@@ -38,7 +38,11 @@ def evaluate_step(
         final_state = prev_state
         guardrails_blocked = True
         guardrail_reasons = guardrail_result.reason_codes
-        final_attrs = prev_attrs
+        final_attrs = StateAttrs(
+            confidence=prev_attrs.confidence,
+            age=prev_attrs.age + 1,
+            status=prev_attrs.status,
+        )
 
     reasons = policy_reasons + guardrail_reasons
 

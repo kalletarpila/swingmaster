@@ -29,6 +29,7 @@ class ReasonCode(Enum):
     INVALIDATED = "INVALIDATED"
     CHURN_GUARD = "CHURN_GUARD"
     DATA_INSUFFICIENT = "DATA_INSUFFICIENT"
+    NO_SIGNAL = "NO_SIGNAL"
 
 
 # UI/audit metadata keyed by reason code.
@@ -69,4 +70,16 @@ REASON_METADATA: dict[ReasonCode, dict[str, object]] = {
         "category": ReasonCategory.EXCLUSION,
         "message": "Available data is insufficient for a decision.",
     },
+    ReasonCode.NO_SIGNAL: {
+        "category": ReasonCategory.INFO,
+        "message": "No actionable signals were present; state remains unchanged.",
+    },
 }
+
+_missing = [rc for rc in ReasonCode if rc not in REASON_METADATA]
+if _missing:
+    raise RuntimeError(f"Missing REASON_METADATA for: {[m.value for m in _missing]}")
+
+_extra = [k for k in REASON_METADATA.keys() if k not in set(ReasonCode)]
+if _extra:
+    raise RuntimeError(f"Extra REASON_METADATA keys: {[e.value for e in _extra]}")

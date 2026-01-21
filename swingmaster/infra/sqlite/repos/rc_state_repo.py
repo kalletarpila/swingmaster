@@ -32,6 +32,12 @@ class RcStateRepo:
                 age,
                 run_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticker, date) DO UPDATE SET
+                state=excluded.state,
+                reasons_json=excluded.reasons_json,
+                confidence=excluded.confidence,
+                age=excluded.age,
+                run_id=excluded.run_id
             """,
             (
                 ticker,
@@ -57,7 +63,7 @@ class RcStateRepo:
         reasons_json = json.dumps([reason.value for reason in transition.reason_codes])
         self._conn.execute(
             """
-            INSERT INTO rc_transition (
+            INSERT OR REPLACE INTO rc_transition (
                 ticker,
                 date,
                 from_state,

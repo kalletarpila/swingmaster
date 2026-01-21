@@ -3,10 +3,13 @@ from __future__ import annotations
 import datetime
 import sqlite3
 import uuid
+from typing import Optional
 
+from swingmaster.app_api.dto import UniverseSpec
 from swingmaster.core.engine.evaluator import TransitionPolicy, evaluate_step
 from swingmaster.infra.sqlite.repos.rc_run_repo import RcRunRepo
 from swingmaster.infra.sqlite.repos.rc_state_repo import RcStateRepo
+from swingmaster.infra.sqlite.repos.ticker_universe_reader import TickerUniverseReader
 from .ports import PrevStateProvider, SignalProvider
 
 
@@ -20,6 +23,7 @@ class SwingmasterApplication:
         engine_version: str,
         policy_id: str,
         policy_version: str,
+        ticker_universe_reader: Optional[TickerUniverseReader] = None,
     ) -> None:
         self._conn = conn
         self._policy = policy
@@ -30,6 +34,12 @@ class SwingmasterApplication:
         self._policy_version = policy_version
         self._run_repo = RcRunRepo(conn)
         self._state_repo = RcStateRepo(conn)
+        self._universe_reader = ticker_universe_reader
+
+    def resolve_universe(self, spec: UniverseSpec) -> list[str]:
+        if self._universe_reader is None:
+            raise RuntimeError("Universe reader not configured")
+        return self._universe_reader.resolve_tickers(spec)
 
     def run_daily(self, as_of_date: str, tickers: list[str]) -> str:
         run_id = str(uuid.uuid4())

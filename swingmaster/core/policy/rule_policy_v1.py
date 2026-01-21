@@ -99,6 +99,13 @@ class RuleBasedTransitionPolicyV1:
         if next_state != prev_state:
             attrs_update = StateAttrs(confidence=None, age=0, status=None)
         else:
+            if not reasons:
+                if prev_state == State.NO_TRADE:
+                    reasons = [ReasonCode.NO_SIGNAL]
+                elif prev_state == State.DOWNTREND_EARLY:
+                    reasons = [ReasonCode.TREND_STARTED]
+                elif prev_state == State.DOWNTREND_LATE:
+                    reasons = [ReasonCode.TREND_MATURED]
             attrs_update = StateAttrs(
                 confidence=prev_attrs.confidence,
                 age=prev_attrs.age + 1,

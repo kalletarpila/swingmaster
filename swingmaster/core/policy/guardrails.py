@@ -27,6 +27,13 @@ MIN_STATE_AGE: dict[State, int] = {
 def apply_guardrails(
     prev_state: State, prev_attrs: StateAttrs, proposed_state: State
 ) -> GuardrailResult:
+    if proposed_state == prev_state:
+        return GuardrailResult(
+            allowed=True,
+            final_state=prev_state,
+            reason_codes=[],
+        )
+
     if proposed_state not in ALLOWED_TRANSITIONS[prev_state]:
         return GuardrailResult(
             allowed=False,

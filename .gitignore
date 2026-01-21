@@ -1,0 +1,20 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+.env
+.env*/
+
+# SQLite artifacts
+*.sqlite
+*.db
+
+# VS Code artifacts
+.vscode/
+*.code-workspace

@@ -1,0 +1,7 @@
+[project]
+name = "swingmaster"
+version = "0.0.1"
+description = "Scaffold for the swingmaster market state engine."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []

@@ -14,67 +14,125 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--date-from", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--date-to", required=True, help="End date YYYY-MM-DD (inclusive)")
     parser.add_argument("--limit", type=int, default=50, help="Top list limit")
-    parser.add_argument("--run-id", help="Specific run_id to filter")
-    parser.add_argument("--latest-run-on-date", help="Resolve latest run_id for given date")
+    parser.add_argument("--run-id", help="Specific run_id to anchor universe")
+    parser.add_argument("--anchor-run-id", help="Alias for run-id when anchoring universe")
+    parser.add_argument("--latest-run-on-date", help="Resolve latest run_id for given date (anchor only)")
+    parser.add_argument("--anchor-date", help="Date used to anchor ticker universe when run-id is provided")
     return parser.parse_args()
 
 
-def load_state_days(conn: sqlite3.Connection, date_from: str, date_to: str, run_id: str | None):
-    params = [date_from, date_to]
-    run_clause = ""
-    if run_id is not None:
-        run_clause = " AND run_id = ?"
-        params.append(run_id)
+def _chunked(iterable, size: int):
+    for i in range(0, len(iterable), size):
+        yield iterable[i : i + size]
+
+
+def load_state_days(
+    conn: sqlite3.Connection, date_from: str, date_to: str, tickers: List[str] | None
+):
+    if tickers:
+        rows: List[sqlite3.Row] = []
+        for chunk in _chunked(tickers, 500):
+            placeholders = ",".join("?" * len(chunk))
+            params = [date_from, date_to, *chunk]
+            chunk_rows = conn.execute(
+                f"""
+                SELECT ticker, date, state, age
+                FROM rc_state_daily
+                WHERE date >= ? AND date <= ? AND ticker IN ({placeholders})
+                ORDER BY ticker, date
+                """,
+                params,
+            ).fetchall()
+            rows.extend(chunk_rows)
+        return rows
     rows = conn.execute(
-        f"""
+        """
         SELECT ticker, date, state, age
         FROM rc_state_daily
-        WHERE date >= ? AND date <= ?{run_clause}
+        WHERE date >= ? AND date <= ?
         ORDER BY ticker, date
         """,
-        params,
+        (date_from, date_to),
     ).fetchall()
     return rows
 
 
 def load_transition_counts(
-    conn: sqlite3.Connection, date_from: str, date_to: str, run_id: str | None
+    conn: sqlite3.Connection, date_from: str, date_to: str, tickers: List[str] | None
 ) -> Dict[str, int]:
-    params = [date_from, date_to]
-    run_clause = ""
-    if run_id is not None:
-        run_clause = " AND run_id = ?"
-        params.append(run_id)
+    if tickers:
+        counts: Dict[str, int] = {}
+        for chunk in _chunked(tickers, 500):
+            placeholders = ",".join("?" * len(chunk))
+            params = [date_from, date_to, *chunk]
+            rows = conn.execute(
+                f"""
+                SELECT ticker, COUNT(*) as c
+                FROM rc_transition
+                WHERE date >= ? AND date <= ? AND ticker IN ({placeholders})
+                GROUP BY ticker
+                """,
+                params,
+            ).fetchall()
+            counts.update({row[0]: row[1] for row in rows})
+        return counts
     rows = conn.execute(
-        f"""
+        """
         SELECT ticker, COUNT(*) as c
         FROM rc_transition
-        WHERE date >= ? AND date <= ?{run_clause}
+        WHERE date >= ? AND date <= ?
         GROUP BY ticker
         """,
-        params,
+        (date_from, date_to),
     ).fetchall()
     return {row[0]: row[1] for row in rows}
 
 
-def load_transitions_total(conn: sqlite3.Connection, date_from: str, date_to: str, run_id: str | None) -> int:
-    params = [date_from, date_to]
-    run_clause = ""
-    if run_id is not None:
-        run_clause = " AND run_id = ?"
-        params.append(run_id)
+def load_transitions_total(
+    conn: sqlite3.Connection, date_from: str, date_to: str, tickers: List[str] | None
+) -> int:
+    if tickers:
+        total = 0
+        for chunk in _chunked(tickers, 500):
+            placeholders = ",".join("?" * len(chunk))
+            params = [date_from, date_to, *chunk]
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM rc_transition
+                WHERE date >= ? AND date <= ? AND ticker IN ({placeholders})
+                """,
+                params,
+            ).fetchone()
+            total += int(row[0]) if row else 0
+        return total
     row = conn.execute(
-        f"""
+        """
         SELECT COUNT(*)
         FROM rc_transition
-        WHERE date >= ? AND date <= ?{run_clause}
+        WHERE date >= ? AND date <= ?
         """,
-        params,
+        (date_from, date_to),
     ).fetchone()
     return int(row[0]) if row else 0
 
 
-def load_expected_days(conn: sqlite3.Connection, date_from: str, date_to: str) -> int:
+def load_expected_days(conn: sqlite3.Connection, date_from: str, date_to: str, tickers: List[str] | None) -> int:
+    if tickers:
+        total_dates = set()
+        for chunk in _chunked(tickers, 500):
+            placeholders = ",".join("?" * len(chunk))
+            params = [date_from, date_to, *chunk]
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT date
+                FROM rc_state_daily
+                WHERE date >= ? AND date <= ? AND ticker IN ({placeholders})
+                """,
+                params,
+            ).fetchall()
+            total_dates.update(row[0] for row in rows)
+        return len(total_dates)
     row = conn.execute(
         """
         SELECT COUNT(DISTINCT date)
@@ -180,29 +238,55 @@ def main() -> None:
     args = parse_args()
     conn = get_connection(args.rc_db)
     try:
-        run_id = args.run_id
-        if run_id is None and args.latest_run_on_date:
+        anchor_run_id = args.run_id or args.anchor_run_id
+        anchor_date = args.latest_run_on_date or args.anchor_date
+        if anchor_run_id and args.latest_run_on_date:
+            raise ValueError("Use either --run-id/--anchor-run-id or --latest-run-on-date, not both")
+        if anchor_run_id and anchor_date is None:
+            raise ValueError("--anchor-date is required when providing --run-id/--anchor-run-id")
+        if anchor_run_id is None and args.latest_run_on_date:
             row = conn.execute(
                 """
-                SELECT run_id FROM rc_state_daily
-                WHERE date=?
-                ORDER BY rowid DESC
+                SELECT r.run_id
+                FROM rc_run r
+                JOIN rc_state_daily s ON s.run_id = r.run_id
+                WHERE s.date=?
+                ORDER BY r.created_at DESC, r.run_id DESC
                 LIMIT 1
                 """,
                 (args.latest_run_on_date,),
             ).fetchone()
-            run_id = row[0] if row else None
+            anchor_run_id = row[0] if row else None
+            anchor_date = args.latest_run_on_date
 
-        rows = load_state_days(conn, args.date_from, args.date_to, run_id)
-        transition_counts = load_transition_counts(conn, args.date_from, args.date_to, run_id)
-        transitions_total = load_transitions_total(conn, args.date_from, args.date_to, run_id)
-        expected_days = load_expected_days(conn, args.date_from, args.date_to)
+        anchor_tickers: List[str] | None = None
+        if anchor_run_id:
+            if anchor_date is None:
+                raise ValueError("--anchor-date or --latest-run-on-date must be provided when anchoring run")
+            rows = conn.execute(
+                """
+                SELECT DISTINCT ticker
+                FROM rc_state_daily
+                WHERE date=? AND run_id=?
+                ORDER BY ticker
+                """,
+                (anchor_date, anchor_run_id),
+            ).fetchall()
+            anchor_tickers = [row[0] for row in rows]
+            if not anchor_tickers:
+                print(f"RUN_FILTER anchor_date={anchor_date} run_id={anchor_run_id} tickers=0 (no data)")
+                return
+
+        rows = load_state_days(conn, args.date_from, args.date_to, anchor_tickers)
+        transition_counts = load_transition_counts(conn, args.date_from, args.date_to, anchor_tickers)
+        transitions_total = load_transitions_total(conn, args.date_from, args.date_to, anchor_tickers)
+        expected_days = load_expected_days(conn, args.date_from, args.date_to, anchor_tickers)
         per_ticker, overall_state_days, total_ticker_days = summarize(rows, transition_counts)
 
         print(
             f"RC_DB={args.rc_db} RANGE={args.date_from}..{args.date_to} "
             f"TICKERS={len(per_ticker)} TICKER_DAYS={total_ticker_days} TRANSITIONS_TOTAL={transitions_total} "
-            f"RUN_FILTER={run_id if run_id else 'none'}"
+            f"RUN_FILTER anchor_date={anchor_date if anchor_date else 'none'} run_id={anchor_run_id if anchor_run_id else 'none'} tickers={len(anchor_tickers) if anchor_tickers else 'all'}"
         )
         full_coverage = sum(1 for data in per_ticker.values() if expected_days > 0 and data["days"] == expected_days)
         pct_full = format_pct(full_coverage, len(per_ticker)) if expected_days > 0 else "0.0%"

@@ -10,7 +10,7 @@ from swingmaster.app_api.dto import UniverseSpec, UniverseMode, UniverseSample
 from swingmaster.app_api.facade import SwingmasterApplication
 from swingmaster.app_api.providers.osakedata_signal_provider_v1 import OsakeDataSignalProviderV1
 from swingmaster.app_api.providers.sqlite_prev_state_provider import SQLitePrevStateProvider
-from swingmaster.core.policy.rule_policy_v1 import RuleBasedTransitionPolicyV1
+from swingmaster.core.policy.factory import default_policy_factory
 from swingmaster.infra.sqlite.db import get_connection
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
 from swingmaster.infra.sqlite.migrator import apply_migrations
@@ -40,6 +40,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--require-row-on-date", action="store_true", help="Require row on the as-of date")
     parser.add_argument("--max-days", type=int, default=0, help="Max trading days to process (0 = no limit)")
     parser.add_argument("--dry-run", action="store_true", help="Resolve and show counts only")
+    parser.add_argument("--policy-id", default="rule_v1", help="Policy id")
+    parser.add_argument("--policy-version", default="dev", help="Policy version")
     return parser.parse_args()
 
 
@@ -225,7 +227,7 @@ def main() -> None:
 
         signal_provider = OsakeDataSignalProviderV1(md_conn, table_name="osakedata")
         prev_state_provider = SQLitePrevStateProvider(rc_conn)
-        policy = RuleBasedTransitionPolicyV1()
+        policy = default_policy_factory.create(args.policy_id, args.policy_version)
 
         app = SwingmasterApplication(
             conn=rc_conn,
@@ -233,8 +235,8 @@ def main() -> None:
             signal_provider=signal_provider,
             prev_state_provider=prev_state_provider,
             engine_version="dev",
-            policy_id="rule_v1",
-            policy_version="dev",
+            policy_id=args.policy_id,
+            policy_version=args.policy_version,
         )
 
         last_run_id = None

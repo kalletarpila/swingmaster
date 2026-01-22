@@ -4,17 +4,21 @@ import argparse
 import json
 import time
 from collections import Counter
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 from swingmaster.app_api.dto import UniverseSpec, UniverseMode, UniverseSample
 from swingmaster.app_api.facade import SwingmasterApplication
 from swingmaster.app_api.providers.osakedata_signal_provider_v1 import OsakeDataSignalProviderV1
+from swingmaster.app_api.providers.osakedata_signal_provider_v2 import OsakeDataSignalProviderV2
 from swingmaster.app_api.providers.sqlite_prev_state_provider import SQLitePrevStateProvider
 from swingmaster.core.policy.factory import default_policy_factory
 from swingmaster.infra.sqlite.db import get_connection
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
 from swingmaster.infra.sqlite.migrator import apply_migrations
 from swingmaster.infra.sqlite.repos.ticker_universe_reader import TickerUniverseReader
+
+# Example:
+# python3 -m swingmaster.cli.run_range_universe --date-from 2026-01-01 --date-to 2026-01-31 --signal-version v2
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,6 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Resolve and show counts only")
     parser.add_argument("--policy-id", default="rule_v1", help="Policy id")
     parser.add_argument("--policy-version", default="dev", help="Policy version")
+    parser.add_argument("--signal-version", choices=["v1", "v2"], default="v1", help="Signal provider version")
     return parser.parse_args()
 
 
@@ -65,6 +70,18 @@ def build_spec(args: argparse.Namespace) -> UniverseSpec:
     )
     spec.validate()
     return spec
+
+
+def parse_reasons(reasons_raw: str | None) -> List[str]:
+    if reasons_raw is None:
+        return []
+    try:
+        parsed = json.loads(reasons_raw)
+        if isinstance(parsed, list):
+            return [r for r in parsed if isinstance(r, str)]
+    except Exception:
+        return []
+    return []
 
 
 def print_report(rc_conn, as_of_date: str, run_id: str) -> None:
@@ -93,18 +110,7 @@ def print_report(rc_conn, as_of_date: str, run_id: str) -> None:
     data_insufficient_tickers: List[str] = []
 
     for row in rows:
-        reasons_raw = row["reasons_json"]
-        if reasons_raw is None:
-            reasons: List[str] = []
-        else:
-            try:
-                parsed = json.loads(reasons_raw)
-                if isinstance(parsed, list):
-                    reasons = [r for r in parsed if isinstance(r, str)]
-                else:
-                    reasons = []
-            except Exception:
-                reasons = []
+        reasons = parse_reasons(row["reasons_json"])
 
         overall.update(reasons)
         st = row["state"]
@@ -156,6 +162,63 @@ def print_report(rc_conn, as_of_date: str, run_id: str) -> None:
         print("ENTRY_WINDOW: none")
 
 
+def print_missing_asof_summary(
+    rc_conn,
+    date_from: str,
+    date_to: str,
+    tickers: List[str],
+    final_day: str,
+    final_run_id: str,
+    top_n: int = 20,
+    list_limit: int = 50,
+) -> None:
+    final_rows = rc_conn.execute(
+        """
+        SELECT ticker, reasons_json
+        FROM rc_state_daily
+        WHERE date=? AND run_id=?
+        """,
+        (final_day, final_run_id),
+    ).fetchall()
+    final_missing = []
+    for row in final_rows:
+        reasons = parse_reasons(row["reasons_json"])
+        if "DATA_INSUFFICIENT" in reasons:
+            final_missing.append(row["ticker"])
+
+    print(f"MISSING_ASOF_FINAL_DAY: {len(final_missing)}")
+    if final_missing:
+        print(f"MISSING_ASOF_FINAL_DAY_TICKERS: {','.join(sorted(final_missing)[:list_limit])}")
+
+    if not tickers:
+        return
+
+    per_ticker = Counter()
+    chunk_size = 500
+    for i in range(0, len(tickers), chunk_size):
+        chunk = tickers[i : i + chunk_size]
+        placeholders = ",".join("?" for _ in chunk)
+        query = (
+            f"SELECT ticker, reasons_json FROM rc_state_daily "
+            f"WHERE date>=? AND date<=? AND ticker IN ({placeholders})"
+        )
+        params = [date_from, date_to, *chunk]
+        rows = rc_conn.execute(query, params).fetchall()
+        for row in rows:
+            reasons = parse_reasons(row["reasons_json"])
+            if "DATA_INSUFFICIENT" in reasons:
+                per_ticker[row["ticker"]] += 1
+
+    total_missing_days = sum(per_ticker.values())
+    print(f"MISSING_ASOF_RANGE_TOTAL_DAYS: {total_missing_days}")
+    print("MISSING_ASOF_RANGE_TOP:")
+    if per_ticker:
+        for ticker, count in sorted(per_ticker.items(), key=lambda x: (-x[1], x[0]))[:top_n]:
+            print(f"  {ticker} days_insufficient={count}")
+    else:
+        print("  (none)")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -200,7 +263,8 @@ def main() -> None:
 
         print(
             f"UNIVERSE mode={args.mode} market={args.market} sector={args.sector} "
-            f"industry={args.industry} sample={args.sample} seed={args.seed} limit={args.limit}"
+            f"industry={args.industry} sample={args.sample} seed={args.seed} limit={args.limit} "
+            f"signal_version={args.signal_version}"
         )
         if args.min_history_rows > 0:
             print(
@@ -208,7 +272,10 @@ def main() -> None:
                 f"require_row_on_date={args.require_row_on_date} -> TICKERS_AFTER_FILTER={len(tickers)}"
             )
             if args.require_row_on_date:
-                print("NOTE: --require-row-on-date is checked only for date_from in v1 (not per-day).")
+                print(
+                    "NOTE: Universe filtering applies --require-row-on-date only against date_from. "
+                    "With signal_version=v2, each day also requires an as-of row; missing days emit DATA_INSUFFICIENT."
+                )
         print(
             f"RANGE date_from={args.date_from} date_to={args.date_to} "
             f"trading_days={len(trading_days)} tickers={len(tickers)}"
@@ -225,7 +292,12 @@ def main() -> None:
                 print("DAYS tail:", ",".join(tail))
             return
 
-        signal_provider = OsakeDataSignalProviderV1(md_conn, table_name="osakedata")
+        if args.signal_version == "v2":
+            signal_provider = OsakeDataSignalProviderV2(
+                md_conn, table_name="osakedata", require_row_on_date=args.require_row_on_date
+            )
+        else:
+            signal_provider = OsakeDataSignalProviderV1(md_conn, table_name="osakedata")
         prev_state_provider = SQLitePrevStateProvider(rc_conn)
         policy = default_policy_factory.create(args.policy_id, args.policy_version)
 
@@ -252,6 +324,15 @@ def main() -> None:
             last_day = trading_days[-1]
             print(f"FINAL_DAY {last_day} run_id={last_run_id}")
             print_report(rc_conn, last_day, last_run_id)
+            if args.signal_version == "v2" and args.require_row_on_date:
+                print_missing_asof_summary(
+                    rc_conn,
+                    args.date_from,
+                    args.date_to,
+                    tickers,
+                    last_day,
+                    last_run_id,
+                )
     finally:
         md_conn.close()
         rc_conn.close()

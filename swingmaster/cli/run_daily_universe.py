@@ -3,13 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 from swingmaster.app_api.dto import UniverseSpec, UniverseMode, UniverseSample
 from swingmaster.app_api.facade import SwingmasterApplication
 from swingmaster.app_api.providers.osakedata_signal_provider_v1 import OsakeDataSignalProviderV1
+from swingmaster.app_api.providers.osakedata_signal_provider_v2 import OsakeDataSignalProviderV2
 from swingmaster.app_api.providers.sqlite_prev_state_provider import SQLitePrevStateProvider
-from swingmaster.core.policy.rule_policy_v1 import RuleBasedTransitionPolicyV1
 from swingmaster.core.policy.factory import default_policy_factory
 from swingmaster.infra.sqlite.db import get_connection
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
@@ -39,6 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--require-row-on-date", action="store_true", help="Require row on the as-of date")
     parser.add_argument("--policy-id", default="rule_v1", help="Policy id")
     parser.add_argument("--policy-version", default="dev", help="Policy version")
+    parser.add_argument("--signal-version", choices=["v1", "v2"], default="v1", help="Signal provider version")
     return parser.parse_args()
 
 
@@ -174,7 +175,12 @@ def main() -> None:
                 require_row_on_date=args.require_row_on_date,
             )
 
-        signal_provider = OsakeDataSignalProviderV1(md_conn, table_name="osakedata")
+        if args.signal_version == "v2":
+            signal_provider = OsakeDataSignalProviderV2(
+                md_conn, table_name="osakedata", require_row_on_date=args.require_row_on_date
+            )
+        else:
+            signal_provider = OsakeDataSignalProviderV1(md_conn, table_name="osakedata")
         prev_state_provider = SQLitePrevStateProvider(rc_conn)
         policy = default_policy_factory.create(args.policy_id, args.policy_version)
 
@@ -190,7 +196,8 @@ def main() -> None:
 
         print(
             f"UNIVERSE mode={args.mode} market={args.market} sector={args.sector} "
-            f"industry={args.industry} sample={args.sample} seed={args.seed} limit={args.limit}"
+            f"industry={args.industry} sample={args.sample} seed={args.seed} limit={args.limit} "
+            f"signal_version={args.signal_version}"
         )
         if args.min_history_rows > 0:
             print(

@@ -491,6 +491,17 @@ def main() -> None:
             last_day = trading_days[-1]
             print(f"FINAL_DAY {last_day} run_id={last_run_id}")
             print_report(rc_conn, last_day, last_run_id)
+            rc_rows_full = rc_conn.execute(
+                "SELECT ticker, state, reasons_json FROM rc_state_daily WHERE date=? AND run_id=?",
+                (last_day, last_run_id),
+            ).fetchall()
+            rc_by_ticker = {
+                row["ticker"]: {
+                    "state": row["state"],
+                    "reasons": parse_reasons(row["reasons_json"]),
+                }
+                for row in rc_rows_full
+            }
             if args.signal_version == "v2" and args.require_row_on_date:
                 _dbg(
                     args,
@@ -533,27 +544,16 @@ def main() -> None:
             _debug_show("ENTRY_CANDIDATES", entry_candidates)
             _debug_show("STAB_CANDIDATES", stab_candidates)
             _debug_show("BOTH_STAB_AND_ENTRY", both_candidates)
-            entry_rows = rc_conn.execute(
-                "SELECT ticker FROM rc_state_daily WHERE date=? AND run_id=? AND state='ENTRY_WINDOW'",
-                (last_day, last_run_id),
-            ).fetchall()
-            entry_window_rc = [r[0] for r in entry_rows]
-            pass_rows = rc_conn.execute(
-                "SELECT ticker FROM rc_state_daily WHERE date=? AND run_id=? AND state='PASS'",
-                (last_day, last_run_id),
-            ).fetchall()
-            pass_rc = [r[0] for r in pass_rows]
+            entry_window_rc = sorted(t for t, v in rc_by_ticker.items() if v["state"] == "ENTRY_WINDOW")
+            pass_rc = sorted(t for t, v in rc_by_ticker.items() if v["state"] == "PASS")
             _debug_show("ENTRY_WINDOW_TICKERS", entry_window_rc)
             _debug_show("PASS_TICKERS", pass_rc)
             if args.debug_show_mismatches:
                 mismatches = []
                 for t in both_candidates:
-                    rc = rc_conn.execute(
-                        "SELECT state, reasons_json FROM rc_state_daily WHERE date=? AND run_id=? AND ticker=?",
-                        (last_day, last_run_id, t),
-                    ).fetchone()
+                    rc = rc_by_ticker.get(t)
                     rc_state = rc["state"] if rc else "MISSING"
-                    reasons_list = parse_reasons(rc["reasons_json"]) if rc else []
+                    reasons_list = rc["reasons"] if rc else []
                     if rc_state != "ENTRY_WINDOW":
                         blocker = infer_entry_blocker(rc_state, reasons_list)
                         reasons_json = json.dumps(reasons_list)
@@ -572,12 +572,9 @@ def main() -> None:
                 limit_val = _effective_limit(args, sorted(tickers))
                 limited = sorted(tickers) if limit_val == len(tickers) else sorted(tickers)[:limit_val]
                 for t in limited:
-                    rc = rc_conn.execute(
-                        "SELECT state, reasons_json FROM rc_state_daily WHERE date=? AND run_id=? AND ticker=?",
-                        (last_day, last_run_id, t),
-                    ).fetchone()
+                    rc = rc_by_ticker.get(t)
                     state = rc["state"] if rc else "MISSING"
-                    reasons_json = json.dumps(parse_reasons(rc["reasons_json"])) if rc else "[]"
+                    reasons_json = json.dumps(rc["reasons"]) if rc else "[]"
                     signal_keys = signals_by_ticker.get(t)
                     signal_names = ",".join(sorted(k.name for k in signal_keys.signals.keys())) if signal_keys else ""
                     _dbg(args, f"FINAL_DAY TICKER {t} rc_state={state} reasons={reasons_json} signals={signal_names}")

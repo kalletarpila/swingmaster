@@ -18,6 +18,59 @@ from swingmaster.infra.sqlite.migrator import apply_migrations
 from swingmaster.infra.sqlite.repos.ticker_universe_reader import TickerUniverseReader
 
 
+def _debug_enabled(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "debug", False))
+
+
+def _debug_limit(args: argparse.Namespace) -> int | None:
+    limit = getattr(args, "debug_limit", 0)
+    return None if limit == 0 else limit
+
+
+def _effective_limit(args: argparse.Namespace, items: list[object]) -> int:
+    if not items:
+        return 0
+    raw = getattr(args, "debug_limit", 0)
+    if raw == 0:
+        return len(items)
+    return min(raw, len(items))
+
+
+def _dbg(args: argparse.Namespace, msg: str) -> None:
+    if _debug_enabled(args):
+        print(f"[debug] {msg}")
+
+
+def _take_head_tail(items: list[str], limit: int | None) -> tuple[list[str], list[str]]:
+    if limit is None or limit <= 0:
+        return items, []
+    head = items[:limit]
+    tail = items[-limit:] if len(items) > limit else []
+    return head, tail
+
+
+def infer_entry_blocker(rc_state: str, reasons: list[str]) -> str:
+    if "DATA_INSUFFICIENT" in reasons:
+        return "BLOCKER_DATA_INSUFFICIENT"
+    if "INVALIDATED" in reasons:
+        return "BLOCKER_INVALIDATED"
+    if "CHURN_GUARD" in reasons:
+        return "BLOCKER_CHURN_GUARD"
+    if "TREND_MATURED" in reasons:
+        return "BLOCKER_TREND_MATURED"
+    if "NO_SIGNAL" in reasons:
+        return "BLOCKER_NO_SIGNAL"
+    if rc_state in {"NO_TRADE"}:
+        return "BLOCKER_STATE_NO_TRADE"
+    if rc_state in {"DOWNTREND_LATE"}:
+        return "BLOCKER_STATE_DOWNTREND_LATE"
+    if rc_state in {"DOWNTREND_EARLY"}:
+        return "BLOCKER_STATE_DOWNTREND_EARLY"
+    if rc_state in {"STABILIZING"}:
+        return "BLOCKER_STATE_STABILIZING"
+    return "BLOCKER_UNKNOWN"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run swingmaster over a universe")
     parser.add_argument("--date", required=True, help="As-of date YYYY-MM-DD")
@@ -41,6 +94,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--policy-id", default="rule_v1", help="Policy id")
     parser.add_argument("--policy-version", default="dev", help="Policy version")
     parser.add_argument("--signal-version", choices=["v1", "v2"], default="v1", help="Signal provider version")
+    parser.add_argument("--debug", action="store_true", help="Enable debug output")
+    parser.add_argument("--debug-limit", type=int, default=25, help="Max items to show in debug lists (0 = no limit)")
+    parser.add_argument("--debug-show-tickers", action="store_true", help="Show per-ticker debug lines")
+    parser.add_argument("--debug-show-mismatches", action="store_true", help="Show entry-like vs RC mismatches")
     return parser.parse_args()
 
 
@@ -157,11 +214,13 @@ def print_report(rc_conn, as_of_date: str, run_id: str) -> int:
     return data_insufficient
 
 
-def collect_signal_stats(signal_provider, tickers: List[str], day: str) -> tuple[Counter, dict[str, int]]:
+def collect_signal_stats(signal_provider, tickers: List[str], day: str) -> tuple[Counter, dict[str, int], Dict[str, object]]:
     signals_counter: Counter[SignalKey] = Counter()
     entry = stab = both = invalidated = data_insufficient = 0
+    signals_by_ticker: Dict[str, object] = {}
     for ticker in tickers:
         signal_set = signal_provider.get_signals(ticker, day)
+        signals_by_ticker[ticker] = signal_set
         keys = set(signal_set.signals.keys())
         signals_counter.update(keys)
         has_entry = SignalKey.ENTRY_SETUP_VALID in keys
@@ -183,7 +242,7 @@ def collect_signal_stats(signal_provider, tickers: List[str], day: str) -> tuple
         "invalidated": invalidated,
         "data_insufficient": data_insufficient,
     }
-    return signals_counter, focused
+    return signals_counter, focused, signals_by_ticker
 
 
 def main() -> None:
@@ -199,6 +258,8 @@ def main() -> None:
         spec = build_spec(args)
         tickers = universe_reader.resolve_tickers(spec)
         if args.min_history_rows > 0:
+            tickers_before = list(tickers)
+            before_filter = len(tickers_before)
             tickers = universe_reader.filter_by_osakedata(
                 tickers=tickers,
                 as_of_date=args.date,
@@ -206,6 +267,14 @@ def main() -> None:
                 min_history_rows=args.min_history_rows,
                 require_row_on_date=args.require_row_on_date,
             )
+            removed_list = sorted(set(tickers_before) - set(tickers))
+            _dbg(
+                args,
+                f"FILTER min_history_rows before={before_filter} after={len(tickers)} removed={len(removed_list)}",
+            )
+            limit_val = _effective_limit(args, removed_list)
+            if removed_list and (limit_val == len(removed_list)):
+                _dbg(args, f"FILTER removed_tickers={removed_list}")
         orig_tickers = list(tickers)
         resolved_count = len(orig_tickers)
         seen = set()
@@ -220,9 +289,25 @@ def main() -> None:
             dup_counter = Counter(orig_tickers)
             dupes = [(t, c) for t, c in dup_counter.items() if c > 1]
             if dupes:
-                print("TICKER_DUPLICATES_TOP:")
+                _dbg(args, "TICKER_DUPLICATES_TOP:")
                 for t, c in sorted(dupes, key=lambda x: (-x[1], x[0]))[:10]:
-                    print(f"  {t}: {c}")
+                    _dbg(args, f"  {t}: {c}")
+
+        if _debug_enabled(args):
+            _dbg(
+                args,
+                (
+                    f"ARGS date={args.date} mode={args.mode} market={args.market} "
+                    f"sector={args.sector} industry={args.industry} limit={args.limit} sample={args.sample} seed={args.seed} "
+                    f"signal_version={args.signal_version} require_row_on_date={args.require_row_on_date} "
+                    f"min_history_rows={args.min_history_rows}"
+                ),
+            )
+            if resolved_count:
+                head, tail = _take_head_tail(tickers, _effective_limit(args, tickers))
+                _dbg(args, f"TICKERS_SAMPLE_HEAD={head}")
+                if tail:
+                    _dbg(args, f"TICKERS_SAMPLE_TAIL={tail}")
 
         if args.signal_version == "v2":
             signal_provider = OsakeDataSignalProviderV2(
@@ -261,10 +346,113 @@ def main() -> None:
         run_id = app.run_daily(as_of_date=args.date, tickers=tickers)
         print(f"TICKERS={len(tickers)}")
         missing_count = print_report(rc_conn, args.date, run_id)
+        if _debug_enabled(args):
+            rc_rows = rc_conn.execute(
+                "SELECT COUNT(*) FROM rc_state_daily WHERE date=? AND run_id=?",
+                (args.date, run_id),
+            ).fetchone()[0]
+            distinct_rc = rc_conn.execute(
+                "SELECT COUNT(DISTINCT ticker) FROM rc_state_daily WHERE date=? AND run_id=?",
+                (args.date, run_id),
+            ).fetchone()[0]
+            _dbg(args, f"RC_ROWS={rc_rows} RC_DISTINCT_TICKERS={distinct_rc}")
+        rc_rows_full = rc_conn.execute(
+            "SELECT ticker, state, reasons_json FROM rc_state_daily WHERE date=? AND run_id=?",
+            (args.date, run_id),
+        ).fetchall()
+        rc_by_ticker = {}
+        for row in rc_rows_full:
+            rc_by_ticker[row["ticker"]] = {
+                "state": row["state"],
+                "reasons": parse_reasons(row["reasons_json"]),
+            }
+        if _debug_enabled(args):
+            if rc_rows_full:
+                state_counter = Counter(r["state"] for r in rc_rows_full)
+                _dbg(args, f"RC_STATE_DIST={dict(state_counter)}")
+            expected = len(tickers)
+            ok_rows = rc_rows == expected
+            ok_distinct = distinct_rc == expected
+            _dbg(
+                args,
+                f"INVARIANTS expected_tickers={expected} rc_rows={rc_rows} rc_distinct={distinct_rc} "
+                f"ok_rows={ok_rows} ok_distinct={ok_distinct}",
+            )
+            if not (ok_rows and ok_distinct):
+                rc_tickers_set = set(rc_by_ticker.keys())
+                ticker_set = set(tickers)
+                missing = [t for t in tickers if t not in rc_tickers_set]
+                extra = [t for t in rc_tickers_set if t not in ticker_set]
+                limit = _effective_limit(args, missing)
+                extra_limit = _effective_limit(args, extra)
+                _dbg(
+                    args,
+                    f"INVARIANT_FAIL missing_in_rc_count={len(missing)} extra_in_rc_count={len(extra)}",
+                )
+                if missing:
+                    sample_miss = missing if limit == len(missing) else missing[:limit]
+                    _dbg(args, f"INVARIANT_FAIL missing_in_rc_sample={sample_miss}")
+                if extra:
+                    sample_extra = extra if extra_limit == len(extra) else extra[:extra_limit]
+                    _dbg(args, f"INVARIANT_FAIL extra_in_rc_sample={sample_extra}")
+        signals_counter, focused, signals_by_ticker = collect_signal_stats(signal_provider, tickers, args.date)
+        if _debug_enabled(args):
+            entry_candidates = [t for t, s in signals_by_ticker.items() if SignalKey.ENTRY_SETUP_VALID in s.signals]
+            stab_candidates = [t for t, s in signals_by_ticker.items() if SignalKey.STABILIZATION_CONFIRMED in s.signals]
+            both_candidates = [t for t in entry_candidates if t in stab_candidates]
+
+            def _show_list(label, items):
+                limit = _effective_limit(args, items)
+                sample = items if limit == len(items) else items[:limit]
+                _dbg(args, f"{label} count={len(items)} sample={sample}")
+
+            _show_list("ENTRY_CANDIDATES", entry_candidates)
+            _show_list("STAB_CANDIDATES", stab_candidates)
+            _show_list("BOTH_STAB_AND_ENTRY", both_candidates)
+            entry_window_rc = [t for t, v in rc_by_ticker.items() if v["state"] == "ENTRY_WINDOW"]
+            pass_rc = [t for t, v in rc_by_ticker.items() if v["state"] == "PASS"]
+            _show_list("ENTRY_WINDOW_TICKERS", entry_window_rc)
+            _show_list("PASS_TICKERS", pass_rc)
+            if args.debug_show_mismatches:
+                mismatches = []
+                for t in both_candidates:
+                    rc = rc_by_ticker.get(t)
+                    if not rc or rc["state"] != "ENTRY_WINDOW":
+                        reasons_json = json.dumps(rc["reasons"]) if rc else "[]"
+                        state = rc["state"] if rc else "MISSING"
+                        mismatches.append((t, state, reasons_json))
+                _dbg(args, f"MISMATCH entry_like_not_entry_window total={len(mismatches)}")
+                limit_val = _effective_limit(args, mismatches)
+                subset = mismatches if limit_val == len(mismatches) else mismatches[:limit_val]
+                for t, state, reasons_json in subset:
+                    reasons_list = json.loads(reasons_json)
+                    blocker = infer_entry_blocker(state, reasons_list)
+                    sigset = signals_by_ticker.get(t)
+                    signals_list = sorted(k.name for k in sigset.signals.keys()) if sigset else []
+                    _dbg(
+                        args,
+                        f"MISMATCH_FULL_CONTEXT ticker={t} blocker={blocker} rc_state={state} "
+                        f"rc_reasons={json.dumps(reasons_list)} signal_keys={json.dumps(signals_list)}",
+                    )
+            if args.debug_show_tickers:
+                limit_val = _effective_limit(args, sorted(tickers))
+                limited = sorted(tickers) if limit_val == len(tickers) else sorted(tickers)[:limit_val]
+                for t in limited:
+                    rc = rc_by_ticker.get(t)
+                    state = rc["state"] if rc else "MISSING"
+                    reasons_json = json.dumps(rc["reasons"]) if rc else "[]"
+                    signal_keys = signals_by_ticker.get(t)
+                    signal_names = ",".join(sorted(k.name for k in signal_keys.signals.keys())) if signal_keys else ""
+                    _dbg(args, f"TICKER {t} rc_state={state} reasons={reasons_json} signals={signal_names}")
+                missing_rc = [t for t in tickers if t not in rc_by_ticker]
+                if missing_rc:
+                    miss_limit = _effective_limit(args, missing_rc)
+                    sample = missing_rc if miss_limit == len(missing_rc) else missing_rc[:miss_limit]
+                    _dbg(args, f"TICKERS_NOT_IN_RC count={len(missing_rc)} sample={sample}")
         if args.signal_version == "v2" and args.require_row_on_date:
             print(f"MISSING_ASOF_DAILY: {missing_count}")
-        signals_counter, focused = collect_signal_stats(signal_provider, tickers, args.date)
-        print("SIGNALS_TOP:")
+        print("NOTE: reasons_* are policy reasons stored in rc_state_daily; SIGNALS_* are signal provider keys computed from market data.")
+        print("SIGNALS_TOP (provider_keys):")
         for key, count in sorted(signals_counter.items(), key=lambda x: (-x[1], x[0].name))[:10]:
             print(f"  {key.name}: {count}")
         print(f"SIGNALS_ENTRY_SETUP_VALID: {focused['entry']}")

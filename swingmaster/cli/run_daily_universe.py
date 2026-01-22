@@ -10,65 +10,20 @@ from swingmaster.app_api.facade import SwingmasterApplication
 from swingmaster.app_api.providers.osakedata_signal_provider_v1 import OsakeDataSignalProviderV1
 from swingmaster.app_api.providers.osakedata_signal_provider_v2 import OsakeDataSignalProviderV2
 from swingmaster.app_api.providers.sqlite_prev_state_provider import SQLitePrevStateProvider
+from swingmaster.cli._debug_utils import (
+    _dbg,
+    _debug_enabled,
+    _debug_limit,
+    _effective_limit,
+    _take_head_tail,
+    infer_entry_blocker,
+)
 from swingmaster.core.policy.factory import default_policy_factory
 from swingmaster.core.signals.enums import SignalKey
 from swingmaster.infra.sqlite.db import get_connection
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
 from swingmaster.infra.sqlite.migrator import apply_migrations
 from swingmaster.infra.sqlite.repos.ticker_universe_reader import TickerUniverseReader
-
-
-def _debug_enabled(args: argparse.Namespace) -> bool:
-    return bool(getattr(args, "debug", False))
-
-
-def _debug_limit(args: argparse.Namespace) -> int | None:
-    limit = getattr(args, "debug_limit", 0)
-    return None if limit == 0 else limit
-
-
-def _effective_limit(args: argparse.Namespace, items: list[object]) -> int:
-    if not items:
-        return 0
-    raw = getattr(args, "debug_limit", 0)
-    if raw == 0:
-        return len(items)
-    return min(raw, len(items))
-
-
-def _dbg(args: argparse.Namespace, msg: str) -> None:
-    if _debug_enabled(args):
-        print(f"[debug] {msg}")
-
-
-def _take_head_tail(items: list[str], limit: int | None) -> tuple[list[str], list[str]]:
-    if limit is None or limit <= 0:
-        return items, []
-    head = items[:limit]
-    tail = items[-limit:] if len(items) > limit else []
-    return head, tail
-
-
-def infer_entry_blocker(rc_state: str, reasons: list[str]) -> str:
-    if "DATA_INSUFFICIENT" in reasons:
-        return "BLOCKER_DATA_INSUFFICIENT"
-    if "INVALIDATED" in reasons:
-        return "BLOCKER_INVALIDATED"
-    if "CHURN_GUARD" in reasons:
-        return "BLOCKER_CHURN_GUARD"
-    if "TREND_MATURED" in reasons:
-        return "BLOCKER_TREND_MATURED"
-    if "NO_SIGNAL" in reasons:
-        return "BLOCKER_NO_SIGNAL"
-    if rc_state in {"NO_TRADE"}:
-        return "BLOCKER_STATE_NO_TRADE"
-    if rc_state in {"DOWNTREND_LATE"}:
-        return "BLOCKER_STATE_DOWNTREND_LATE"
-    if rc_state in {"DOWNTREND_EARLY"}:
-        return "BLOCKER_STATE_DOWNTREND_EARLY"
-    if rc_state in {"STABILIZING"}:
-        return "BLOCKER_STATE_STABILIZING"
-    return "BLOCKER_UNKNOWN"
 
 
 def parse_args() -> argparse.Namespace:

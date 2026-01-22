@@ -12,6 +12,7 @@ from swingmaster.app_api.providers.osakedata_signal_provider_v1 import OsakeData
 from swingmaster.app_api.providers.osakedata_signal_provider_v2 import OsakeDataSignalProviderV2
 from swingmaster.app_api.providers.sqlite_prev_state_provider import SQLitePrevStateProvider
 from swingmaster.core.policy.factory import default_policy_factory
+from swingmaster.core.signals.enums import SignalKey
 from swingmaster.infra.sqlite.db import get_connection
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
 from swingmaster.infra.sqlite.migrator import apply_migrations
@@ -82,6 +83,25 @@ def parse_reasons(reasons_raw: str | None) -> List[str]:
     except Exception:
         return []
     return []
+
+
+def build_trading_days(md_conn, tickers: List[str], date_from: str, date_to: str) -> List[str]:
+    if not tickers:
+        return []
+    days = set()
+    chunk_size = 500
+    for i in range(0, len(tickers), chunk_size):
+        chunk = tickers[i : i + chunk_size]
+        placeholders = ",".join("?" for _ in chunk)
+        query = (
+            f"SELECT DISTINCT pvm FROM osakedata "
+            f"WHERE pvm>=? AND pvm<=? AND osake IN ({placeholders})"
+        )
+        params = [date_from, date_to, *chunk]
+        rows = md_conn.execute(query, params).fetchall()
+        for row in rows:
+            days.add(row[0])
+    return sorted(days)
 
 
 def print_report(rc_conn, as_of_date: str, run_id: str) -> None:
@@ -164,9 +184,9 @@ def print_report(rc_conn, as_of_date: str, run_id: str) -> None:
 
 def print_missing_asof_summary(
     rc_conn,
-    date_from: str,
-    date_to: str,
     tickers: List[str],
+    run_ids_by_day: Dict[str, str],
+    trading_days: List[str],
     final_day: str,
     final_run_id: str,
     top_n: int = 20,
@@ -193,30 +213,89 @@ def print_missing_asof_summary(
     if not tickers:
         return
 
+    if not run_ids_by_day:
+        print("MISSING_ASOF_RANGE: no runs captured; skipping summary")
+        return
+
     per_ticker = Counter()
-    chunk_size = 500
-    for i in range(0, len(tickers), chunk_size):
-        chunk = tickers[i : i + chunk_size]
-        placeholders = ",".join("?" for _ in chunk)
-        query = (
-            f"SELECT ticker, reasons_json FROM rc_state_daily "
-            f"WHERE date>=? AND date<=? AND ticker IN ({placeholders})"
-        )
-        params = [date_from, date_to, *chunk]
-        rows = rc_conn.execute(query, params).fetchall()
+    per_day = Counter()
+    affected_tickers = set()
+    affected_days = set()
+    for day in sorted(run_ids_by_day.keys()):
+        run_id = run_ids_by_day[day]
+        rows = rc_conn.execute(
+            """
+            SELECT ticker, reasons_json
+            FROM rc_state_daily
+            WHERE date=? AND run_id=? AND reasons_json LIKE '%DATA_INSUFFICIENT%'
+            """,
+            (day, run_id),
+        ).fetchall()
+        missing_this_day = 0
         for row in rows:
             reasons = parse_reasons(row["reasons_json"])
             if "DATA_INSUFFICIENT" in reasons:
                 per_ticker[row["ticker"]] += 1
+                missing_this_day += 1
+                affected_tickers.add(row["ticker"])
+        if missing_this_day > 0:
+            per_day[day] = missing_this_day
+            affected_days.add(day)
 
     total_missing_days = sum(per_ticker.values())
-    print(f"MISSING_ASOF_RANGE_TOTAL_DAYS: {total_missing_days}")
+    print(f"MISSING_ASOF_RANGE_TICKER_DAY_COUNT: {total_missing_days}")
+    print(
+        f"MISSING_ASOF_RANGE_AFFECTED_TICKERS: {len(affected_tickers)}/{len(tickers)}"
+    )
+    print(
+        f"MISSING_ASOF_RANGE_AFFECTED_DAYS: {len(affected_days)}/{len(trading_days)}"
+    )
+    if 0 < len(affected_days) <= 5:
+        print(
+            "MISSING_ASOF_RANGE_AFFECTED_DAYS_LIST: "
+            + ",".join(sorted(affected_days))
+        )
+    print("MISSING_ASOF_RANGE_DAY_COUNTS_TOP:")
+    if per_day:
+        for day, count in sorted(per_day.items(), key=lambda x: (-x[1], x[0]))[:10]:
+            print(f"  {day} missing_tickers={count}")
+    else:
+        print("  (none)")
     print("MISSING_ASOF_RANGE_TOP:")
     if per_ticker:
         for ticker, count in sorted(per_ticker.items(), key=lambda x: (-x[1], x[0]))[:top_n]:
             print(f"  {ticker} days_insufficient={count}")
     else:
         print("  (none)")
+
+
+def collect_signal_stats(signal_provider, tickers: List[str], day: str) -> tuple[Counter, dict[str, int]]:
+    signals_counter: Counter[SignalKey] = Counter()
+    entry = stab = both = invalidated = data_insufficient = 0
+    for ticker in tickers:
+        signal_set = signal_provider.get_signals(ticker, day)
+        keys = set(signal_set.signals.keys())
+        signals_counter.update(keys)
+        has_entry = SignalKey.ENTRY_SETUP_VALID in keys
+        has_stab = SignalKey.STABILIZATION_CONFIRMED in keys
+        if has_entry:
+            entry += 1
+        if has_stab:
+            stab += 1
+        if has_entry and has_stab:
+            both += 1
+        if SignalKey.INVALIDATED in keys:
+            invalidated += 1
+        if SignalKey.DATA_INSUFFICIENT in keys:
+            data_insufficient += 1
+    focused = {
+        "entry": entry,
+        "stab": stab,
+        "both": both,
+        "invalidated": invalidated,
+        "data_insufficient": data_insufficient,
+    }
+    return signals_counter, focused
 
 
 def main() -> None:
@@ -239,16 +318,25 @@ def main() -> None:
                 min_history_rows=args.min_history_rows,
                 require_row_on_date=args.require_row_on_date,
             )
+        orig_tickers = list(tickers)
+        resolved_count = len(orig_tickers)
+        seen = set()
+        tickers_unique = []
+        for t in orig_tickers:
+            if t not in seen:
+                seen.add(t)
+                tickers_unique.append(t)
+        tickers = tickers_unique
+        print(f"TICKERS_RESOLVED: {resolved_count} UNIQUE: {len(tickers)}")
+        if resolved_count != len(tickers):
+            dup_counter = Counter(orig_tickers)
+            dupes = [(t, c) for t, c in dup_counter.items() if c > 1]
+            if dupes:
+                print("TICKER_DUPLICATES_TOP:")
+                for t, c in sorted(dupes, key=lambda x: (-x[1], x[0]))[:10]:
+                    print(f"  {t}: {c}")
 
-        days = md_conn.execute(
-            """
-            SELECT DISTINCT pvm FROM osakedata
-            WHERE pvm >= ? AND pvm <= ?
-            ORDER BY pvm
-            """,
-            (args.date_from, args.date_to),
-        ).fetchall()
-        trading_days = [row[0] for row in days]
+        trading_days = build_trading_days(md_conn, tickers, args.date_from, args.date_to)
         if args.max_days > 0:
             trading_days = trading_days[: args.max_days]
         if not trading_days:
@@ -274,8 +362,14 @@ def main() -> None:
             if args.require_row_on_date:
                 print(
                     "NOTE: Universe filtering applies --require-row-on-date only against date_from. "
-                    "With signal_version=v2, each day also requires an as-of row; missing days emit DATA_INSUFFICIENT."
+                    "Trading days are derived only from the selected tickers (no cross-market dates). "
+                    "With signal_version=v2, each processed day also requires an as-of row; missing days emit DATA_INSUFFICIENT "
+                    "and a MISSING_ASOF summary is printed after the run."
                 )
+        if args.require_row_on_date and args.signal_version == "v2":
+            print(
+                "NOTE: signal_version=v2 enforces an as-of row for every processed trading day; missing rows emit DATA_INSUFFICIENT."
+            )
         print(
             f"RANGE date_from={args.date_from} date_to={args.date_to} "
             f"trading_days={len(trading_days)} tickers={len(tickers)}"
@@ -312,11 +406,13 @@ def main() -> None:
         )
 
         last_run_id = None
+        run_ids_by_day: Dict[str, str] = {}
         for idx, day in enumerate(trading_days, start=1):
             start = time.perf_counter()
             run_id = app.run_daily(as_of_date=day, tickers=tickers)
             elapsed_ms = (time.perf_counter() - start) * 1000
             last_run_id = run_id
+            run_ids_by_day[day] = run_id
             if idx == 1 or idx == len(trading_days) or idx % 5 == 0:
                 print(f"DAY {idx}/{len(trading_days)} {day} run_id={run_id} ms={elapsed_ms:.1f}")
 
@@ -325,14 +421,37 @@ def main() -> None:
             print(f"FINAL_DAY {last_day} run_id={last_run_id}")
             print_report(rc_conn, last_day, last_run_id)
             if args.signal_version == "v2" and args.require_row_on_date:
+                print(
+                    "NOTE: osakedata contains only trading days; missing-as-of means a ticker has no osakedata row "
+                    "on a processed trading day (often illiquidity or data gap)."
+                )
+                print(
+                    "MISSING_ASOF_SUMMARY scope=run_range_universe "
+                    f"signal_version=v2 require_row_on_date=True"
+                )
+                print(
+                    f"MISSING_ASOF_SUMMARY days={len(trading_days)} "
+                    f"tickers={len(tickers)} runs={len(run_ids_by_day)}"
+                )
                 print_missing_asof_summary(
                     rc_conn,
-                    args.date_from,
-                    args.date_to,
                     tickers,
+                    run_ids_by_day,
+                    trading_days,
                     last_day,
                     last_run_id,
                 )
+            signals_counter, focused = collect_signal_stats(
+                signal_provider, tickers, last_day
+            )
+            print("SIGNALS_TOP:")
+            for key, count in sorted(signals_counter.items(), key=lambda x: (-x[1], x[0].name))[:10]:
+                print(f"  {key.name}: {count}")
+            print(f"SIGNALS_ENTRY_SETUP_VALID: {focused['entry']}")
+            print(f"SIGNALS_STABILIZATION_CONFIRMED: {focused['stab']}")
+            print(f"SIGNALS_BOTH_STAB_AND_ENTRY: {focused['both']}")
+            print(f"SIGNALS_INVALIDATED: {focused['invalidated']}")
+            print(f"SIGNALS_DATA_INSUFFICIENT: {focused['data_insufficient']}")
     finally:
         md_conn.close()
         rc_conn.close()

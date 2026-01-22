@@ -578,14 +578,16 @@ def main() -> None:
             _debug_show("ENTRY_CANDIDATES", entry_candidates)
             _debug_show("STAB_CANDIDATES", stab_candidates)
             _debug_show("BOTH_STAB_AND_ENTRY", both_candidates)
-            entry_window_rc = [t for t, v in rc_conn.execute(
+            entry_rows = rc_conn.execute(
                 "SELECT ticker FROM rc_state_daily WHERE date=? AND run_id=? AND state='ENTRY_WINDOW'",
                 (last_day, last_run_id),
-            ).fetchall()]
-            pass_rc = [t for t, v in rc_conn.execute(
+            ).fetchall()
+            entry_window_rc = [r[0] for r in entry_rows]
+            pass_rows = rc_conn.execute(
                 "SELECT ticker FROM rc_state_daily WHERE date=? AND run_id=? AND state='PASS'",
                 (last_day, last_run_id),
-            ).fetchall()]
+            ).fetchall()
+            pass_rc = [r[0] for r in pass_rows]
             _debug_show("ENTRY_WINDOW_TICKERS", entry_window_rc)
             _debug_show("PASS_TICKERS", pass_rc)
             if args.debug_show_mismatches:
@@ -610,10 +612,6 @@ def main() -> None:
                         args,
                         f"MISMATCH_FULL_CONTEXT ticker={t} blocker={blocker} rc_state={state} "
                         f"rc_reasons={reasons_json} signal_keys={json.dumps(signal_keys_list)}",
-                    )
-                    _dbg(
-                        args,
-                        f"FINAL_DAY MISMATCH entry_like_not_entry_window: {t} state={state} blocker={blocker} reasons={reasons_json}",
                     )
             if args.debug_show_tickers:
                 limit_val = _effective_limit(args, sorted(tickers))

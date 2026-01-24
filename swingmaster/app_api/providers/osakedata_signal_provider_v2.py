@@ -8,6 +8,8 @@ from swingmaster.core.signals.enums import SignalKey
 from swingmaster.core.signals.models import Signal, SignalSet
 from swingmaster.infra.market_data.osakedata_reader import OsakeDataReader
 
+SAFETY_MARGIN_ROWS = 2
+
 
 class OsakeDataSignalProviderV2(SignalProvider):
     def __init__(
@@ -51,22 +53,13 @@ class OsakeDataSignalProviderV2(SignalProvider):
         self._require_row_on_date = require_row_on_date
 
     def get_signals(self, ticker: str, date: str) -> SignalSet:
-        # Minimal history any single signal computation needs (no extra summing of windows).
-        required = max(
-            self._sma_window + self._momentum_lookback,
-            self._sma_window + 5,  # slope check
-            self._atr_window + 1,
-            max(self._stabilization_days + 1, self._entry_sma_window),
-            self._invalidation_lookback + 1,
-        )
-        ohlc = self._reader.get_last_n_ohlc_required(
-            ticker,
-            date,
-            required,
-            require_row_on_date=self._require_row_on_date,
-        )
+        required = self._required_rows()
+        ohlc = self._reader.get_last_n_ohlc(ticker, date, required)
         if len(ohlc) < required:
             return self._insufficient()
+        if self._require_row_on_date:
+            if ohlc[0][0] != date:
+                return self._insufficient()
 
         closes = [row[4] for row in ohlc]
         highs = [row[2] for row in ohlc]
@@ -139,6 +132,15 @@ class OsakeDataSignalProviderV2(SignalProvider):
 
     def _signal(self, key: SignalKey) -> Signal:
         return Signal(key=key, value=True, confidence=None, source="osakedata_v2")
+
+    def _required_rows(self) -> int:
+        return max(
+            self._sma_window + self._momentum_lookback,
+            self._sma_window + 5,  # slope check
+            self._atr_window + 1,
+            max(self._stabilization_days + 1, self._entry_sma_window),
+            self._invalidation_lookback + 1,
+        ) + SAFETY_MARGIN_ROWS
 
     def _insufficient(self) -> SignalSet:
         return SignalSet(

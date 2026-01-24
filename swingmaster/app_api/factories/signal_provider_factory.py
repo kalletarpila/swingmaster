@@ -1,9 +1,21 @@
+"""Composition root for signal provider wiring.
+
+Providers remain pure and testable; infra dependencies are injected here.
+Keep wiring explicit and deterministic.
+"""
+
 from __future__ import annotations
 
 import sqlite3
 
 from swingmaster.app_api.ports import SignalProvider
 from swingmaster.app_api.providers.osakedata_signal_provider_v2 import OsakeDataSignalProviderV2
+
+SUPPORTED_SIGNAL_PROVIDERS = ("osakedata_v2",)
+
+
+def list_supported_signal_providers() -> tuple[str, ...]:
+    return SUPPORTED_SIGNAL_PROVIDERS
 
 
 def build_signal_provider(
@@ -25,4 +37,6 @@ def build_signal_provider(
             require_row_on_date=require_row_on_date,
             **kwargs,
         )
-    raise ValueError(f"Unknown signal provider: {provider}")
+    raise ValueError(
+        f"Unknown signal provider: {provider}. Supported: {list_supported_signal_providers()}"
+    )

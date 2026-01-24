@@ -27,6 +27,7 @@ class ReasonCode(Enum):
     ENTRY_CONDITIONS_MET = "ENTRY_CONDITIONS_MET"
     EDGE_GONE = "EDGE_GONE"
     INVALIDATED = "INVALIDATED"
+    RESET_TO_NEUTRAL = "RESET_TO_NEUTRAL"
     CHURN_GUARD = "CHURN_GUARD"
     DATA_INSUFFICIENT = "DATA_INSUFFICIENT"
     NO_SIGNAL = "NO_SIGNAL"
@@ -61,6 +62,10 @@ REASON_METADATA: dict[ReasonCode, dict[str, object]] = {
     ReasonCode.INVALIDATED: {
         "category": ReasonCategory.EXCLUSION,
         "message": "Prior setup or thesis has been invalidated.",
+    },
+    ReasonCode.RESET_TO_NEUTRAL: {
+        "category": ReasonCategory.EXCLUSION,
+        "message": "Lifecycle reset to neutral state.",
     },
     ReasonCode.CHURN_GUARD: {
         "category": ReasonCategory.EXCLUSION,

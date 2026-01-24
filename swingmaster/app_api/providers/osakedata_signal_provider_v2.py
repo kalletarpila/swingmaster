@@ -7,6 +7,12 @@ from swingmaster.app_api.ports import SignalProvider
 from swingmaster.core.signals.enums import SignalKey
 from swingmaster.core.signals.models import Signal, SignalSet
 from swingmaster.infra.market_data.osakedata_reader import OsakeDataReader
+from swingmaster.app_api.providers.signals_v2.context import SignalContextV2
+from swingmaster.app_api.providers.signals_v2.entry_setup_valid import eval_entry_setup_valid
+from swingmaster.app_api.providers.signals_v2.invalidated import eval_invalidated
+from swingmaster.app_api.providers.signals_v2.stabilization_confirmed import eval_stabilization_confirmed
+from swingmaster.app_api.providers.signals_v2.trend_matured import eval_trend_matured
+from swingmaster.app_api.providers.signals_v2.trend_started import eval_trend_started
 
 SAFETY_MARGIN_ROWS = 2
 
@@ -65,54 +71,37 @@ class OsakeDataSignalProviderV2(SignalProvider):
         highs = [row[2] for row in ohlc]
         lows = [row[3] for row in ohlc]
 
+        ctx = SignalContextV2(closes=closes, highs=highs, lows=lows, ohlc=ohlc)
         signals = {}
 
         # TREND_STARTED
-        if len(closes) > self._momentum_lookback and len(closes) >= self._sma_window:
-            latest = closes[0]
-            prev = closes[self._momentum_lookback]
-            sma20 = sum(closes[: self._sma_window]) / float(self._sma_window)
-            if latest > prev and latest > sma20:
-                signals[SignalKey.TREND_STARTED] = self._signal(SignalKey.TREND_STARTED)
+        if eval_trend_started(ctx, self._sma_window, self._momentum_lookback):
+            signals[SignalKey.TREND_STARTED] = self._signal(SignalKey.TREND_STARTED)
 
         # TREND_MATURED
-        if len(closes) >= max(self._sma_window, self._matured_below_sma_days):
-            sma20_today = sum(closes[: self._sma_window]) / float(self._sma_window)
-            last_below = all(c < sma20_today for c in closes[: self._matured_below_sma_days])
-            slope_neg = False
-            if len(closes) >= self._sma_window + 5:
-                sma20_5ago = sum(closes[5 : 5 + self._sma_window]) / float(self._sma_window)
-                slope_neg = sma20_today < sma20_5ago
-            if last_below or slope_neg:
-                signals[SignalKey.TREND_MATURED] = self._signal(SignalKey.TREND_MATURED)
+        if eval_trend_matured(ctx, self._sma_window, self._matured_below_sma_days):
+            signals[SignalKey.TREND_MATURED] = self._signal(SignalKey.TREND_MATURED)
 
         # STABILIZATION_CONFIRMED
-        if len(ohlc) >= max(self._atr_window + 1, self._stabilization_days + 1):
-            atr = self._compute_atr(ohlc[: self._atr_window + 1])
-            latest_close = closes[0]
-            atr_pct = atr / latest_close if latest_close else 0.0
-            window_high = max(highs[: self._stabilization_days])
-            window_low = min(lows[: self._stabilization_days])
-            range_pct = (window_high - window_low) / latest_close if latest_close else 0.0
-            if atr_pct <= self._atr_pct_threshold and range_pct <= self._range_pct_threshold:
-                signals[SignalKey.STABILIZATION_CONFIRMED] = self._signal(SignalKey.STABILIZATION_CONFIRMED)
+        if eval_stabilization_confirmed(
+            ctx,
+            self._atr_window,
+            self._stabilization_days,
+            self._atr_pct_threshold,
+            self._range_pct_threshold,
+            self._compute_atr,
+        ):
+            signals[SignalKey.STABILIZATION_CONFIRMED] = self._signal(SignalKey.STABILIZATION_CONFIRMED)
 
         # ENTRY_SETUP_VALID
-        if len(ohlc) >= max(self._stabilization_days + 1, self._entry_sma_window):
-            latest_close = closes[0]
-            prev_highs = highs[1 : 1 + self._stabilization_days]
-            if prev_highs:
-                breakout_level = max(prev_highs)
-                sma_entry = sum(closes[: self._entry_sma_window]) / float(self._entry_sma_window)
-                if latest_close > breakout_level and latest_close > sma_entry:
-                    signals[SignalKey.ENTRY_SETUP_VALID] = self._signal(SignalKey.ENTRY_SETUP_VALID)
+        if eval_entry_setup_valid(ctx, self._stabilization_days, self._entry_sma_window):
+            signals[SignalKey.ENTRY_SETUP_VALID] = self._signal(SignalKey.ENTRY_SETUP_VALID)
 
-        # INVALIDATED
-        if len(ohlc) >= self._invalidation_lookback + 1:
-            prior_lows = lows[1 : self._invalidation_lookback + 1]
-            min_low = min(prior_lows) if prior_lows else lows[0]
-            if lows[0] < min_low:
-                signals[SignalKey.INVALIDATED] = self._signal(SignalKey.INVALIDATED)
+        invalidated = eval_invalidated(ctx.lows, self._invalidation_lookback)
+        if invalidated:
+            signals[SignalKey.INVALIDATED] = self._signal(SignalKey.INVALIDATED)
+            signals.pop(SignalKey.STABILIZATION_CONFIRMED, None)
+            signals.pop(SignalKey.ENTRY_SETUP_VALID, None)
 
         if not signals:
             return SignalSet(

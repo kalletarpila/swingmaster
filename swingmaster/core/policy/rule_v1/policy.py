@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+
 from swingmaster.core.domain.enums import ReasonCode, State
 from swingmaster.core.domain.models import Decision, StateAttrs
+from swingmaster.core.signals.enums import SignalKey
 from swingmaster.core.signals.models import SignalSet
+from swingmaster.core.policy.ports.state_history_port import StateHistoryDay, StateHistoryPort
 from .rules_common import Rule, apply_hard_exclusions, first_match
 from .rules_downtrend_early import rule_stabilizing as rule_de_stabilizing, rule_trend_matured
 from .rules_downtrend_late import rule_stabilizing as rule_dl_stabilizing
@@ -60,10 +64,33 @@ def build_ruleset_rule_v1() -> RuleSet:
 
 
 class RuleBasedTransitionPolicyV1Impl:
-    def __init__(self, ruleset: Optional[RuleSet] = None) -> None:
+    def __init__(
+        self, ruleset: Optional[RuleSet] = None, history_port: Optional[StateHistoryPort] = None
+    ) -> None:
         self._ruleset = ruleset or build_ruleset_rule_v1()
+        self._history_port = history_port
 
-    def decide(self, prev_state: State, prev_attrs: StateAttrs, signals: SignalSet) -> Decision:
+    def decide(
+        self,
+        prev_state: State,
+        prev_attrs: StateAttrs,
+        signals: SignalSet,
+        ticker: Optional[str] = None,
+        as_of_date: Optional[str] = None,
+    ) -> Decision:
+        if _should_reset_to_neutral(
+            prev_state,
+            prev_attrs,
+            signals,
+            history_port=self._history_port,
+            ticker=ticker,
+            as_of_date=as_of_date,
+        ):
+            return Decision(
+                next_state=State.NO_TRADE,
+                reason_codes=[ReasonCode.RESET_TO_NEUTRAL],
+                attrs_update=StateAttrs(confidence=None, age=0, status=None),
+            )
         proposal = apply_ruleset(prev_state, signals, self._ruleset)
 
         if proposal.next_state != prev_state:
@@ -86,3 +113,164 @@ class RuleBasedTransitionPolicyV1Impl:
             reason_codes=proposal.reasons,
             attrs_update=attrs_update,
         )
+
+
+RESET_NO_SIGNAL_DAYS = 15
+CHURN_GUARD_THRESHOLD = 3
+CHURN_GUARD_WINDOW_DAYS = 10
+PROGRESS_SIGNALS = {
+    SignalKey.TREND_STARTED,
+    SignalKey.TREND_MATURED,
+    SignalKey.STABILIZATION_CONFIRMED,
+    SignalKey.ENTRY_SETUP_VALID,
+    SignalKey.INVALIDATED,
+}
+ALLOWED_QUIET_SIGNALS = {SignalKey.NO_SIGNAL}
+if hasattr(SignalKey, "CHURN_GUARD"):
+    ALLOWED_QUIET_SIGNALS.add(SignalKey.CHURN_GUARD)
+
+
+def _extract_churn_guard_hits(status: Optional[str]) -> int:
+    if not status:
+        return 0
+    try:
+        parsed = json.loads(status)
+    except Exception:
+        return 0
+    if not isinstance(parsed, dict):
+        return 0
+    count = parsed.get("churn_guard_hits")
+    if count is None:
+        count = parsed.get("churn_guard_count")
+    window_days = parsed.get("churn_window_days")
+    if window_days is None:
+        window_days = parsed.get("churn_guard_window_days")
+    if window_days is not None and window_days < CHURN_GUARD_WINDOW_DAYS:
+        return 0
+    if isinstance(count, int):
+        return count
+    return 0
+
+
+def _has_any_progress_signal(signals: SignalSet) -> bool:
+    for key in PROGRESS_SIGNALS:
+        if signals.has(key):
+            return True
+    return False
+
+
+def _is_quiet_day(signals: SignalSet) -> bool:
+    if signals.has(SignalKey.DATA_INSUFFICIENT):
+        return False
+    if signals.has(SignalKey.INVALIDATED):
+        return False
+    if signals.has(SignalKey.EDGE_GONE):
+        return False
+    if _has_any_progress_signal(signals):
+        return False
+    try:
+        signal_keys = signals.signals.keys()
+    except Exception:
+        return signals.has(SignalKey.NO_SIGNAL)
+    if not signal_keys:
+        return False
+    if SignalKey.NO_SIGNAL not in signal_keys:
+        return False
+    for key in signal_keys:
+        if key not in ALLOWED_QUIET_SIGNALS:
+            return False
+    return True
+
+
+def _day_has_reason(day: StateHistoryDay, reason: ReasonCode) -> bool:
+    return reason in day.reason_codes
+
+
+def _day_has_signal(day: StateHistoryDay, signal: SignalKey) -> bool:
+    if day.signal_keys is None:
+        return False
+    return signal in day.signal_keys
+
+
+def _window_has_invalidated(history: list[StateHistoryDay]) -> bool:
+    for day in history:
+        if _day_has_reason(day, ReasonCode.INVALIDATED) or _day_has_signal(day, SignalKey.INVALIDATED):
+            return True
+    return False
+
+
+def _window_has_edge_gone(history: list[StateHistoryDay]) -> bool:
+    for day in history:
+        if _day_has_reason(day, ReasonCode.EDGE_GONE) or _day_has_signal(day, SignalKey.EDGE_GONE):
+            return True
+    return False
+
+
+def _max_churn_hits(history: list[StateHistoryDay]) -> int:
+    max_hits = 0
+    for day in history:
+        if day.churn_guard_hits is None:
+            continue
+        if day.churn_guard_hits > max_hits:
+            max_hits = day.churn_guard_hits
+    return max_hits
+
+
+def _is_quiet_history_day(day: StateHistoryDay) -> bool:
+    if _day_has_reason(day, ReasonCode.DATA_INSUFFICIENT) or _day_has_signal(day, SignalKey.DATA_INSUFFICIENT):
+        return False
+    if _day_has_reason(day, ReasonCode.INVALIDATED) or _day_has_signal(day, SignalKey.INVALIDATED):
+        return False
+    if _day_has_reason(day, ReasonCode.EDGE_GONE) or _day_has_signal(day, SignalKey.EDGE_GONE):
+        return False
+    if day.signal_keys is None:
+        return False
+    if SignalKey.NO_SIGNAL not in day.signal_keys:
+        return False
+    for key in day.signal_keys:
+        if key not in ALLOWED_QUIET_SIGNALS:
+            return False
+    return True
+
+
+def _should_reset_to_neutral(
+    prev_state: State,
+    prev_attrs: StateAttrs,
+    signals: SignalSet,
+    history_port: Optional[StateHistoryPort] = None,
+    ticker: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+) -> bool:
+    if signals.has(SignalKey.INVALIDATED):
+        return False
+    if signals.has(SignalKey.DATA_INSUFFICIENT):
+        return False
+    if _has_any_progress_signal(signals):
+        return False
+
+    if history_port is not None and ticker and as_of_date:
+        history = history_port.get_recent_days(ticker, as_of_date, limit=RESET_NO_SIGNAL_DAYS)
+        if _window_has_invalidated(history):
+            return False
+        if signals.has(SignalKey.EDGE_GONE) or _window_has_edge_gone(history):
+            return True
+        if _max_churn_hits(history) >= CHURN_GUARD_THRESHOLD:
+            return True
+        if prev_state in {State.PASS, State.STABILIZING} and len(history) >= RESET_NO_SIGNAL_DAYS:
+            if all(_is_quiet_history_day(day) for day in history):
+                return True
+        return False
+
+    if signals.has(SignalKey.EDGE_GONE):
+        return True
+
+    if prev_state in {State.PASS, State.STABILIZING}:
+        if prev_attrs.age >= RESET_NO_SIGNAL_DAYS - 1:
+            if _is_quiet_day(signals):
+                return True
+
+    churn_guard_hits = _extract_churn_guard_hits(prev_attrs.status)
+    if churn_guard_hits >= CHURN_GUARD_THRESHOLD:
+        return True
+
+    return False

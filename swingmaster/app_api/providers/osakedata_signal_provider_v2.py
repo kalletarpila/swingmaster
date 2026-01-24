@@ -115,7 +115,16 @@ class OsakeDataSignalProviderV2(SignalProvider):
                 signals[SignalKey.INVALIDATED] = self._signal(SignalKey.INVALIDATED)
 
         if not signals:
-            return SignalSet(signals={})
+            return SignalSet(
+                signals={
+                    SignalKey.NO_SIGNAL: Signal(
+                        key=SignalKey.NO_SIGNAL,
+                        value=True,
+                        confidence=None,
+                        source="osakedata_v2",
+                    )
+                }
+            )
         return SignalSet(signals=signals)
 
     def _compute_atr(self, ohlc: List[tuple]) -> float:

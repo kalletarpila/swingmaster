@@ -180,3 +180,46 @@ def test_require_row_on_date_blocks_signals_when_missing_day():
     signals_flag = get_signals_with_flag(conn, missing_date, require_row_on_date=True)
     assert signals_flag == {SignalKey.DATA_INSUFFICIENT}
     conn.close()
+
+
+def test_no_signal_emitted_when_no_other_signals_and_not_insufficient():
+    conn = setup_db()
+    provider = OsakeDataSignalProviderV2(conn, table_name="osakedata")
+    required = provider._required_rows()
+    base = date(2026, 1, 1)
+    rows = make_rows("AAA", base, required, close=100.0, high_offset=10.0, low_offset=10.0)
+    for i in range(1, 26):
+        idx = -i
+        rows[idx] = (rows[idx][0], rows[idx][1], 101.0, 111.0, 91.0, 101.0, 1_000_000, "X")
+    insert_rows(conn, rows)
+    as_of_date = rows[-1][1]
+    signals = get_signals(provider, as_of_date)
+    assert signals == {SignalKey.NO_SIGNAL}
+    conn.close()
+
+
+def test_no_signal_not_emitted_when_any_other_signal_present():
+    conn = setup_db()
+    provider = OsakeDataSignalProviderV2(conn, table_name="osakedata")
+    required = provider._required_rows()
+    base = date(2026, 1, 1)
+    rows = make_rows("AAA", base, required, close=100.0)
+    rows[-2] = (rows[-2][0], rows[-2][1], 101.0, 102.0, 100.0, 101.0, 1_000_000, "X")
+    rows[-1] = (rows[-1][0], rows[-1][1], 102.0, 103.0, 101.0, 102.0, 1_000_000, "X")
+    insert_rows(conn, rows)
+    as_of_date = rows[-1][1]
+    signals = get_signals(provider, as_of_date)
+    assert SignalKey.NO_SIGNAL not in signals
+    assert SignalKey.TREND_STARTED in signals
+    conn.close()
+
+
+def test_no_signal_not_emitted_when_data_insufficient():
+    conn = setup_db()
+    provider = OsakeDataSignalProviderV2(conn, table_name="osakedata")
+    rows = make_rows("AAA", date(2026, 1, 1), 5, close=100.0)
+    insert_rows(conn, rows)
+    signals = get_signals(provider, rows[-1][1])
+    assert signals == {SignalKey.DATA_INSUFFICIENT}
+    assert SignalKey.NO_SIGNAL not in signals
+    conn.close()

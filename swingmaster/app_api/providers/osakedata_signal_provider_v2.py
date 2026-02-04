@@ -13,7 +13,13 @@ from swingmaster.app_api.providers.signals_v2.entry_setup_valid import eval_entr
 from swingmaster.app_api.providers.signals_v2.invalidated import eval_invalidated
 from swingmaster.app_api.providers.signals_v2.stabilization_confirmed import eval_stabilization_confirmed
 from swingmaster.app_api.providers.signals_v2.trend_matured import eval_trend_matured
-from swingmaster.app_api.providers.signals_v2.trend_started import eval_trend_started
+from swingmaster.app_api.providers.signals_v2.trend_started import (
+    BREAK_LOW_WINDOW,
+    REGIME_WINDOW,
+    SMA_LEN,
+    SLOPE_LOOKBACK,
+    eval_trend_started,
+)
 
 SAFETY_MARGIN_ROWS = 2
 
@@ -169,6 +175,9 @@ class OsakeDataSignalProviderV2(SignalProvider):
             max(self._stabilization_days + 1, self._entry_sma_window),
             self._invalidation_lookback + 1,
             (2 * self._dow_window) + 1,
+            SMA_LEN + REGIME_WINDOW - 1,
+            SMA_LEN + SLOPE_LOOKBACK,
+            BREAK_LOW_WINDOW + 1,
         ) + SAFETY_MARGIN_ROWS
 
     def _insufficient(self) -> SignalSet:

@@ -63,15 +63,20 @@ def get_signals_with_flag(conn, date: str, require_row_on_date: bool):
 
 def test_trend_started_v2():
     conn = setup_db()
-    provider = OsakeDataSignalProviderV2(conn, table_name="osakedata")
+    provider = OsakeDataSignalProviderV2(conn, table_name="osakedata", sma_window=49)
     required = provider._required_rows()
     base = date(2026, 1, 1)
     rows = make_rows("AAA", base, required, close=100.0)
-    rows[-2] = (rows[-2][0], rows[-2][1], 101.0, 102.0, 100.0, 101.0, 1_000_000, "X")
-    rows[-1] = (rows[-1][0], rows[-1][1], 102.0, 103.0, 101.0, 102.0, 1_000_000, "X")
+    for i in range(required):
+        day = rows[i][1]
+        price = 100.0 + i
+        rows[i] = (rows[i][0], day, price, price + 1.0, price - 1.0, price, 1_000_000, "X")
+    prev_close = rows[-2][5]
+    breakdown_close = prev_close - 12.0
+    rows[-1] = (rows[-1][0], rows[-1][1], breakdown_close, breakdown_close + 1.0, breakdown_close - 1.0, breakdown_close, 1_000_000, "X")
     insert_rows(conn, rows)
     as_of_date = rows[-1][1]
-    signals = get_signals(conn, as_of_date)
+    signals = set(provider.get_signals("AAA", as_of_date).signals.keys())
     assert SignalKey.TREND_STARTED in signals
     conn.close()
 
@@ -81,10 +86,11 @@ def test_trend_matured_v2():
     provider = OsakeDataSignalProviderV2(conn, table_name="osakedata")
     required = provider._required_rows()
     base = date(2026, 1, 1)
-    rows = make_rows("AAA", base, required, close=100.0)
-    for i in range(1, 6):
-        idx = -i
-        rows[idx] = (rows[idx][0], rows[idx][1], 90.0, 91.0, 89.0, 90.0, 1_000_000, "X")
+    rows = make_rows("AAA", base, required, close=150.0)
+    for i in range(required):
+        day = rows[i][1]
+        price = 150.0 - i * 0.5
+        rows[i] = (rows[i][0], day, price, price + 1.0, price - 1.0, price, 1_000_000, "X")
     insert_rows(conn, rows)
     as_of_date = rows[-1][1]
     signals = get_signals(conn, as_of_date)

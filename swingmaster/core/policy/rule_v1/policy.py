@@ -129,6 +129,18 @@ ALLOWED_QUIET_SIGNALS = {SignalKey.NO_SIGNAL}
 if hasattr(SignalKey, "CHURN_GUARD"):
     ALLOWED_QUIET_SIGNALS.add(SignalKey.CHURN_GUARD)
 
+DOW_QUIET_SIGNALS = {
+    SignalKey.DOW_TREND_UP,
+    SignalKey.DOW_TREND_DOWN,
+    SignalKey.DOW_TREND_NEUTRAL,
+    SignalKey.DOW_LAST_LOW_L,
+    SignalKey.DOW_LAST_LOW_HL,
+    SignalKey.DOW_LAST_LOW_LL,
+    SignalKey.DOW_LAST_HIGH_H,
+    SignalKey.DOW_LAST_HIGH_HH,
+    SignalKey.DOW_LAST_HIGH_LH,
+}
+
 
 def _extract_churn_guard_hits(status: Optional[str]) -> int:
     if not status:
@@ -177,7 +189,7 @@ def _is_quiet_day(signals: SignalSet) -> bool:
     if SignalKey.NO_SIGNAL not in signal_keys:
         return False
     for key in signal_keys:
-        if key not in ALLOWED_QUIET_SIGNALS:
+        if key not in ALLOWED_QUIET_SIGNALS and key not in DOW_QUIET_SIGNALS:
             return False
     return True
 
@@ -228,7 +240,7 @@ def _is_quiet_history_day(day: StateHistoryDay) -> bool:
     if SignalKey.NO_SIGNAL not in day.signal_keys:
         return False
     for key in day.signal_keys:
-        if key not in ALLOWED_QUIET_SIGNALS:
+        if key not in ALLOWED_QUIET_SIGNALS and key not in DOW_QUIET_SIGNALS:
             return False
     return True
 

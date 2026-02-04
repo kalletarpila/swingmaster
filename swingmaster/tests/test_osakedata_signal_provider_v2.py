@@ -103,7 +103,23 @@ def test_stabilization_confirmed_v2():
     provider = OsakeDataSignalProviderV2(conn, table_name="osakedata")
     required = provider._required_rows()
     base = date(2026, 1, 1)
-    rows = make_rows("AAA", base, required, close=100.0, high_offset=0.2, low_offset=0.2)
+    rows = make_rows("AAA", base, required, close=100.0, high_offset=5.0, low_offset=5.0)
+    for i in range(required):
+        day = rows[i][1]
+        idx_from_end = (required - 1) - i
+        if idx_from_end < 7:
+            close = 98.0
+            low = 95.0 if idx_from_end != 4 else 94.8
+            high = low + 4.0
+        elif idx_from_end < 27:
+            close = 100.0
+            low = 95.0
+            high = 105.0
+        else:
+            close = 100.0
+            low = 95.0
+            high = 105.0
+        rows[i] = (rows[i][0], day, close, high, low, close, 1_000_000, "X")
     insert_rows(conn, rows)
     as_of_date = rows[-1][1]
     signals = get_signals(conn, as_of_date)

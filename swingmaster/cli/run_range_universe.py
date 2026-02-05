@@ -7,10 +7,7 @@ from collections import Counter
 from typing import Dict, List
 
 from swingmaster.app_api.dto import UniverseSpec, UniverseMode, UniverseSample
-from swingmaster.app_api.facade import SwingmasterApplication
-from swingmaster.app_api.providers.osakedata_signal_provider_v1 import OsakeDataSignalProviderV1
-from swingmaster.app_api.providers.osakedata_signal_provider_v2 import OsakeDataSignalProviderV2
-from swingmaster.app_api.providers.sqlite_prev_state_provider import SQLitePrevStateProvider
+from swingmaster.app_api.factories import build_swingmaster_app
 from swingmaster.cli._debug_utils import (
     _dbg,
     _debug_enabled,
@@ -19,7 +16,6 @@ from swingmaster.cli._debug_utils import (
     _take_head_tail,
     infer_entry_blocker,
 )
-from swingmaster.core.policy.factory import default_policy_factory
 from swingmaster.core.signals.enums import SignalKey
 from swingmaster.infra.sqlite.db import get_connection
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
@@ -417,24 +413,21 @@ def main() -> None:
                     print("DAYS tail:", ",".join(tail))
             return
 
-        if args.signal_version == "v2":
-            signal_provider = OsakeDataSignalProviderV2(
-                md_conn, table_name="osakedata", require_row_on_date=args.require_row_on_date
-            )
-        else:
-            signal_provider = OsakeDataSignalProviderV1(md_conn, table_name="osakedata")
-        prev_state_provider = SQLitePrevStateProvider(rc_conn)
-        policy = default_policy_factory.create(args.policy_id, args.policy_version)
-
-        app = SwingmasterApplication(
-            conn=rc_conn,
-            policy=policy,
-            signal_provider=signal_provider,
-            prev_state_provider=prev_state_provider,
-            engine_version="dev",
+        policy_version = args.policy_version
+        if policy_version == "dev":
+            policy_version = "v1"
+        provider_name = "osakedata_v2" if args.signal_version == "v2" else "osakedata_v1"
+        app = build_swingmaster_app(
+            rc_conn,
+            policy_version=policy_version,
+            enable_history=False,
+            provider=provider_name,
+            md_conn=md_conn,
+            require_row_on_date=args.require_row_on_date,
             policy_id=args.policy_id,
-            policy_version=args.policy_version,
+            engine_version="dev",
         )
+        signal_provider = app._signal_provider
 
         last_run_id = None
         run_ids_by_day: Dict[str, str] = {}

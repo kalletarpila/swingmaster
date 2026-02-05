@@ -8,6 +8,7 @@ SLOPE_LOOKBACK = 5
 REGIME_WINDOW = 30
 ABOVE_RATIO_MIN = 0.70
 BREAK_LOW_WINDOW = 10
+DEBOUNCE_DAYS = 5
 
 
 def eval_trend_started(ctx: SignalContextV2, sma_window: int, momentum_lookback: int) -> bool:
@@ -16,6 +17,7 @@ def eval_trend_started(ctx: SignalContextV2, sma_window: int, momentum_lookback:
     min_required = max(
         SMA_LEN + REGIME_WINDOW - 1,
         SMA_LEN + SLOPE_LOOKBACK,
+        SMA_LEN + DEBOUNCE_DAYS + 1,
         BREAK_LOW_WINDOW + 1,
     )
     if len(closes) < min_required:
@@ -40,6 +42,11 @@ def eval_trend_started(ctx: SignalContextV2, sma_window: int, momentum_lookback:
 
     if not (yesterday_close >= yesterday_sma and today_close < today_sma):
         return False
+
+    # Debounce: avoid repeated triggers if we were already below SMA recently.
+    for i in range(1, 1 + DEBOUNCE_DAYS + 1):
+        if closes[i] < sma20[i]:
+            return False
 
     prev_low = min(closes[1 : 1 + BREAK_LOW_WINDOW])
     breakdown_ok = today_close < prev_low

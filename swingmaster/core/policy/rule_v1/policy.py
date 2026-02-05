@@ -88,6 +88,16 @@ class RuleBasedTransitionPolicyV1Impl:
         )
         if edge_decision is not None:
             return edge_decision
+        churn_decision = _churn_guard_decision(
+            prev_state,
+            prev_attrs,
+            signals,
+            history_port=self._history_port,
+            ticker=ticker,
+            as_of_date=as_of_date,
+        )
+        if churn_decision is not None:
+            return churn_decision
         if _should_reset_to_neutral(
             prev_state,
             prev_attrs,
@@ -128,6 +138,8 @@ class RuleBasedTransitionPolicyV1Impl:
 RESET_NO_SIGNAL_DAYS = 15
 CHURN_GUARD_THRESHOLD = 3
 CHURN_GUARD_WINDOW_DAYS = 10
+CHURN_COOLDOWN_DAYS = 7
+CHURN_REPEAT_WINDOW_DAYS = 10
 EDGE_GONE_ENTRY_WINDOW_MAX_AGE = 12
 EDGE_GONE_STABILIZING_MAX_AGE = 20
 EDGE_GONE_RECENT_SETUP_LOOKBACK = 10
@@ -381,3 +393,79 @@ def _has_recent_setup_activity(history: list[StateHistoryDay]) -> bool:
         if day.state == State.ENTRY_WINDOW:
             return True
     return False
+
+
+def _churn_guard_decision(
+    prev_state: State,
+    prev_attrs: StateAttrs,
+    signals: SignalSet,
+    history_port: Optional[StateHistoryPort] = None,
+    ticker: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+) -> Optional[Decision]:
+    if signals.has(SignalKey.DATA_INSUFFICIENT):
+        return None
+    if signals.has(SignalKey.INVALIDATED):
+        return None
+    if signals.has(SignalKey.STABILIZATION_CONFIRMED):
+        return None
+    if prev_state not in {State.STABILIZING, State.PASS, State.NO_TRADE, State.ENTRY_WINDOW}:
+        return None
+    if not signals.has(SignalKey.ENTRY_SETUP_VALID):
+        return None
+
+    history = None
+    if history_port is not None and ticker and as_of_date:
+        history = history_port.get_recent_days(
+            ticker,
+            as_of_date,
+            limit=max(CHURN_COOLDOWN_DAYS, CHURN_REPEAT_WINDOW_DAYS) + 1,
+        )
+
+    churn_guard = False
+    if history is not None:
+        if _recent_entry_window_exit(history):
+            churn_guard = True
+        elif _repeat_setup_without_stabilization(history):
+            churn_guard = True
+
+    if churn_guard:
+        return Decision(
+            next_state=prev_state,
+            reason_codes=[ReasonCode.CHURN_GUARD],
+            attrs_update=StateAttrs(
+                confidence=prev_attrs.confidence,
+                age=prev_attrs.age + 1,
+                status=prev_attrs.status,
+            ),
+        )
+    return None
+
+
+def _recent_entry_window_exit(history: list[StateHistoryDay]) -> bool:
+    for idx in range(len(history) - 1):
+        today = history[idx]
+        prior = history[idx + 1]
+        if today.state == State.PASS and prior.state == State.ENTRY_WINDOW:
+            return idx < CHURN_COOLDOWN_DAYS
+    return False
+
+
+def _repeat_setup_without_stabilization(history: list[StateHistoryDay]) -> bool:
+    window = history[:CHURN_REPEAT_WINDOW_DAYS]
+    if not window:
+        return False
+    if not any(day.signal_keys is not None for day in window):
+        # Signal keys not available; cannot evaluate repeat-setup safely.
+        return False
+    idx_setup = None
+    for i, day in enumerate(window):
+        if day.signal_keys and SignalKey.ENTRY_SETUP_VALID in day.signal_keys:
+            idx_setup = i
+            break
+    if idx_setup is None:
+        return False
+    for day in window[:idx_setup]:
+        if day.signal_keys and SignalKey.STABILIZATION_CONFIRMED in day.signal_keys:
+            return False
+    return True

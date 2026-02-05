@@ -201,6 +201,11 @@ def _print_summary(
     require_signal_miss_days_total: int,
     exclude_signal_days_total: int,
     exclude_signal_miss_days_total: int,
+    after_signal: str | None,
+    after_signal_anchor_date: str | None,
+    window_days: int | None,
+    after_signal_anchors_found_total: int,
+    after_signal_anchors_missing_total: int,
 ) -> None:
     print("SUMMARY")
     print(f"tickers_resolved={tickers_resolved}")
@@ -214,6 +219,12 @@ def _print_summary(
     print(f"require_signal_miss_days_total={require_signal_miss_days_total}")
     print(f"exclude_signal_days_total={exclude_signal_days_total}")
     print(f"exclude_signal_miss_days_total={exclude_signal_miss_days_total}")
+    if after_signal is not None:
+        print(f"after_signal={after_signal}")
+        print(f"after_signal_anchor_date={after_signal_anchor_date}")
+        print(f"window_days={window_days}")
+        print(f"after_signal_anchors_found_total={after_signal_anchors_found_total}")
+        print(f"after_signal_anchors_missing_total={after_signal_anchors_missing_total}")
     if focus_signal == "TREND_STARTED" or trend_started_days_total > 0:
         print(f"trend_started_days_total={trend_started_days_total}")
         print(
@@ -242,6 +253,11 @@ def main() -> None:
     exclude_signal_days_total = 0
     exclude_signal_miss_days_total = 0
     focus_signal_value = args.focus_signal
+    after_signal_value = args.after_signal
+    after_signal_anchor_date = None
+    window_days_value = args.window_days if args.window_days and args.window_days > 0 else None
+    after_signal_anchors_found_total = 0
+    after_signal_anchors_missing_total = 0
 
     md_conn = get_readonly_connection(MD_DB_DEFAULT)
     rc_conn = get_readonly_connection(RC_DB_DEFAULT)
@@ -265,6 +281,11 @@ def main() -> None:
                     require_signal_miss_days_total=require_signal_miss_days_total,
                     exclude_signal_days_total=exclude_signal_days_total,
                     exclude_signal_miss_days_total=exclude_signal_miss_days_total,
+                    after_signal=after_signal_value,
+                    after_signal_anchor_date=after_signal_anchor_date,
+                    window_days=window_days_value,
+                    after_signal_anchors_found_total=after_signal_anchors_found_total,
+                    after_signal_anchors_missing_total=after_signal_anchors_missing_total,
                 )
             return
 
@@ -276,7 +297,7 @@ def main() -> None:
             {SignalKey[name] for name in args.exclude_signal} if args.exclude_signal else set()
         )
         after_signal = SignalKey[args.after_signal] if args.after_signal else None
-        window_days = args.window_days if args.window_days and args.window_days > 0 else None
+        window_days = window_days_value
         trading_days = build_trading_days(md_conn, tickers, args.begin_date, args.end_date)
         if not trading_days:
             if args.summary:
@@ -295,6 +316,11 @@ def main() -> None:
                     require_signal_miss_days_total=require_signal_miss_days_total,
                     exclude_signal_days_total=exclude_signal_days_total,
                     exclude_signal_miss_days_total=exclude_signal_miss_days_total,
+                    after_signal=after_signal_value,
+                    after_signal_anchor_date=after_signal_anchor_date,
+                    window_days=window_days_value,
+                    after_signal_anchors_found_total=after_signal_anchors_found_total,
+                    after_signal_anchors_missing_total=after_signal_anchors_missing_total,
                 )
             return
 
@@ -312,28 +338,57 @@ def main() -> None:
         prev_state_provider = app._prev_state_provider
 
         debug_limit = args.debug_limit if args.debug_limit > 0 else None
+        global_after_signal_anchor_date = None
+
+        def _is_eligible_after_anchor(
+            day_date: date, anchor_date: date | None, window_days: int | None
+        ) -> bool:
+            if anchor_date is None:
+                return False
+            if day_date <= anchor_date:
+                return False
+            if window_days is None:
+                return True
+            return (day_date - anchor_date).days <= window_days
 
         for ticker in tickers:
             printed = 0
             tickers_processed += 1
-            last_after_signal_day = None
+            day_signals = []
+            last_after_signal_date = None
             for day in trading_days:
-                dates_processed_total += 1
                 signal_set = signal_provider.get_signals(ticker, day)
+                day_signals.append((day, signal_set))
+                if after_signal is not None and after_signal in signal_set.signals:
+                    last_after_signal_date = date.fromisoformat(day)
+            if after_signal is not None:
+                if last_after_signal_date is None:
+                    after_signal_anchors_missing_total += 1
+                else:
+                    after_signal_anchors_found_total += 1
+                    if (
+                        global_after_signal_anchor_date is None
+                        or last_after_signal_date > global_after_signal_anchor_date
+                    ):
+                        global_after_signal_anchor_date = last_after_signal_date
+            for day, signal_set in day_signals:
+                dates_processed_total += 1
+                day_date = date.fromisoformat(day)
                 signal_keys = sorted(signal_set.signals.keys(), key=lambda k: k.name)
                 data_insufficient = SignalKey.DATA_INSUFFICIENT in signal_set.signals
                 if data_insufficient:
                     data_insufficient_days_total += 1
-                if focus_signal is not None and focus_signal in signal_set.signals:
-                    focus_match_days_total += 1
                 if SignalKey.TREND_STARTED in signal_set.signals:
                     trend_started_days_total += 1
                     if SignalKey.INVALIDATED in signal_set.signals:
                         trend_started_overridden_by_invalidated_days_total += 1
                     else:
                         trend_started_clean_days_total += 1
-                if after_signal is not None and after_signal in signal_set.signals:
-                    last_after_signal_day = day
+                if after_signal is not None:
+                    if not _is_eligible_after_anchor(day_date, last_after_signal_date, window_days):
+                        continue
+                if focus_signal is not None and focus_signal in signal_set.signals:
+                    focus_match_days_total += 1
 
                 prev_state = None
                 next_state = None
@@ -366,16 +421,6 @@ def main() -> None:
                 if not event:
                     continue
 
-                if after_signal is not None:
-                    if last_after_signal_day is None:
-                        continue
-                    if day <= last_after_signal_day:
-                        continue
-                    if window_days is not None:
-                        delta_days = (date.fromisoformat(day) - date.fromisoformat(last_after_signal_day)).days
-                        if delta_days <= 0 or delta_days > window_days:
-                            continue
-
                 if require_signals:
                     missing_required = [sig for sig in require_signals if sig not in signal_set.signals]
                     if missing_required:
@@ -406,6 +451,14 @@ def main() -> None:
                     require_signal_days_total += 1
                 if exclude_signals:
                     exclude_signal_days_total += 1
+            if len(tickers) == 1:
+                after_signal_anchor_date = (
+                    last_after_signal_date.isoformat() if last_after_signal_date else None
+                )
+        if len(tickers) != 1:
+            after_signal_anchor_date = (
+                global_after_signal_anchor_date.isoformat() if global_after_signal_anchor_date else None
+            )
         if args.summary:
             _print_summary(
                 tickers_resolved=tickers_resolved,
@@ -422,6 +475,11 @@ def main() -> None:
                 require_signal_miss_days_total=require_signal_miss_days_total,
                 exclude_signal_days_total=exclude_signal_days_total,
                 exclude_signal_miss_days_total=exclude_signal_miss_days_total,
+                after_signal=after_signal_value,
+                after_signal_anchor_date=after_signal_anchor_date,
+                window_days=window_days_value,
+                after_signal_anchors_found_total=after_signal_anchors_found_total,
+                after_signal_anchors_missing_total=after_signal_anchors_missing_total,
             )
     finally:
         md_conn.close()

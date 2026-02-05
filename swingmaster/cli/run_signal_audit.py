@@ -9,6 +9,7 @@ from swingmaster.app_api.factories import build_swingmaster_app
 from swingmaster.core.domain.enums import ReasonCode, State
 from swingmaster.core.engine.evaluator import evaluate_step
 from swingmaster.core.signals.enums import SignalKey
+from swingmaster.infra.market_data.osakedata_reader import OsakeDataReader
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
 from swingmaster.infra.sqlite.repos.ticker_universe_reader import TickerUniverseReader
 
@@ -29,6 +30,16 @@ def parse_args() -> argparse.Namespace:
         choices=[key.name for key in SignalKey],
         help="Print only days where this signal is emitted (DATA_INSUFFICIENT always prints)",
     )
+    parser.add_argument(
+        "--streaks",
+        action="store_true",
+        help="Compute focus-signal streak/run statistics per ticker",
+    )
+    parser.add_argument(
+        "--first-hit-only",
+        action="store_true",
+        help="Treat focus-signal as edge view: only first day of each run counts/prints",
+    )
     parser.add_argument("--with-policy", action="store_true", help="Include policy evaluation")
     parser.add_argument("--debug", action="store_true", help="Enable provider-level debug output")
     parser.add_argument(
@@ -36,6 +47,11 @@ def parse_args() -> argparse.Namespace:
         dest="debug_dow_markers",
         action="store_true",
         help="Enable compute_dow_markers debug output",
+    )
+    parser.add_argument(
+        "--debug-ohlcv",
+        action="store_true",
+        help="Print OHLCV-derived diagnostics around printed event-days",
     )
     parser.add_argument(
         "--debug-limit",
@@ -65,6 +81,12 @@ def parse_args() -> argparse.Namespace:
         "--after-signal",
         choices=[key.name for key in SignalKey],
         help="Only include event-days after the most recent prior occurrence of this signal",
+    )
+    parser.add_argument(
+        "--anchor-mode",
+        choices=["last", "first"],
+        default="last",
+        help="Anchor selection mode for --after-signal (default: last)",
     )
     parser.add_argument(
         "--window-days",
@@ -206,6 +228,9 @@ def _print_summary(
     window_days: int | None,
     after_signal_anchors_found_total: int,
     after_signal_anchors_missing_total: int,
+    anchor_mode: str,
+    after_signal_anchor_mode_first_count: int,
+    after_signal_anchor_mode_last_count: int,
 ) -> None:
     print("SUMMARY")
     print(f"tickers_resolved={tickers_resolved}")
@@ -223,8 +248,17 @@ def _print_summary(
         print(f"after_signal={after_signal}")
         print(f"after_signal_anchor_date={after_signal_anchor_date}")
         print(f"window_days={window_days}")
+        print(f"anchor_mode={anchor_mode}")
         print(f"after_signal_anchors_found_total={after_signal_anchors_found_total}")
         print(f"after_signal_anchors_missing_total={after_signal_anchors_missing_total}")
+        print(
+            "after_signal_anchor_mode_first_count="
+            f"{after_signal_anchor_mode_first_count}"
+        )
+        print(
+            "after_signal_anchor_mode_last_count="
+            f"{after_signal_anchor_mode_last_count}"
+        )
     if focus_signal == "TREND_STARTED" or trend_started_days_total > 0:
         print(f"trend_started_days_total={trend_started_days_total}")
         print(
@@ -232,6 +266,93 @@ def _print_summary(
             f"{trend_started_overridden_by_invalidated_days_total}"
         )
         print(f"trend_started_clean_days_total={trend_started_clean_days_total}")
+
+
+def _print_streaks_summary(streaks_by_ticker: dict[str, dict[str, object]]) -> None:
+    # Deterministic, compact streak summary for focus-signal presence.
+    items = []
+    for ticker, stats in streaks_by_ticker.items():
+        runs_total = int(stats["runs_total"])
+        if runs_total <= 0:
+            continue
+        items.append((ticker, stats))
+
+    items.sort(
+        key=lambda x: (
+            -int(x[1]["max_run_len"]),
+            -int(x[1]["runs_total"]),
+            x[0],
+        )
+    )
+
+    streaks_tickers_with_runs = len(items)
+    streaks_runs_total = sum(int(stats["runs_total"]) for _t, stats in items)
+    streaks_max_run_len_overall = max((int(stats["max_run_len"]) for _t, stats in items), default=0)
+
+    print("STREAKS SUMMARY")
+    for ticker, stats in items:
+        print(
+            f"STREAKS ticker={ticker} "
+            f"runs_total={stats['runs_total']} "
+            f"max_run_len={stats['max_run_len']} "
+            f"avg_run_len={stats['avg_run_len']}"
+        )
+    print(
+        "STREAKS_AGG "
+        f"streaks_tickers_with_runs={streaks_tickers_with_runs} "
+        f"streaks_runs_total={streaks_runs_total} "
+        f"streaks_max_run_len_overall={streaks_max_run_len_overall}"
+    )
+
+
+def _sma_series(values: list[float], window: int) -> list[float]:
+    if window <= 0 or len(values) < window:
+        return []
+    out: list[float] = []
+    for i in range(len(values) - window + 1):
+        out.append(sum(values[i : i + window]) / float(window))
+    return out
+
+
+def _is_new_low(values: list[float], idx: int, lookback: int) -> bool:
+    if idx + lookback >= len(values):
+        return False
+    prior = values[idx + 1 : idx + 1 + lookback]
+    if not prior:
+        return False
+    return values[idx] < min(prior)
+
+
+def _load_debug_ohlcv_window(md_conn, ticker: str, as_of_date: str, n: int) -> list[tuple]:
+    # Keep this local and simple for determinism and testability (can be monkeypatched).
+    return OsakeDataReader(md_conn, "osakedata").get_last_n_ohlc(ticker, as_of_date, n)
+
+
+def _print_debug_ohlcv(md_conn, ticker: str, as_of_date: str, window: int = 20) -> None:
+    # Uses the same DESC-ordered close series convention as SignalContextV2.
+    sma_len = 20
+    new_low_lookback = 10
+    required = window + sma_len - 1
+    ohlc = _load_debug_ohlcv_window(md_conn, ticker, as_of_date, required)
+    if not ohlc:
+        print(f"DEBUG_OHLCV (window={window})")
+        return
+
+    dates = [row[0] for row in ohlc]
+    closes = [row[4] for row in ohlc]
+    sma20 = _sma_series(closes, sma_len)
+
+    print(f"DEBUG_OHLCV (window={window})")
+    rows = min(window, len(closes))
+    for i in range(rows):
+        close = closes[i]
+        sma_val = sma20[i] if i < len(sma20) else None
+        below_sma = "Y" if (sma_val is not None and close < sma_val) else "N"
+        new_low = "Y" if _is_new_low(closes, i, new_low_lookback) else "N"
+        print(
+            "DEBUG_OHLCV_ROW "
+            f"date={dates[i]} close={close} sma20={sma_val} below_sma={below_sma} new_low={new_low}"
+        )
 
 
 def main() -> None:
@@ -258,6 +379,7 @@ def main() -> None:
     window_days_value = args.window_days if args.window_days and args.window_days > 0 else None
     after_signal_anchors_found_total = 0
     after_signal_anchors_missing_total = 0
+    streaks_by_ticker: dict[str, dict[str, object]] = {}
 
     md_conn = get_readonly_connection(MD_DB_DEFAULT)
     rc_conn = get_readonly_connection(RC_DB_DEFAULT)
@@ -286,6 +408,9 @@ def main() -> None:
                     window_days=window_days_value,
                     after_signal_anchors_found_total=after_signal_anchors_found_total,
                     after_signal_anchors_missing_total=after_signal_anchors_missing_total,
+                    anchor_mode=args.anchor_mode,
+                    after_signal_anchor_mode_first_count=0,
+                    after_signal_anchor_mode_last_count=0,
                 )
             return
 
@@ -321,6 +446,9 @@ def main() -> None:
                     window_days=window_days_value,
                     after_signal_anchors_found_total=after_signal_anchors_found_total,
                     after_signal_anchors_missing_total=after_signal_anchors_missing_total,
+                    anchor_mode=args.anchor_mode,
+                    after_signal_anchor_mode_first_count=0,
+                    after_signal_anchor_mode_last_count=0,
                 )
             return
 
@@ -337,8 +465,9 @@ def main() -> None:
         policy = app._policy
         prev_state_provider = app._prev_state_provider
 
+        allow_day_print = (not args.streaks) or args.print_focus_only
         debug_limit = args.debug_limit if args.debug_limit > 0 else None
-        global_after_signal_anchor_date = None
+        global_after_signal_anchor_date: date | None = None
 
         def _is_eligible_after_anchor(
             day_date: date, anchor_date: date | None, window_days: int | None
@@ -355,22 +484,53 @@ def main() -> None:
             printed = 0
             tickers_processed += 1
             day_signals = []
+            first_after_signal_date = None
             last_after_signal_date = None
+            anchor_date = None
+            prev_focus_present = False
             for day in trading_days:
                 signal_set = signal_provider.get_signals(ticker, day)
                 day_signals.append((day, signal_set))
                 if after_signal is not None and after_signal in signal_set.signals:
+                    if first_after_signal_date is None:
+                        first_after_signal_date = date.fromisoformat(day)
                     last_after_signal_date = date.fromisoformat(day)
             if after_signal is not None:
-                if last_after_signal_date is None:
+                if args.anchor_mode == "first":
+                    anchor_date = first_after_signal_date
+                else:
+                    anchor_date = last_after_signal_date
+            if after_signal is not None:
+                if anchor_date is None:
                     after_signal_anchors_missing_total += 1
                 else:
                     after_signal_anchors_found_total += 1
                     if (
                         global_after_signal_anchor_date is None
-                        or last_after_signal_date > global_after_signal_anchor_date
+                        or anchor_date > global_after_signal_anchor_date
                     ):
-                        global_after_signal_anchor_date = last_after_signal_date
+                        global_after_signal_anchor_date = anchor_date
+
+            if args.streaks and focus_signal is not None:
+                runs: list[int] = []
+                run_len = 0
+                for _day, ss in day_signals:
+                    if focus_signal in ss.signals:
+                        run_len += 1
+                    else:
+                        if run_len:
+                            runs.append(run_len)
+                            run_len = 0
+                if run_len:
+                    runs.append(run_len)
+                runs_total = len(runs)
+                max_run_len = max(runs) if runs else 0
+                avg_run_len = (sum(runs) / float(runs_total)) if runs_total else 0.0
+                streaks_by_ticker[ticker] = {
+                    "runs_total": runs_total,
+                    "max_run_len": max_run_len,
+                    "avg_run_len": f"{avg_run_len:.2f}",
+                }
             for day, signal_set in day_signals:
                 dates_processed_total += 1
                 day_date = date.fromisoformat(day)
@@ -384,10 +544,16 @@ def main() -> None:
                         trend_started_overridden_by_invalidated_days_total += 1
                     else:
                         trend_started_clean_days_total += 1
+
+                focus_present = focus_signal is not None and focus_signal in signal_set.signals
+                focus_match = focus_present and (not args.first_hit_only or not prev_focus_present)
+                prev_focus_present = focus_present
+
                 if after_signal is not None:
-                    if not _is_eligible_after_anchor(day_date, last_after_signal_date, window_days):
+                    if not _is_eligible_after_anchor(day_date, anchor_date, window_days):
                         continue
-                if focus_signal is not None and focus_signal in signal_set.signals:
+
+                if focus_match:
                     focus_match_days_total += 1
 
                 prev_state = None
@@ -410,10 +576,10 @@ def main() -> None:
                         reasons = evaluation.reasons
                         policy_event = _is_policy_event(next_state, reasons)
                     if args.print_focus_only:
-                        event = focus_signal is not None and focus_signal in signal_set.signals
+                        event = focus_match
                     else:
                         event = False
-                        if focus_signal is not None and focus_signal in signal_set.signals:
+                        if focus_match:
                             event = True
                         if args.with_policy and policy_event:
                             event = True
@@ -435,31 +601,40 @@ def main() -> None:
                 if debug_limit is not None and printed >= debug_limit:
                     continue
 
-                _print_event_block(
-                    ticker=ticker,
-                    day=day,
-                    signal_keys=signal_keys,
-                    data_insufficient=data_insufficient,
-                    with_policy=args.with_policy,
-                    prev_state=prev_state,
-                    next_state=next_state,
-                    reasons=reasons,
-                )
-                printed += 1
-                event_days_printed_total += 1
-                if require_signals:
-                    require_signal_days_total += 1
-                if exclude_signals:
-                    exclude_signal_days_total += 1
+                if allow_day_print:
+                    _print_event_block(
+                        ticker=ticker,
+                        day=day,
+                        signal_keys=signal_keys,
+                        data_insufficient=data_insufficient,
+                        with_policy=args.with_policy,
+                        prev_state=prev_state,
+                        next_state=next_state,
+                        reasons=reasons,
+                    )
+                    if args.debug_ohlcv:
+                        _print_debug_ohlcv(md_conn, ticker, day, window=20)
+                    printed += 1
+                    event_days_printed_total += 1
+                    if require_signals:
+                        require_signal_days_total += 1
+                    if exclude_signals:
+                        exclude_signal_days_total += 1
             if len(tickers) == 1:
-                after_signal_anchor_date = (
-                    last_after_signal_date.isoformat() if last_after_signal_date else None
-                )
+                after_signal_anchor_date = anchor_date.isoformat() if anchor_date else None
         if len(tickers) != 1:
             after_signal_anchor_date = (
                 global_after_signal_anchor_date.isoformat() if global_after_signal_anchor_date else None
             )
         if args.summary:
+            if args.anchor_mode == "first":
+                anchor_mode_first_count = after_signal_anchors_found_total
+                anchor_mode_last_count = 0
+            else:
+                anchor_mode_first_count = 0
+                anchor_mode_last_count = after_signal_anchors_found_total
+            if args.streaks:
+                _print_streaks_summary(streaks_by_ticker)
             _print_summary(
                 tickers_resolved=tickers_resolved,
                 tickers_processed=tickers_processed,
@@ -480,7 +655,12 @@ def main() -> None:
                 window_days=window_days_value,
                 after_signal_anchors_found_total=after_signal_anchors_found_total,
                 after_signal_anchors_missing_total=after_signal_anchors_missing_total,
+                anchor_mode=args.anchor_mode,
+                after_signal_anchor_mode_first_count=anchor_mode_first_count,
+                after_signal_anchor_mode_last_count=anchor_mode_last_count,
             )
+        elif args.streaks:
+            _print_streaks_summary(streaks_by_ticker)
     finally:
         md_conn.close()
         rc_conn.close()

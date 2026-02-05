@@ -16,8 +16,6 @@ def apply_hard_exclusions(signals: SignalSet) -> Optional[Proposal]:
         return Proposal(next_state=State.NO_TRADE, reasons=[ReasonCode.DATA_INSUFFICIENT])
     if signals.has(SignalKey.INVALIDATED):
         return Proposal(next_state=State.NO_TRADE, reasons=[ReasonCode.INVALIDATED])
-    if signals.has(SignalKey.EDGE_GONE):
-        return Proposal(next_state=State.NO_TRADE, reasons=[ReasonCode.EDGE_GONE])
     return None
 
 

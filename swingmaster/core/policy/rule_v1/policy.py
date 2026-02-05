@@ -78,6 +78,16 @@ class RuleBasedTransitionPolicyV1Impl:
         ticker: Optional[str] = None,
         as_of_date: Optional[str] = None,
     ) -> Decision:
+        edge_decision = _edge_gone_decision(
+            prev_state,
+            prev_attrs,
+            signals,
+            history_port=self._history_port,
+            ticker=ticker,
+            as_of_date=as_of_date,
+        )
+        if edge_decision is not None:
+            return edge_decision
         if _should_reset_to_neutral(
             prev_state,
             prev_attrs,
@@ -118,6 +128,9 @@ class RuleBasedTransitionPolicyV1Impl:
 RESET_NO_SIGNAL_DAYS = 15
 CHURN_GUARD_THRESHOLD = 3
 CHURN_GUARD_WINDOW_DAYS = 10
+EDGE_GONE_ENTRY_WINDOW_MAX_AGE = 12
+EDGE_GONE_STABILIZING_MAX_AGE = 20
+EDGE_GONE_RECENT_SETUP_LOOKBACK = 10
 PROGRESS_SIGNALS = {
     SignalKey.TREND_STARTED,
     SignalKey.TREND_MATURED,
@@ -285,4 +298,86 @@ def _should_reset_to_neutral(
     if churn_guard_hits >= CHURN_GUARD_THRESHOLD:
         return True
 
+    return False
+
+
+def _edge_gone_decision(
+    prev_state: State,
+    prev_attrs: StateAttrs,
+    signals: SignalSet,
+    history_port: Optional[StateHistoryPort] = None,
+    ticker: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+) -> Optional[Decision]:
+    if signals.has(SignalKey.DATA_INSUFFICIENT):
+        return None
+    if signals.has(SignalKey.INVALIDATED):
+        return None
+    if prev_state not in {State.ENTRY_WINDOW, State.STABILIZING}:
+        return None
+
+    history = None
+    if history_port is not None and ticker and as_of_date:
+        history = history_port.get_recent_days(
+            ticker,
+            as_of_date,
+            limit=max(
+                EDGE_GONE_ENTRY_WINDOW_MAX_AGE,
+                EDGE_GONE_STABILIZING_MAX_AGE,
+                EDGE_GONE_RECENT_SETUP_LOOKBACK,
+            ),
+        )
+
+    consecutive = _consecutive_state_days(history, prev_state, prev_attrs)
+
+    if prev_state == State.ENTRY_WINDOW:
+        if consecutive >= EDGE_GONE_ENTRY_WINDOW_MAX_AGE:
+            return Decision(
+                next_state=State.PASS,
+                reason_codes=[ReasonCode.EDGE_GONE],
+                attrs_update=StateAttrs(confidence=None, age=0, status=None),
+            )
+        return None
+
+    if prev_state == State.STABILIZING:
+        if consecutive >= EDGE_GONE_STABILIZING_MAX_AGE:
+            if history is not None and _has_recent_setup_activity(history):
+                return None
+            return Decision(
+                next_state=State.NO_TRADE,
+                reason_codes=[ReasonCode.EDGE_GONE],
+                attrs_update=StateAttrs(confidence=None, age=0, status=None),
+            )
+    return None
+
+
+def _consecutive_state_days(
+    history: Optional[list[StateHistoryDay]],
+    state: State,
+    prev_attrs: StateAttrs,
+) -> int:
+    if not history:
+        return prev_attrs.age + 1
+    if history[0].state != state:
+        return prev_attrs.age + 1
+    count = 0
+    for day in history:
+        if day.state != state:
+            break
+        count += 1
+    return count
+
+
+def _has_recent_setup_activity(history: list[StateHistoryDay]) -> bool:
+    window = history[:EDGE_GONE_RECENT_SETUP_LOOKBACK]
+    if not window:
+        return False
+    if any(day.signal_keys is not None for day in window):
+        for day in window:
+            if day.signal_keys and SignalKey.ENTRY_SETUP_VALID in day.signal_keys:
+                return True
+        return False
+    for day in window:
+        if day.state == State.ENTRY_WINDOW:
+            return True
     return False

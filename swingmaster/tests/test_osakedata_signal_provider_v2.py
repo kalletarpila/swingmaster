@@ -195,6 +195,32 @@ def test_data_insufficient_v2():
     conn.close()
 
 
+def test_data_insufficient_debug_disabled_no_output(capsys):
+    conn = setup_db()
+    rows = make_rows("AAA", date(2026, 1, 1), 5, close=100.0)
+    insert_rows(conn, rows)
+    provider = OsakeDataSignalProviderV2(conn, table_name="osakedata")
+    provider.get_signals("AAA", rows[-1][1])
+    out = capsys.readouterr().out
+    assert out == ""
+    conn.close()
+
+
+def test_data_insufficient_debug_enabled_outputs_line(capsys):
+    conn = setup_db()
+    rows = make_rows("AAA", date(2026, 1, 1), 5, close=100.0)
+    insert_rows(conn, rows)
+    provider = OsakeDataSignalProviderV2(conn, table_name="osakedata", debug=True)
+    required = provider._required_rows()
+    provider.get_signals("AAA", rows[-1][1])
+    out = capsys.readouterr().out
+    assert "[debug][DATA_INSUFFICIENT]" in out
+    assert "ticker=AAA" in out
+    assert f"required_rows={required}" in out
+    assert "available_rows=5" in out
+    conn.close()
+
+
 def test_require_row_on_date_blocks_signals_when_missing_day():
     conn = setup_db()
     provider = OsakeDataSignalProviderV2(conn, table_name="osakedata")

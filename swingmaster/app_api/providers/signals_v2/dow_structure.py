@@ -32,7 +32,7 @@ def compute_dow_markers(
     window: int = 5,
     use_high_low: bool = False,
     sensitive_down_reset: bool = False,
-    debug: bool = True,
+    debug: bool = False,
 ) -> Tuple[List[Dict], str]:
     """
     Laske pivotit (HH/HL/LH/LL) ja trendiyhteenveto.
@@ -450,6 +450,7 @@ def compute_dow_signal_facts(
     window: int = 3,
     use_high_low: bool = True,
     sensitive_down_reset: bool = False,
+    debug: bool = False,
 ) -> Dict[SignalKey, bool]:
     series = build_dow_series_from_ohlc(ohlc_desc)
     markers, _summary = compute_dow_markers(
@@ -457,6 +458,7 @@ def compute_dow_signal_facts(
         window=window,
         use_high_low=use_high_low,
         sensitive_down_reset=sensitive_down_reset,
+        debug=debug,
     )
     markers = [m for m in markers if m.get("date") and m["date"] <= as_of_date]
     if not markers:

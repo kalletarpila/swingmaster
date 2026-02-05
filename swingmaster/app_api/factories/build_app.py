@@ -22,7 +22,6 @@ def build_swingmaster_app(
     Composition root: build and wire all runtime components (policy, providers, ports)
     and return the application facade.
     """
-    _ = debug
     md_conn = kwargs.pop("md_conn", conn)
     policy_id = kwargs.pop("policy_id", "rule_v1" if policy_version == "v1" else "rule_v2")
     engine_version = kwargs.pop("engine_version", "dev")
@@ -45,6 +44,7 @@ def build_swingmaster_app(
             conn=md_conn,
             table_name=table_name,
             require_row_on_date=require_row_on_date,
+            debug=debug,
             **kwargs,
         )
 

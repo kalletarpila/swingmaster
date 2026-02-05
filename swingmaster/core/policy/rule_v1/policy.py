@@ -87,7 +87,7 @@ class RuleBasedTransitionPolicyV1Impl:
             as_of_date=as_of_date,
         )
         if edge_decision is not None:
-            return edge_decision
+            return _with_trend_started_reason(edge_decision, signals)
         churn_decision = _churn_guard_decision(
             prev_state,
             prev_attrs,
@@ -97,7 +97,7 @@ class RuleBasedTransitionPolicyV1Impl:
             as_of_date=as_of_date,
         )
         if churn_decision is not None:
-            return churn_decision
+            return _with_trend_started_reason(churn_decision, signals)
         entry_decision = _entry_conditions_decision(
             prev_state,
             prev_attrs,
@@ -107,7 +107,7 @@ class RuleBasedTransitionPolicyV1Impl:
             as_of_date=as_of_date,
         )
         if entry_decision is not None:
-            return entry_decision
+            return _with_trend_started_reason(entry_decision, signals)
         if _should_reset_to_neutral(
             prev_state,
             prev_attrs,
@@ -116,11 +116,12 @@ class RuleBasedTransitionPolicyV1Impl:
             ticker=ticker,
             as_of_date=as_of_date,
         ):
-            return Decision(
+            decision = Decision(
                 next_state=State.NO_TRADE,
                 reason_codes=[ReasonCode.RESET_TO_NEUTRAL],
                 attrs_update=StateAttrs(confidence=None, age=0, status=None),
             )
+            return _with_trend_started_reason(decision, signals)
         proposal = apply_ruleset(prev_state, signals, self._ruleset)
 
         if proposal.next_state != prev_state:
@@ -138,11 +139,30 @@ class RuleBasedTransitionPolicyV1Impl:
                 status=prev_attrs.status,
             )
 
-        return Decision(
+        decision = Decision(
             next_state=proposal.next_state,
             reason_codes=proposal.reasons,
             attrs_update=attrs_update,
         )
+        return _with_trend_started_reason(decision, signals)
+
+
+def _with_trend_started_reason(decision: Decision, signals: SignalSet) -> Decision:
+    if signals.has(SignalKey.DATA_INSUFFICIENT):
+        return decision
+    if signals.has(SignalKey.INVALIDATED):
+        return decision
+    if ReasonCode.INVALIDATED in decision.reason_codes:
+        return decision
+    if not signals.has(SignalKey.TREND_STARTED):
+        return decision
+    if ReasonCode.TREND_STARTED in decision.reason_codes:
+        return decision
+    return Decision(
+        next_state=decision.next_state,
+        reason_codes=[*decision.reason_codes, ReasonCode.TREND_STARTED],
+        attrs_update=decision.attrs_update,
+    )
 
 
 RESET_NO_SIGNAL_DAYS = 15

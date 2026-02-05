@@ -273,6 +273,7 @@ def main() -> None:
             require_row_on_date=args.require_row_on_date,
             policy_id=args.policy_id,
             engine_version="dev",
+            debug=args.debug,
         )
         signal_provider = app._signal_provider
 

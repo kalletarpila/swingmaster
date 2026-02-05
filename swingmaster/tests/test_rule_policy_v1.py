@@ -510,6 +510,17 @@ def test_stabilization_confirmed_disables_churn_guard():
     assert ReasonCode.CHURN_GUARD not in decision.reason_codes
 
 
+def test_trend_started_reason_added_when_stabilizing_no_transition():
+    policy = RuleBasedTransitionPolicyV1Impl()
+    prev_state = State.STABILIZING
+    prev_attrs = mk_attrs(age=2)
+    signals = mk_signalset([SignalKey.TREND_STARTED])
+    decision = policy.decide(prev_state, prev_attrs, signals)
+    assert decision.next_state == State.STABILIZING
+    assert ReasonCode.TREND_STARTED in decision.reason_codes
+    assert ReasonCode.INVALIDATED not in decision.reason_codes
+
+
 def test_invalidated_overrides_churn_guard():
     days = [
         StateHistoryDay(

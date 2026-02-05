@@ -42,6 +42,8 @@ class OsakeDataSignalProviderV2(SignalProvider):
         dow_window: int = 3,
         dow_use_high_low: bool = True,
         dow_sensitive_down_reset: bool = False,
+        debug: bool = False,
+        debug_dow_markers: bool = False,
     ) -> None:
         for name, value, min_val in [
             ("sma_window", sma_window, 2),
@@ -57,6 +59,9 @@ class OsakeDataSignalProviderV2(SignalProvider):
                 raise ValueError(f"Invalid parameters: {name} must be >= {min_val}")
         if not isinstance(require_row_on_date, bool):
             raise ValueError("require_row_on_date must be a bool")
+        if not isinstance(debug_dow_markers, bool):
+            raise ValueError("debug_dow_markers must be a bool")
+        self._table_name = table_name
         self._reader = OsakeDataReader(conn, table_name)
         self._sma_window = sma_window
         self._momentum_lookback = momentum_lookback
@@ -71,14 +76,18 @@ class OsakeDataSignalProviderV2(SignalProvider):
         self._dow_window = dow_window
         self._dow_use_high_low = dow_use_high_low
         self._dow_sensitive_down_reset = dow_sensitive_down_reset
+        self._debug = debug
+        self._debug_dow_markers = debug_dow_markers
 
     def get_signals(self, ticker: str, date: str) -> SignalSet:
         required = self._required_rows()
         ohlc = self._reader.get_last_n_ohlc(ticker, date, required)
         if len(ohlc) < required:
+            self._debug_insufficient(ticker, date, required, ohlc)
             return self._insufficient()
         if self._require_row_on_date:
             if ohlc[0][0] != date:
+                self._debug_insufficient(ticker, date, required, ohlc)
                 return self._insufficient()
 
         closes = [row[4] for row in ohlc]
@@ -129,6 +138,7 @@ class OsakeDataSignalProviderV2(SignalProvider):
             window=self._dow_window,
             use_high_low=self._dow_use_high_low,
             sensitive_down_reset=self._dow_sensitive_down_reset,
+            debug=self._debug_dow_markers,
         )
         if (
             SignalKey.DOW_TREND_CHANGE_UP_TO_NEUTRAL in dow_facts
@@ -166,6 +176,17 @@ class OsakeDataSignalProviderV2(SignalProvider):
 
     def _signal(self, key: SignalKey) -> Signal:
         return Signal(key=key, value=True, confidence=None, source="osakedata_v2")
+
+    def _debug_insufficient(self, ticker: str, date: str, required: int, ohlc: List[tuple]) -> None:
+        if not self._debug:
+            return
+        latest_row_date = ohlc[0][0] if ohlc else None
+        print(
+            "[debug][DATA_INSUFFICIENT] "
+            f"ticker={ticker} date={date} required_rows={required} available_rows={len(ohlc)} "
+            f"require_row_on_date={self._require_row_on_date} latest_row_date={latest_row_date} "
+            f"table={self._table_name}"
+        )
 
     def _required_rows(self) -> int:
         return max(

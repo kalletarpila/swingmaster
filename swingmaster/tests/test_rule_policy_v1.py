@@ -10,6 +10,8 @@ from swingmaster.core.policy.rule_v1.policy import (
     CHURN_GUARD_WINDOW_DAYS,
     CHURN_COOLDOWN_DAYS,
     CHURN_REPEAT_WINDOW_DAYS,
+    SETUP_FRESH_DAYS,
+    STAB_RECENCY_DAYS,
     EDGE_GONE_ENTRY_WINDOW_MAX_AGE,
     EDGE_GONE_RECENT_SETUP_LOOKBACK,
     EDGE_GONE_STABILIZING_MAX_AGE,
@@ -103,10 +105,7 @@ def test_stabilizing_to_entry_window_requires_both_signals():
     )
     decision = policy.decide(prev_state, prev_attrs, signals)
     assert decision.next_state == State.ENTRY_WINDOW
-    assert set(decision.reason_codes) == {
-        ReasonCode.STABILIZATION_CONFIRMED,
-        ReasonCode.ENTRY_CONDITIONS_MET,
-    }
+    assert decision.reason_codes == [ReasonCode.ENTRY_CONDITIONS_MET]
 
 
 def test_entry_window_to_pass_when_setup_invalid():
@@ -595,6 +594,124 @@ def test_churn_guard_repeat_setup_without_stabilization():
     signals = mk_signalset([SignalKey.ENTRY_SETUP_VALID])
     decision = policy.decide(prev_state, prev_attrs, signals, ticker="AAA", as_of_date="2026-01-15")
     assert ReasonCode.CHURN_GUARD in decision.reason_codes
+
+
+def test_entry_conditions_met_happy_path():
+    days = [
+        StateHistoryDay(
+            date="2026-01-15",
+            state=State.STABILIZING,
+            reason_codes=[ReasonCode.STABILIZATION_CONFIRMED],
+            signal_keys=[SignalKey.STABILIZATION_CONFIRMED],
+        )
+    ]
+    for i in range(1, max(STAB_RECENCY_DAYS, SETUP_FRESH_DAYS)):
+        days.append(
+            StateHistoryDay(
+                date=f"2026-01-{15 - i:02d}",
+                state=State.STABILIZING,
+                reason_codes=[ReasonCode.NO_SIGNAL],
+                signal_keys=[SignalKey.ENTRY_SETUP_VALID] if i == 1 else [SignalKey.NO_SIGNAL],
+            )
+        )
+    history = FakeHistoryPort(days)
+    policy = RuleBasedTransitionPolicyV1Impl(history_port=history)
+    prev_state = State.STABILIZING
+    prev_attrs = mk_attrs(age=0)
+    signals = mk_signalset([SignalKey.ENTRY_SETUP_VALID])
+    decision = policy.decide(prev_state, prev_attrs, signals, ticker="AAA", as_of_date="2026-01-15")
+    assert decision.next_state == State.ENTRY_WINDOW
+    assert decision.reason_codes == [ReasonCode.ENTRY_CONDITIONS_MET]
+
+
+def test_entry_conditions_blocked_by_churn_guard():
+    days = [
+        StateHistoryDay(
+            date="2026-01-15",
+            state=State.PASS,
+            reason_codes=[ReasonCode.NO_SIGNAL],
+            signal_keys=[SignalKey.NO_SIGNAL],
+        ),
+        StateHistoryDay(
+            date="2026-01-14",
+            state=State.ENTRY_WINDOW,
+            reason_codes=[ReasonCode.ENTRY_CONDITIONS_MET],
+            signal_keys=[SignalKey.ENTRY_SETUP_VALID],
+        ),
+        StateHistoryDay(
+            date="2026-01-13",
+            state=State.STABILIZING,
+            reason_codes=[ReasonCode.STABILIZATION_CONFIRMED],
+            signal_keys=[SignalKey.STABILIZATION_CONFIRMED],
+        ),
+    ]
+    history = FakeHistoryPort(days)
+    policy = RuleBasedTransitionPolicyV1Impl(history_port=history)
+    prev_state = State.STABILIZING
+    prev_attrs = mk_attrs(age=0)
+    signals = mk_signalset([SignalKey.ENTRY_SETUP_VALID])
+    decision = policy.decide(prev_state, prev_attrs, signals, ticker="AAA", as_of_date="2026-01-15")
+    assert ReasonCode.CHURN_GUARD in decision.reason_codes
+    assert ReasonCode.ENTRY_CONDITIONS_MET not in decision.reason_codes
+
+
+def test_entry_conditions_blocked_by_edge_gone():
+    days = [
+        StateHistoryDay(
+            date=f"2026-01-{i:02d}",
+            state=State.STABILIZING,
+            reason_codes=[ReasonCode.STABILIZATION_CONFIRMED],
+            signal_keys=[SignalKey.STABILIZATION_CONFIRMED],
+        )
+        for i in range(EDGE_GONE_STABILIZING_MAX_AGE, 0, -1)
+    ]
+    history = FakeHistoryPort(days)
+    policy = RuleBasedTransitionPolicyV1Impl(history_port=history)
+    prev_state = State.STABILIZING
+    prev_attrs = mk_attrs(age=0)
+    signals = mk_signalset([SignalKey.ENTRY_SETUP_VALID, SignalKey.STABILIZATION_CONFIRMED])
+    decision = policy.decide(prev_state, prev_attrs, signals, ticker="AAA", as_of_date="2026-01-20")
+    assert ReasonCode.EDGE_GONE in decision.reason_codes
+    assert ReasonCode.ENTRY_CONDITIONS_MET not in decision.reason_codes
+
+
+def test_entry_conditions_blocked_by_invalidated():
+    policy = RuleBasedTransitionPolicyV1Impl()
+    prev_state = State.STABILIZING
+    prev_attrs = mk_attrs(age=0)
+    signals = mk_signalset([SignalKey.ENTRY_SETUP_VALID, SignalKey.INVALIDATED])
+    decision = policy.decide(prev_state, prev_attrs, signals)
+    assert decision.reason_codes == [ReasonCode.INVALIDATED]
+    assert ReasonCode.ENTRY_CONDITIONS_MET not in decision.reason_codes
+
+
+def test_entry_conditions_blocked_by_data_insufficient():
+    policy = RuleBasedTransitionPolicyV1Impl()
+    prev_state = State.STABILIZING
+    prev_attrs = mk_attrs(age=0)
+    signals = mk_signalset([SignalKey.ENTRY_SETUP_VALID, SignalKey.DATA_INSUFFICIENT])
+    decision = policy.decide(prev_state, prev_attrs, signals)
+    assert decision.reason_codes == [ReasonCode.DATA_INSUFFICIENT]
+    assert ReasonCode.ENTRY_CONDITIONS_MET not in decision.reason_codes
+
+
+def test_entry_conditions_freshness_fails():
+    days = [
+        StateHistoryDay(
+            date=f"2026-01-{i:02d}",
+            state=State.STABILIZING,
+            reason_codes=[ReasonCode.NO_SIGNAL],
+            signal_keys=[SignalKey.NO_SIGNAL],
+        )
+        for i in range(SETUP_FRESH_DAYS + 2, 0, -1)
+    ]
+    history = FakeHistoryPort(days)
+    policy = RuleBasedTransitionPolicyV1Impl(history_port=history)
+    prev_state = State.STABILIZING
+    prev_attrs = mk_attrs(age=0)
+    signals = mk_signalset([SignalKey.ENTRY_SETUP_VALID, SignalKey.STABILIZATION_CONFIRMED])
+    decision = policy.decide(prev_state, prev_attrs, signals, ticker="AAA", as_of_date="2026-01-20")
+    assert ReasonCode.ENTRY_CONDITIONS_MET not in decision.reason_codes
 
 
 def test_history_empty_signalset_day_not_quiet():

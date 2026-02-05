@@ -13,7 +13,7 @@ from .rules_downtrend_late import rule_stabilizing as rule_dl_stabilizing
 from .rules_entry_window import rule_keep_window, rule_pass
 from .rules_no_trade import rule_trend_started
 from .rules_pass import rule_reset
-from .rules_stabilizing import rule_entry_window, rule_stay_with_confirmed
+from .rules_stabilizing import rule_stay_with_confirmed
 from .types import Proposal
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -47,7 +47,7 @@ def build_ruleset_rule_v1() -> RuleSet:
         State.NO_TRADE: [rule_trend_started],
         State.DOWNTREND_EARLY: [rule_trend_matured, rule_de_stabilizing],
         State.DOWNTREND_LATE: [rule_dl_stabilizing],
-        State.STABILIZING: [rule_entry_window, rule_stay_with_confirmed],
+        State.STABILIZING: [rule_stay_with_confirmed],
         State.ENTRY_WINDOW: [rule_keep_window, rule_pass],
         State.PASS: [rule_reset],
     }
@@ -98,6 +98,16 @@ class RuleBasedTransitionPolicyV1Impl:
         )
         if churn_decision is not None:
             return churn_decision
+        entry_decision = _entry_conditions_decision(
+            prev_state,
+            prev_attrs,
+            signals,
+            history_port=self._history_port,
+            ticker=ticker,
+            as_of_date=as_of_date,
+        )
+        if entry_decision is not None:
+            return entry_decision
         if _should_reset_to_neutral(
             prev_state,
             prev_attrs,
@@ -140,6 +150,8 @@ CHURN_GUARD_THRESHOLD = 3
 CHURN_GUARD_WINDOW_DAYS = 10
 CHURN_COOLDOWN_DAYS = 7
 CHURN_REPEAT_WINDOW_DAYS = 10
+STAB_RECENCY_DAYS = 10
+SETUP_FRESH_DAYS = 5
 EDGE_GONE_ENTRY_WINDOW_MAX_AGE = 12
 EDGE_GONE_STABILIZING_MAX_AGE = 20
 EDGE_GONE_RECENT_SETUP_LOOKBACK = 10
@@ -469,3 +481,85 @@ def _repeat_setup_without_stabilization(history: list[StateHistoryDay]) -> bool:
         if day.signal_keys and SignalKey.STABILIZATION_CONFIRMED in day.signal_keys:
             return False
     return True
+
+
+def _entry_conditions_decision(
+    prev_state: State,
+    prev_attrs: StateAttrs,
+    signals: SignalSet,
+    history_port: Optional[StateHistoryPort] = None,
+    ticker: Optional[str] = None,
+    as_of_date: Optional[str] = None,
+) -> Optional[Decision]:
+    if signals.has(SignalKey.DATA_INSUFFICIENT):
+        return None
+    if signals.has(SignalKey.INVALIDATED):
+        return None
+    if signals.has(SignalKey.EDGE_GONE):
+        return None
+    if signals.has(SignalKey.NO_SIGNAL):
+        return None
+    if signals.has(SignalKey.TREND_STARTED):
+        return None
+    if signals.has(SignalKey.TREND_MATURED):
+        return None
+    if prev_state != State.STABILIZING:
+        return None
+    if not signals.has(SignalKey.ENTRY_SETUP_VALID):
+        return None
+
+    history = None
+    if history_port is not None and ticker and as_of_date:
+        history = history_port.get_recent_days(
+            ticker,
+            as_of_date,
+            limit=max(STAB_RECENCY_DAYS, SETUP_FRESH_DAYS),
+        )
+
+    has_signal_keys = _history_has_signal_keys(history)
+    stabilization_recent = False
+    if signals.has(SignalKey.STABILIZATION_CONFIRMED):
+        stabilization_recent = True
+    elif history is not None and has_signal_keys:
+        stabilization_recent = _history_has_signal(history, SignalKey.STABILIZATION_CONFIRMED, STAB_RECENCY_DAYS)
+    else:
+        stabilization_recent = prev_state == State.STABILIZING
+
+    if not stabilization_recent:
+        return None
+
+    setup_fresh = True
+    if history is not None and has_signal_keys:
+        setup_fresh = _history_has_signal(history, SignalKey.ENTRY_SETUP_VALID, SETUP_FRESH_DAYS)
+    elif history is not None and not has_signal_keys:
+        # No signal keys; use ENTRY_WINDOW as a conservative freshness proxy.
+        setup_fresh = _history_has_state(history, State.ENTRY_WINDOW, SETUP_FRESH_DAYS)
+
+    if not setup_fresh:
+        return None
+
+    return Decision(
+        next_state=State.ENTRY_WINDOW,
+        reason_codes=[ReasonCode.ENTRY_CONDITIONS_MET],
+        attrs_update=StateAttrs(confidence=None, age=0, status=None),
+    )
+
+
+def _history_has_signal_keys(history: Optional[list[StateHistoryDay]]) -> bool:
+    if not history:
+        return False
+    return any(day.signal_keys is not None for day in history)
+
+
+def _history_has_signal(history: list[StateHistoryDay], signal: SignalKey, limit: int) -> bool:
+    for day in history[:limit]:
+        if day.signal_keys and signal in day.signal_keys:
+            return True
+    return False
+
+
+def _history_has_state(history: list[StateHistoryDay], state: State, limit: int) -> bool:
+    for day in history[:limit]:
+        if day.state == state:
+            return True
+    return False

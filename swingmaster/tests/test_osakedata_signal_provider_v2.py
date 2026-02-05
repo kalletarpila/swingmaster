@@ -133,10 +133,18 @@ def test_entry_setup_valid_v2():
     required = provider._required_rows()
     base = date(2026, 1, 1)
     rows = make_rows("AAA", base, required, close=100.0)
-    for i in range(1, 6):
-        idx = -i
-        rows[idx] = (rows[idx][0], rows[idx][1], 100.0, 100.0, 99.0, 100.0, 1_000_000, "X")
-    rows[-1] = (rows[-1][0], rows[-1][1], 105.0, 106.0, 104.0, 105.0, 1_000_000, "X")
+    for i in range(required):
+        day = rows[i][1]
+        idx_from_end = (required - 1) - i
+        if idx_from_end < 10:
+            close = 100.0
+            low = 98.5
+            high = 100.5
+        else:
+            close = 100.0
+            low = 98.0
+            high = 102.0
+        rows[i] = (rows[i][0], day, close, high, low, close, 1_000_000, "X")
     insert_rows(conn, rows)
     as_of_date = rows[-1][1]
     signals = get_signals(conn, as_of_date)

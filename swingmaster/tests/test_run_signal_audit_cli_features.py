@@ -202,3 +202,99 @@ def test_anchor_mode_first_vs_last(monkeypatch, capsys, anchor_mode, expected_da
             printed_dates.add(line.split()[-1])
     assert printed_dates == expected_dates
     assert f"after_signal_anchor_date={expected_anchor}" in out
+
+
+def test_debug_show_mismatches_prints_require_miss_lines_only_when_enabled(monkeypatch, capsys):
+    days = ["2026-01-01"]
+    tickers = ["AAA"]
+    focus = SignalKey.ENTRY_SETUP_VALID
+    provider = _FakeSignalProvider({("AAA", days[0]): _ss(focus)})
+
+    _run(
+        monkeypatch,
+        [
+            "--market",
+            "OMXH",
+            "--begin-date",
+            days[0],
+            "--end-date",
+            days[0],
+            "--ticker",
+            "AAA",
+            "--focus-signal",
+            focus.name,
+            "--print-focus-only",
+            "--require-signal",
+            SignalKey.INVALIDATED.name,
+        ],
+        tickers=tickers,
+        days=days,
+        provider=provider,
+    )
+    out = capsys.readouterr().out
+    assert "MISMATCH REQUIRE_MISS" not in out
+
+    _run(
+        monkeypatch,
+        [
+            "--market",
+            "OMXH",
+            "--begin-date",
+            days[0],
+            "--end-date",
+            days[0],
+            "--ticker",
+            "AAA",
+            "--focus-signal",
+            focus.name,
+            "--print-focus-only",
+            "--require-signal",
+            SignalKey.INVALIDATED.name,
+            "--debug-show-mismatches",
+        ],
+        tickers=tickers,
+        days=days,
+        provider=provider,
+    )
+    out = capsys.readouterr().out
+    assert out.splitlines()[0].startswith("MISMATCH REQUIRE_MISS ")
+
+
+def test_debug_show_mismatches_respects_debug_limit(monkeypatch, capsys):
+    days = ["2026-01-01", "2026-01-02"]
+    tickers = ["AAA"]
+    focus = SignalKey.ENTRY_SETUP_VALID
+    provider = _FakeSignalProvider(
+        {
+            ("AAA", days[0]): _ss(focus),
+            ("AAA", days[1]): _ss(focus),
+        }
+    )
+
+    _run(
+        monkeypatch,
+        [
+            "--market",
+            "OMXH",
+            "--begin-date",
+            days[0],
+            "--end-date",
+            days[-1],
+            "--ticker",
+            "AAA",
+            "--focus-signal",
+            focus.name,
+            "--print-focus-only",
+            "--require-signal",
+            SignalKey.INVALIDATED.name,
+            "--debug-show-mismatches",
+            "--debug-limit",
+            "1",
+        ],
+        tickers=tickers,
+        days=days,
+        provider=provider,
+    )
+    out = capsys.readouterr().out
+    mismatch_lines = [ln for ln in out.splitlines() if ln.startswith("MISMATCH REQUIRE_MISS ")]
+    assert len(mismatch_lines) == 1

@@ -24,7 +24,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--market", required=True, help="Market identifier (e.g. US, OMXH, XETRA)")
     parser.add_argument("--begin-date", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD (inclusive)")
-    parser.add_argument("--ticker", required=True, help="Ticker symbol(s) or ALL (comma-separated)")
+    parser.add_argument(
+        "--ticker",
+        required=True,
+        nargs="+",
+        help="Ticker symbol(s) or ALL (comma-separated; spaces around commas allowed)",
+    )
     parser.add_argument(
         "--focus-signal",
         choices=[key.name for key in SignalKey],
@@ -66,6 +71,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--summary", action="store_true", help="Print summary counters at end")
     parser.add_argument(
+        "--debug-show-mismatches",
+        action="store_true",
+        help="Print debug lines for require/exclude-signal miss counters",
+    )
+    parser.add_argument(
         "--require-signal",
         action="append",
         choices=[key.name for key in SignalKey],
@@ -81,6 +91,11 @@ def parse_args() -> argparse.Namespace:
         "--after-signal",
         choices=[key.name for key in SignalKey],
         help="Only include event-days after the most recent prior occurrence of this signal",
+    )
+    parser.add_argument(
+        "--after-signal-anchor-date",
+        default=None,
+        help="Override after-signal anchor date (YYYY-MM-DD)",
     )
     parser.add_argument(
         "--anchor-mode",
@@ -231,6 +246,7 @@ def _print_summary(
     anchor_mode: str,
     after_signal_anchor_mode_first_count: int,
     after_signal_anchor_mode_last_count: int,
+    anchor_source: str,
 ) -> None:
     print("SUMMARY")
     print(f"tickers_resolved={tickers_resolved}")
@@ -247,6 +263,7 @@ def _print_summary(
     if after_signal is not None:
         print(f"after_signal={after_signal}")
         print(f"after_signal_anchor_date={after_signal_anchor_date}")
+        print(f"anchor_source={anchor_source}")
         print(f"window_days={window_days}")
         print(f"anchor_mode={anchor_mode}")
         print(f"after_signal_anchors_found_total={after_signal_anchors_found_total}")
@@ -359,6 +376,12 @@ def main() -> None:
     args = parse_args()
     if args.begin_date > args.end_date:
         raise ValueError("begin-date must be <= end-date")
+    explicit_anchor_date = None
+    if args.after_signal_anchor_date is not None:
+        try:
+            explicit_anchor_date = date.fromisoformat(args.after_signal_anchor_date)
+        except ValueError as exc:
+            raise ValueError("after-signal-anchor-date must be YYYY-MM-DD") from exc
 
     tickers_resolved = 0
     tickers_processed = 0
@@ -384,7 +407,8 @@ def main() -> None:
     md_conn = get_readonly_connection(MD_DB_DEFAULT)
     rc_conn = get_readonly_connection(RC_DB_DEFAULT)
     try:
-        tickers = resolve_tickers(md_conn, args.market, args.ticker, args.max_tickers)
+        ticker_arg = " ".join(args.ticker)
+        tickers = resolve_tickers(md_conn, args.market, ticker_arg, args.max_tickers)
         tickers_resolved = len(tickers)
         if not tickers:
             if args.summary:
@@ -411,6 +435,7 @@ def main() -> None:
                     anchor_mode=args.anchor_mode,
                     after_signal_anchor_mode_first_count=0,
                     after_signal_anchor_mode_last_count=0,
+                    anchor_source="explicit" if explicit_anchor_date else "inferred",
                 )
             return
 
@@ -449,6 +474,7 @@ def main() -> None:
                     anchor_mode=args.anchor_mode,
                     after_signal_anchor_mode_first_count=0,
                     after_signal_anchor_mode_last_count=0,
+                    anchor_source="explicit" if explicit_anchor_date else "inferred",
                 )
             return
 
@@ -482,25 +508,28 @@ def main() -> None:
 
         for ticker in tickers:
             printed = 0
+            mismatches_printed = 0
             tickers_processed += 1
             day_signals = []
             first_after_signal_date = None
             last_after_signal_date = None
             anchor_date = None
             prev_focus_present = False
+            if explicit_anchor_date is not None:
+                anchor_date = explicit_anchor_date
             for day in trading_days:
                 signal_set = signal_provider.get_signals(ticker, day)
                 day_signals.append((day, signal_set))
-                if after_signal is not None and after_signal in signal_set.signals:
+                if explicit_anchor_date is None and after_signal is not None and after_signal in signal_set.signals:
                     if first_after_signal_date is None:
                         first_after_signal_date = date.fromisoformat(day)
                     last_after_signal_date = date.fromisoformat(day)
-            if after_signal is not None:
+            if explicit_anchor_date is None and after_signal is not None:
                 if args.anchor_mode == "first":
                     anchor_date = first_after_signal_date
                 else:
                     anchor_date = last_after_signal_date
-            if after_signal is not None:
+            if explicit_anchor_date is None and after_signal is not None:
                 if anchor_date is None:
                     after_signal_anchors_missing_total += 1
                 else:
@@ -591,11 +620,49 @@ def main() -> None:
                     missing_required = [sig for sig in require_signals if sig not in signal_set.signals]
                     if missing_required:
                         require_signal_miss_days_total += 1
+                        if args.debug_show_mismatches and (
+                            debug_limit is None or mismatches_printed < debug_limit
+                        ):
+                            anchor_str = anchor_date.isoformat() if anchor_date else None
+                            eligible_str = (
+                                "Y"
+                                if (
+                                    after_signal is None
+                                    or _is_eligible_after_anchor(day_date, anchor_date, window_days)
+                                )
+                                else "N"
+                            )
+                            signals_str = ",".join(k.name for k in signal_keys) if signal_keys else "(none)"
+                            print(
+                                "MISMATCH REQUIRE_MISS "
+                                f"ticker={ticker} date={day} signals={signals_str} "
+                                f"anchor={anchor_str} window_days={window_days} eligible={eligible_str}"
+                            )
+                            mismatches_printed += 1
                         continue
                 if exclude_signals:
                     has_excluded = [sig for sig in exclude_signals if sig in signal_set.signals]
                     if has_excluded:
                         exclude_signal_miss_days_total += 1
+                        if args.debug_show_mismatches and (
+                            debug_limit is None or mismatches_printed < debug_limit
+                        ):
+                            anchor_str = anchor_date.isoformat() if anchor_date else None
+                            eligible_str = (
+                                "Y"
+                                if (
+                                    after_signal is None
+                                    or _is_eligible_after_anchor(day_date, anchor_date, window_days)
+                                )
+                                else "N"
+                            )
+                            signals_str = ",".join(k.name for k in signal_keys) if signal_keys else "(none)"
+                            print(
+                                "MISMATCH EXCLUDE_MISS "
+                                f"ticker={ticker} date={day} signals={signals_str} "
+                                f"anchor={anchor_str} window_days={window_days} eligible={eligible_str}"
+                            )
+                            mismatches_printed += 1
                         continue
 
                 if debug_limit is not None and printed >= debug_limit:
@@ -626,6 +693,8 @@ def main() -> None:
             after_signal_anchor_date = (
                 global_after_signal_anchor_date.isoformat() if global_after_signal_anchor_date else None
             )
+        if explicit_anchor_date is not None:
+            after_signal_anchor_date = explicit_anchor_date.isoformat()
         if args.summary:
             if args.anchor_mode == "first":
                 anchor_mode_first_count = after_signal_anchors_found_total
@@ -633,6 +702,7 @@ def main() -> None:
             else:
                 anchor_mode_first_count = 0
                 anchor_mode_last_count = after_signal_anchors_found_total
+            anchor_source = "explicit" if explicit_anchor_date else "inferred"
             if args.streaks:
                 _print_streaks_summary(streaks_by_ticker)
             _print_summary(
@@ -658,6 +728,7 @@ def main() -> None:
                 anchor_mode=args.anchor_mode,
                 after_signal_anchor_mode_first_count=anchor_mode_first_count,
                 after_signal_anchor_mode_last_count=anchor_mode_last_count,
+                anchor_source=anchor_source,
             )
         elif args.streaks:
             _print_streaks_summary(streaks_by_ticker)

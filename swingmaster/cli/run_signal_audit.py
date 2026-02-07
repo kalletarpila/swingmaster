@@ -591,11 +591,16 @@ def main() -> None:
                 or SignalKey.STABILIZATION_CONFIRMED in exclude_signals
             )
             focus_match_eligible_flags = []
+            entry_debug_by_day = {}
             if explicit_anchor_date is not None:
                 anchor_date = explicit_anchor_date
             for day in trading_days:
                 signal_set = signal_provider.get_signals(ticker, day)
                 day_signals.append((day, signal_set))
+                if args.debug and args.focus_signal == "ENTRY_SETUP_VALID":
+                    entry_debug = _entry_dbg.get_entry_setup_valid_debug()
+                    if entry_debug:
+                        entry_debug_by_day[day] = entry_debug
                 if explicit_anchor_date is None and after_signal is not None and after_signal in signal_set.signals:
                     if first_after_signal_date is None:
                         first_after_signal_date = date.fromisoformat(day)
@@ -765,7 +770,7 @@ def main() -> None:
                         and focus_match
                         and SignalKey.ENTRY_SETUP_VALID in signal_set.signals
                     ):
-                        entry_debug = _entry_dbg.get_entry_setup_valid_debug()
+                        entry_debug = entry_debug_by_day.get(day)
                         if entry_debug and entry_debug.startswith("DEBUG_ENTRY_SETUP_VALID "):
                             debug_tail = entry_debug[len("DEBUG_ENTRY_SETUP_VALID ") :]
                             print(f"DEBUG_ENTRY_SETUP_VALID date={day} {debug_tail}")

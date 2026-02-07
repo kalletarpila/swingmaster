@@ -15,26 +15,43 @@ MOMENTUM_DROP_MAX = 0.02
 
 
 def eval_trend_matured(ctx: SignalContextV2, sma_window: int, matured_below_sma_days: int) -> bool:
-    _ = (sma_window, matured_below_sma_days)
-    closes = ctx.closes
+    return _eval_trend_matured(ctx, sma_window, matured_below_sma_days)[0]
+
+
+def eval_trend_matured_debug(
+    ctx: SignalContextV2, sma_window: int, matured_below_sma_days: int
+) -> tuple[bool, str]:
+    result, debug_info = _eval_trend_matured(ctx, sma_window, matured_below_sma_days)
+    return result, debug_info
+
+
+def _min_required() -> int:
     max_index = max(
         MIN_AGE_DAYS - 1,
         STRUCT_WINDOW - 1,
         MOMENTUM_WINDOW - 1,
         DRAW_REF_LOOKBACK_A,
     )
-    min_required = max(
+    return max(
         SMA_LEN + max_index + 1,
         STRUCT_WINDOW + NEW_LOW_LOOKBACK,
         MOMENTUM_WINDOW + NEW_LOW_LOOKBACK,
         DRAW_REF_LOOKBACK_A + 1,
     )
+
+
+def _eval_trend_matured(
+    ctx: SignalContextV2, sma_window: int, matured_below_sma_days: int
+) -> tuple[bool, str]:
+    _ = (sma_window, matured_below_sma_days)
+    closes = ctx.closes
+    min_required = _min_required()
     if len(closes) < min_required:
-        return False
+        return False, "TREND_MATURED_DEBUG insufficient_data=True result=False"
 
     sma20 = _sma_series(closes, SMA_LEN)
     if sma20 is None:
-        return False
+        return False, "TREND_MATURED_DEBUG insufficient_data=True result=False"
 
     new_lows = 0
     for i in range(STRUCT_WINDOW):
@@ -44,10 +61,10 @@ def eval_trend_matured(ctx: SignalContextV2, sma_window: int, matured_below_sma_
 
     ref_slice = closes[DRAW_REF_LOOKBACK_B : DRAW_REF_LOOKBACK_A + 1]
     if not ref_slice:
-        return False
+        return False, "TREND_MATURED_DEBUG insufficient_data=True result=False"
     ref_high = max(ref_slice)
     if ref_high <= 0:
-        return False
+        return False, "TREND_MATURED_DEBUG insufficient_data=True result=False"
     drawdown = (ref_high - closes[0]) / ref_high
     structure_drawdown = drawdown >= DRAW_MIN_DD
 
@@ -57,25 +74,61 @@ def eval_trend_matured(ctx: SignalContextV2, sma_window: int, matured_below_sma_
     for i in range(MIN_AGE_DAYS):
         if closes[i] < sma20[i]:
             below_ma_days += 1
-    time_ok = below_ma_days >= _ceil_ratio(MIN_AGE_DAYS, 0.70)
+    required_days = _ceil_ratio(MIN_AGE_DAYS, 0.70)
+    time_ok = below_ma_days >= required_days
 
     new_low_indices = []
     for i in range(MOMENTUM_WINDOW):
         if _is_new_low(closes, i, NEW_LOW_LOOKBACK):
             new_low_indices.append(i)
     if len(new_low_indices) < MOMENTUM_NEWLOW_COUNT:
-        return False
+        debug_info = (
+            "TREND_MATURED_DEBUG "
+            f"structure_new_lows_count={new_lows} structure_new_lows_ok={structure_new_lows} "
+            f"structure_drawdown_ref_high={ref_high} structure_drawdown_close0={closes[0]} "
+            f"structure_drawdown={drawdown} structure_drawdown_ok={structure_drawdown} "
+            f"time_below_ma_days={below_ma_days} time_required_days={required_days} time_ok={time_ok} "
+            f"momentum_new_low_count={len(new_low_indices)} momentum_indices=[] "
+            "momentum_l1=None momentum_l2=None momentum_l3=None "
+            "momentum_step1_pct=None momentum_step2_pct=None momentum_ok=False "
+            "result=False"
+        )
+        return False, debug_info
     chron_indices = sorted(new_low_indices, reverse=True)
     last_three = chron_indices[-MOMENTUM_NEWLOW_COUNT:]
     l1, l2, l3 = (closes[i] for i in last_three)
     if l1 <= 0 or l2 <= 0:
-        return False
+        debug_info = (
+            "TREND_MATURED_DEBUG "
+            f"structure_new_lows_count={new_lows} structure_new_lows_ok={structure_new_lows} "
+            f"structure_drawdown_ref_high={ref_high} structure_drawdown_close0={closes[0]} "
+            f"structure_drawdown={drawdown} structure_drawdown_ok={structure_drawdown} "
+            f"time_below_ma_days={below_ma_days} time_required_days={required_days} time_ok={time_ok} "
+            f"momentum_new_low_count={len(new_low_indices)} momentum_indices={last_three} "
+            f"momentum_l1={l1} momentum_l2={l2} momentum_l3={l3} "
+            "momentum_step1_pct=None momentum_step2_pct=None momentum_ok=False "
+            "result=False"
+        )
+        return False, debug_info
+    step1_pct = abs(l2 - l1) / l1
+    step2_pct = abs(l3 - l2) / l2
     momentum_ok = (
-        abs(l2 - l1) / l1 <= MOMENTUM_DROP_MAX
-        and abs(l3 - l2) / l2 <= MOMENTUM_DROP_MAX
+        step1_pct <= MOMENTUM_DROP_MAX and step2_pct <= MOMENTUM_DROP_MAX
     )
 
-    return structure_ok and time_ok and momentum_ok
+    result = structure_ok and time_ok and momentum_ok
+    debug_info = (
+        "TREND_MATURED_DEBUG "
+        f"structure_new_lows_count={new_lows} structure_new_lows_ok={structure_new_lows} "
+        f"structure_drawdown_ref_high={ref_high} structure_drawdown_close0={closes[0]} "
+        f"structure_drawdown={drawdown} structure_drawdown_ok={structure_drawdown} "
+        f"time_below_ma_days={below_ma_days} time_required_days={required_days} time_ok={time_ok} "
+        f"momentum_new_low_count={len(new_low_indices)} momentum_indices={last_three} "
+        f"momentum_l1={l1} momentum_l2={l2} momentum_l3={l3} "
+        f"momentum_step1_pct={step1_pct} momentum_step2_pct={step2_pct} "
+        f"momentum_ok={momentum_ok} result={result}"
+    )
+    return result, debug_info
 
 
 def _sma_series(closes: list[float], window: int) -> list[float] | None:

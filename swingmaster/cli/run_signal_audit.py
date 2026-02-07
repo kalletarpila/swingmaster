@@ -6,6 +6,14 @@ from datetime import date
 
 from swingmaster.app_api.dto import UniverseSpec
 from swingmaster.app_api.factories import build_swingmaster_app
+from swingmaster.app_api.providers.signals_v2.context import SignalContextV2
+from swingmaster.app_api.providers.signals_v2.stabilization_confirmed import (
+    eval_stabilization_confirmed_debug,
+)
+from swingmaster.app_api.providers.signals_v2.trend_matured import (
+    eval_trend_matured_debug,
+    _min_required as _trend_matured_min_required,
+)
 from swingmaster.core.domain.enums import ReasonCode, State
 from swingmaster.core.engine.evaluator import evaluate_step
 from swingmaster.core.signals.enums import SignalKey
@@ -372,6 +380,41 @@ def _print_debug_ohlcv(md_conn, ticker: str, as_of_date: str, window: int = 20) 
         )
 
 
+def _print_trend_matured_debug(md_conn, ticker: str, as_of_date: str) -> None:
+    required = _trend_matured_min_required()
+    ohlc = _load_debug_ohlcv_window(md_conn, ticker, as_of_date, required)
+    if not ohlc:
+        print("TREND_MATURED_DEBUG insufficient_data=True result=False")
+        return
+    closes = [row[4] for row in ohlc]
+    highs = [row[2] for row in ohlc]
+    lows = [row[3] for row in ohlc]
+    ctx = SignalContextV2(closes=closes, highs=highs, lows=lows, ohlc=ohlc)
+    _result, debug_info = eval_trend_matured_debug(ctx, sma_window=20, matured_below_sma_days=5)
+    print(debug_info)
+
+
+def _print_stabilization_debug(md_conn, ticker: str, as_of_date: str) -> None:
+    required = 40
+    ohlc = _load_debug_ohlcv_window(md_conn, ticker, as_of_date, required)
+    if not ohlc:
+        print("DEBUG_STABILIZATION insufficient_data=True result=False")
+        return
+    closes = [row[4] for row in ohlc]
+    highs = [row[2] for row in ohlc]
+    lows = [row[3] for row in ohlc]
+    ctx = SignalContextV2(closes=closes, highs=highs, lows=lows, ohlc=ohlc)
+    _result, debug_info = eval_stabilization_confirmed_debug(
+        ctx,
+        atr_window=14,
+        stabilization_days=5,
+        atr_pct_threshold=0.03,
+        range_pct_threshold=0.05,
+        compute_atr=lambda _o: 0.0,
+    )
+    print(debug_info)
+
+
 def main() -> None:
     args = parse_args()
     if args.begin_date > args.end_date:
@@ -493,6 +536,8 @@ def main() -> None:
 
         allow_day_print = (not args.streaks) or args.print_focus_only
         debug_limit = args.debug_limit if args.debug_limit > 0 else None
+        debug_matured = args.debug_show_mismatches or args.debug_ohlcv
+        debug_stabilization = args.debug_show_mismatches or args.debug_ohlcv
         global_after_signal_anchor_date: date | None = None
 
         def _is_eligible_after_anchor(
@@ -515,6 +560,11 @@ def main() -> None:
             last_after_signal_date = None
             anchor_date = None
             prev_focus_present = False
+            debug_stabilization_needed = (
+                focus_signal == SignalKey.STABILIZATION_CONFIRMED
+                or SignalKey.STABILIZATION_CONFIRMED in require_signals
+                or SignalKey.STABILIZATION_CONFIRMED in exclude_signals
+            )
             if explicit_anchor_date is not None:
                 anchor_date = explicit_anchor_date
             for day in trading_days:
@@ -639,6 +689,13 @@ def main() -> None:
                                 f"anchor={anchor_str} window_days={window_days} eligible={eligible_str}"
                             )
                             mismatches_printed += 1
+                            if debug_matured and SignalKey.TREND_MATURED in signal_set.signals:
+                                _print_trend_matured_debug(md_conn, ticker, day)
+                            if (
+                                debug_stabilization
+                                and debug_stabilization_needed
+                            ):
+                                _print_stabilization_debug(md_conn, ticker, day)
                         continue
                 if exclude_signals:
                     has_excluded = [sig for sig in exclude_signals if sig in signal_set.signals]
@@ -663,6 +720,13 @@ def main() -> None:
                                 f"anchor={anchor_str} window_days={window_days} eligible={eligible_str}"
                             )
                             mismatches_printed += 1
+                            if debug_matured and SignalKey.TREND_MATURED in signal_set.signals:
+                                _print_trend_matured_debug(md_conn, ticker, day)
+                            if (
+                                debug_stabilization
+                                and debug_stabilization_needed
+                            ):
+                                _print_stabilization_debug(md_conn, ticker, day)
                         continue
 
                 if debug_limit is not None and printed >= debug_limit:
@@ -679,6 +743,13 @@ def main() -> None:
                         next_state=next_state,
                         reasons=reasons,
                     )
+                    if debug_matured and SignalKey.TREND_MATURED in signal_set.signals:
+                        _print_trend_matured_debug(md_conn, ticker, day)
+                    if (
+                        debug_stabilization
+                        and SignalKey.STABILIZATION_CONFIRMED in signal_set.signals
+                    ):
+                        _print_stabilization_debug(md_conn, ticker, day)
                     if args.debug_ohlcv:
                         _print_debug_ohlcv(md_conn, ticker, day, window=20)
                     printed += 1

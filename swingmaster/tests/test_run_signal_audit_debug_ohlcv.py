@@ -122,3 +122,125 @@ def test_debug_ohlcv_enabled_prints_rows_and_limits_window(monkeypatch, capsys):
 
     row_lines = [ln for ln in out.splitlines() if ln.startswith("DEBUG_OHLCV_ROW ")]
     assert len(row_lines) <= 20
+
+
+def test_trend_matured_debug_line_prints_only_when_debug_enabled(monkeypatch, capsys):
+    day = "2026-01-20"
+    tickers = ["AAA"]
+    days = [day]
+    provider = _FakeSignalProvider({("AAA", day): _ss(SignalKey.TREND_MATURED)})
+
+    from swingmaster.cli import run_signal_audit as mod
+
+    ohlc = []
+    for i in range(60):
+        d = f"2026-01-{20 - i:02d}"
+        c = 100.0 - i * 0.1
+        ohlc.append((d, c, c, c, c, 1.0))
+    monkeypatch.setattr(mod, "_load_debug_ohlcv_window", lambda *_a, **_kw: ohlc)
+
+    _run(
+        monkeypatch,
+        [
+            "--market",
+            "OMXH",
+            "--begin-date",
+            day,
+            "--end-date",
+            day,
+            "--ticker",
+            "AAA",
+            "--focus-signal",
+            "TREND_MATURED",
+            "--print-focus-only",
+        ],
+        tickers=tickers,
+        days=days,
+        provider=provider,
+    )
+    out = capsys.readouterr().out
+    assert "TREND_MATURED_DEBUG" not in out
+
+    _run(
+        monkeypatch,
+        [
+            "--market",
+            "OMXH",
+            "--begin-date",
+            day,
+            "--end-date",
+            day,
+            "--ticker",
+            "AAA",
+            "--focus-signal",
+            "TREND_MATURED",
+            "--print-focus-only",
+            "--debug-ohlcv",
+        ],
+        tickers=tickers,
+        days=days,
+        provider=provider,
+    )
+    out = capsys.readouterr().out
+    assert "TREND_MATURED_DEBUG " in out
+
+
+def test_stabilization_debug_line_prints_only_when_debug_enabled(monkeypatch, capsys):
+    day = "2026-01-20"
+    tickers = ["AAA"]
+    days = [day]
+    provider = _FakeSignalProvider({("AAA", day): _ss(SignalKey.STABILIZATION_CONFIRMED)})
+
+    from swingmaster.cli import run_signal_audit as mod
+
+    ohlc = []
+    for i in range(40):
+        d = f"2026-01-{20 - i:02d}"
+        c = 100.0
+        ohlc.append((d, c, c, c, c, 1.0))
+    monkeypatch.setattr(mod, "_load_debug_ohlcv_window", lambda *_a, **_kw: ohlc)
+
+    _run(
+        monkeypatch,
+        [
+            "--market",
+            "OMXH",
+            "--begin-date",
+            day,
+            "--end-date",
+            day,
+            "--ticker",
+            "AAA",
+            "--focus-signal",
+            "STABILIZATION_CONFIRMED",
+            "--print-focus-only",
+        ],
+        tickers=tickers,
+        days=days,
+        provider=provider,
+    )
+    out = capsys.readouterr().out
+    assert "DEBUG_STABILIZATION" not in out
+
+    _run(
+        monkeypatch,
+        [
+            "--market",
+            "OMXH",
+            "--begin-date",
+            day,
+            "--end-date",
+            day,
+            "--ticker",
+            "AAA",
+            "--focus-signal",
+            "STABILIZATION_CONFIRMED",
+            "--print-focus-only",
+            "--debug-ohlcv",
+        ],
+        tickers=tickers,
+        days=days,
+        provider=provider,
+    )
+    out = capsys.readouterr().out
+    assert "DEBUG_STABILIZATION " in out

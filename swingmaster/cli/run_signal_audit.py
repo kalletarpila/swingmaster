@@ -552,7 +552,7 @@ def main() -> None:
         )
         _entry_dbg = __import__(
             "swingmaster.app_api.providers.signals_v2.entry_setup_valid",
-            fromlist=["set_entry_setup_valid_debug"],
+            fromlist=["set_entry_setup_valid_debug", "get_entry_setup_valid_debug"],
         )
         _entry_dbg.set_entry_setup_valid_debug(args.debug)
         signal_provider = app._signal_provider
@@ -758,6 +758,17 @@ def main() -> None:
                     continue
 
                 if allow_day_print:
+                    if (
+                        args.debug
+                        and args.print_focus_only
+                        and args.focus_signal == "ENTRY_SETUP_VALID"
+                        and focus_match
+                        and SignalKey.ENTRY_SETUP_VALID in signal_set.signals
+                    ):
+                        entry_debug = _entry_dbg.get_entry_setup_valid_debug()
+                        if entry_debug and entry_debug.startswith("DEBUG_ENTRY_SETUP_VALID "):
+                            debug_tail = entry_debug[len("DEBUG_ENTRY_SETUP_VALID ") :]
+                            print(f"DEBUG_ENTRY_SETUP_VALID date={day} {debug_tail}")
                     _print_event_block(
                         ticker=ticker,
                         day=day,

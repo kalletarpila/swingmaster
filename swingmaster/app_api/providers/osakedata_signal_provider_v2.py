@@ -94,7 +94,7 @@ class OsakeDataSignalProviderV2(SignalProvider):
         highs = [row[2] for row in ohlc]
         lows = [row[3] for row in ohlc]
 
-        ctx = SignalContextV2(closes=closes, highs=highs, lows=lows, ohlc=ohlc)
+        ctx = SignalContextV2(closes=closes, highs=highs, lows=lows, ohlc=ohlc, as_of_date=date)
         signals = {}
         primary_signals = set()
 

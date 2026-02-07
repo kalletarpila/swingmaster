@@ -10,3 +10,4 @@ class SignalContextV2:
     highs: List[float]
     lows: List[float]
     ohlc: List[Tuple[str, float, float, float, float, float]]
+    as_of_date: str | None = None

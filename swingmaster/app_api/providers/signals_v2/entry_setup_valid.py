@@ -3,6 +3,7 @@ from __future__ import annotations
 from .context import SignalContextV2
 
 _DEBUG_ENTRY_SETUP_VALID = False
+_LAST_ENTRY_SETUP_VALID_DEBUG = None
 
 
 def set_entry_setup_valid_debug(enabled: bool) -> None:
@@ -15,19 +16,27 @@ def _debug_print(msg: str) -> None:
         print(msg)
 
 
+def get_entry_setup_valid_debug() -> str | None:
+    return _LAST_ENTRY_SETUP_VALID_DEBUG
+
+
 def eval_entry_setup_valid(ctx: SignalContextV2, stabilization_days: int, entry_sma_window: int) -> bool:
     _ = (stabilization_days, entry_sma_window)
     closes = ctx.closes
     highs = ctx.highs
     lows = ctx.lows
     if len(closes) < _min_required_len():
+        global _LAST_ENTRY_SETUP_VALID_DEBUG
+        _LAST_ENTRY_SETUP_VALID_DEBUG = None
         return False
     if len(highs) < _min_required_len() or len(lows) < _min_required_len():
+        _LAST_ENTRY_SETUP_VALID_DEBUG = None
         return False
 
     base_ok, base_invalidation = _base_range(closes, highs, lows)
     reclaim_ok, reclaim_invalidation = _reclaim_ma20(closes, highs, lows)
     if not (base_ok or reclaim_ok):
+        _LAST_ENTRY_SETUP_VALID_DEBUG = None
         return False
 
     if base_ok:
@@ -36,10 +45,12 @@ def eval_entry_setup_valid(ctx: SignalContextV2, stabilization_days: int, entry_
         invalidation_level = reclaim_invalidation
 
     if invalidation_level is None:
+        _LAST_ENTRY_SETUP_VALID_DEBUG = None
         return False
 
     entry_price = closes[0]
     if entry_price <= invalidation_level:
+        _LAST_ENTRY_SETUP_VALID_DEBUG = None
         return False
 
     atr14 = _atr14(highs, lows, closes)
@@ -48,24 +59,35 @@ def eval_entry_setup_valid(ctx: SignalContextV2, stabilization_days: int, entry_
     if atr14 is not None:
         risk_atr = (entry_price - invalidation_level) / max(atr14, _TINY)
         if risk_atr > RISK_ATR_MAX:
+            _LAST_ENTRY_SETUP_VALID_DEBUG = None
             return False
     else:
         risk_pct = (entry_price - invalidation_level) / entry_price
         if risk_pct > RISK_PCT_MAX:
+            _LAST_ENTRY_SETUP_VALID_DEBUG = None
             return False
 
     support_ok = _support_ok(closes, invalidation_level)
     if not support_ok:
+        _LAST_ENTRY_SETUP_VALID_DEBUG = None
         return False
 
+    date_val = getattr(ctx, "as_of_date", None)
+    if date_val is None:
+        date_val = getattr(ctx, "date", None)
+    if hasattr(date_val, "isoformat"):
+        date_val = date_val.isoformat()
+    date_part = f"date={date_val} " if date_val is not None else ""
     debug_info = (
         "DEBUG_ENTRY_SETUP_VALID "
+        f"{date_part}"
         f"base_ok={base_ok} base_invalidation={base_invalidation} "
         f"reclaim_ok={reclaim_ok} reclaim_invalidation={reclaim_invalidation} "
         f"invalidation_level={invalidation_level} entry_price={entry_price} "
         f"atr14={atr14} risk_atr={risk_atr} risk_pct={risk_pct} "
         f"support_ok={support_ok} result=True"
     )
+    _LAST_ENTRY_SETUP_VALID_DEBUG = debug_info
     _debug_print(debug_info)
     return True
 

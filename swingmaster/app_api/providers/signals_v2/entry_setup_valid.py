@@ -88,7 +88,6 @@ def eval_entry_setup_valid(ctx: SignalContextV2, stabilization_days: int, entry_
         f"support_ok={support_ok} result=True"
     )
     _LAST_ENTRY_SETUP_VALID_DEBUG = debug_info
-    _debug_print(debug_info)
     return True
 
 

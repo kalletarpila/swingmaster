@@ -585,6 +585,7 @@ def main() -> None:
                 or SignalKey.STABILIZATION_CONFIRMED in require_signals
                 or SignalKey.STABILIZATION_CONFIRMED in exclude_signals
             )
+            focus_match_eligible_flags = []
             if explicit_anchor_date is not None:
                 anchor_date = explicit_anchor_date
             for day in trading_days:
@@ -610,26 +611,6 @@ def main() -> None:
                     ):
                         global_after_signal_anchor_date = anchor_date
 
-            if args.streaks and focus_signal is not None:
-                runs: list[int] = []
-                run_len = 0
-                for _day, ss in day_signals:
-                    if focus_signal in ss.signals:
-                        run_len += 1
-                    else:
-                        if run_len:
-                            runs.append(run_len)
-                            run_len = 0
-                if run_len:
-                    runs.append(run_len)
-                runs_total = len(runs)
-                max_run_len = max(runs) if runs else 0
-                avg_run_len = (sum(runs) / float(runs_total)) if runs_total else 0.0
-                streaks_by_ticker[ticker] = {
-                    "runs_total": runs_total,
-                    "max_run_len": max_run_len,
-                    "avg_run_len": f"{avg_run_len:.2f}",
-                }
             for day, signal_set in day_signals:
                 dates_processed_total += 1
                 day_date = date.fromisoformat(day)
@@ -650,7 +631,17 @@ def main() -> None:
 
                 if after_signal is not None:
                     if not _is_eligible_after_anchor(day_date, anchor_date, window_days):
+                        focus_match_eligible_flags.append(False)
                         continue
+
+                require_ok = True
+                if require_signals:
+                    require_ok = all(sig in signal_set.signals for sig in require_signals)
+                exclude_ok = True
+                if exclude_signals:
+                    exclude_ok = not any(sig in signal_set.signals for sig in exclude_signals)
+                focus_match_eligible = focus_match and require_ok and exclude_ok
+                focus_match_eligible_flags.append(focus_match_eligible)
 
                 if focus_match:
                     focus_match_days_total += 1
@@ -783,6 +774,26 @@ def main() -> None:
                         require_signal_days_total += 1
                     if exclude_signals:
                         exclude_signal_days_total += 1
+            if args.streaks and focus_signal is not None:
+                runs: list[int] = []
+                run_len = 0
+                for eligible in focus_match_eligible_flags:
+                    if eligible:
+                        run_len += 1
+                    else:
+                        if run_len:
+                            runs.append(run_len)
+                            run_len = 0
+                if run_len:
+                    runs.append(run_len)
+                runs_total = len(runs)
+                max_run_len = max(runs) if runs else 0
+                avg_run_len = (sum(runs) / float(runs_total)) if runs_total else 0.0
+                streaks_by_ticker[ticker] = {
+                    "runs_total": runs_total,
+                    "max_run_len": max_run_len,
+                    "avg_run_len": f"{avg_run_len:.2f}",
+                }
             if len(tickers) == 1:
                 after_signal_anchor_date = anchor_date.isoformat() if anchor_date else None
         if len(tickers) != 1:

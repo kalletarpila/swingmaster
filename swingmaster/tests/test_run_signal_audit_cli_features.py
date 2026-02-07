@@ -302,3 +302,53 @@ def test_debug_show_mismatches_respects_debug_limit(monkeypatch, capsys):
     out = capsys.readouterr().out
     mismatch_lines = [ln for ln in out.splitlines() if ln.startswith("MISMATCH REQUIRE_MISS ")]
     assert len(mismatch_lines) == 1
+
+
+def test_streaks_respect_after_signal_window_filters(monkeypatch, capsys):
+    days = [
+        "2026-01-01",
+        "2026-01-02",
+        "2026-01-03",
+        "2026-01-04",
+        "2026-01-05",
+        "2026-01-06",
+    ]
+    tickers = ["AAA"]
+    focus = SignalKey.ENTRY_SETUP_VALID
+    after = SignalKey.TREND_STARTED
+    by = {
+        ("AAA", days[1]): _ss(after),
+        ("AAA", days[2]): _ss(focus),
+        ("AAA", days[3]): _ss(focus),
+        ("AAA", days[4]): _ss(focus),
+    }
+    provider = _FakeSignalProvider(by)
+
+    _run(
+        monkeypatch,
+        [
+            "--market",
+            "OMXH",
+            "--begin-date",
+            days[0],
+            "--end-date",
+            days[-1],
+            "--ticker",
+            "AAA",
+            "--focus-signal",
+            focus.name,
+            "--after-signal",
+            after.name,
+            "--anchor-mode",
+            "first",
+            "--window-days",
+            "2",
+            "--streaks",
+            "--summary",
+        ],
+        tickers=tickers,
+        days=days,
+        provider=provider,
+    )
+    out = capsys.readouterr().out
+    assert "STREAKS ticker=AAA runs_total=1 max_run_len=2 avg_run_len=2.00" in out

@@ -2,6 +2,18 @@ from __future__ import annotations
 
 from .context import SignalContextV2
 
+_DEBUG_ENTRY_SETUP_VALID = False
+
+
+def set_entry_setup_valid_debug(enabled: bool) -> None:
+    global _DEBUG_ENTRY_SETUP_VALID
+    _DEBUG_ENTRY_SETUP_VALID = enabled
+
+
+def _debug_print(msg: str) -> None:
+    if _DEBUG_ENTRY_SETUP_VALID:
+        print(msg)
+
 
 def eval_entry_setup_valid(ctx: SignalContextV2, stabilization_days: int, entry_sma_window: int) -> bool:
     _ = (stabilization_days, entry_sma_window)
@@ -31,6 +43,8 @@ def eval_entry_setup_valid(ctx: SignalContextV2, stabilization_days: int, entry_
         return False
 
     atr14 = _atr14(highs, lows, closes)
+    risk_atr = None
+    risk_pct = None
     if atr14 is not None:
         risk_atr = (entry_price - invalidation_level) / max(atr14, _TINY)
         if risk_atr > RISK_ATR_MAX:
@@ -40,9 +54,19 @@ def eval_entry_setup_valid(ctx: SignalContextV2, stabilization_days: int, entry_
         if risk_pct > RISK_PCT_MAX:
             return False
 
-    if not _support_ok(closes, invalidation_level):
+    support_ok = _support_ok(closes, invalidation_level)
+    if not support_ok:
         return False
 
+    debug_info = (
+        "DEBUG_ENTRY_SETUP_VALID "
+        f"base_ok={base_ok} base_invalidation={base_invalidation} "
+        f"reclaim_ok={reclaim_ok} reclaim_invalidation={reclaim_invalidation} "
+        f"invalidation_level={invalidation_level} entry_price={entry_price} "
+        f"atr14={atr14} risk_atr={risk_atr} risk_pct={risk_pct} "
+        f"support_ok={support_ok} result=True"
+    )
+    _debug_print(debug_info)
     return True
 
 

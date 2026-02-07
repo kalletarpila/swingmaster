@@ -550,6 +550,11 @@ def main() -> None:
             debug=args.debug,
             debug_dow_markers=args.debug_dow_markers,
         )
+        _entry_dbg = __import__(
+            "swingmaster.app_api.providers.signals_v2.entry_setup_valid",
+            fromlist=["set_entry_setup_valid_debug"],
+        )
+        _entry_dbg.set_entry_setup_valid_debug(args.debug)
         signal_provider = app._signal_provider
         policy = app._policy
         prev_state_provider = app._prev_state_provider
@@ -628,6 +633,10 @@ def main() -> None:
                 focus_present = focus_signal is not None and focus_signal in signal_set.signals
                 focus_match = focus_present and (not args.first_hit_only or not prev_focus_present)
                 prev_focus_present = focus_present
+
+                if args.focus_signal == "ENTRY_SETUP_VALID" and not focus_present:
+                    focus_match_eligible_flags.append(False)
+                    continue
 
                 if after_signal is not None:
                     if not _is_eligible_after_anchor(day_date, anchor_date, window_days):

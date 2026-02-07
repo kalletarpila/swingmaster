@@ -772,8 +772,11 @@ def main() -> None:
                     ):
                         entry_debug = entry_debug_by_day.get(day)
                         if entry_debug and entry_debug.startswith("DEBUG_ENTRY_SETUP_VALID "):
-                            debug_tail = entry_debug[len("DEBUG_ENTRY_SETUP_VALID ") :]
-                            print(f"DEBUG_ENTRY_SETUP_VALID date={day} {debug_tail}")
+                            if entry_debug.startswith("DEBUG_ENTRY_SETUP_VALID date="):
+                                print(entry_debug)
+                            else:
+                                debug_tail = entry_debug[len("DEBUG_ENTRY_SETUP_VALID ") :]
+                                print(f"DEBUG_ENTRY_SETUP_VALID date={day} {debug_tail}")
                     _print_event_block(
                         ticker=ticker,
                         day=day,

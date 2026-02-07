@@ -86,11 +86,20 @@ def _eval_stabilization_confirmed(
 
     significant_new_low_count = 0
     sweep_count = 0
+    first_new_low_d = None
+    first_new_low = None
+    first_new_low_ref = None
+    first_new_low_threshold = None
     for d in range(STAB_WINDOW):
         ref_low = min(lows[d + 1 : d + 1 + NO_NEW_LOW_WINDOW])
         low_d = lows[d]
         if low_d < ref_low * (1 - SIGNIFICANT_LOW_EPS):
             significant_new_low_count += 1
+            if first_new_low_d is None:
+                first_new_low_d = d
+                first_new_low = low_d
+                first_new_low_ref = ref_low
+                first_new_low_threshold = ref_low * (1 - SIGNIFICANT_LOW_EPS)
         elif ref_low * (1 - SIGNIFICANT_LOW_EPS) <= low_d < ref_low:
             sweep_count += 1
     no_new_low_ok = significant_new_low_count == 0 and sweep_count <= SWEEP_MAX_COUNT
@@ -129,6 +138,13 @@ def _eval_stabilization_confirmed(
         f"stab_first_failed={first_failed} "
         f"stab_final={result}"
     )
+    if significant_new_low_count > 0:
+        debug_info += (
+            f" stab_first_new_low_d={first_new_low_d} "
+            f"stab_first_new_low={first_new_low} "
+            f"stab_ref_low={first_new_low_ref} "
+            f"stab_new_low_threshold={first_new_low_threshold}"
+        )
     return result, debug_info
 
 

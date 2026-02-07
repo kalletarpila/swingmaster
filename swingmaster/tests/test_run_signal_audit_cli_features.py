@@ -142,6 +142,10 @@ def test_first_hit_only_prints_only_first_day_of_each_run(monkeypatch, capsys):
     assert "TICKER AAA DATE 2026-01-02" not in out
     assert "TICKER AAA DATE 2026-01-05" not in out
     assert "focus_match_days_total=2" in out
+    assert "focus_first_match_date=2026-01-01" in out
+    assert "focus_last_match_date=2026-01-04" in out
+    assert "focus_first_match_days_from_anchor=None" in out
+    assert "focus_last_match_days_from_anchor=None" in out
 
 
 @pytest.mark.parametrize(

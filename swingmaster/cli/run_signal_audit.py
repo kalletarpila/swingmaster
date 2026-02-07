@@ -239,6 +239,10 @@ def _print_summary(
     data_insufficient_days_total: int,
     focus_signal: str | None,
     focus_match_days_total: int,
+    focus_first_match_date: str | None,
+    focus_last_match_date: str | None,
+    focus_first_match_days_from_anchor: int | None,
+    focus_last_match_days_from_anchor: int | None,
     trend_started_days_total: int,
     trend_started_overridden_by_invalidated_days_total: int,
     trend_started_clean_days_total: int,
@@ -264,6 +268,10 @@ def _print_summary(
     print(f"data_insufficient_days_total={data_insufficient_days_total}")
     print(f"focus_signal={focus_signal}")
     print(f"focus_match_days_total={focus_match_days_total}")
+    print(f"focus_first_match_date={focus_first_match_date}")
+    print(f"focus_last_match_date={focus_last_match_date}")
+    print(f"focus_first_match_days_from_anchor={focus_first_match_days_from_anchor}")
+    print(f"focus_last_match_days_from_anchor={focus_last_match_days_from_anchor}")
     print(f"require_signal_days_total={require_signal_days_total}")
     print(f"require_signal_miss_days_total={require_signal_miss_days_total}")
     print(f"exclude_signal_days_total={exclude_signal_days_total}")
@@ -432,6 +440,10 @@ def main() -> None:
     event_days_printed_total = 0
     data_insufficient_days_total = 0
     focus_match_days_total = 0
+    focus_first_match_date = None
+    focus_last_match_date = None
+    focus_first_match_anchor = None
+    focus_last_match_anchor = None
     trend_started_days_total = 0
     trend_started_overridden_by_invalidated_days_total = 0
     trend_started_clean_days_total = 0
@@ -463,6 +475,10 @@ def main() -> None:
                     data_insufficient_days_total=data_insufficient_days_total,
                     focus_signal=focus_signal_value,
                     focus_match_days_total=focus_match_days_total,
+                    focus_first_match_date=focus_first_match_date,
+                    focus_last_match_date=focus_last_match_date,
+                    focus_first_match_days_from_anchor=None,
+                    focus_last_match_days_from_anchor=None,
                     trend_started_days_total=trend_started_days_total,
                     trend_started_overridden_by_invalidated_days_total=trend_started_overridden_by_invalidated_days_total,
                     trend_started_clean_days_total=trend_started_clean_days_total,
@@ -502,6 +518,10 @@ def main() -> None:
                     data_insufficient_days_total=data_insufficient_days_total,
                     focus_signal=focus_signal_value,
                     focus_match_days_total=focus_match_days_total,
+                    focus_first_match_date=focus_first_match_date,
+                    focus_last_match_date=focus_last_match_date,
+                    focus_first_match_days_from_anchor=None,
+                    focus_last_match_days_from_anchor=None,
                     trend_started_days_total=trend_started_days_total,
                     trend_started_overridden_by_invalidated_days_total=trend_started_overridden_by_invalidated_days_total,
                     trend_started_clean_days_total=trend_started_clean_days_total,
@@ -634,6 +654,11 @@ def main() -> None:
 
                 if focus_match:
                     focus_match_days_total += 1
+                    if focus_first_match_date is None:
+                        focus_first_match_date = day
+                        focus_first_match_anchor = anchor_date
+                    focus_last_match_date = day
+                    focus_last_match_anchor = anchor_date
 
                 prev_state = None
                 next_state = None
@@ -774,6 +799,17 @@ def main() -> None:
                 anchor_mode_first_count = 0
                 anchor_mode_last_count = after_signal_anchors_found_total
             anchor_source = "explicit" if explicit_anchor_date else "inferred"
+            focus_first_match_days_from_anchor = None
+            focus_last_match_days_from_anchor = None
+            if after_signal is not None:
+                if focus_first_match_date is not None and focus_first_match_anchor is not None:
+                    focus_first_match_days_from_anchor = (
+                        date.fromisoformat(focus_first_match_date) - focus_first_match_anchor
+                    ).days
+                if focus_last_match_date is not None and focus_last_match_anchor is not None:
+                    focus_last_match_days_from_anchor = (
+                        date.fromisoformat(focus_last_match_date) - focus_last_match_anchor
+                    ).days
             if args.streaks:
                 _print_streaks_summary(streaks_by_ticker)
             _print_summary(
@@ -784,6 +820,10 @@ def main() -> None:
                 data_insufficient_days_total=data_insufficient_days_total,
                 focus_signal=focus_signal_value,
                 focus_match_days_total=focus_match_days_total,
+                focus_first_match_date=focus_first_match_date,
+                focus_last_match_date=focus_last_match_date,
+                focus_first_match_days_from_anchor=focus_first_match_days_from_anchor,
+                focus_last_match_days_from_anchor=focus_last_match_days_from_anchor,
                 trend_started_days_total=trend_started_days_total,
                 trend_started_overridden_by_invalidated_days_total=trend_started_overridden_by_invalidated_days_total,
                 trend_started_clean_days_total=trend_started_clean_days_total,

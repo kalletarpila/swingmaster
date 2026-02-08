@@ -56,6 +56,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--debug-limit", type=int, default=25, help="Max items to show in debug lists (0 = no limit)")
     parser.add_argument("--debug-show-tickers", action="store_true", help="Show per-ticker debug lines on final day")
     parser.add_argument("--debug-show-mismatches", action="store_true", help="Show entry-like vs RC mismatches on final day")
+    parser.add_argument("--print-signals", action="store_true", help="Print per-day per-ticker signal keys")
+    parser.add_argument("--print-signals-limit", type=int, default=20, help="Max tickers per day for --print-signals")
     return parser.parse_args()
 
 
@@ -480,6 +482,18 @@ def main() -> None:
                     if extra:
                         sample = extra if extra_limit == len(extra) else extra[:extra_limit]
                         _dbg(args, f"INVARIANT_FAIL extra_in_rc_sample={sample}")
+            if args.print_signals:
+                limit = args.print_signals_limit
+                tickers_to_show = tickers if limit <= 0 or len(tickers) <= limit else tickers[:limit]
+                print(f"PRINT_SIGNALS date={day}")
+                for t in tickers_to_show:
+                    signal_set = signal_provider.get_signals(t, day)
+                    signals_dict = getattr(signal_set, "signals", None) if signal_set is not None else None
+                    if signals_dict:
+                        names = sorted(k.name for k in signals_dict.keys())
+                    else:
+                        names = []
+                    print(f"SIGNALS ticker={t} signals={json.dumps(names)}")
 
         if last_run_id and trading_days:
             last_day = trading_days[-1]

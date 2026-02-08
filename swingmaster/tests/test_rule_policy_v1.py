@@ -4,7 +4,7 @@ import json
 from typing import Optional
 
 from swingmaster.core.domain.enums import ReasonCode, State
-from swingmaster.core.domain.models import StateAttrs
+from swingmaster.core.domain.models import Decision, StateAttrs
 from swingmaster.core.policy.rule_v1.policy import (
     CHURN_GUARD_THRESHOLD,
     CHURN_GUARD_WINDOW_DAYS,
@@ -17,6 +17,7 @@ from swingmaster.core.policy.rule_v1.policy import (
     EDGE_GONE_STABILIZING_MAX_AGE,
     RESET_NO_SIGNAL_DAYS,
     RuleBasedTransitionPolicyV1Impl,
+    _with_trend_started_reason,
 )
 from swingmaster.core.policy.ports.state_history_port import StateHistoryDay, StateHistoryPort
 from swingmaster.core.policy.rule_policy_v1 import RuleBasedTransitionPolicyV1
@@ -106,6 +107,17 @@ def test_stabilizing_to_entry_window_requires_both_signals():
     decision = policy.decide(prev_state, prev_attrs, signals)
     assert decision.next_state == State.ENTRY_WINDOW
     assert decision.reason_codes == [ReasonCode.ENTRY_CONDITIONS_MET]
+
+
+def test_entry_conditions_met_is_exclusive():
+    decision = Decision(
+        next_state=State.ENTRY_WINDOW,
+        reason_codes=[ReasonCode.STABILIZATION_CONFIRMED, ReasonCode.ENTRY_CONDITIONS_MET],
+        attrs_update=StateAttrs(confidence=None, age=0, status=None),
+    )
+    signals = make_signals()
+    result = _with_trend_started_reason(decision, signals)
+    assert result.reason_codes == [ReasonCode.ENTRY_CONDITIONS_MET]
 
 
 def test_entry_window_to_pass_when_setup_invalid():

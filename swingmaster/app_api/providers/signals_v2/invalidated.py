@@ -42,7 +42,6 @@ def eval_invalidated(lows: list[float], invalidation_lookback: int) -> bool:
             f"today_low={lows[0]} prior_min_low={prior_min} result=True"
         )
         _LAST_INVALIDATED_DEBUG = debug_info
-        _debug_print(debug_info)
     else:
         _LAST_INVALIDATED_DEBUG = None
     return result

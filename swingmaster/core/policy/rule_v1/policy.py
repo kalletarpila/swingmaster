@@ -148,6 +148,12 @@ class RuleBasedTransitionPolicyV1Impl:
 
 
 def _with_trend_started_reason(decision: Decision, signals: SignalSet) -> Decision:
+    if ReasonCode.ENTRY_CONDITIONS_MET in decision.reason_codes:
+        return Decision(
+            next_state=decision.next_state,
+            reason_codes=[ReasonCode.ENTRY_CONDITIONS_MET],
+            attrs_update=decision.attrs_update,
+        )
     if signals.has(SignalKey.DATA_INSUFFICIENT):
         return decision
     if signals.has(SignalKey.INVALIDATED):

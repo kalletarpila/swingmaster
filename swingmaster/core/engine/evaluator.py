@@ -44,6 +44,18 @@ def evaluate_step(
             status=prev_attrs.status,
         )
 
+    if ReasonCode.CHURN_GUARD in guardrail_reasons:
+        disallowed = {
+            ReasonCode.INVALIDATED,
+            ReasonCode.DATA_INSUFFICIENT,
+            ReasonCode.TREND_STARTED,
+            ReasonCode.TREND_MATURED,
+            ReasonCode.STABILIZATION_CONFIRMED,
+            ReasonCode.ENTRY_CONDITIONS_MET,
+        }
+        if any(reason in disallowed for reason in policy_reasons):
+            guardrail_reasons = [r for r in guardrail_reasons if r != ReasonCode.CHURN_GUARD]
+
     reasons = policy_reasons + guardrail_reasons
 
     transition: Transition | None

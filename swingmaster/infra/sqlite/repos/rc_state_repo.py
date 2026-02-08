@@ -11,6 +11,11 @@ class RcStateRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
+    def _normalize_reasons(self, reasons: list[ReasonCode]) -> list[ReasonCode]:
+        if ReasonCode.ENTRY_CONDITIONS_MET in reasons:
+            return [ReasonCode.ENTRY_CONDITIONS_MET]
+        return reasons
+
     def insert_state(
         self,
         ticker: str,
@@ -20,7 +25,12 @@ class RcStateRepo:
         attrs: StateAttrs,
         run_id: str,
     ) -> None:
-        reasons_json = json.dumps([reason.value for reason in reasons])
+        normalized_reasons = self._normalize_reasons(reasons)
+        reasons_json = json.dumps(
+            [reason.value for reason in normalized_reasons],
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
         self._conn.execute(
             """
             INSERT INTO rc_state_daily (
@@ -60,7 +70,12 @@ class RcStateRepo:
         if transition is None:
             return
 
-        reasons_json = json.dumps([reason.value for reason in transition.reason_codes])
+        normalized_reasons = self._normalize_reasons(transition.reason_codes)
+        reasons_json = json.dumps(
+            [reason.value for reason in normalized_reasons],
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
         self._conn.execute(
             """
             INSERT OR REPLACE INTO rc_transition (

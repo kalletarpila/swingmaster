@@ -1,3 +1,11 @@
+"""Legacy SQLite-backed signal provider (v0).
+
+Responsibilities:
+  - Read precomputed signals from SQLite storage.
+Must not:
+  - Compute new signals or apply policy logic.
+"""
+
 from __future__ import annotations
 
 import sqlite3

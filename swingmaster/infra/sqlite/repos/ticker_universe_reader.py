@@ -1,3 +1,11 @@
+"""SQLite reader for resolving ticker universes.
+
+Responsibilities:
+  - Query available tickers by market/sector/industry filters.
+Must not:
+  - Implement signal/policy logic; data access only.
+"""
+
 from __future__ import annotations
 
 import random

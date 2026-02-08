@@ -1,3 +1,11 @@
+"""Adapter for rule_v2 policy construction and identification.
+
+Responsibilities:
+  - Provide a stable factory entry point for rule_v2 policy instances.
+Must not:
+  - Perform policy logic; delegates to rule_v2 implementation.
+"""
+
 from __future__ import annotations
 
 from typing import Optional

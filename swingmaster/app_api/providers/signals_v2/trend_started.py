@@ -1,3 +1,27 @@
+"""Signal: TREND_STARTED.
+
+Category:
+  - Trend / structure breakdown.
+
+Contract:
+  - Inputs: close series (most recent first).
+  - Output: boolean signal.
+  - Determinism: must not depend on policy state or history.
+
+Trigger summary:
+  - Requires sufficient history for SMA20 and regime windows.
+  - Regime must be above SMA20 with positive SMA slope.
+  - Requires a cross from above to below SMA today vs. yesterday.
+  - Debounces if any recent day was already below SMA.
+  - Confirms a breakdown below the prior BREAK_LOW_WINDOW low.
+
+Edge cases:
+  - Returns False on insufficient history or invalid SMA window.
+
+Complexity:
+  - O(N) over fixed windows, O(1) extra space.
+"""
+
 from __future__ import annotations
 
 from .context import SignalContextV2

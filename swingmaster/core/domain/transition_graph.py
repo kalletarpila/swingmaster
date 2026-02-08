@@ -1,3 +1,13 @@
+"""Allowed state transitions for the deterministic state machine.
+
+Responsibilities:
+  - Define legal next states per current state.
+  - Guardrails and policies must respect this graph.
+
+Invariants:
+  - Must remain stable for auditability; changes require coordinated migration.
+"""
+
 from __future__ import annotations
 
 from .enums import State

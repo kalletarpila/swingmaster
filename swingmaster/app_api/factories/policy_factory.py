@@ -1,3 +1,5 @@
+"""Factory for creating policy instances from app configuration."""
+
 from __future__ import annotations
 
 import sqlite3

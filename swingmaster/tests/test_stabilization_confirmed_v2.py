@@ -1,3 +1,5 @@
+"""Tests for stabilization confirmed v2."""
+
 from __future__ import annotations
 
 from swingmaster.app_api.providers.signals_v2.context import SignalContextV2

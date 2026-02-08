@@ -1,3 +1,26 @@
+"""Signal: STABILIZATION_CONFIRMED.
+
+Category:
+  - Stabilization / volatility contraction.
+
+Contract:
+  - Inputs: highs/lows/closes (most recent first).
+  - Output: boolean signal.
+  - Determinism: must not depend on policy state or history.
+
+Trigger summary:
+  - Recent range median must shrink vs. baseline median.
+  - Wide days must be limited relative to baseline.
+  - No significant new lows; limited sweep count.
+  - A minimum count of upper-range closes is required.
+
+Edge cases:
+  - Returns False on insufficient history for required windows.
+
+Complexity:
+  - O(N) over fixed windows, O(1) extra space.
+"""
+
 from __future__ import annotations
 
 from typing import Callable

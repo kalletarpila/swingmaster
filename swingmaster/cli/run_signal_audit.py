@@ -1,3 +1,17 @@
+"""Audit provider-level signals and policy outcomes over a date range.
+
+Purpose:
+  - Compute signals per ticker/day and print audit diagnostics (optional filtering).
+Inputs:
+  - CLI args for market/ticker selection, date range, signal version, focus filters.
+Outputs:
+  - Prints audit lines to stdout; may read/write DB depending on options.
+Example:
+  - PYTHONPATH=. python3 swingmaster/cli/run_signal_audit.py --market OMXH --begin-date 2025-01-01 --end-date 2025-12-31 --ticker YIT.HE --focus-signal ENTRY_SETUP_VALID --debug
+Debug:
+  - --debug / --debug-limit enable provider debug lines and cap output volume.
+"""
+
 from __future__ import annotations
 
 import argparse

@@ -1,3 +1,11 @@
+"""DTO definitions for app-level data exchange.
+
+Responsibilities:
+  - Define stable, typed structures for app inputs/outputs.
+Must not:
+  - Implement business logic.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

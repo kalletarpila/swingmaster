@@ -1,3 +1,15 @@
+"""List tickers for a given market/sector universe.
+
+Purpose:
+  - Resolve and print tickers based on universe filters.
+Inputs:
+  - CLI args (market, sector, industry, tickers list).
+Outputs:
+  - Printed ticker list and counts to stdout.
+Example:
+  - PYTHONPATH=. python3 swingmaster/cli/list_universe.py --market OMXH
+"""
+
 from __future__ import annotations
 
 import argparse

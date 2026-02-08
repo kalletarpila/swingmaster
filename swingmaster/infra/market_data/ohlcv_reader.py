@@ -1,3 +1,5 @@
+"""Abstractions and helpers for OHLCV data access."""
+
 from __future__ import annotations
 
 import re

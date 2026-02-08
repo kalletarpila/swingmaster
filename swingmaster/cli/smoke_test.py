@@ -1,3 +1,15 @@
+"""Lightweight CLI smoke test entry point for end-to-end sanity checks.
+
+Purpose:
+  - Execute a minimal run to validate wiring and DB connectivity.
+Inputs:
+  - CLI args for market/universe selection and DB paths.
+Outputs:
+  - Printed status/progress to stdout.
+Example:
+  - PYTHONPATH=. python3 swingmaster/cli/smoke_test.py --market OMXH --limit 5
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

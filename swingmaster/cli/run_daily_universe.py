@@ -1,3 +1,17 @@
+"""Run the daily universe pipeline for a single date or small window.
+
+Purpose:
+  - Compute signals and apply policy per ticker for a given day, writing results.
+Inputs:
+  - CLI args for date, market/universe selection, DB paths, policy/signal versions.
+Outputs:
+  - Writes rc_state_daily / rc_transition records and prints progress to stdout.
+Example:
+  - PYTHONPATH=. python3 swingmaster/cli/run_daily_universe.py --market OMXH --date 2025-01-10
+Debug:
+  - --debug / --debug-limit control diagnostic output volume.
+"""
+
 from __future__ import annotations
 
 import argparse

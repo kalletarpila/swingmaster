@@ -1,7 +1,9 @@
 """Composition root for signal provider wiring.
 
-Providers remain pure and testable; infra dependencies are injected here.
-Keep wiring explicit and deterministic.
+Responsibilities:
+  - Build signal provider instances with injected infra dependencies.
+Must not:
+  - Compute signals directly; wiring only.
 """
 
 from __future__ import annotations

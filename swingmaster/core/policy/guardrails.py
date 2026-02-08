@@ -1,3 +1,17 @@
+"""Policy guardrails for state transitions.
+
+Responsibilities:
+  - Enforce allowed transitions and minimum state ages.
+  - Provide guardrail reason codes when blocking transitions.
+
+Inputs/Outputs:
+  - Inputs: previous state/attrs and proposed next state.
+  - Outputs: GuardrailResult with allowed flag and reason codes.
+
+Invariants:
+  - Must be deterministic and independent of OHLCV.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

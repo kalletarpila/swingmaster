@@ -1,3 +1,13 @@
+"""Common rule helpers for rule_v1 policy evaluation.
+
+Responsibilities:
+  - Provide small, deterministic helpers to assemble Proposal objects.
+Must not:
+  - Read OHLCV or external state; operates only on SignalSet inputs.
+Key definitions:
+  - Rule protocol, first_match, apply_hard_exclusions.
+"""
+
 from __future__ import annotations
 
 from typing import Callable, Iterable, Optional

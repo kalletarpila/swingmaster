@@ -1,3 +1,11 @@
+"""Port interfaces for reading prior state history in policies.
+
+Responsibilities:
+  - Define read-only access patterns for rc_state_daily history.
+Must not:
+  - Implement persistence; concrete adapters live in infra layers.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

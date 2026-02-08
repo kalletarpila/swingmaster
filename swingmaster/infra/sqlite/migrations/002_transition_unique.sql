@@ -24,3 +24,4 @@ DROP TABLE rc_transition;
 ALTER TABLE rc_transition_new RENAME TO rc_transition;
 
 CREATE INDEX IF NOT EXISTS idx_rc_transition_ticker_date ON rc_transition(ticker, date);
+-- Purpose: Add unique constraints for rc_transition records.

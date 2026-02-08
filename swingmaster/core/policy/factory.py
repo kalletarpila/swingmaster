@@ -1,3 +1,11 @@
+"""Policy factory helpers for constructing transition policy instances.
+
+Responsibilities:
+  - Map policy identifiers/versions to concrete policy implementations.
+Must not:
+  - Read OHLCV; uses provided ports and configuration only.
+"""
+
 from __future__ import annotations
 
 from typing import Callable, Dict, Tuple

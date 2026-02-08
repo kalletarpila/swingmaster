@@ -1,3 +1,24 @@
+"""Signal: INVALIDATED.
+
+Category:
+  - Invalidation / breakdown guard.
+
+Contract:
+  - Inputs: low-price series (most recent first) and invalidation lookback length.
+  - Output: boolean signal (True when today's low breaks prior lows).
+  - Determinism: must not depend on policy state or history.
+
+Trigger summary:
+  - Fires when lows[0] is strictly less than the minimum low in the prior
+    invalidation_lookback days.
+
+Edge cases:
+  - Returns False when insufficient history is available.
+
+Complexity:
+  - O(lookback) time, O(1) extra space.
+"""
+
 from __future__ import annotations
 
 _DEBUG_INVALIDATED = False

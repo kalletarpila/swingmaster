@@ -1,3 +1,5 @@
+"""Tests for run signal audit cli features."""
+
 from __future__ import annotations
 
 import sys

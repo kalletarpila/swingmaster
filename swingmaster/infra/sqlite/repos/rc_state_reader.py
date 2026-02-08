@@ -1,3 +1,5 @@
+"""SQLite reader for rc_state_daily history queries."""
+
 from __future__ import annotations
 
 import sqlite3

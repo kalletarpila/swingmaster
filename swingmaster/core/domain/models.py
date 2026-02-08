@@ -1,3 +1,15 @@
+"""Domain models for policy decisions and transitions.
+
+Responsibilities:
+  - Define immutable data carriers for state attributes, decisions, and transitions.
+
+Inputs/Outputs:
+  - Decision and Transition are persisted/audited by infra layers.
+
+Invariants:
+  - Models must be deterministic containers with no behavior.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

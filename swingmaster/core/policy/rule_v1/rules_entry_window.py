@@ -1,3 +1,13 @@
+"""Rules for ENTRY_WINDOW state behavior in rule_v1.
+
+Responsibilities:
+  - Keep entry window open or pass based on signals.
+Must not:
+  - Access OHLCV or policy history; rules are signal-only and deterministic.
+Key definitions:
+  - rule_keep_window, rule_pass.
+"""
+
 from __future__ import annotations
 
 from typing import Optional

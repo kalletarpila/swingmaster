@@ -1,3 +1,11 @@
+"""SQLite implementation of StateHistoryPort.
+
+Responsibilities:
+  - Read recent rc_state_daily rows for history-based policy checks.
+Must not:
+  - Implement policy logic; data access only.
+"""
+
 from __future__ import annotations
 
 import json

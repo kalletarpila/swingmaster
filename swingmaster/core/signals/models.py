@@ -1,3 +1,11 @@
+"""SignalSet and related models for carrying provider signals.
+
+Responsibilities:
+  - Provide a small, deterministic container for SignalKey presence checks.
+Must not:
+  - Compute signals; only stores them.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

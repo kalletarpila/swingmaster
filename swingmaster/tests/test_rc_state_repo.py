@@ -1,3 +1,5 @@
+"""Tests for rc state repo."""
+
 from __future__ import annotations
 
 import json

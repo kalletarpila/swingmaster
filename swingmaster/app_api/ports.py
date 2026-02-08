@@ -1,3 +1,11 @@
+"""Port definitions for app-level dependencies.
+
+Responsibilities:
+  - Define interface contracts for providers and persistence.
+Must not:
+  - Implement logic; interfaces only.
+"""
+
 from __future__ import annotations
 
 from typing import Protocol

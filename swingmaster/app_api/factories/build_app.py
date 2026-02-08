@@ -1,3 +1,11 @@
+"""Construct a fully wired app instance for running the engine.
+
+Responsibilities:
+  - Assemble providers, policies, and persistence ports based on config.
+Must not:
+  - Implement signal/policy logic; composition only.
+"""
+
 from __future__ import annotations
 
 import sqlite3

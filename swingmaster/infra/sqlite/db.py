@@ -1,3 +1,11 @@
+"""SQLite connection helpers for read/write access.
+
+Responsibilities:
+  - Create and configure SQLite connections for repositories.
+Must not:
+  - Implement domain logic; connection management only.
+"""
+
 from __future__ import annotations
 
 import sqlite3

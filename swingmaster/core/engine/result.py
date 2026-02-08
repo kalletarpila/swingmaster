@@ -1,3 +1,13 @@
+"""Evaluation result payload for a single state-machine step.
+
+Responsibilities:
+  - Capture final state, reasons, and transition metadata for persistence/audit.
+
+Inputs/Outputs:
+  - Inputs: produced by evaluator.evaluate_step.
+  - Outputs: immutable dataclass consumed by app/infra layers.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

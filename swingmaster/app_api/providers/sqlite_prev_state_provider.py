@@ -1,3 +1,11 @@
+"""SQLite-backed provider for previous state lookup.
+
+Responsibilities:
+  - Fetch prior state/attrs for a ticker/day from persistence.
+Must not:
+  - Compute signals or policy decisions.
+"""
+
 from __future__ import annotations
 
 import sqlite3

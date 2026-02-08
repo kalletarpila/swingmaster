@@ -1,3 +1,22 @@
+"""Dow structure helpers for v2 signals.
+
+Responsibilities:
+  - Compute pivot markers (H/L/HH/HL/LH/LL) from OHLC-derived series.
+  - Summarize trend state from marker sequences.
+  - Must not depend on policy state or persistence.
+
+Key definitions:
+  - build_dow_series_from_ohlc: converts OHLC to Dow input series.
+  - compute_dow_markers: produces marker list and trend summary.
+
+Inputs/Outputs:
+  - Inputs: OHLC series (DESC order) or value/high/low series.
+  - Outputs: markers list and summary string.
+
+Determinism:
+  - Pure computation on input series; no external state.
+"""
+
 from __future__ import annotations
 
 from typing import Dict, List, Tuple

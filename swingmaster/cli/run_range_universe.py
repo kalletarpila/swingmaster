@@ -1,3 +1,18 @@
+"""Run the universe pipeline across a date range and persist results.
+
+Purpose:
+  - Iterate trading days, compute signals, apply policy, and write state/transition rows.
+Inputs:
+  - CLI args for market/universe selection, date range, DB paths, policy/signal versions.
+Outputs:
+  - Writes rc_state_daily / rc_transition records and prints progress to stdout.
+Examples:
+  - PYTHONPATH=. python3 swingmaster/cli/run_range_universe.py --market OMXH --mode market --date-from 2024-02-08 --date-to 2026-02-02 --max-days 550 --signal-version v2
+Debug:
+  - --debug / --debug-limit control diagnostic output volume.
+  - --print-signals / --print-signals-limit emit per-day signal keys when enabled.
+"""
+
 from __future__ import annotations
 
 import argparse

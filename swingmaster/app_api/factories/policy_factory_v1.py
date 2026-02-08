@@ -1,3 +1,5 @@
+"""Factory for constructing rule_v1 policy instances."""
+
 from __future__ import annotations
 
 import sqlite3

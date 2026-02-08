@@ -1,3 +1,11 @@
+"""SQLite schema migration helpers for rc_state and related tables.
+
+Responsibilities:
+  - Create/upgrade schema deterministically.
+Must not:
+  - Embed business logic; migrations only.
+"""
+
 from __future__ import annotations
 
 import sqlite3

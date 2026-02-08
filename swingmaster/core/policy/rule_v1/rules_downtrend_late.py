@@ -1,3 +1,13 @@
+"""Rules for DOWNTREND_LATE state transitions in rule_v1.
+
+Responsibilities:
+  - Map SignalSet patterns to Proposal transitions for late downtrend.
+Must not:
+  - Access OHLCV or policy history; rules are signal-only and deterministic.
+Key definitions:
+  - rule_stabilizing.
+"""
+
 from __future__ import annotations
 
 from typing import Optional

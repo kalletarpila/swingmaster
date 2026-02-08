@@ -1,3 +1,13 @@
+"""Rules for STABILIZING state transitions in rule_v1.
+
+Responsibilities:
+  - Stay in stabilization based on confirming signals.
+Must not:
+  - Access OHLCV or policy history; rules are signal-only and deterministic.
+Key definitions:
+  - rule_stay_with_confirmed.
+"""
+
 from __future__ import annotations
 
 from typing import Optional

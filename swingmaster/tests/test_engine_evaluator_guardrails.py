@@ -1,3 +1,5 @@
+"""Tests for engine evaluator guardrails."""
+
 from __future__ import annotations
 
 from swingmaster.core.domain.enums import ReasonCode, State

@@ -1,3 +1,5 @@
+"""Tests for rule policy v2 dow."""
+
 from __future__ import annotations
 
 from swingmaster.core.domain.enums import ReasonCode, State

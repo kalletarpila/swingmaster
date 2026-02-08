@@ -1,3 +1,27 @@
+"""Signal: TREND_MATURED.
+
+Category:
+  - Trend / structure progression.
+
+Contract:
+  - Inputs: close series (most recent first).
+  - Output: boolean signal.
+  - Determinism: must not depend on policy state or history.
+
+Trigger summary:
+  - Requires sufficient history for SMA20, structure, momentum, and drawdown windows.
+  - Structure passes if enough recent new lows OR drawdown from a reference high.
+  - Time passes if a majority of the last MIN_AGE_DAYS closes are below SMA20.
+  - Momentum passes if last three new lows are spaced with limited percent drop.
+  - Fires only when structure, time, and momentum all pass.
+
+Edge cases:
+  - Returns False on insufficient history or invalid SMA window.
+
+Complexity:
+  - O(N) over fixed windows, O(1) extra space.
+"""
+
 from __future__ import annotations
 
 from .context import SignalContextV2

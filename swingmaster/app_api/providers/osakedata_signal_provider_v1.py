@@ -1,3 +1,11 @@
+"""Signal provider v1 backed by osakedata OHLCV.
+
+Responsibilities:
+  - Fetch OHLCV data and compute SignalSet for each ticker/day.
+Must not:
+  - Apply policy logic; emits signals only.
+"""
+
 from __future__ import annotations
 
 import sqlite3

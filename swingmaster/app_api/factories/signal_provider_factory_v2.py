@@ -1,3 +1,5 @@
+"""Factory for creating v2 signal provider instances."""
+
 from __future__ import annotations
 
 import sqlite3

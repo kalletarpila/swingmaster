@@ -1,3 +1,22 @@
+"""Rule-based transition policy v1 for daily market state decisions.
+
+Responsibilities:
+  - Consume provider-level signals and optional state history to decide next state.
+  - Emit deterministic Decision objects with audit-friendly ReasonCode lists.
+Must not:
+  - Read raw OHLCV or provider internals; only consumes SignalSet + ports.
+
+Consumed signals (non-exhaustive): DATA_INSUFFICIENT, INVALIDATED, EDGE_GONE,
+STABILIZATION_CONFIRMED, ENTRY_SETUP_VALID, TREND_STARTED, TREND_MATURED,
+NO_SIGNAL, CHURN_GUARD (if present), and DOW_* quiet signals.
+State/history access:
+  - Uses StateHistoryPort.get_recent_days(...) for recency/quiet-window checks.
+Outputs:
+  - Decision(next_state, reason_codes, attrs_update) for the state machine.
+Invariants:
+  - Deterministic and audit-friendly; no side effects beyond Decision creation.
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,13 @@
+"""Rules for NO_TRADE state transitions in rule_v1.
+
+Responsibilities:
+  - Enter trend based on signals (e.g., TREND_STARTED).
+Must not:
+  - Access OHLCV or policy history; rules are signal-only and deterministic.
+Key definitions:
+  - rule_trend_started.
+"""
+
 from __future__ import annotations
 
 from typing import Optional

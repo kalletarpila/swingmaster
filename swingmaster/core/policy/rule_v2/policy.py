@@ -1,3 +1,13 @@
+"""Rule-based transition policy v2 for daily market state decisions.
+
+Responsibilities:
+  - Consume provider-level signals and optional history to decide next state.
+Must not:
+  - Read OHLCV directly; uses signals and ports only.
+Outputs:
+  - Decision objects for the state machine with audit reasons.
+"""
+
 from __future__ import annotations
 
 from typing import Optional

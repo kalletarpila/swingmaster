@@ -1,3 +1,5 @@
+"""SQLite repository for run metadata (rc_run)."""
+
 from __future__ import annotations
 
 import sqlite3

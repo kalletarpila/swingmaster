@@ -1,3 +1,15 @@
+"""Summarize state transitions and reasons across a run.
+
+Purpose:
+  - Read persisted rc_state/rc_transition data and emit summary stats.
+Inputs:
+  - CLI args for DB paths, filters, and formatting options.
+Outputs:
+  - Printed summaries to stdout.
+Example:
+  - PYTHONPATH=. python3 swingmaster/cli/chain_summary.py --help
+"""
+
 from __future__ import annotations
 
 import argparse

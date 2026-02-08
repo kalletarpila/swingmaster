@@ -1,3 +1,26 @@
+"""Signal: ENTRY_SETUP_VALID.
+
+Category:
+  - Entry setup / reclaim validation.
+
+Contract:
+  - Inputs: highs/lows/closes (most recent first).
+  - Output: boolean signal.
+  - Determinism: must not depend on policy state or history.
+
+Trigger summary:
+  - Requires a tight base range or a reclaim above SMA20 with strong close.
+  - Derives an invalidation level from the chosen setup.
+  - Entry price must be above invalidation with bounded risk (ATR or percent).
+  - Support must hold above invalidation for SUPPORT_LOOKBACK days.
+
+Edge cases:
+  - Returns False on insufficient history or invalid SMA window.
+
+Complexity:
+  - O(N) over fixed windows, O(1) extra space.
+"""
+
 from __future__ import annotations
 
 from .context import SignalContextV2

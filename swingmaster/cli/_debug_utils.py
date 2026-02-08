@@ -1,3 +1,11 @@
+"""CLI debug helpers for consistent, deterministic diagnostic output.
+
+Responsibilities:
+  - Provide small helpers for printing/debug limits in CLIs.
+Must not:
+  - Affect trading logic; output-only utilities.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -56,4 +64,3 @@ def infer_entry_blocker(rc_state: str, reasons: Iterable[str]) -> str:
     if rc_state in {"STABILIZING"}:
         return "BLOCKER_STATE_STABILIZING"
     return "BLOCKER_UNKNOWN"
-

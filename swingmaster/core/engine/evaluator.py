@@ -1,3 +1,19 @@
+"""State machine evaluation for a single ticker/day.
+
+Responsibilities:
+  - Apply policy decision and guardrails deterministically.
+  - Merge policy and guardrail reasons into final reasons list.
+  - Produce EvaluationResult and optional Transition for persistence.
+
+Inputs/Outputs:
+  - Inputs: previous State/StateAttrs, SignalSet, and a TransitionPolicy.
+  - Outputs: EvaluationResult with final state, reasons, and transition.
+
+Invariants:
+  - Must not read OHLCV directly; signals are precomputed.
+  - Must remain deterministic and audit-friendly.
+"""
+
 from __future__ import annotations
 
 from typing import Protocol

@@ -1,3 +1,5 @@
+"""Tests for cli debug helpers."""
+
 from swingmaster.cli.run_daily_universe import _effective_limit
 from swingmaster.cli._debug_utils import _dbg
 

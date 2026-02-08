@@ -1,3 +1,11 @@
+"""SignalKey enum definitions for provider-level signals.
+
+Responsibilities:
+  - Enumerate stable signal identifiers consumed by policies.
+Must not:
+  - Encode logic; values are identifiers only.
+"""
+
 from __future__ import annotations
 
 from enum import Enum

@@ -1,3 +1,11 @@
+"""Shared type definitions for rule_v1 policy rules.
+
+Responsibilities:
+  - Define Proposal dataclass used to carry next state + reasons.
+Must not:
+  - Implement logic; data-only types for rule evaluation.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

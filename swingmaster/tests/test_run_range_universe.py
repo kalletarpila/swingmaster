@@ -1,3 +1,5 @@
+"""Tests for run range universe."""
+
 from __future__ import annotations
 
 import sqlite3

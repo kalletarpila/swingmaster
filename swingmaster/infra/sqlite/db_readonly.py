@@ -1,3 +1,5 @@
+"""SQLite connection helpers for read-only access."""
+
 from __future__ import annotations
 
 import sqlite3

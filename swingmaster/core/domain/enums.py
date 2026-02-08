@@ -1,3 +1,14 @@
+"""Domain enums for state machine and reasoning.
+
+Responsibilities:
+  - Define State and ReasonCode identifiers persisted in RC storage.
+  - Provide stable reason categories and audit metadata.
+
+Invariants:
+  - Enum values must remain stable for persistence and audits.
+  - ReasonCode metadata must be complete and deterministic.
+"""
+
 from __future__ import annotations
 
 from enum import Enum

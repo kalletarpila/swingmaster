@@ -1,3 +1,11 @@
+"""Facade API for running signals and policies at the app layer.
+
+Responsibilities:
+  - Provide a simplified entry point to compute signals and decisions.
+Must not:
+  - Implement policy logic directly; delegates to factories/providers.
+"""
+
 from __future__ import annotations
 
 import datetime

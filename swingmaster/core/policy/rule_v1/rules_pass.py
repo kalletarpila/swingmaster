@@ -1,3 +1,13 @@
+"""Rules for PASS state transitions in rule_v1.
+
+Responsibilities:
+  - Reset or remain in PASS based on signals.
+Must not:
+  - Access OHLCV or policy history; rules are signal-only and deterministic.
+Key definitions:
+  - rule_reset.
+"""
+
 from __future__ import annotations
 
 from typing import Optional

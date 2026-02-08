@@ -31,3 +31,4 @@ CREATE TABLE IF NOT EXISTS rc_transition (
 
 CREATE INDEX IF NOT EXISTS idx_rc_state_daily_date ON rc_state_daily(date);
 CREATE INDEX IF NOT EXISTS idx_rc_transition_ticker_date ON rc_transition(ticker, date);
+-- Purpose: Initialize core rc_state and related tables for persistence.

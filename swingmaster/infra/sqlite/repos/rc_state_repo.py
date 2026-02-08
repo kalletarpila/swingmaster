@@ -1,3 +1,11 @@
+"""SQLite repository for rc_state_daily and rc_transition persistence.
+
+Responsibilities:
+  - Insert/update state and transition rows deterministically.
+Must not:
+  - Modify policy or signal logic; persistence only.
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,5 @@
+"""Tests for policy factory wiring and rule set behavior."""
+
 from __future__ import annotations
 
 import pytest

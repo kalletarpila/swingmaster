@@ -1,3 +1,11 @@
+"""App-level policy factory for selecting policy versions.
+
+Responsibilities:
+  - Map CLI/app config to concrete policy implementations.
+Must not:
+  - Implement policy logic; delegates to core policy factories.
+"""
+
 from __future__ import annotations
 
 import sqlite3

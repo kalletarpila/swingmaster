@@ -1,3 +1,5 @@
+"""Tests for osakedata signal provider v2."""
+
 from __future__ import annotations
 
 import sqlite3

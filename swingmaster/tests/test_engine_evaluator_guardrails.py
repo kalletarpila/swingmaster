@@ -5,6 +5,7 @@ from __future__ import annotations
 from swingmaster.core.domain.enums import ReasonCode, State
 from swingmaster.core.domain.models import Decision, StateAttrs
 from swingmaster.core.engine.evaluator import evaluate_step
+from swingmaster.core.policy.guardrails import apply_guardrails
 from swingmaster.core.signals.models import SignalSet
 
 
@@ -19,10 +20,19 @@ class _PolicyWithInvalidated:
 
 def test_churn_guard_not_combined_with_invalidated() -> None:
     prev_state = State.DOWNTREND_EARLY
-    prev_attrs = StateAttrs(confidence=None, age=0, status=None)
+    prev_attrs = StateAttrs(confidence=None, age=2, status=None)
     signals = SignalSet({})
     policy = _PolicyWithInvalidated()
 
     result = evaluate_step(prev_state, prev_attrs, signals, policy)
 
     assert result.reasons == [ReasonCode.INVALIDATED]
+
+
+def test_guardrails_min_state_age_lock_reason() -> None:
+    prev_state = State.DOWNTREND_EARLY
+    prev_attrs = StateAttrs(confidence=None, age=0, status=None)
+    result = apply_guardrails(prev_state, prev_attrs, State.DOWNTREND_LATE)
+
+    assert result.reason_codes == [ReasonCode.MIN_STATE_AGE_LOCK]
+    assert ReasonCode.CHURN_GUARD not in result.reason_codes

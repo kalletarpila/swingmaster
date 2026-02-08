@@ -72,6 +72,8 @@ class SwingmasterApplication:
                     prev_attrs=prev_attrs,
                     signals=signals,
                     policy=self._policy,
+                    ticker=ticker,
+                    as_of_date=as_of_date,
                 )
 
                 self._state_repo.insert_state(

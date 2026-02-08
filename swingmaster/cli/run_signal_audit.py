@@ -28,7 +28,7 @@ from swingmaster.app_api.providers.signals_v2.trend_matured import (
     eval_trend_matured_debug,
     _min_required as _trend_matured_min_required,
 )
-from swingmaster.core.domain.enums import ReasonCode, State
+from swingmaster.core.domain.enums import ReasonCode, State, reason_to_persisted
 from swingmaster.core.engine.evaluator import evaluate_step
 from swingmaster.core.signals.enums import SignalKey
 from swingmaster.infra.market_data.osakedata_reader import OsakeDataReader
@@ -90,6 +90,11 @@ def parse_args() -> argparse.Namespace:
         "--print-focus-only",
         action="store_true",
         help="Print only focus-signal matches (plus DATA_INSUFFICIENT)",
+    )
+    parser.add_argument(
+        "--print-policy-reasons-raw",
+        action="store_true",
+        help="Print both raw and normalized policy reasons when policy evaluation is enabled",
     )
     parser.add_argument("--summary", action="store_true", help="Print summary counters at end")
     parser.add_argument(
@@ -228,6 +233,7 @@ def _print_event_block(
     signal_keys: list[SignalKey],
     data_insufficient: bool,
     with_policy: bool,
+    print_policy_reasons_raw: bool,
     prev_state: State | None,
     next_state: State | None,
     reasons: list[ReasonCode] | None,
@@ -239,8 +245,14 @@ def _print_event_block(
         print("POLICY skipped DATA_INSUFFICIENT")
     elif with_policy and prev_state is not None and next_state is not None and reasons is not None:
         print(f"POLICY {prev_state.name}->{next_state.name}")
-        reason_names = ",".join(code.value for code in reasons) if reasons else "(none)"
-        print(f"REASONS {reason_names}")
+        if print_policy_reasons_raw:
+            reason_raw = ",".join(code.value for code in reasons) if reasons else "(none)"
+            reason_norm = ",".join(reason_to_persisted(code) for code in reasons) if reasons else "(none)"
+            print(f"REASONS_RAW {reason_raw}")
+            print(f"REASONS {reason_norm}")
+        else:
+            reason_norm = ",".join(reason_to_persisted(code) for code in reasons) if reasons else "(none)"
+            print(f"REASONS {reason_norm}")
     print("")
 
 
@@ -706,6 +718,8 @@ def main() -> None:
                             prev_attrs=prev_attrs,
                             signals=signal_set,
                             policy=policy,
+                            ticker=ticker,
+                            as_of_date=day,
                         )
                         next_state = evaluation.final_state
                         reasons = evaluation.reasons
@@ -819,6 +833,7 @@ def main() -> None:
                         signal_keys=signal_keys,
                         data_insufficient=data_insufficient,
                         with_policy=args.with_policy,
+                        print_policy_reasons_raw=args.print_policy_reasons_raw,
                         prev_state=prev_state,
                         next_state=next_state,
                         reasons=reasons,

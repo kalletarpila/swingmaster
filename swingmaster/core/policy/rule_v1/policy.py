@@ -35,7 +35,7 @@ from .rules_pass import rule_reset
 from .rules_stabilizing import rule_stay_with_confirmed
 from .types import Proposal
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 
 @dataclass(frozen=True)
@@ -188,6 +188,13 @@ def _with_trend_started_reason(decision: Decision, signals: SignalSet) -> Decisi
         reason_codes=[*decision.reason_codes, ReasonCode.TREND_STARTED],
         attrs_update=decision.attrs_update,
     )
+
+_CHURN_GUARD_DEBUG_FN: Optional[Callable[[str], None]] = None
+
+
+def set_churn_guard_debug(fn: Optional[Callable[[str], None]]) -> None:
+    global _CHURN_GUARD_DEBUG_FN
+    _CHURN_GUARD_DEBUG_FN = fn
 
 
 RESET_NO_SIGNAL_DAYS = 15
@@ -480,13 +487,21 @@ def _churn_guard_decision(
         )
 
     churn_guard = False
+    trigger = None
     if history is not None:
         if _recent_entry_window_exit(history):
             churn_guard = True
+            trigger = "recent_entry_window_exit"
         elif _repeat_setup_without_stabilization(history):
             churn_guard = True
+            trigger = "repeat_setup_without_stabilization"
 
     if churn_guard:
+        if _CHURN_GUARD_DEBUG_FN is not None:
+            _CHURN_GUARD_DEBUG_FN(
+                "CHURN_GUARD_ORIGIN=POLICY "
+                f"ticker={ticker} date={as_of_date} prev_state={prev_state} TRIGGER={trigger}"
+            )
         return Decision(
             next_state=prev_state,
             reason_codes=[ReasonCode.CHURN_GUARD],

@@ -12,7 +12,7 @@ import json
 import sqlite3
 from typing import List, Optional
 
-from swingmaster.core.domain.enums import ReasonCode, State
+from swingmaster.core.domain.enums import ReasonCode, State, reason_from_persisted
 from swingmaster.core.policy.ports.state_history_port import StateHistoryDay, StateHistoryPort
 from swingmaster.core.signals.enums import SignalKey
 
@@ -74,10 +74,10 @@ def _parse_reason_codes(raw: Optional[str]) -> List[ReasonCode]:
     values = _parse_json_list(raw)
     codes: List[ReasonCode] = []
     for value in values:
-        try:
-            codes.append(ReasonCode(value))
-        except Exception:
+        code = reason_from_persisted(value)
+        if code is None:
             continue
+        codes.append(code)
     return codes
 
 

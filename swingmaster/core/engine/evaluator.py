@@ -16,13 +16,20 @@ Invariants:
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Callable, Protocol
 
 from ..domain.enums import ReasonCode, State
 from ..domain.models import Decision, StateAttrs, Transition
-from ..policy.guardrails import apply_guardrails
+from ..policy.guardrails import MIN_STATE_AGE, apply_guardrails
 from ..signals.models import SignalSet
 from .result import EvaluationResult
+
+_DEBUG_FN: Callable[[str], None] | None = None
+
+
+def set_evaluator_debug(fn: Callable[[str], None] | None) -> None:
+    global _DEBUG_FN
+    _DEBUG_FN = fn
 
 
 class TransitionPolicy(Protocol):
@@ -35,6 +42,8 @@ def evaluate_step(
     prev_attrs: StateAttrs,
     signals: SignalSet,
     policy: TransitionPolicy,
+    ticker: str | None = None,
+    as_of_date: str | None = None,
 ) -> EvaluationResult:
     decision = policy.decide(prev_state, prev_attrs, signals)
     proposed_state = decision.next_state
@@ -58,6 +67,14 @@ def evaluate_step(
             confidence=prev_attrs.confidence,
             age=prev_attrs.age + 1,
             status=prev_attrs.status,
+        )
+
+    if _DEBUG_FN is not None and ReasonCode.CHURN_GUARD in guardrail_reasons:
+        min_age = MIN_STATE_AGE.get(prev_state)
+        _DEBUG_FN(
+            "CHURN_GUARD_ORIGIN=GUARDRAILS "
+            f"ticker={ticker} date={as_of_date} prev_state={prev_state} "
+            f"prev_age={prev_attrs.age} min_age={min_age}"
         )
 
     if ReasonCode.CHURN_GUARD in guardrail_reasons:

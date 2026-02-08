@@ -40,6 +40,7 @@ class ReasonCode(Enum):
     INVALIDATED = "INVALIDATED"
     RESET_TO_NEUTRAL = "RESET_TO_NEUTRAL"
     CHURN_GUARD = "CHURN_GUARD"
+    MIN_STATE_AGE_LOCK = "MIN_STATE_AGE_LOCK"
     DATA_INSUFFICIENT = "DATA_INSUFFICIENT"
     NO_SIGNAL = "NO_SIGNAL"
 
@@ -82,6 +83,10 @@ REASON_METADATA: dict[ReasonCode, dict[str, object]] = {
         "category": ReasonCategory.EXCLUSION,
         "message": "Transition blocked to prevent rapid oscillation.",
     },
+    ReasonCode.MIN_STATE_AGE_LOCK: {
+        "category": ReasonCategory.EXCLUSION,
+        "message": "State blocked by minimum age guardrail.",
+    },
     ReasonCode.DATA_INSUFFICIENT: {
         "category": ReasonCategory.EXCLUSION,
         "message": "Available data is insufficient for a decision.",
@@ -91,6 +96,35 @@ REASON_METADATA: dict[ReasonCode, dict[str, object]] = {
         "message": "No actionable signals were present; state remains unchanged.",
     },
 }
+
+_REASON_PERSIST_OVERLAP = {
+    ReasonCode.DATA_INSUFFICIENT,
+    ReasonCode.EDGE_GONE,
+    ReasonCode.INVALIDATED,
+    ReasonCode.NO_SIGNAL,
+    ReasonCode.SELLING_PRESSURE_EASED,
+    ReasonCode.STABILIZATION_CONFIRMED,
+    ReasonCode.TREND_MATURED,
+    ReasonCode.TREND_STARTED,
+}
+
+
+def reason_to_persisted(reason: ReasonCode) -> str:
+    if reason in _REASON_PERSIST_OVERLAP:
+        return f"POLICY:{reason.value}"
+    return reason.value
+
+
+def reason_from_persisted(label: str) -> ReasonCode | None:
+    if not label:
+        return None
+    if label.startswith("POLICY:"):
+        label = label[len("POLICY:") :]
+    try:
+        return ReasonCode(label)
+    except Exception:
+        return None
+
 
 _missing = [rc for rc in ReasonCode if rc not in REASON_METADATA]
 if _missing:

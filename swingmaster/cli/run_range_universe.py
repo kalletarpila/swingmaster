@@ -31,6 +31,9 @@ from swingmaster.cli._debug_utils import (
     _take_head_tail,
     infer_entry_blocker,
 )
+from swingmaster.core.engine.evaluator import set_evaluator_debug
+from swingmaster.core.policy.rule_v1.policy import set_churn_guard_debug
+from swingmaster.core.domain.enums import reason_from_persisted, reason_to_persisted
 from swingmaster.core.signals.enums import SignalKey
 from swingmaster.infra.sqlite.db import get_connection
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
@@ -104,7 +107,15 @@ def parse_reasons(reasons_raw: str | None) -> List[str]:
     try:
         parsed = json.loads(reasons_raw)
         if isinstance(parsed, list):
-            return [r for r in parsed if isinstance(r, str)]
+            normalized: List[str] = []
+            for value in parsed:
+                if not isinstance(value, str):
+                    continue
+                code = reason_from_persisted(value)
+                if code is None:
+                    continue
+                normalized.append(reason_to_persisted(code))
+            return normalized
     except Exception:
         return []
     return []
@@ -320,6 +331,13 @@ def collect_signal_stats(signal_provider, tickers: List[str], day: str) -> tuple
 
 def main() -> None:
     args = parse_args()
+
+    if _debug_enabled(args):
+        set_evaluator_debug(lambda msg: _dbg(args, msg))
+        set_churn_guard_debug(lambda msg: _dbg(args, msg))
+    else:
+        set_evaluator_debug(None)
+        set_churn_guard_debug(None)
 
     md_conn = get_readonly_connection(args.md_db)
     rc_conn = get_connection(args.rc_db)

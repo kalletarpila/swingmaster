@@ -59,7 +59,7 @@ def apply_guardrails(
         return GuardrailResult(
             allowed=False,
             final_state=prev_state,
-            reason_codes=[ReasonCode.CHURN_GUARD],
+            reason_codes=[ReasonCode.MIN_STATE_AGE_LOCK],
         )
 
     return GuardrailResult(

@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from swingmaster.core.domain.enums import ReasonCode, State
+from swingmaster.core.domain.enums import ReasonCode, State, reason_to_persisted
 from swingmaster.core.domain.models import StateAttrs, Transition
 
 
@@ -35,7 +35,7 @@ class RcStateRepo:
     ) -> None:
         normalized_reasons = self._normalize_reasons(reasons)
         reasons_json = json.dumps(
-            [reason.value for reason in normalized_reasons],
+            [reason_to_persisted(reason) for reason in normalized_reasons],
             separators=(",", ":"),
             ensure_ascii=False,
         )
@@ -80,7 +80,7 @@ class RcStateRepo:
 
         normalized_reasons = self._normalize_reasons(transition.reason_codes)
         reasons_json = json.dumps(
-            [reason.value for reason in normalized_reasons],
+            [reason_to_persisted(reason) for reason in normalized_reasons],
             separators=(",", ":"),
             ensure_ascii=False,
         )

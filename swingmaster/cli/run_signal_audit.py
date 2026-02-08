@@ -555,6 +555,11 @@ def main() -> None:
             fromlist=["set_entry_setup_valid_debug", "get_entry_setup_valid_debug"],
         )
         _entry_dbg.set_entry_setup_valid_debug(args.debug)
+        _invalidated_dbg = __import__(
+            "swingmaster.app_api.providers.signals_v2.invalidated",
+            fromlist=["set_invalidated_debug", "set_invalidated_debug_date", "get_invalidated_debug"],
+        )
+        _invalidated_dbg.set_invalidated_debug(args.debug)
         signal_provider = app._signal_provider
         policy = app._policy
         prev_state_provider = app._prev_state_provider
@@ -592,15 +597,22 @@ def main() -> None:
             )
             focus_match_eligible_flags = []
             entry_debug_by_day = {}
+            invalidated_debug_by_day = {}
             if explicit_anchor_date is not None:
                 anchor_date = explicit_anchor_date
             for day in trading_days:
+                if args.debug and args.focus_signal == "INVALIDATED":
+                    _invalidated_dbg.set_invalidated_debug_date(day)
                 signal_set = signal_provider.get_signals(ticker, day)
                 day_signals.append((day, signal_set))
                 if args.debug and args.focus_signal == "ENTRY_SETUP_VALID":
                     entry_debug = _entry_dbg.get_entry_setup_valid_debug()
                     if entry_debug:
                         entry_debug_by_day[day] = entry_debug
+                if args.debug and args.focus_signal == "INVALIDATED":
+                    invalidated_debug = _invalidated_dbg.get_invalidated_debug()
+                    if invalidated_debug:
+                        invalidated_debug_by_day[day] = invalidated_debug
                 if explicit_anchor_date is None and after_signal is not None and after_signal in signal_set.signals:
                     if first_after_signal_date is None:
                         first_after_signal_date = date.fromisoformat(day)
@@ -777,6 +789,16 @@ def main() -> None:
                             else:
                                 debug_tail = entry_debug[len("DEBUG_ENTRY_SETUP_VALID ") :]
                                 print(f"DEBUG_ENTRY_SETUP_VALID date={day} {debug_tail}")
+                    if (
+                        args.debug
+                        and args.print_focus_only
+                        and args.focus_signal == "INVALIDATED"
+                        and focus_match
+                        and SignalKey.INVALIDATED in signal_set.signals
+                    ):
+                        invalidated_debug = invalidated_debug_by_day.get(day)
+                        if invalidated_debug and invalidated_debug.startswith("DEBUG_INVALIDATED "):
+                            print(invalidated_debug)
                     _print_event_block(
                         ticker=ticker,
                         day=day,

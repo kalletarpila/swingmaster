@@ -2,4 +2,5 @@
 
 POLICY_V1 = "v1"
 POLICY_V2 = "v2"
-ALLOWED_POLICY_VERSIONS = {POLICY_V1, POLICY_V2}
+# v1 is disabled; keep constant for legacy parsing only.
+ALLOWED_POLICY_VERSIONS = {POLICY_V2}

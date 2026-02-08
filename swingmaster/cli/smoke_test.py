@@ -17,7 +17,7 @@ from pathlib import Path
 from swingmaster.app_api.facade import SwingmasterApplication
 from swingmaster.app_api.providers.sqlite_prev_state_provider import SQLitePrevStateProvider
 from swingmaster.app_api.providers.sqlite_signal_provider_v0 import SQLiteSignalProviderV0
-from swingmaster.core.policy.rule_policy_v1 import RuleBasedTransitionPolicyV1
+from swingmaster.core.policy.rule_policy_v2 import RuleBasedTransitionPolicyV2
 from swingmaster.infra.sqlite.db import get_connection
 from swingmaster.infra.sqlite.migrator import apply_migrations
 from swingmaster.infra.market_data.ohlcv_reader import OhlcvReader
@@ -86,15 +86,15 @@ def main() -> None:
             sma20 = sum(c for _, c in pairs[0:20]) / 20.0
             print(f"  latest={latest} prev={prev} sma20={sma20}")
 
-        policy = RuleBasedTransitionPolicyV1()
+        policy = RuleBasedTransitionPolicyV2()
         app = SwingmasterApplication(
             conn=conn,
             policy=policy,
             signal_provider=SQLiteSignalProviderV0(conn, table_name="daily_ohlcv"),
             prev_state_provider=SQLitePrevStateProvider(conn),
             engine_version="dev",
-            policy_id="rule_v1",
-            policy_version="dev",
+            policy_id="rule_v2",
+            policy_version="v2",
         )
 
         run_id_day1 = app.run_daily(as_of_date="2026-01-21", tickers=["AAA", "BBB", "CCC"])

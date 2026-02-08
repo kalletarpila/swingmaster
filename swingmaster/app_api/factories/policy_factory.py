@@ -16,21 +16,17 @@ from swingmaster.app_api.factories.policy_versions import (
 def build_policy(
     conn: sqlite3.Connection,
     *,
-    policy_version: str = "v1",
+    policy_version: str = "v2",
     history_table: str = "rc_state_daily",
     enable_history: bool = True,
 ):
     """Composition root: build a policy instance by version.
 
-    Supported versions: "v1", "v2".
+    Supported versions: "v2" (v1 disabled).
     Wiring is deterministic; history is optional but recommended.
     """
     if policy_version == POLICY_V1:
-        return build_rule_policy_v1(
-            conn,
-            history_table=history_table,
-            enable_history=enable_history,
-        )
+        raise RuntimeError("v1 disabled")
     if policy_version == POLICY_V2:
         return build_rule_policy_v2(
             conn,

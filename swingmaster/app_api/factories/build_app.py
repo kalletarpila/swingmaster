@@ -20,7 +20,7 @@ from swingmaster.app_api.factories.signal_provider_factory import build_signal_p
 
 def build_swingmaster_app(
     conn: sqlite3.Connection,
-    policy_version: str = "v1",
+    policy_version: str = "v2",
     enable_history: bool = True,
     provider: str = "osakedata_v2",
     debug: bool = False,
@@ -31,6 +31,8 @@ def build_swingmaster_app(
     and return the application facade.
     """
     md_conn = kwargs.pop("md_conn", conn)
+    if policy_version == "v1":
+        raise RuntimeError("v1 disabled")
     policy_id = kwargs.pop("policy_id", "rule_v1" if policy_version == "v1" else "rule_v2")
     engine_version = kwargs.pop("engine_version", "dev")
     history_table = kwargs.pop("history_table", "rc_state_daily")
@@ -45,16 +47,15 @@ def build_swingmaster_app(
     )
 
     if provider == "osakedata_v1":
-        signal_provider = OsakeDataSignalProviderV1(md_conn, table_name=table_name)
-    else:
-        signal_provider = build_signal_provider(
-            provider=provider,
-            conn=md_conn,
-            table_name=table_name,
-            require_row_on_date=require_row_on_date,
-            debug=debug,
-            **kwargs,
-        )
+        raise RuntimeError("v1 disabled")
+    signal_provider = build_signal_provider(
+        provider=provider,
+        conn=md_conn,
+        table_name=table_name,
+        require_row_on_date=require_row_on_date,
+        debug=debug,
+        **kwargs,
+    )
 
     prev_state_provider = SQLitePrevStateProvider(conn)
 

@@ -67,9 +67,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--require-row-on-date", action="store_true", help="Require row on the as-of date")
     parser.add_argument("--max-days", type=int, default=0, help="Max trading days to process (0 = no limit)")
     parser.add_argument("--dry-run", action="store_true", help="Resolve and show counts only")
-    parser.add_argument("--policy-id", default="rule_v1", help="Policy id")
-    parser.add_argument("--policy-version", default="dev", help="Policy version")
-    parser.add_argument("--signal-version", choices=["v1", "v2"], default="v1", help="Signal provider version")
+    parser.add_argument("--policy-id", default="rule_v2", help="Policy id")
+    parser.add_argument("--policy-version", default="v2", help="Policy version")
+    parser.add_argument("--signal-version", choices=["v2"], default="v2", help="Signal provider version")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--debug-limit", type=int, default=25, help="Max items to show in debug lists (0 = no limit)")
     parser.add_argument("--debug-show-tickers", action="store_true", help="Show per-ticker debug lines on final day")
@@ -450,7 +450,7 @@ def main() -> None:
 
         policy_version = args.policy_version
         if policy_version == "dev":
-            policy_version = "v1"
+            policy_version = "v2"
         provider_name = "osakedata_v2" if args.signal_version == "v2" else "osakedata_v1"
         app = build_swingmaster_app(
             rc_conn,

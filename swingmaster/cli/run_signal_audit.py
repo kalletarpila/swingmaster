@@ -569,7 +569,7 @@ def main() -> None:
 
         app = build_swingmaster_app(
             rc_conn,
-            policy_version="v1",
+            policy_version="v2",
             enable_history=True,
             provider="osakedata_v2",
             md_conn=md_conn,

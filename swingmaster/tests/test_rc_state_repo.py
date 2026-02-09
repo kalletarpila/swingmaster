@@ -7,6 +7,8 @@ import sqlite3
 
 from swingmaster.core.domain.enums import ReasonCode, State, reason_to_persisted
 from swingmaster.core.domain.models import StateAttrs, Transition
+from swingmaster.core.signals.enums import SignalKey
+from swingmaster.core.signals.models import Signal, SignalSet
 from swingmaster.infra.sqlite.repos.rc_state_repo import RcStateRepo
 
 
@@ -33,6 +35,17 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             from_state TEXT,
             to_state TEXT,
             reasons_json TEXT,
+            run_id TEXT,
+            PRIMARY KEY (ticker, date)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE rc_signal_daily (
+            ticker TEXT,
+            date TEXT,
+            signal_keys_json TEXT,
             run_id TEXT,
             PRIMARY KEY (ticker, date)
         )
@@ -116,3 +129,57 @@ def test_reason_overlap_persisted_with_policy_prefix() -> None:
     ).fetchone()
     assert stored_state is not None
     assert stored_state[0] == expected
+
+
+def test_signal_keys_persisted_sorted_unique() -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_tables(conn)
+    repo = RcStateRepo(conn)
+
+    signals = SignalSet(
+        signals={
+            SignalKey.DOW_TREND_UP: Signal(
+                key=SignalKey.DOW_TREND_UP,
+                value=True,
+                confidence=None,
+                source="dow",
+            ),
+            SignalKey.TREND_STARTED: Signal(
+                key=SignalKey.TREND_STARTED,
+                value=True,
+                confidence=None,
+                source="trend",
+            ),
+            SignalKey.DOW_LAST_HIGH_HH: Signal(
+                key=SignalKey.DOW_LAST_HIGH_HH,
+                value=True,
+                confidence=None,
+                source="dow",
+            ),
+        }
+    )
+
+    repo.insert_signals(
+        ticker="TEST.HE",
+        date="2025-01-12",
+        signals=signals,
+        run_id="run-3",
+    )
+
+    expected = json.dumps(
+        sorted(
+            {
+                SignalKey.DOW_TREND_UP.value,
+                SignalKey.TREND_STARTED.value,
+                SignalKey.DOW_LAST_HIGH_HH.value,
+            }
+        ),
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    stored = conn.execute(
+        "SELECT signal_keys_json FROM rc_signal_daily WHERE ticker=? AND date=?",
+        ("TEST.HE", "2025-01-12"),
+    ).fetchone()
+    assert stored is not None
+    assert stored[0] == expected

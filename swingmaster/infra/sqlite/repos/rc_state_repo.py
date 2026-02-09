@@ -13,6 +13,7 @@ import sqlite3
 
 from swingmaster.core.domain.enums import ReasonCode, State, reason_to_persisted
 from swingmaster.core.domain.models import StateAttrs, Transition
+from swingmaster.core.signals.models import SignalSet
 
 
 class RcStateRepo:
@@ -64,6 +65,39 @@ class RcStateRepo:
                 reasons_json,
                 attrs.confidence,
                 attrs.age,
+                run_id,
+            ),
+        )
+
+    def insert_signals(
+        self,
+        ticker: str,
+        date: str,
+        signals: SignalSet,
+        run_id: str,
+    ) -> None:
+        signal_keys = sorted({key.value for key in signals.signals})
+        signal_keys_json = json.dumps(
+            signal_keys,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        self._conn.execute(
+            """
+            INSERT INTO rc_signal_daily (
+                ticker,
+                date,
+                signal_keys_json,
+                run_id
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(ticker, date) DO UPDATE SET
+                signal_keys_json=excluded.signal_keys_json,
+                run_id=excluded.run_id
+            """,
+            (
+                ticker,
+                date,
+                signal_keys_json,
                 run_id,
             ),
         )

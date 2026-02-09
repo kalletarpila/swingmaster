@@ -84,6 +84,12 @@ class SwingmasterApplication:
                     attrs=evaluation.final_attrs,
                     run_id=run_id,
                 )
+                self._state_repo.insert_signals(
+                    ticker=ticker,
+                    date=as_of_date,
+                    signals=signals,
+                    run_id=run_id,
+                )
                 self._state_repo.insert_transition(
                     ticker=ticker,
                     date=as_of_date,

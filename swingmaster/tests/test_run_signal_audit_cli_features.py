@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+import json
 
 import pytest
 
@@ -38,10 +39,23 @@ class _FakeApp:
     _prev_state_provider: object = None
 
 
-def _run(monkeypatch, argv: list[str], *, tickers: list[str], days: list[str], provider) -> str:
+def _run(
+    monkeypatch,
+    argv: list[str],
+    *,
+    tickers: list[str],
+    days: list[str],
+    provider,
+    rc_conn=None,
+) -> str:
     from swingmaster.cli import run_signal_audit as mod
 
-    monkeypatch.setattr(mod, "get_readonly_connection", lambda _p: _DummyConn())
+    def _conn(path: str):
+        if rc_conn is not None and path == mod.RC_DB_DEFAULT:
+            return rc_conn
+        return _DummyConn()
+
+    monkeypatch.setattr(mod, "get_readonly_connection", _conn)
     monkeypatch.setattr(mod, "resolve_tickers", lambda _c, _m, _t, _mx: tickers)
     monkeypatch.setattr(mod, "build_trading_days", lambda _c, _t, _a, _b: days)
     monkeypatch.setattr(mod, "build_swingmaster_app", lambda *_a, **_kw: _FakeApp(provider))
@@ -354,3 +368,56 @@ def test_streaks_respect_after_signal_window_filters(monkeypatch, capsys):
     )
     out = capsys.readouterr().out
     assert "STREAKS ticker=AAA runs_total=1 max_run_len=2 avg_run_len=2.00" in out
+
+
+def test_use_db_signals_prefers_db_and_falls_back(monkeypatch, capsys):
+    class _FakeCursor:
+        def __init__(self, row):
+            self._row = row
+
+        def fetchone(self):
+            return self._row
+
+    class _FakeRcConn:
+        def __init__(self, by_key):
+            self._by_key = by_key
+
+        def execute(self, _sql, params):
+            return _FakeCursor(self._by_key.get(params))
+
+        def close(self) -> None:  # pragma: no cover
+            return
+
+    days = ["2026-01-01", "2026-01-02"]
+    tickers = ["AAA"]
+    focus = SignalKey.TREND_STARTED
+    provider = _FakeSignalProvider({("AAA", days[1]): _ss(focus)})
+
+    rc_row = json.dumps([focus.name], separators=(",", ":"), ensure_ascii=False)
+    rc_conn = _FakeRcConn({("AAA", days[0]): (rc_row,)})
+
+    _run(
+        monkeypatch,
+        [
+            "--market",
+            "OMXH",
+            "--begin-date",
+            days[0],
+            "--end-date",
+            days[-1],
+            "--ticker",
+            "AAA",
+            "--focus-signal",
+            focus.name,
+            "--print-focus-only",
+            "--use-db-signals",
+            "--debug",
+        ],
+        tickers=tickers,
+        days=days,
+        provider=provider,
+        rc_conn=rc_conn,
+    )
+    out = capsys.readouterr().out
+    assert "[debug] SIGNAL_SOURCE=DB ticker=AAA date=2026-01-01" in out
+    assert "[debug] SIGNAL_SOURCE=PROVIDER ticker=AAA date=2026-01-02" in out

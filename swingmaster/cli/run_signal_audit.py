@@ -15,6 +15,7 @@ Debug:
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 from datetime import date
 
@@ -31,6 +32,7 @@ from swingmaster.app_api.providers.signals_v2.trend_matured import (
 from swingmaster.core.domain.enums import ReasonCode, State, reason_to_persisted
 from swingmaster.core.engine.evaluator import evaluate_step
 from swingmaster.core.signals.enums import SignalKey
+from swingmaster.core.signals.models import Signal, SignalSet
 from swingmaster.infra.market_data.osakedata_reader import OsakeDataReader
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
 from swingmaster.infra.sqlite.repos.ticker_universe_reader import TickerUniverseReader
@@ -141,6 +143,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Safety cap when ticker=ALL (0 = no cap)",
+    )
+    parser.add_argument(
+        "--use-db-signals",
+        action="store_true",
+        help="Load signals from rc_signal_daily when available",
     )
     return parser.parse_args()
 
@@ -449,6 +456,26 @@ def _print_stabilization_debug(md_conn, ticker: str, as_of_date: str) -> None:
     print(debug_info)
 
 
+def _load_signal_set_from_db(
+    rc_conn: sqlite3.Connection,
+    ticker: str,
+    day: str,
+) -> SignalSet | None:
+    row = rc_conn.execute(
+        "SELECT signal_keys_json FROM rc_signal_daily WHERE ticker=? AND date=?",
+        (ticker, day),
+    ).fetchone()
+    if row is None:
+        return None
+    raw = row[0] or "[]"
+    keys = json.loads(raw)
+    signals = {}
+    for key_str in keys:
+        key = SignalKey[key_str]
+        signals[key] = Signal(key=key, value=True, confidence=None, source=None)
+    return SignalSet(signals=signals)
+
+
 def main() -> None:
     args = parse_args()
     if args.begin_date > args.end_date:
@@ -629,8 +656,15 @@ def main() -> None:
             for day in trading_days:
                 if args.debug and args.focus_signal == "INVALIDATED":
                     _invalidated_dbg.set_invalidated_debug_date(day)
-                signal_set = signal_provider.get_signals(ticker, day)
-                day_signals.append((day, signal_set))
+                signal_source = "PROVIDER"
+                signal_set = None
+                if args.use_db_signals:
+                    signal_set = _load_signal_set_from_db(rc_conn, ticker, day)
+                    if signal_set is not None:
+                        signal_source = "DB"
+                if signal_set is None:
+                    signal_set = signal_provider.get_signals(ticker, day)
+                day_signals.append((day, signal_set, signal_source))
                 if args.debug and args.focus_signal == "ENTRY_SETUP_VALID":
                     entry_debug = _entry_dbg.get_entry_setup_valid_debug()
                     if entry_debug:
@@ -659,7 +693,7 @@ def main() -> None:
                     ):
                         global_after_signal_anchor_date = anchor_date
 
-            for day, signal_set in day_signals:
+            for day, signal_set, signal_source in day_signals:
                 dates_processed_total += 1
                 day_date = date.fromisoformat(day)
                 signal_keys = sorted(signal_set.signals.keys(), key=lambda k: k.name)
@@ -803,6 +837,10 @@ def main() -> None:
                     continue
 
                 if allow_day_print:
+                    if args.debug:
+                        print(
+                            f"[debug] SIGNAL_SOURCE={signal_source} ticker={ticker} date={day}"
+                        )
                     if (
                         args.debug
                         and args.print_focus_only

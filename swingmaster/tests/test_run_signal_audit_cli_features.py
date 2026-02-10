@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import sqlite3
 import sys
 from dataclasses import dataclass
-import json
 
 import pytest
 
@@ -56,6 +57,8 @@ def _run(
         return _DummyConn()
 
     monkeypatch.setattr(mod, "get_readonly_connection", _conn)
+    if rc_conn is not None and hasattr(mod, "_open_rc_readonly"):
+        monkeypatch.setattr(mod, "_open_rc_readonly", lambda _p: rc_conn)
     monkeypatch.setattr(mod, "resolve_tickers", lambda _c, _m, _t, _mx: tickers)
     monkeypatch.setattr(mod, "build_trading_days", lambda _c, _t, _a, _b: days)
     monkeypatch.setattr(mod, "build_swingmaster_app", lambda *_a, **_kw: _FakeApp(provider))
@@ -421,3 +424,84 @@ def test_use_db_signals_prefers_db_and_falls_back(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "[debug] SIGNAL_SOURCE=DB ticker=AAA date=2026-01-01" in out
     assert "[debug] SIGNAL_SOURCE=PROVIDER ticker=AAA date=2026-01-02" in out
+
+
+def test_audit_does_not_write_to_rc_db(monkeypatch, tmp_path):
+    from swingmaster.cli import run_signal_audit as mod
+
+    db_path = tmp_path / "rc.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE rc_run (
+            run_id TEXT PRIMARY KEY,
+            created_at TEXT,
+            engine_version TEXT,
+            policy_id TEXT,
+            policy_version TEXT
+        );
+        CREATE TABLE rc_state_daily (
+            ticker TEXT,
+            date TEXT,
+            state TEXT,
+            reasons_json TEXT,
+            confidence INTEGER,
+            age INTEGER,
+            run_id TEXT,
+            PRIMARY KEY (ticker, date)
+        );
+        CREATE TABLE rc_transition (
+            ticker TEXT,
+            date TEXT,
+            from_state TEXT,
+            to_state TEXT,
+            reasons_json TEXT,
+            run_id TEXT,
+            PRIMARY KEY (ticker, date)
+        );
+        CREATE TABLE rc_signal_daily (
+            ticker TEXT,
+            date TEXT,
+            signal_keys_json TEXT,
+            run_id TEXT,
+            PRIMARY KEY (ticker, date)
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(mod, "RC_DB_DEFAULT", str(db_path))
+    monkeypatch.setattr(mod, "get_readonly_connection", lambda _p: _DummyConn())
+    monkeypatch.setattr(mod, "resolve_tickers", lambda _c, _m, _t, _mx: ["AAA"])
+    monkeypatch.setattr(mod, "build_trading_days", lambda _c, _t, _a, _b: ["2026-01-01"])
+
+    provider = _FakeSignalProvider({("AAA", "2026-01-01"): _ss(SignalKey.TREND_STARTED)})
+    monkeypatch.setattr(mod, "build_swingmaster_app", lambda *_a, **_kw: _FakeApp(provider))
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_signal_audit.py",
+            "--market",
+            "OMXH",
+            "--begin-date",
+            "2026-01-01",
+            "--end-date",
+            "2026-01-01",
+            "--ticker",
+            "AAA",
+            "--focus-signal",
+            "TREND_STARTED",
+            "--print-focus-only",
+            "--use-db-signals",
+        ],
+    )
+    mod.main()
+
+    conn = sqlite3.connect(db_path)
+    for table in ("rc_run", "rc_state_daily", "rc_transition", "rc_signal_daily"):
+        count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        assert count == 0
+    conn.close()

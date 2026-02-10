@@ -476,6 +476,12 @@ def _load_signal_set_from_db(
     return SignalSet(signals=signals)
 
 
+def _open_rc_readonly(db_path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def main() -> None:
     args = parse_args()
     if args.begin_date > args.end_date:
@@ -513,7 +519,7 @@ def main() -> None:
     streaks_by_ticker: dict[str, dict[str, object]] = {}
 
     md_conn = get_readonly_connection(MD_DB_DEFAULT)
-    rc_conn = get_readonly_connection(RC_DB_DEFAULT)
+    rc_conn = _open_rc_readonly(RC_DB_DEFAULT)
     try:
         ticker_arg = " ".join(args.ticker)
         tickers = resolve_tickers(md_conn, args.market, ticker_arg, args.max_tickers)

@@ -131,6 +131,93 @@ def test_reason_overlap_persisted_with_policy_prefix() -> None:
     assert stored_state[0] == expected
 
 
+def test_pass_to_no_trade_empty_reasons_persists_pass_completed() -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_tables(conn)
+    repo = RcStateRepo(conn)
+
+    transition = Transition(
+        from_state=State.PASS,
+        to_state=State.NO_TRADE,
+        reason_codes=[],
+    )
+    repo.insert_transition(
+        ticker="TEST.HE",
+        date="2025-01-12",
+        transition=transition,
+        run_id="run-3",
+    )
+
+    stored = conn.execute(
+        "SELECT reasons_json FROM rc_transition WHERE ticker=? AND date=?",
+        ("TEST.HE", "2025-01-12"),
+    ).fetchone()
+    assert stored is not None
+    assert stored[0] == json.dumps(
+        ["POLICY:PASS_COMPLETED"],
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def test_pass_to_no_trade_with_reason_preserved() -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_tables(conn)
+    repo = RcStateRepo(conn)
+
+    transition = Transition(
+        from_state=State.PASS,
+        to_state=State.NO_TRADE,
+        reason_codes=[ReasonCode.INVALIDATED],
+    )
+    repo.insert_transition(
+        ticker="TEST.HE",
+        date="2025-01-13",
+        transition=transition,
+        run_id="run-4",
+    )
+
+    stored = conn.execute(
+        "SELECT reasons_json FROM rc_transition WHERE ticker=? AND date=?",
+        ("TEST.HE", "2025-01-13"),
+    ).fetchone()
+    assert stored is not None
+    assert stored[0] == json.dumps(
+        ["POLICY:INVALIDATED"],
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def test_entry_window_to_pass_empty_reasons_persists_completed() -> None:
+    conn = sqlite3.connect(":memory:")
+    _create_tables(conn)
+    repo = RcStateRepo(conn)
+
+    transition = Transition(
+        from_state=State.ENTRY_WINDOW,
+        to_state=State.PASS,
+        reason_codes=[],
+    )
+    repo.insert_transition(
+        ticker="TEST.HE",
+        date="2025-01-14",
+        transition=transition,
+        run_id="run-5",
+    )
+
+    stored = conn.execute(
+        "SELECT reasons_json FROM rc_transition WHERE ticker=? AND date=?",
+        ("TEST.HE", "2025-01-14"),
+    ).fetchone()
+    assert stored is not None
+    assert stored[0] == json.dumps(
+        ["POLICY:ENTRY_WINDOW_COMPLETED"],
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
 def test_signal_keys_persisted_sorted_unique() -> None:
     conn = sqlite3.connect(":memory:")
     _create_tables(conn)

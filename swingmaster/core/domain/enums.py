@@ -40,6 +40,8 @@ class ReasonCode(Enum):
     INVALIDATED = "INVALIDATED"
     INVALIDATION_BLOCKED_BY_LOCK = "INVALIDATION_BLOCKED_BY_LOCK"
     DISALLOWED_TRANSITION = "DISALLOWED_TRANSITION"
+    PASS_COMPLETED = "PASS_COMPLETED"
+    ENTRY_WINDOW_COMPLETED = "ENTRY_WINDOW_COMPLETED"
     RESET_TO_NEUTRAL = "RESET_TO_NEUTRAL"
     CHURN_GUARD = "CHURN_GUARD"
     MIN_STATE_AGE_LOCK = "MIN_STATE_AGE_LOCK"
@@ -85,6 +87,14 @@ REASON_METADATA: dict[ReasonCode, dict[str, object]] = {
         "category": ReasonCategory.EXCLUSION,
         "message": "Proposed transition is not allowed by the transition graph.",
     },
+    ReasonCode.PASS_COMPLETED: {
+        "category": ReasonCategory.INFO,
+        "message": "Pass period completed; returning to neutral.",
+    },
+    ReasonCode.ENTRY_WINDOW_COMPLETED: {
+        "category": ReasonCategory.INFO,
+        "message": "Entry window completed; transitioning to pass.",
+    },
     ReasonCode.RESET_TO_NEUTRAL: {
         "category": ReasonCategory.EXCLUSION,
         "message": "Lifecycle reset to neutral state.",
@@ -112,6 +122,8 @@ _REASON_PERSIST_OVERLAP = {
     ReasonCode.EDGE_GONE,
     ReasonCode.INVALIDATED,
     ReasonCode.INVALIDATION_BLOCKED_BY_LOCK,
+    ReasonCode.PASS_COMPLETED,
+    ReasonCode.ENTRY_WINDOW_COMPLETED,
     ReasonCode.NO_SIGNAL,
     ReasonCode.SELLING_PRESSURE_EASED,
     ReasonCode.STABILIZATION_CONFIRMED,

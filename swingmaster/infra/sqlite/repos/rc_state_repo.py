@@ -112,7 +112,16 @@ class RcStateRepo:
         if transition is None:
             return
 
-        normalized_reasons = self._normalize_reasons(transition.reason_codes)
+        reasons = transition.reason_codes
+        if not reasons:
+            if transition.from_state == State.PASS and transition.to_state == State.NO_TRADE:
+                reasons = [ReasonCode.PASS_COMPLETED]
+            elif (
+                transition.from_state == State.ENTRY_WINDOW
+                and transition.to_state == State.PASS
+            ):
+                reasons = [ReasonCode.ENTRY_WINDOW_COMPLETED]
+        normalized_reasons = self._normalize_reasons(reasons)
         reasons_json = json.dumps(
             [reason_to_persisted(reason) for reason in normalized_reasons],
             separators=(",", ":"),

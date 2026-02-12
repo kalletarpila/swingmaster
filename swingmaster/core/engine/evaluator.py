@@ -89,6 +89,16 @@ def evaluate_step(
         if any(reason in disallowed for reason in policy_reasons):
             guardrail_reasons = [r for r in guardrail_reasons if r != ReasonCode.CHURN_GUARD]
 
+    if (
+        guardrails_blocked
+        and ReasonCode.MIN_STATE_AGE_LOCK in guardrail_reasons
+        and ReasonCode.INVALIDATED in policy_reasons
+    ):
+        policy_reasons = [
+            reason for reason in policy_reasons if reason != ReasonCode.INVALIDATED
+        ]
+        policy_reasons.append(ReasonCode.INVALIDATION_BLOCKED_BY_LOCK)
+
     reasons = policy_reasons + guardrail_reasons
 
     transition: Transition | None

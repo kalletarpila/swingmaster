@@ -38,6 +38,7 @@ class ReasonCode(Enum):
     ENTRY_CONDITIONS_MET = "ENTRY_CONDITIONS_MET"
     EDGE_GONE = "EDGE_GONE"
     INVALIDATED = "INVALIDATED"
+    INVALIDATION_BLOCKED_BY_LOCK = "INVALIDATION_BLOCKED_BY_LOCK"
     DISALLOWED_TRANSITION = "DISALLOWED_TRANSITION"
     RESET_TO_NEUTRAL = "RESET_TO_NEUTRAL"
     CHURN_GUARD = "CHURN_GUARD"
@@ -76,6 +77,10 @@ REASON_METADATA: dict[ReasonCode, dict[str, object]] = {
         "category": ReasonCategory.EXCLUSION,
         "message": "Prior setup or thesis has been invalidated.",
     },
+    ReasonCode.INVALIDATION_BLOCKED_BY_LOCK: {
+        "category": ReasonCategory.EXCLUSION,
+        "message": "Invalidation blocked by minimum age guardrail.",
+    },
     ReasonCode.DISALLOWED_TRANSITION: {
         "category": ReasonCategory.EXCLUSION,
         "message": "Proposed transition is not allowed by the transition graph.",
@@ -106,6 +111,7 @@ _REASON_PERSIST_OVERLAP = {
     ReasonCode.DATA_INSUFFICIENT,
     ReasonCode.EDGE_GONE,
     ReasonCode.INVALIDATED,
+    ReasonCode.INVALIDATION_BLOCKED_BY_LOCK,
     ReasonCode.NO_SIGNAL,
     ReasonCode.SELLING_PRESSURE_EASED,
     ReasonCode.STABILIZATION_CONFIRMED,

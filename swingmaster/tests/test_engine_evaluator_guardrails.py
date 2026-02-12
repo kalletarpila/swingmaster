@@ -44,3 +44,27 @@ def test_guardrails_disallowed_transition_reason() -> None:
     result = apply_guardrails(prev_state, prev_attrs, State.ENTRY_WINDOW)
 
     assert result.reason_codes == [ReasonCode.DISALLOWED_TRANSITION]
+
+
+def test_invalidated_blocked_by_lock_reasons() -> None:
+    prev_state = State.DOWNTREND_EARLY
+    prev_attrs = StateAttrs(confidence=None, age=0, status=None)
+    signals = SignalSet({})
+    policy = _PolicyWithInvalidated()
+
+    result = evaluate_step(prev_state, prev_attrs, signals, policy)
+
+    assert ReasonCode.MIN_STATE_AGE_LOCK in result.reasons
+    assert ReasonCode.INVALIDATION_BLOCKED_BY_LOCK in result.reasons
+    assert ReasonCode.INVALIDATED not in result.reasons
+
+
+def test_invalidated_not_blocked_preserved() -> None:
+    prev_state = State.DOWNTREND_EARLY
+    prev_attrs = StateAttrs(confidence=None, age=2, status=None)
+    signals = SignalSet({})
+    policy = _PolicyWithInvalidated()
+
+    result = evaluate_step(prev_state, prev_attrs, signals, policy)
+
+    assert result.reasons == [ReasonCode.INVALIDATED]

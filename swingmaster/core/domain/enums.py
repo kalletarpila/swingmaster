@@ -38,6 +38,7 @@ class ReasonCode(Enum):
     ENTRY_CONDITIONS_MET = "ENTRY_CONDITIONS_MET"
     EDGE_GONE = "EDGE_GONE"
     INVALIDATED = "INVALIDATED"
+    DISALLOWED_TRANSITION = "DISALLOWED_TRANSITION"
     RESET_TO_NEUTRAL = "RESET_TO_NEUTRAL"
     CHURN_GUARD = "CHURN_GUARD"
     MIN_STATE_AGE_LOCK = "MIN_STATE_AGE_LOCK"
@@ -74,6 +75,10 @@ REASON_METADATA: dict[ReasonCode, dict[str, object]] = {
     ReasonCode.INVALIDATED: {
         "category": ReasonCategory.EXCLUSION,
         "message": "Prior setup or thesis has been invalidated.",
+    },
+    ReasonCode.DISALLOWED_TRANSITION: {
+        "category": ReasonCategory.EXCLUSION,
+        "message": "Proposed transition is not allowed by the transition graph.",
     },
     ReasonCode.RESET_TO_NEUTRAL: {
         "category": ReasonCategory.EXCLUSION,

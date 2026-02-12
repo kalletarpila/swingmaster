@@ -52,7 +52,7 @@ def apply_guardrails(
         return GuardrailResult(
             allowed=False,
             final_state=prev_state,
-            reason_codes=[ReasonCode.INVALIDATED],
+            reason_codes=[ReasonCode.DISALLOWED_TRANSITION],
         )
 
     if prev_attrs.age < MIN_STATE_AGE[prev_state]:

@@ -23,6 +23,7 @@ class StateAttrs:
     confidence: Optional[int]
     age: int
     status: Optional[str]
+    downtrend_origin: Optional[str] = None
 
 
 @dataclass

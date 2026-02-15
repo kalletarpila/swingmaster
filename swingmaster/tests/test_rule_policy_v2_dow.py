@@ -47,6 +47,8 @@ def test_no_trade_to_downtrend_early_on_slow_decline_started_when_not_uptrend():
     )
     assert decision.next_state == State.DOWNTREND_EARLY
     assert ReasonCode.SLOW_DECLINE_STARTED in decision.reason_codes
+    assert decision.attrs_update is not None
+    assert decision.attrs_update.downtrend_origin == "SLOW"
 
 
 def test_no_trade_stays_no_trade_on_slow_decline_started_if_dow_trend_up_present():
@@ -59,3 +61,29 @@ def test_no_trade_stays_no_trade_on_slow_decline_started_if_dow_trend_up_present
     )
     assert decision.next_state == State.NO_TRADE
     assert ReasonCode.SLOW_DECLINE_STARTED not in decision.reason_codes
+
+
+def test_origin_is_trend_when_no_trade_to_downtrend_early_on_trend_started():
+    policy = RuleBasedTransitionPolicyV2()
+    signals = make_signals(SignalKey.TREND_STARTED)
+    decision = policy.decide(
+        prev_state=State.NO_TRADE,
+        prev_attrs=StateAttrs(confidence=None, age=0, status=None),
+        signals=signals,
+    )
+    assert decision.next_state == State.DOWNTREND_EARLY
+    assert decision.attrs_update is not None
+    assert decision.attrs_update.downtrend_origin == "TREND"
+
+
+def test_origin_is_slow_when_no_trade_to_downtrend_early_on_slow_decline_started():
+    policy = RuleBasedTransitionPolicyV2()
+    signals = make_signals(SignalKey.SLOW_DECLINE_STARTED, SignalKey.DOW_TREND_NEUTRAL)
+    decision = policy.decide(
+        prev_state=State.NO_TRADE,
+        prev_attrs=StateAttrs(confidence=None, age=0, status=None),
+        signals=signals,
+    )
+    assert decision.next_state == State.DOWNTREND_EARLY
+    assert decision.attrs_update is not None
+    assert decision.attrs_update.downtrend_origin == "SLOW"

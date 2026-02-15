@@ -48,6 +48,18 @@ class RuleBasedTransitionPolicyV2Impl:
         )
         if prev_state != State.NO_TRADE:
             return decision
+        if decision.next_state == State.DOWNTREND_EARLY and enriched.has(SignalKey.TREND_STARTED):
+            attrs = decision.attrs_update or StateAttrs(confidence=None, age=0, status=None)
+            return Decision(
+                next_state=decision.next_state,
+                reason_codes=decision.reason_codes,
+                attrs_update=StateAttrs(
+                    confidence=attrs.confidence,
+                    age=attrs.age,
+                    status=attrs.status,
+                    downtrend_origin="TREND",
+                ),
+            )
         if decision.next_state != State.NO_TRADE:
             return decision
         if decision.reason_codes != [ReasonCode.NO_SIGNAL]:
@@ -59,7 +71,12 @@ class RuleBasedTransitionPolicyV2Impl:
         return Decision(
             next_state=State.DOWNTREND_EARLY,
             reason_codes=[ReasonCode.SLOW_DECLINE_STARTED],
-            attrs_update=StateAttrs(confidence=None, age=0, status=None),
+            attrs_update=StateAttrs(
+                confidence=None,
+                age=0,
+                status=None,
+                downtrend_origin="SLOW",
+            ),
         )
 
 

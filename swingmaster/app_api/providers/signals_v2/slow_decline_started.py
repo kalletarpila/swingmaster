@@ -18,7 +18,7 @@ MA_LONG = 10
 
 def eval_slow_decline_started(
     ctx: SignalContextV2,
-    min_decline_percent: float = 3.0,
+    min_decline_percent: float = 4.5,
     use_ma_filter: bool = True,
 ) -> bool:
     closes = ctx.closes

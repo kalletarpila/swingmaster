@@ -155,8 +155,8 @@ def _get_info(conn: sqlite3.Connection) -> dict:
     }
 
 
-def main(argv: list[str]) -> int:
-    args = parse_args(argv)
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
     timestamp = datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
     conn = None

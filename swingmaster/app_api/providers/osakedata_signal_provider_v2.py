@@ -20,6 +20,7 @@ from swingmaster.app_api.providers.signals_v2.dow_structure import compute_dow_s
 from swingmaster.app_api.providers.signals_v2.entry_setup_valid import eval_entry_setup_valid
 from swingmaster.app_api.providers.signals_v2.invalidated import eval_invalidated
 from swingmaster.app_api.providers.signals_v2.stabilization_confirmed import eval_stabilization_confirmed
+from swingmaster.app_api.providers.signals_v2.slow_decline_started import eval_slow_decline_started
 from swingmaster.app_api.providers.signals_v2.trend_matured import eval_trend_matured
 from swingmaster.app_api.providers.signals_v2.trend_started import (
     BREAK_LOW_WINDOW,
@@ -50,6 +51,8 @@ class OsakeDataSignalProviderV2(SignalProvider):
         dow_window: int = 3,
         dow_use_high_low: bool = True,
         dow_sensitive_down_reset: bool = False,
+        min_decline_percent: float = 3.0,
+        use_ma_filter: bool = True,
         debug: bool = False,
         debug_dow_markers: bool = False,
     ) -> None:
@@ -67,6 +70,8 @@ class OsakeDataSignalProviderV2(SignalProvider):
                 raise ValueError(f"Invalid parameters: {name} must be >= {min_val}")
         if not isinstance(require_row_on_date, bool):
             raise ValueError("require_row_on_date must be a bool")
+        if not isinstance(use_ma_filter, bool):
+            raise ValueError("use_ma_filter must be a bool")
         if not isinstance(debug_dow_markers, bool):
             raise ValueError("debug_dow_markers must be a bool")
         self._table_name = table_name
@@ -84,6 +89,8 @@ class OsakeDataSignalProviderV2(SignalProvider):
         self._dow_window = dow_window
         self._dow_use_high_low = dow_use_high_low
         self._dow_sensitive_down_reset = dow_sensitive_down_reset
+        self._min_decline_percent = min_decline_percent
+        self._use_ma_filter = use_ma_filter
         self._debug = debug
         self._debug_dow_markers = debug_dow_markers
 
@@ -108,6 +115,13 @@ class OsakeDataSignalProviderV2(SignalProvider):
 
         # TREND_STARTED
         trend_started_base = eval_trend_started(ctx, self._sma_window, self._momentum_lookback)
+        if eval_slow_decline_started(
+            ctx,
+            min_decline_percent=self._min_decline_percent,
+            use_ma_filter=self._use_ma_filter,
+        ):
+            signals[SignalKey.SLOW_DECLINE_STARTED] = self._signal(SignalKey.SLOW_DECLINE_STARTED)
+            primary_signals.add(SignalKey.SLOW_DECLINE_STARTED)
 
         # TREND_MATURED
         if eval_trend_matured(ctx, self._sma_window, self._matured_below_sma_days):

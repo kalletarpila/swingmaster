@@ -22,9 +22,9 @@ def test_trend_started_fires_on_fresh_cross_down():
     assert eval_trend_started(ctx, sma_window=20, momentum_lookback=1) is True
 
 
-def test_trend_started_debounced_when_recent_below_sma():
+def test_trend_started_not_debounced_when_recent_below_sma():
     closes = _base_closes()
     closes[0] = 160.0  # fresh cross-down and breakdown
     closes[3] = 192.0  # recent day below SMA but still above today's close
     ctx = _make_ctx(closes)
-    assert eval_trend_started(ctx, sma_window=20, momentum_lookback=1) is False
+    assert eval_trend_started(ctx, sma_window=20, momentum_lookback=1) is True

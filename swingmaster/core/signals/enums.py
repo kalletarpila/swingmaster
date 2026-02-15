@@ -13,6 +13,7 @@ from enum import Enum
 
 # Signals are observations only; different extractors may emit them in the future.
 class SignalKey(Enum):
+    SLOW_DECLINE_STARTED = "SLOW_DECLINE_STARTED"
     TREND_STARTED = "TREND_STARTED"
     TREND_MATURED = "TREND_MATURED"
     SELLING_PRESSURE_EASED = "SELLING_PRESSURE_EASED"

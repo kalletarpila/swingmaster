@@ -20,6 +20,7 @@ Lähteet (koodi):
 
 ## 1.1 SignalKey-lista
 - `TREND_STARTED`
+- `SLOW_DECLINE_STARTED`
 - `TREND_MATURED`
 - `SELLING_PRESSURE_EASED`
 - `STABILIZATION_CONFIRMED`
@@ -57,6 +58,10 @@ Provider: `OsakeDataSignalProviderV2`.
   - `trend_started.py`-ehdot täyttyvät (SMA20/regime + breakdown).
   - tai force-tilanne: `DOW_TREND_CHANGE_UP_TO_NEUTRAL` + `DOW_LAST_LOW_LL`.
 
+- `SLOW_DECLINE_STARTED`:
+  - `slow_decline_started.py`: staircase-lasku (`t-10 > t-5 > t-2 > t0`), minimi-pudotusprosentti ja optionaalinen MA-filtteri.
+  - provider lisää tämän primäärisignaalina ennen muita pääsignaaleja.
+
 - `TREND_MATURED`:
   - `trend_matured.py`: rakenne + aika + momentum yhdessä.
 
@@ -80,6 +85,7 @@ Provider: `OsakeDataSignalProviderV2`.
 ## 1.3 Huomiot
 - `SELLING_PRESSURE_EASED` ja `EDGE_GONE` ovat enumissa, mutta eivät nykyisessä v2-providerissa normaalisti emittoitavia pääsignaaleja.
 - Policy v2 lisää invalidaation: jos prev state on `STABILIZING` tai `ENTRY_WINDOW` ja `DOW_NEW_LL` löytyy, policy lisää `INVALIDATED`-signaalin ennen päätöstä.
+- Policy v2: `NO_TRADE -> DOWNTREND_EARLY` voi tapahtua myös `SLOW_DECLINE_STARTED`-signaalista, jos `DOW_TREND_UP` ei ole aktiivinen.
 
 ## 2. Tilakoneen tilat ja merkitys
 
@@ -113,9 +119,10 @@ ReasonCodet (`ReasonCode`) ja semantiikka:
 - `MIN_STATE_AGE_LOCK`: minimi-ikä guardrail estää muutoksen.
 - `DATA_INSUFFICIENT`: data ei riitä päätökseen.
 - `NO_SIGNAL`: ei toimintakelpoista signaalia.
+- `SLOW_DECLINE_STARTED`: hidas laskutrendi käynnistyi (policy-trigger reason).
 
 Persistointi:
-- osa reasoneista tallennetaan prefiksillä `POLICY:` (ks. `reason_to_persisted`).
+- reasont tallennetaan prefiksillä `POLICY:` (ks. `reason_to_persisted`).
 
 ## 4. Transition Contract Matrix
 
@@ -150,6 +157,7 @@ Ydinjärjestys:
 Per-state signaalisäännöt:
 - `NO_TRADE`:
   - `TREND_STARTED` -> `DOWNTREND_EARLY`
+  - `SLOW_DECLINE_STARTED` + ei `DOW_TREND_UP` -> `DOWNTREND_EARLY` (v2)
 - `DOWNTREND_EARLY`:
   - `TREND_MATURED` -> `DOWNTREND_LATE`
   - `STABILIZATION_CONFIRMED` tai `SELLING_PRESSURE_EASED` -> `STABILIZING`
@@ -174,6 +182,11 @@ Policy-helperit (v1) käytännössä:
   - `STABILIZING` + `ENTRY_SETUP_VALID` + recency/freshness ehdot -> `ENTRY_WINDOW` (`ENTRY_CONDITIONS_MET`)
 - `_should_reset_to_neutral`:
   - hiljaisuus/churn/edge-ehto -> `NO_TRADE` (`RESET_TO_NEUTRAL`)
+
+Lisähuomio (v2):
+- kun `NO_TRADE -> DOWNTREND_EARLY`, policy voi asettaa state_attrin `downtrend_origin`:
+  - `TREND` (jos triggeri `TREND_STARTED`)
+  - `SLOW` (jos triggeri `SLOW_DECLINE_STARTED`)
 
 ---
 

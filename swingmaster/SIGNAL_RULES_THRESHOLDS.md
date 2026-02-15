@@ -4,6 +4,7 @@ Tämä dokumentti kuvaa **täsmälleen koodin perusteella** signaalien syntylogi
 
 Lähteet:
 - `swingmaster/app_api/providers/osakedata_signal_provider_v2.py`
+- `swingmaster/app_api/providers/signals_v2/slow_decline_started.py`
 - `swingmaster/app_api/providers/signals_v2/trend_started.py`
 - `swingmaster/app_api/providers/signals_v2/trend_matured.py`
 - `swingmaster/app_api/providers/signals_v2/stabilization_confirmed.py`
@@ -29,6 +30,8 @@ Parametrit (default):
 - `dow_window=3`
 - `dow_use_high_low=True`
 - `dow_sensitive_down_reset=False`
+- `min_decline_percent=3.0`
+- `use_ma_filter=True`
 - `SAFETY_MARGIN_ROWS=2`
 
 ### 1.1 Vaadittu historian pituus
@@ -58,7 +61,7 @@ Vakiot:
 - `REGIME_WINDOW = 30`
 - `ABOVE_RATIO_MIN = 0.70`
 - `BREAK_LOW_WINDOW = 10`
-- `DEBOUNCE_DAYS = 5`
+- `DEBOUNCE_DAYS = 0`
 
 ### 2.1 Ehdot
 Signaali syntyy, jos kaikki toteutuvat:
@@ -183,7 +186,40 @@ Lisäksi:
   - viime 3 päivän close ei saa rikkoa invalidation-tasoa alle
     `invalidation*(1-0.003)`.
 
-## 6. INVALIDATED
+## 6. SLOW_DECLINE_STARTED
+
+Tiedosto: `slow_decline_started.py`.
+
+Vakiot:
+- `LOOKBACK_LONG_DAYS = 10`
+- `MA_SHORT = 5`
+- `MA_LONG = 10`
+
+Provider-parametrit:
+- `min_decline_percent` (provider default `3.0`; funktiossa fallback-default `4.5`)
+- `use_ma_filter` (provider default `True`)
+
+### 6.1 Ehdot
+Signaali syntyy, jos kaikki toteutuvat:
+1. Riittävä data:
+   - `len(closes) >= max(LOOKBACK_LONG_DAYS + 1, MA_LONG)` eli vähintään 10+1 havaintoa.
+2. Staircase decline:
+   - `c_t10 > c_t5 > c_t2 > c_t0`
+3. Pudotuksen minimiraja:
+   - `decline_pct = ((c_t10 - c_t0) / c_t10) * 100`
+   - `decline_pct >= min_decline_percent`
+4. Turvaehto:
+   - `c_t10 > 0` (muuten False)
+5. Jos `use_ma_filter=True`:
+   - `ma10 = avg(closes[:10])`
+   - `ma5 = avg(closes[:5])`
+   - ehdot: `c_t0 < ma10` ja `ma5 < ma10`
+
+Reunaehdot:
+- jos jokin käytetty close-arvo tai MA-ikkunan arvo on `None` -> False.
+- jos `use_ma_filter=False`, MA-ehdot ohitetaan.
+
+## 7. INVALIDATED
 
 Tiedosto: `invalidated.py`.
 
@@ -197,7 +233,7 @@ Providerin lisälogiikka:
   - `STABILIZATION_CONFIRMED`
   - `ENTRY_SETUP_VALID`
 
-## 7. DOW-rakenne signaalit
+## 8. DOW-rakenne signaalit
 
 Tiedosto: `dow_structure.py` / `compute_dow_signal_facts`.
 
@@ -231,17 +267,18 @@ Koodin palauttamat signal-faktat:
   - `DOW_BOS_BREAK_DOWN` jos reset tapahtui UP-trendistä
   - `DOW_BOS_BREAK_UP` jos reset tapahtui DOWN-trendistä
 
-## 8. NO_SIGNAL
+## 9. NO_SIGNAL
 
 Provider lisää `NO_SIGNAL`, kun:
 - yhtään primäärisignaalia ei syntynyt,
 - eikä `INVALIDATED` ole aktiivinen.
 
-## 9. Signaalien keskinäinen prioriteetti provider-tasolla
+## 10. Signaalien keskinäinen prioriteetti provider-tasolla
 
 Providerin sisäinen prioriteettikäyttäytyminen:
 - `INVALIDATED` voi kumota saman päivän `STABILIZATION_CONFIRMED` ja `ENTRY_SETUP_VALID`.
 - `TREND_STARTED` voi syntyä joko base-logiikasta tai DOW-force-ehdosta.
+- `SLOW_DECLINE_STARTED` lasketaan providerissa omana primäärisignaalinaan ennen `TREND_MATURED`/`STABILIZATION_CONFIRMED`/`ENTRY_SETUP_VALID`-lohkoja.
 - DOW-faktat lisätään signal-settiin aina laskennan jälkeen.
 - Jos ei primäärisignaaleja, fallback `NO_SIGNAL`.
 

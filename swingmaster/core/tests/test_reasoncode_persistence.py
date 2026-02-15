@@ -9,8 +9,8 @@ def test_reason_to_persisted_overlap_prefixed() -> None:
     assert reason_to_persisted(ReasonCode.TREND_STARTED) == "POLICY:TREND_STARTED"
 
 
-def test_reason_to_persisted_non_overlap_plain() -> None:
-    assert reason_to_persisted(ReasonCode.ENTRY_CONDITIONS_MET) == "ENTRY_CONDITIONS_MET"
+def test_reason_to_persisted_non_overlap_prefixed() -> None:
+    assert reason_to_persisted(ReasonCode.ENTRY_CONDITIONS_MET) == "POLICY:ENTRY_CONDITIONS_MET"
 
 
 def test_reason_from_persisted_accepts_both_forms() -> None:

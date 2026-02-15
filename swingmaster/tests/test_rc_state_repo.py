@@ -73,7 +73,7 @@ def test_entry_conditions_met_is_exclusive_in_persistence() -> None:
     )
 
     expected = json.dumps(
-        [ReasonCode.ENTRY_CONDITIONS_MET.value],
+        [reason_to_persisted(ReasonCode.ENTRY_CONDITIONS_MET)],
         separators=(",", ":"),
         ensure_ascii=False,
     )

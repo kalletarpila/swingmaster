@@ -32,7 +32,7 @@ SLOPE_LOOKBACK = 5
 REGIME_WINDOW = 30
 ABOVE_RATIO_MIN = 0.70
 BREAK_LOW_WINDOW = 10
-DEBOUNCE_DAYS = 5
+DEBOUNCE_DAYS = 0
 
 
 def eval_trend_started(ctx: SignalContextV2, sma_window: int, momentum_lookback: int) -> bool:

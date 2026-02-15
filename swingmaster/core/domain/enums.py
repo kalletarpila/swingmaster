@@ -133,9 +133,7 @@ _REASON_PERSIST_OVERLAP = {
 
 
 def reason_to_persisted(reason: ReasonCode) -> str:
-    if reason in _REASON_PERSIST_OVERLAP:
-        return f"POLICY:{reason.value}"
-    return reason.value
+    return f"POLICY:{reason.value}"
 
 
 def reason_from_persisted(label: str) -> ReasonCode | None:

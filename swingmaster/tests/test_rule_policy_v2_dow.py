@@ -35,3 +35,27 @@ def test_dow_new_ll_does_not_invalidate_outside_context():
         signals=signals,
     )
     assert ReasonCode.INVALIDATED not in decision.reason_codes
+
+
+def test_no_trade_to_downtrend_early_on_slow_decline_started_when_not_uptrend():
+    policy = RuleBasedTransitionPolicyV2()
+    signals = make_signals(SignalKey.SLOW_DECLINE_STARTED, SignalKey.DOW_TREND_NEUTRAL)
+    decision = policy.decide(
+        prev_state=State.NO_TRADE,
+        prev_attrs=StateAttrs(confidence=None, age=0, status=None),
+        signals=signals,
+    )
+    assert decision.next_state == State.DOWNTREND_EARLY
+    assert ReasonCode.SLOW_DECLINE_STARTED in decision.reason_codes
+
+
+def test_no_trade_stays_no_trade_on_slow_decline_started_if_dow_trend_up_present():
+    policy = RuleBasedTransitionPolicyV2()
+    signals = make_signals(SignalKey.SLOW_DECLINE_STARTED, SignalKey.DOW_TREND_UP)
+    decision = policy.decide(
+        prev_state=State.NO_TRADE,
+        prev_attrs=StateAttrs(confidence=None, age=0, status=None),
+        signals=signals,
+    )
+    assert decision.next_state == State.NO_TRADE
+    assert ReasonCode.SLOW_DECLINE_STARTED not in decision.reason_codes

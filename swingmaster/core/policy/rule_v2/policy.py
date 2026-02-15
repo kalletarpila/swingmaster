@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Optional
 
 from swingmaster.core.domain.models import Decision, StateAttrs
-from swingmaster.core.domain.enums import State
+from swingmaster.core.domain.enums import ReasonCode, State
 from swingmaster.core.policy.ports.state_history_port import StateHistoryPort
 from swingmaster.core.policy.rule_v1 import RuleBasedTransitionPolicyV1Impl
 from swingmaster.core.signals.enums import SignalKey
@@ -39,12 +39,27 @@ class RuleBasedTransitionPolicyV2Impl:
         as_of_date: Optional[str] = None,
     ) -> Decision:
         enriched = _apply_dow_invalidation(prev_state, signals)
-        return self._v1.decide(
+        decision = self._v1.decide(
             prev_state,
             prev_attrs,
             enriched,
             ticker=ticker,
             as_of_date=as_of_date,
+        )
+        if prev_state != State.NO_TRADE:
+            return decision
+        if decision.next_state != State.NO_TRADE:
+            return decision
+        if decision.reason_codes != [ReasonCode.NO_SIGNAL]:
+            return decision
+        if not enriched.has(SignalKey.SLOW_DECLINE_STARTED):
+            return decision
+        if enriched.has(SignalKey.DOW_TREND_UP):
+            return decision
+        return Decision(
+            next_state=State.DOWNTREND_EARLY,
+            reason_codes=[ReasonCode.SLOW_DECLINE_STARTED],
+            attrs_update=StateAttrs(confidence=None, age=0, status=None),
         )
 
 

@@ -31,6 +31,7 @@ class ReasonCategory(Enum):
 
 # Stable identifiers for decision reasoning; value is the persisted code.
 class ReasonCode(Enum):
+    SLOW_DECLINE_STARTED = "SLOW_DECLINE_STARTED"
     TREND_STARTED = "TREND_STARTED"
     TREND_MATURED = "TREND_MATURED"
     SELLING_PRESSURE_EASED = "SELLING_PRESSURE_EASED"
@@ -51,6 +52,10 @@ class ReasonCode(Enum):
 
 # UI/audit metadata keyed by reason code.
 REASON_METADATA: dict[ReasonCode, dict[str, object]] = {
+    ReasonCode.SLOW_DECLINE_STARTED: {
+        "category": ReasonCategory.INFO,
+        "message": "Slow staircase decline has started.",
+    },
     ReasonCode.TREND_STARTED: {
         "category": ReasonCategory.INFO,
         "message": "Trend has begun and is being tracked.",

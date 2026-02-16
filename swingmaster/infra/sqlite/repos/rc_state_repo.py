@@ -19,11 +19,49 @@ from swingmaster.core.signals.models import SignalSet
 class RcStateRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
+        self._has_state_attrs_json = self._table_has_column("rc_state_daily", "state_attrs_json")
+
+    def _table_has_column(self, table_name: str, column_name: str) -> bool:
+        try:
+            rows = self._conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        except Exception:
+            return False
+        for row in rows:
+            try:
+                if row[1] == column_name:
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _normalize_reasons(self, reasons: list[ReasonCode]) -> list[ReasonCode]:
         if ReasonCode.ENTRY_CONDITIONS_MET in reasons:
             return [ReasonCode.ENTRY_CONDITIONS_MET]
         return reasons
+
+    def _state_attrs_json(self, attrs: StateAttrs) -> str:
+        downtrend_origin = attrs.downtrend_origin
+        decline_profile = attrs.decline_profile
+        if attrs.status:
+            try:
+                parsed = json.loads(attrs.status)
+                if isinstance(parsed, dict):
+                    if downtrend_origin is None:
+                        value = parsed.get("downtrend_origin")
+                        if isinstance(value, str):
+                            downtrend_origin = value
+                    if decline_profile is None:
+                        value = parsed.get("decline_profile")
+                        if isinstance(value, str):
+                            decline_profile = value
+            except Exception:
+                pass
+        payload: dict[str, str] = {}
+        if isinstance(downtrend_origin, str):
+            payload["downtrend_origin"] = downtrend_origin
+        if isinstance(decline_profile, str):
+            payload["decline_profile"] = decline_profile
+        return json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
 
     def insert_state(
         self,
@@ -40,6 +78,40 @@ class RcStateRepo:
             separators=(",", ":"),
             ensure_ascii=False,
         )
+        if self._has_state_attrs_json:
+            state_attrs_json = self._state_attrs_json(attrs)
+            self._conn.execute(
+                """
+                INSERT INTO rc_state_daily (
+                    ticker,
+                    date,
+                    state,
+                    reasons_json,
+                    confidence,
+                    age,
+                    state_attrs_json,
+                    run_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ticker, date) DO UPDATE SET
+                    state=excluded.state,
+                    reasons_json=excluded.reasons_json,
+                    confidence=excluded.confidence,
+                    age=excluded.age,
+                    state_attrs_json=excluded.state_attrs_json,
+                    run_id=excluded.run_id
+                """,
+                (
+                    ticker,
+                    date,
+                    state.value,
+                    reasons_json,
+                    attrs.confidence,
+                    attrs.age,
+                    state_attrs_json,
+                    run_id,
+                ),
+            )
+            return
         self._conn.execute(
             """
             INSERT INTO rc_state_daily (

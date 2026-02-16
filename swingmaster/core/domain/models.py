@@ -24,6 +24,7 @@ class StateAttrs:
     age: int
     status: Optional[str]
     downtrend_origin: Optional[str] = None
+    decline_profile: Optional[str] = None
 
 
 @dataclass

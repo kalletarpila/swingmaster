@@ -6,10 +6,12 @@ import sqlite3
 
 from swingmaster.app_api.factories.policy_factory_v1 import build_rule_policy_v1
 from swingmaster.app_api.factories.policy_factory_v2 import build_rule_policy_v2
+from swingmaster.app_api.factories.policy_factory_v3 import build_rule_policy_v3
 from swingmaster.app_api.factories.policy_versions import (
     ALLOWED_POLICY_VERSIONS,
     POLICY_V1,
     POLICY_V2,
+    POLICY_V3,
 )
 
 
@@ -29,6 +31,12 @@ def build_policy(
         raise RuntimeError("v1 disabled")
     if policy_version == POLICY_V2:
         return build_rule_policy_v2(
+            conn,
+            history_table=history_table,
+            enable_history=enable_history,
+        )
+    if policy_version == POLICY_V3:
+        return build_rule_policy_v3(
             conn,
             history_table=history_table,
             enable_history=enable_history,

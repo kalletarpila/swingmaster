@@ -16,4 +16,10 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
     migrations_dir = Path(__file__).resolve().parent / "migrations"
     for migration in sorted(migrations_dir.glob("*.sql")):
         sql_text = migration.read_text()
-        conn.executescript(sql_text)
+        try:
+            conn.executescript(sql_text)
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            if "duplicate column name" in msg:
+                continue
+            raise

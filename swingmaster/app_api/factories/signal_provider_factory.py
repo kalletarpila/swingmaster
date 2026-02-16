@@ -12,8 +12,9 @@ import sqlite3
 
 from swingmaster.app_api.ports import SignalProvider
 from swingmaster.app_api.providers.osakedata_signal_provider_v2 import OsakeDataSignalProviderV2
+from swingmaster.app_api.providers.osakedata_signal_provider_v3 import OsakeDataSignalProviderV3
 
-SUPPORTED_SIGNAL_PROVIDERS = ("osakedata_v2",)
+SUPPORTED_SIGNAL_PROVIDERS = ("osakedata_v2", "osakedata_v3")
 
 
 def list_supported_signal_providers() -> tuple[str, ...]:
@@ -34,6 +35,13 @@ def build_signal_provider(
     """
     if provider == "osakedata_v2":
         return OsakeDataSignalProviderV2(
+            conn,
+            table_name=table_name,
+            require_row_on_date=require_row_on_date,
+            **kwargs,
+        )
+    if provider == "osakedata_v3":
+        return OsakeDataSignalProviderV3(
             conn,
             table_name=table_name,
             require_row_on_date=require_row_on_date,

@@ -33,7 +33,10 @@ def build_swingmaster_app(
     md_conn = kwargs.pop("md_conn", conn)
     if policy_version == "v1":
         raise RuntimeError("v1 disabled")
-    policy_id = kwargs.pop("policy_id", "rule_v1" if policy_version == "v1" else "rule_v2")
+    default_policy_id = "rule_v2"
+    if policy_version == "v3":
+        default_policy_id = "rule_v3"
+    policy_id = kwargs.pop("policy_id", default_policy_id)
     engine_version = kwargs.pop("engine_version", "dev")
     history_table = kwargs.pop("history_table", "rc_state_daily")
     table_name = kwargs.pop("table_name", "osakedata")

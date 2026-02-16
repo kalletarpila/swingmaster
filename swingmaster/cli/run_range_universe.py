@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Resolve and show counts only")
     parser.add_argument("--policy-id", default="rule_v2", help="Policy id")
     parser.add_argument("--policy-version", default="v2", help="Policy version")
-    parser.add_argument("--signal-version", choices=["v2"], default="v2", help="Signal provider version")
+    parser.add_argument("--signal-version", choices=["v2", "v3"], default="v2", help="Signal provider version")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--debug-limit", type=int, default=25, help="Max items to show in debug lists (0 = no limit)")
     parser.add_argument("--debug-show-tickers", action="store_true", help="Show per-ticker debug lines on final day")
@@ -451,7 +451,14 @@ def main() -> None:
         policy_version = args.policy_version
         if policy_version == "dev":
             policy_version = "v2"
-        provider_name = "osakedata_v2" if args.signal_version == "v2" else "osakedata_v1"
+        if (args.signal_version == "v3") != (policy_version == "v3"):
+            raise RuntimeError(
+                "Incompatible versions: signal-version and policy-version must both be v3, or both non-v3."
+            )
+        policy_id = args.policy_id
+        if policy_version == "v3" and policy_id == "rule_v2":
+            policy_id = "rule_v3"
+        provider_name = "osakedata_v3" if args.signal_version == "v3" else "osakedata_v2"
         app = build_swingmaster_app(
             rc_conn,
             policy_version=policy_version,
@@ -459,7 +466,7 @@ def main() -> None:
             provider=provider_name,
             md_conn=md_conn,
             require_row_on_date=args.require_row_on_date,
-            policy_id=args.policy_id,
+            policy_id=policy_id,
             engine_version="dev",
             debug=args.debug,
         )

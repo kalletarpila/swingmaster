@@ -168,7 +168,10 @@ def compute_dow_markers(
 
     pivots_by_idx: Dict[int, List[Tuple[str, float]]] = {}
     for idx, kind, pivot_val in pivots:
-        pivots_by_idx.setdefault(idx, []).append((kind, pivot_val))
+        confirm_idx = idx + window
+        if confirm_idx >= n:
+            continue
+        pivots_by_idx.setdefault(confirm_idx, []).append((kind, pivot_val))
 
     markers: List[Dict] = []
     active_structural_high = None

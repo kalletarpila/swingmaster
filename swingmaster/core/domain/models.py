@@ -24,6 +24,7 @@ class StateAttrs:
     age: int
     status: Optional[str]
     downtrend_origin: Optional[str] = None
+    downtrend_entry_type: Optional[str] = None
     decline_profile: Optional[str] = None
     stabilization_phase: Optional[str] = None
     entry_gate: Optional[str] = None

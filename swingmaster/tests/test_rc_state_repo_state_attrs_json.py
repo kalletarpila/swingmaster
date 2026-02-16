@@ -63,6 +63,7 @@ def test_state_attrs_json_persisted_when_column_exists() -> None:
             age=0,
             status=None,
             downtrend_origin="TREND",
+            downtrend_entry_type="TREND_SOFT",
             decline_profile="SLOW_DRIFT",
         ),
         run_id="run-1",
@@ -75,5 +76,6 @@ def test_state_attrs_json_persisted_when_column_exists() -> None:
     assert row is not None
     assert json.loads(row[0]) == {
         "downtrend_origin": "TREND",
+        "downtrend_entry_type": "TREND_SOFT",
         "decline_profile": "SLOW_DRIFT",
     }

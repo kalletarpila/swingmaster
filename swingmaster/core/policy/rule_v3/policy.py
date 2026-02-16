@@ -33,6 +33,11 @@ ENTRY_GATE_LEGACY = "LEGACY_ENTRY_SETUP_VALID"
 ENTRY_QUALITY_A = "A"
 ENTRY_QUALITY_B = "B"
 ENTRY_QUALITY_LEGACY = "LEGACY"
+ENTRY_TYPE_SLOW_STRUCTURAL = "SLOW_STRUCTURAL"
+ENTRY_TYPE_SLOW_SOFT = "SLOW_SOFT"
+ENTRY_TYPE_TREND_STRUCTURAL = "TREND_STRUCTURAL"
+ENTRY_TYPE_TREND_SOFT = "TREND_SOFT"
+ENTRY_TYPE_UNKNOWN = "UNKNOWN"
 
 SPECIFIC_PROFILES = {
     PROFILE_SLOW_DRIFT,
@@ -65,11 +70,17 @@ class RuleBasedTransitionPolicyV3Impl:
             as_of_date=as_of_date,
         )
 
-        prev_origin, prev_profile, prev_stabilization_phase, prev_entry_gate, prev_entry_quality = _resolve_prev_attrs(
-            prev_attrs
-        )
+        (
+            prev_origin,
+            prev_entry_type,
+            prev_profile,
+            prev_stabilization_phase,
+            prev_entry_gate,
+            prev_entry_quality,
+        ) = _resolve_prev_attrs(prev_attrs)
 
         next_origin = prev_origin
+        next_entry_type = prev_entry_type
         next_profile = prev_profile
         final_next_state = decision.next_state
         gate_a_triggered = False
@@ -111,6 +122,8 @@ class RuleBasedTransitionPolicyV3Impl:
 
         if prev_state == State.NO_TRADE and final_next_state == State.DOWNTREND_EARLY:
             next_origin = _resolve_downtrend_origin(signals, prev_origin)
+            if next_entry_type is None:
+                next_entry_type = _classify_downtrend_entry_type(signals)
             next_profile = _apply_one_way_profile(prev_profile, candidate_profile, allow_unknown=True)
         elif (
             prev_state in {State.DOWNTREND_EARLY, State.DOWNTREND_LATE}
@@ -122,6 +135,7 @@ class RuleBasedTransitionPolicyV3Impl:
         status = _merge_status_json(
             attrs.status,
             next_origin,
+            next_entry_type,
             next_profile,
             next_stabilization_phase,
             next_entry_gate,
@@ -136,6 +150,7 @@ class RuleBasedTransitionPolicyV3Impl:
                 age=attrs.age,
                 status=status,
                 downtrend_origin=next_origin,
+                downtrend_entry_type=next_entry_type,
                 decline_profile=next_profile,
                 stabilization_phase=next_stabilization_phase,
                 entry_gate=next_entry_gate,
@@ -164,6 +179,33 @@ def _resolve_downtrend_origin(signals: SignalSet, prev_origin: Optional[str]) ->
     if signals.has(SignalKey.SLOW_DECLINE_STARTED):
         return "SLOW"
     return prev_origin
+
+
+def _classify_downtrend_entry_type(signals: SignalSet) -> str:
+    origin = _resolve_entry_origin_for_entry_type(signals)
+    structural_confirmed = (
+        signals.has(SignalKey.STRUCTURAL_DOWNTREND_DETECTED)
+        or signals.has(SignalKey.DOW_TREND_DOWN)
+        or signals.has(SignalKey.DOW_NEW_LL)
+        or signals.has(SignalKey.DOW_BOS_BREAK_DOWN)
+    )
+    if origin == "SLOW" and structural_confirmed:
+        return ENTRY_TYPE_SLOW_STRUCTURAL
+    if origin == "SLOW":
+        return ENTRY_TYPE_SLOW_SOFT
+    if origin == "TREND" and structural_confirmed:
+        return ENTRY_TYPE_TREND_STRUCTURAL
+    if origin == "TREND":
+        return ENTRY_TYPE_TREND_SOFT
+    return ENTRY_TYPE_UNKNOWN
+
+
+def _resolve_entry_origin_for_entry_type(signals: SignalSet) -> str:
+    if signals.has(SignalKey.SLOW_DECLINE_STARTED):
+        return "SLOW"
+    if signals.has(SignalKey.TREND_STARTED):
+        return "TREND"
+    return "UNKNOWN"
 
 
 def _apply_one_way_profile(
@@ -215,8 +257,9 @@ def _resolve_stabilization_phase(
 
 def _resolve_prev_attrs(
     prev_attrs: StateAttrs,
-) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
+) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
     origin = prev_attrs.downtrend_origin
+    entry_type = prev_attrs.downtrend_entry_type
     profile = prev_attrs.decline_profile
     stabilization_phase = prev_attrs.stabilization_phase
     entry_gate = prev_attrs.entry_gate
@@ -224,6 +267,7 @@ def _resolve_prev_attrs(
 
     if (
         origin is None
+        or entry_type is None
         or profile is None
         or stabilization_phase is None
         or entry_gate is None
@@ -238,6 +282,10 @@ def _resolve_prev_attrs(
                 value = parsed.get("downtrend_origin")
                 if isinstance(value, str):
                     origin = value
+            if entry_type is None:
+                value = parsed.get("downtrend_entry_type")
+                if isinstance(value, str):
+                    entry_type = value
             if profile is None:
                 value = parsed.get("decline_profile")
                 if isinstance(value, str):
@@ -255,12 +303,13 @@ def _resolve_prev_attrs(
                 if isinstance(value, str):
                     entry_quality = value
 
-    return origin, profile, stabilization_phase, entry_gate, entry_quality
+    return origin, entry_type, profile, stabilization_phase, entry_gate, entry_quality
 
 
 def _merge_status_json(
     status: Optional[str],
     downtrend_origin: Optional[str],
+    downtrend_entry_type: Optional[str],
     decline_profile: Optional[str],
     stabilization_phase: Optional[str],
     entry_gate: Optional[str],
@@ -279,6 +328,11 @@ def _merge_status_json(
         payload["downtrend_origin"] = downtrend_origin
     elif "downtrend_origin" in payload:
         del payload["downtrend_origin"]
+
+    if isinstance(downtrend_entry_type, str):
+        payload["downtrend_entry_type"] = downtrend_entry_type
+    elif "downtrend_entry_type" in payload:
+        del payload["downtrend_entry_type"]
 
     if isinstance(decline_profile, str):
         payload["decline_profile"] = decline_profile

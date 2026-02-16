@@ -223,3 +223,57 @@ def test_invalidated_blocks_legacy_entry_setup_valid() -> None:
     assert decision.attrs_update.entry_gate is None
     assert decision.attrs_update.entry_quality is None
     assert decision.attrs_update.stabilization_phase == "EARLY_STABILIZATION"
+
+
+def test_downtrend_entry_type_slow_structural() -> None:
+    policy = RuleBasedTransitionPolicyV3()
+    decision = policy.decide(
+        prev_state=State.NO_TRADE,
+        prev_attrs=StateAttrs(confidence=None, age=0, status=None),
+        signals=make_signals(
+            SignalKey.SLOW_DECLINE_STARTED,
+            SignalKey.STRUCTURAL_DOWNTREND_DETECTED,
+        ),
+    )
+    assert decision.next_state == State.DOWNTREND_EARLY
+    assert decision.attrs_update is not None
+    assert decision.attrs_update.downtrend_entry_type == "SLOW_STRUCTURAL"
+
+
+def test_downtrend_entry_type_slow_soft() -> None:
+    policy = RuleBasedTransitionPolicyV3()
+    decision = policy.decide(
+        prev_state=State.NO_TRADE,
+        prev_attrs=StateAttrs(confidence=None, age=0, status=None),
+        signals=make_signals(SignalKey.SLOW_DECLINE_STARTED),
+    )
+    assert decision.next_state == State.DOWNTREND_EARLY
+    assert decision.attrs_update is not None
+    assert decision.attrs_update.downtrend_entry_type == "SLOW_SOFT"
+
+
+def test_downtrend_entry_type_trend_structural() -> None:
+    policy = RuleBasedTransitionPolicyV3()
+    decision = policy.decide(
+        prev_state=State.NO_TRADE,
+        prev_attrs=StateAttrs(confidence=None, age=0, status=None),
+        signals=make_signals(
+            SignalKey.TREND_STARTED,
+            SignalKey.DOW_NEW_LL,
+        ),
+    )
+    assert decision.next_state == State.DOWNTREND_EARLY
+    assert decision.attrs_update is not None
+    assert decision.attrs_update.downtrend_entry_type == "TREND_STRUCTURAL"
+
+
+def test_downtrend_entry_type_trend_soft() -> None:
+    policy = RuleBasedTransitionPolicyV3()
+    decision = policy.decide(
+        prev_state=State.NO_TRADE,
+        prev_attrs=StateAttrs(confidence=None, age=0, status=None),
+        signals=make_signals(SignalKey.TREND_STARTED),
+    )
+    assert decision.next_state == State.DOWNTREND_EARLY
+    assert decision.attrs_update is not None
+    assert decision.attrs_update.downtrend_entry_type == "TREND_SOFT"

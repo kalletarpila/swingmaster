@@ -28,6 +28,7 @@ class SQLitePrevStateProvider(PrevStateProvider):
 
         state_value, confidence_value, age_value, status_value = row
         downtrend_origin = None
+        downtrend_entry_type = None
         decline_profile = None
         stabilization_phase = None
         entry_gate = None
@@ -39,6 +40,9 @@ class SQLitePrevStateProvider(PrevStateProvider):
                     value = parsed.get("downtrend_origin")
                     if isinstance(value, str):
                         downtrend_origin = value
+                    value = parsed.get("downtrend_entry_type")
+                    if isinstance(value, str):
+                        downtrend_entry_type = value
                     value = parsed.get("decline_profile")
                     if isinstance(value, str):
                         decline_profile = value
@@ -58,6 +62,7 @@ class SQLitePrevStateProvider(PrevStateProvider):
             age=age_value,
             status=status_value,
             downtrend_origin=downtrend_origin,
+            downtrend_entry_type=downtrend_entry_type,
             decline_profile=decline_profile,
             stabilization_phase=stabilization_phase,
             entry_gate=entry_gate,

@@ -210,6 +210,67 @@ def test_decline_profile_upgrade_is_one_way_only() -> None:
     assert decision3.attrs_update.decline_profile == "STRUCTURAL_DOWNTREND"
 
 
+def test_downtrend_entry_type_carry_forward_not_overwritten() -> None:
+    conn = _conn_memory()
+    conn.execute("PRAGMA foreign_keys = ON")
+    apply_migrations(conn)
+
+    repo = RcStateRepo(conn)
+    prev_provider = SQLitePrevStateProvider(conn)
+    policy = RuleBasedTransitionPolicyV3()
+
+    conn.execute(
+        "INSERT INTO rc_run (run_id, created_at, engine_version, policy_id, policy_version) VALUES (?, ?, ?, ?, ?)",
+        ("run-1", "2026-01-01T00:00:00Z", "dev", "rule_v3", "v3"),
+    )
+    conn.execute(
+        "INSERT INTO rc_run (run_id, created_at, engine_version, policy_id, policy_version) VALUES (?, ?, ?, ?, ?)",
+        ("run-2", "2026-01-02T00:00:00Z", "dev", "rule_v3", "v3"),
+    )
+
+    day1 = policy.decide(
+        prev_state=State.NO_TRADE,
+        prev_attrs=StateAttrs(confidence=None, age=0, status=None),
+        signals=_signal_set(SignalKey.SLOW_DECLINE_STARTED),
+    )
+    assert day1.next_state == State.DOWNTREND_EARLY
+    assert day1.attrs_update is not None
+    assert day1.attrs_update.downtrend_entry_type == "SLOW_SOFT"
+    repo.insert_state(
+        ticker="AAA",
+        date="2026-01-01",
+        state=day1.next_state,
+        reasons=day1.reason_codes,
+        attrs=day1.attrs_update,
+        run_id="run-1",
+    )
+
+    prev_state2, prev_attrs2 = prev_provider.get_prev("AAA", "2026-01-02")
+    day2 = policy.decide(
+        prev_state=prev_state2,
+        prev_attrs=prev_attrs2,
+        signals=_signal_set(SignalKey.TREND_STARTED, SignalKey.DOW_NEW_LL),
+    )
+    assert day2.attrs_update is not None
+    assert day2.attrs_update.downtrend_entry_type == "SLOW_SOFT"
+    repo.insert_state(
+        ticker="AAA",
+        date="2026-01-02",
+        state=day2.next_state,
+        reasons=day2.reason_codes,
+        attrs=day2.attrs_update,
+        run_id="run-2",
+    )
+
+    row = conn.execute(
+        "SELECT state_attrs_json FROM rc_state_daily WHERE ticker=? AND date=?",
+        ("AAA", "2026-01-02"),
+    ).fetchone()
+    assert row is not None
+    payload = json.loads(row["state_attrs_json"])
+    assert payload["downtrend_entry_type"] == "SLOW_SOFT"
+
+
 def test_stabilization_phase_carry_forward_and_updates() -> None:
     conn = _conn_memory()
     conn.execute("PRAGMA foreign_keys = ON")
@@ -418,6 +479,7 @@ def test_prev_state_provider_reads_state_attrs_json_for_downtrend_origin_and_dec
     attrs_json = json.dumps(
         {
             "downtrend_origin": "TREND",
+            "downtrend_entry_type": "TREND_STRUCTURAL",
             "decline_profile": "SHARP_SELL_OFF",
             "stabilization_phase": "EARLY_REVERSAL",
             "entry_gate": "LEGACY_ENTRY_SETUP_VALID",
@@ -449,6 +511,7 @@ def test_prev_state_provider_reads_state_attrs_json_for_downtrend_origin_and_dec
 
     assert prev_state == State.DOWNTREND_EARLY
     assert prev_attrs.downtrend_origin == "TREND"
+    assert prev_attrs.downtrend_entry_type == "TREND_STRUCTURAL"
     assert prev_attrs.decline_profile == "SHARP_SELL_OFF"
     assert prev_attrs.stabilization_phase == "EARLY_REVERSAL"
     assert prev_attrs.entry_gate == "LEGACY_ENTRY_SETUP_VALID"

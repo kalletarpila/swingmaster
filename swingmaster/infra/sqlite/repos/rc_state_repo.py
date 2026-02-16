@@ -41,6 +41,7 @@ class RcStateRepo:
 
     def _state_attrs_json(self, attrs: StateAttrs) -> str:
         downtrend_origin = attrs.downtrend_origin
+        downtrend_entry_type = attrs.downtrend_entry_type
         decline_profile = attrs.decline_profile
         stabilization_phase = attrs.stabilization_phase
         entry_gate = attrs.entry_gate
@@ -53,6 +54,10 @@ class RcStateRepo:
                         value = parsed.get("downtrend_origin")
                         if isinstance(value, str):
                             downtrend_origin = value
+                    if downtrend_entry_type is None:
+                        value = parsed.get("downtrend_entry_type")
+                        if isinstance(value, str):
+                            downtrend_entry_type = value
                     if decline_profile is None:
                         value = parsed.get("decline_profile")
                         if isinstance(value, str):
@@ -74,6 +79,8 @@ class RcStateRepo:
         payload: dict[str, str] = {}
         if isinstance(downtrend_origin, str):
             payload["downtrend_origin"] = downtrend_origin
+        if isinstance(downtrend_entry_type, str):
+            payload["downtrend_entry_type"] = downtrend_entry_type
         if isinstance(decline_profile, str):
             payload["decline_profile"] = decline_profile
         if isinstance(stabilization_phase, str):

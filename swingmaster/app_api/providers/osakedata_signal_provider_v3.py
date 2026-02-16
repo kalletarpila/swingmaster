@@ -28,10 +28,14 @@ from swingmaster.app_api.providers.signals_v2.trend_started import (
     eval_trend_started,
 )
 from swingmaster.app_api.providers.signals_v3.context import SignalContextV3
+from swingmaster.app_api.providers.signals_v3.ma20_reclaimed import eval_ma20_reclaimed
 from swingmaster.app_api.providers.signals_v3.sharp_sell_off_detected import eval_sharp_sell_off_detected
 from swingmaster.app_api.providers.signals_v3.slow_drift_detected import eval_slow_drift_detected
 from swingmaster.app_api.providers.signals_v3.structural_downtrend_detected import (
     eval_structural_downtrend_detected,
+)
+from swingmaster.app_api.providers.signals_v3.volatility_compression_detected import (
+    eval_volatility_compression_detected,
 )
 
 SAFETY_MARGIN_ROWS = 2
@@ -113,10 +117,22 @@ class OsakeDataSignalProviderV3(SignalProvider):
         if eval_slow_drift_detected(ctx):
             signals[SignalKey.SLOW_DRIFT_DETECTED] = self._signal(SignalKey.SLOW_DRIFT_DETECTED)
             primary_signals.add(SignalKey.SLOW_DRIFT_DETECTED)
+            signals[SignalKey.SLOW_DECLINE_STARTED] = self._signal(SignalKey.SLOW_DECLINE_STARTED)
+            primary_signals.add(SignalKey.SLOW_DECLINE_STARTED)
 
         if eval_sharp_sell_off_detected(ctx, self._compute_atr):
             signals[SignalKey.SHARP_SELL_OFF_DETECTED] = self._signal(SignalKey.SHARP_SELL_OFF_DETECTED)
             primary_signals.add(SignalKey.SHARP_SELL_OFF_DETECTED)
+
+        if eval_volatility_compression_detected(ctx, self._compute_atr):
+            signals[SignalKey.VOLATILITY_COMPRESSION_DETECTED] = self._signal(
+                SignalKey.VOLATILITY_COMPRESSION_DETECTED
+            )
+            primary_signals.add(SignalKey.VOLATILITY_COMPRESSION_DETECTED)
+
+        if eval_ma20_reclaimed(ctx):
+            signals[SignalKey.MA20_RECLAIMED] = self._signal(SignalKey.MA20_RECLAIMED)
+            primary_signals.add(SignalKey.MA20_RECLAIMED)
 
         trend_started_base = eval_trend_started(ctx, self._sma_window, self._momentum_lookback)
 
@@ -175,6 +191,15 @@ class OsakeDataSignalProviderV3(SignalProvider):
 
         for key in dow_facts.keys():
             signals[key] = self._signal(key)
+
+        if SignalKey.DOW_LAST_LOW_HL in signals:
+            signals[SignalKey.HIGHER_LOW_CONFIRMED] = self._signal(SignalKey.HIGHER_LOW_CONFIRMED)
+            primary_signals.add(SignalKey.HIGHER_LOW_CONFIRMED)
+        if SignalKey.DOW_BOS_BREAK_UP in signals:
+            signals[SignalKey.STRUCTURE_BREAKOUT_UP_CONFIRMED] = self._signal(
+                SignalKey.STRUCTURE_BREAKOUT_UP_CONFIRMED
+            )
+            primary_signals.add(SignalKey.STRUCTURE_BREAKOUT_UP_CONFIRMED)
 
         if not primary_signals and SignalKey.INVALIDATED not in signals:
             signals[SignalKey.NO_SIGNAL] = Signal(

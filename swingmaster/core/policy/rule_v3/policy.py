@@ -24,6 +24,15 @@ PROFILE_SLOW_DRIFT = "SLOW_DRIFT"
 PROFILE_SHARP_SELL_OFF = "SHARP_SELL_OFF"
 PROFILE_STRUCTURAL = "STRUCTURAL_DOWNTREND"
 PROFILE_UNKNOWN = "UNKNOWN"
+PHASE_EARLY_STABILIZATION = "EARLY_STABILIZATION"
+PHASE_BASE_BUILDING = "BASE_BUILDING"
+PHASE_EARLY_REVERSAL = "EARLY_REVERSAL"
+ENTRY_GATE_A = "EARLY_STAB_MA20_HL"
+ENTRY_GATE_B = "EARLY_STAB_MA20"
+ENTRY_GATE_LEGACY = "LEGACY_ENTRY_SETUP_VALID"
+ENTRY_QUALITY_A = "A"
+ENTRY_QUALITY_B = "B"
+ENTRY_QUALITY_LEGACY = "LEGACY"
 
 SPECIFIC_PROFILES = {
     PROFILE_SLOW_DRIFT,
@@ -56,27 +65,71 @@ class RuleBasedTransitionPolicyV3Impl:
             as_of_date=as_of_date,
         )
 
-        prev_origin, prev_profile = _resolve_prev_attrs(prev_attrs)
+        prev_origin, prev_profile, prev_stabilization_phase, prev_entry_gate, prev_entry_quality = _resolve_prev_attrs(
+            prev_attrs
+        )
 
         next_origin = prev_origin
         next_profile = prev_profile
+        final_next_state = decision.next_state
+        gate_a_triggered = False
+        gate_b_triggered = False
+        if decision.next_state == State.STABILIZING:
+            if (
+                signals.has(SignalKey.MA20_RECLAIMED)
+                and signals.has(SignalKey.HIGHER_LOW_CONFIRMED)
+                and not signals.has(SignalKey.INVALIDATED)
+            ):
+                final_next_state = State.ENTRY_WINDOW
+                gate_a_triggered = True
+            elif (
+                signals.has(SignalKey.MA20_RECLAIMED)
+                and not signals.has(SignalKey.HIGHER_LOW_CONFIRMED)
+                and not signals.has(SignalKey.INVALIDATED)
+            ):
+                final_next_state = State.ENTRY_WINDOW
+                gate_b_triggered = True
+
+        next_stabilization_phase = _resolve_stabilization_phase(
+            final_next_state,
+            signals,
+            prev_stabilization_phase,
+        )
+        next_entry_gate = prev_entry_gate
+        next_entry_quality = prev_entry_quality
+        if gate_a_triggered:
+            next_entry_gate = ENTRY_GATE_A
+            next_entry_quality = ENTRY_QUALITY_A
+        elif gate_b_triggered:
+            next_entry_gate = ENTRY_GATE_B
+            next_entry_quality = ENTRY_QUALITY_B
+        elif final_next_state == State.ENTRY_WINDOW:
+            next_entry_gate = ENTRY_GATE_LEGACY
+            next_entry_quality = ENTRY_QUALITY_LEGACY
 
         candidate_profile = _classify_decline_profile(signals)
 
-        if prev_state == State.NO_TRADE and decision.next_state == State.DOWNTREND_EARLY:
+        if prev_state == State.NO_TRADE and final_next_state == State.DOWNTREND_EARLY:
             next_origin = _resolve_downtrend_origin(signals, prev_origin)
             next_profile = _apply_one_way_profile(prev_profile, candidate_profile, allow_unknown=True)
         elif (
             prev_state in {State.DOWNTREND_EARLY, State.DOWNTREND_LATE}
-            and decision.next_state in {State.DOWNTREND_EARLY, State.DOWNTREND_LATE}
+            and final_next_state in {State.DOWNTREND_EARLY, State.DOWNTREND_LATE}
         ):
             next_profile = _upgrade_unknown_profile(prev_profile, candidate_profile)
 
         attrs = decision.attrs_update or prev_attrs
-        status = _merge_status_json(attrs.status, next_origin, next_profile)
+        status = _merge_status_json(
+            attrs.status,
+            next_origin,
+            next_profile,
+            next_stabilization_phase,
+            next_entry_gate,
+            next_entry_quality,
+        )
 
         return Decision(
-            next_state=decision.next_state,
+            next_state=final_next_state,
             reason_codes=decision.reason_codes,
             attrs_update=StateAttrs(
                 confidence=attrs.confidence,
@@ -84,6 +137,9 @@ class RuleBasedTransitionPolicyV3Impl:
                 status=status,
                 downtrend_origin=next_origin,
                 decline_profile=next_profile,
+                stabilization_phase=next_stabilization_phase,
+                entry_gate=next_entry_gate,
+                entry_quality=next_entry_quality,
             ),
         )
 
@@ -137,34 +193,78 @@ def _upgrade_unknown_profile(prev_profile: Optional[str], candidate_profile: str
     return prev_profile
 
 
-def _resolve_prev_attrs(prev_attrs: StateAttrs) -> tuple[Optional[str], Optional[str]]:
+def _resolve_stabilization_phase(
+    to_state: State,
+    signals: SignalSet,
+    prev_phase: Optional[str],
+) -> Optional[str]:
+    if to_state == State.STABILIZING:
+        if signals.has(SignalKey.ENTRY_SETUP_VALID) and not signals.has(SignalKey.INVALIDATED):
+            return PHASE_EARLY_REVERSAL
+        if (
+            signals.has(SignalKey.STABILIZATION_CONFIRMED)
+            and signals.has(SignalKey.VOLATILITY_COMPRESSION_DETECTED)
+            and not signals.has(SignalKey.INVALIDATED)
+        ):
+            return PHASE_BASE_BUILDING
+        return PHASE_EARLY_STABILIZATION
+    if to_state == State.ENTRY_WINDOW:
+        return PHASE_EARLY_REVERSAL
+    return prev_phase
+
+
+def _resolve_prev_attrs(
+    prev_attrs: StateAttrs,
+) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
     origin = prev_attrs.downtrend_origin
     profile = prev_attrs.decline_profile
-    if (origin is not None) and (profile is not None):
-        return origin, profile
-    if not prev_attrs.status:
-        return origin, profile
-    try:
-        parsed = json.loads(prev_attrs.status)
-    except Exception:
-        return origin, profile
-    if not isinstance(parsed, dict):
-        return origin, profile
-    if origin is None:
-        value = parsed.get("downtrend_origin")
-        if isinstance(value, str):
-            origin = value
-    if profile is None:
-        value = parsed.get("decline_profile")
-        if isinstance(value, str):
-            profile = value
-    return origin, profile
+    stabilization_phase = prev_attrs.stabilization_phase
+    entry_gate = prev_attrs.entry_gate
+    entry_quality = prev_attrs.entry_quality
+
+    if (
+        origin is None
+        or profile is None
+        or stabilization_phase is None
+        or entry_gate is None
+        or entry_quality is None
+    ) and prev_attrs.status:
+        try:
+            parsed = json.loads(prev_attrs.status)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            if origin is None:
+                value = parsed.get("downtrend_origin")
+                if isinstance(value, str):
+                    origin = value
+            if profile is None:
+                value = parsed.get("decline_profile")
+                if isinstance(value, str):
+                    profile = value
+            if stabilization_phase is None:
+                value = parsed.get("stabilization_phase")
+                if isinstance(value, str):
+                    stabilization_phase = value
+            if entry_gate is None:
+                value = parsed.get("entry_gate")
+                if isinstance(value, str):
+                    entry_gate = value
+            if entry_quality is None:
+                value = parsed.get("entry_quality")
+                if isinstance(value, str):
+                    entry_quality = value
+
+    return origin, profile, stabilization_phase, entry_gate, entry_quality
 
 
 def _merge_status_json(
     status: Optional[str],
     downtrend_origin: Optional[str],
     decline_profile: Optional[str],
+    stabilization_phase: Optional[str],
+    entry_gate: Optional[str],
+    entry_quality: Optional[str],
 ) -> Optional[str]:
     payload = {}
     if status:
@@ -184,6 +284,21 @@ def _merge_status_json(
         payload["decline_profile"] = decline_profile
     elif "decline_profile" in payload:
         del payload["decline_profile"]
+
+    if isinstance(stabilization_phase, str):
+        payload["stabilization_phase"] = stabilization_phase
+    elif "stabilization_phase" in payload:
+        del payload["stabilization_phase"]
+
+    if isinstance(entry_gate, str):
+        payload["entry_gate"] = entry_gate
+    elif "entry_gate" in payload:
+        del payload["entry_gate"]
+
+    if isinstance(entry_quality, str):
+        payload["entry_quality"] = entry_quality
+    elif "entry_quality" in payload:
+        del payload["entry_quality"]
 
     if not payload:
         return None

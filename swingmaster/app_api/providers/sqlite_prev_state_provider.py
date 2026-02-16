@@ -29,6 +29,9 @@ class SQLitePrevStateProvider(PrevStateProvider):
         state_value, confidence_value, age_value, status_value = row
         downtrend_origin = None
         decline_profile = None
+        stabilization_phase = None
+        entry_gate = None
+        entry_quality = None
         if status_value:
             try:
                 parsed = json.loads(status_value)
@@ -39,6 +42,15 @@ class SQLitePrevStateProvider(PrevStateProvider):
                     value = parsed.get("decline_profile")
                     if isinstance(value, str):
                         decline_profile = value
+                    value = parsed.get("stabilization_phase")
+                    if isinstance(value, str):
+                        stabilization_phase = value
+                    value = parsed.get("entry_gate")
+                    if isinstance(value, str):
+                        entry_gate = value
+                    value = parsed.get("entry_quality")
+                    if isinstance(value, str):
+                        entry_quality = value
             except Exception:
                 pass
         return State(state_value), StateAttrs(
@@ -47,4 +59,7 @@ class SQLitePrevStateProvider(PrevStateProvider):
             status=status_value,
             downtrend_origin=downtrend_origin,
             decline_profile=decline_profile,
+            stabilization_phase=stabilization_phase,
+            entry_gate=entry_gate,
+            entry_quality=entry_quality,
         )

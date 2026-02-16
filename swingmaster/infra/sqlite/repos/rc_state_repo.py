@@ -42,6 +42,9 @@ class RcStateRepo:
     def _state_attrs_json(self, attrs: StateAttrs) -> str:
         downtrend_origin = attrs.downtrend_origin
         decline_profile = attrs.decline_profile
+        stabilization_phase = attrs.stabilization_phase
+        entry_gate = attrs.entry_gate
+        entry_quality = attrs.entry_quality
         if attrs.status:
             try:
                 parsed = json.loads(attrs.status)
@@ -54,6 +57,18 @@ class RcStateRepo:
                         value = parsed.get("decline_profile")
                         if isinstance(value, str):
                             decline_profile = value
+                    if stabilization_phase is None:
+                        value = parsed.get("stabilization_phase")
+                        if isinstance(value, str):
+                            stabilization_phase = value
+                    if entry_gate is None:
+                        value = parsed.get("entry_gate")
+                        if isinstance(value, str):
+                            entry_gate = value
+                    if entry_quality is None:
+                        value = parsed.get("entry_quality")
+                        if isinstance(value, str):
+                            entry_quality = value
             except Exception:
                 pass
         payload: dict[str, str] = {}
@@ -61,6 +76,12 @@ class RcStateRepo:
             payload["downtrend_origin"] = downtrend_origin
         if isinstance(decline_profile, str):
             payload["decline_profile"] = decline_profile
+        if isinstance(stabilization_phase, str):
+            payload["stabilization_phase"] = stabilization_phase
+        if isinstance(entry_gate, str):
+            payload["entry_gate"] = entry_gate
+        if isinstance(entry_quality, str):
+            payload["entry_quality"] = entry_quality
         return json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
 
     def insert_state(

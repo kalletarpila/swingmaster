@@ -21,7 +21,7 @@ def eval_slow_decline_started(
     min_decline_percent: float = 4.5,
     use_ma_filter: bool = True,
 ) -> bool:
-    return False
+    # return False
     closes = ctx.closes
     min_required = max(LOOKBACK_LONG_DAYS + 1, MA_LONG)
     if len(closes) < min_required:

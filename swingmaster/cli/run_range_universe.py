@@ -19,6 +19,7 @@ import argparse
 import json
 import time
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Dict, List
 
 from swingmaster.app_api.dto import UniverseSpec, UniverseMode, UniverseSample
@@ -329,6 +330,660 @@ def collect_signal_stats(signal_provider, tickers: List[str], day: str) -> tuple
     return signals_counter, focused, signals_by_ticker
 
 
+def ensure_rc_pipeline_episode_table(rc_conn) -> None:
+    rc_conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rc_pipeline_episode (
+          episode_id TEXT PRIMARY KEY,
+
+          ticker TEXT NOT NULL,
+          downtrend_entry_date TEXT NOT NULL,
+          entry_window_date TEXT NOT NULL,
+
+          entry_window_exit_date TEXT NULL,
+          entry_window_exit_state TEXT NULL,
+
+          close_at_entry REAL NULL,
+          close_at_ew_start REAL NULL,
+          close_at_ew_exit REAL NULL,
+
+          days_entry_to_ew_trading INTEGER NULL,
+          days_in_entry_window_trading INTEGER NULL,
+
+          pipe_min_sma3 REAL NULL,
+          pipe_max_sma3 REAL NULL,
+
+          pre40_min_sma5 REAL NULL,
+          pre40_max_sma5 REAL NULL,
+
+          post60_min_sma5 REAL NULL,
+          post60_max_sma5 REAL NULL,
+
+          exit_reasons_json TEXT NULL,
+
+          computed_at TEXT NOT NULL,
+          pipeline_version TEXT NOT NULL
+        );
+        """
+    )
+    rc_conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rc_pipeline_episode_ticker
+          ON rc_pipeline_episode(ticker);
+        """
+    )
+    rc_conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rc_pipeline_episode_entry_window_date
+          ON rc_pipeline_episode(entry_window_date);
+        """
+    )
+    rc_conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rc_pipeline_episode_entry_window_exit_date
+          ON rc_pipeline_episode(entry_window_exit_date);
+        """
+    )
+    rc_conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rc_pipeline_episode_pipeline_version
+          ON rc_pipeline_episode(pipeline_version);
+        """
+    )
+    existing_columns = {
+        row[1]
+        for row in rc_conn.execute("PRAGMA table_info(rc_pipeline_episode)").fetchall()
+    }
+    columns_to_add = [
+        ("peak60_sma5_date", "TEXT NULL"),
+        ("peak60_days_from_ew_start", "INTEGER NULL"),
+        ("peak60_sma5", "REAL NULL"),
+        ("peak60_growth_pct_close_ew_to_peak", "REAL NULL"),
+        ("pre40_peak_sma5_date", "TEXT NULL"),
+        ("pre40_peak_days_before_entry", "INTEGER NULL"),
+        ("pre40_peak_sma5", "REAL NULL"),
+        ("pre40_trough_sma5_date", "TEXT NULL"),
+        ("pre40_trough_days_before_entry", "INTEGER NULL"),
+        ("pre40_trough_sma5", "REAL NULL"),
+        ("post60_peak_sma5_date", "TEXT NULL"),
+        ("post60_peak_days_from_exit", "INTEGER NULL"),
+        ("post60_peak_sma5", "REAL NULL"),
+    ]
+    for column_name, column_type in columns_to_add:
+        if column_name not in existing_columns:
+            rc_conn.execute(
+                f"ALTER TABLE rc_pipeline_episode ADD COLUMN {column_name} {column_type}"
+            )
+
+
+def populate_rc_pipeline_episode(
+    rc_conn,
+    md_conn,
+    date_from: str,
+    date_to: str,
+    pipeline_version: str = "rc_pipeline_episode_v1",
+) -> None:
+    entry_window_starts = rc_conn.execute(
+        """
+        SELECT ticker, date
+        FROM rc_transition
+        WHERE to_state='ENTRY_WINDOW' AND date>=? AND date<=?
+        GROUP BY ticker, date
+        ORDER BY ticker, date
+        """,
+        (date_from, date_to),
+    ).fetchall()
+
+    upsert_sql = """
+    INSERT INTO rc_pipeline_episode (
+      episode_id,
+      ticker,
+      downtrend_entry_date,
+      entry_window_date,
+      entry_window_exit_date,
+      entry_window_exit_state,
+      close_at_entry,
+      close_at_ew_start,
+      close_at_ew_exit,
+      days_entry_to_ew_trading,
+      days_in_entry_window_trading,
+      exit_reasons_json,
+      computed_at,
+      pipeline_version
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(episode_id) DO UPDATE SET
+      ticker=excluded.ticker,
+      downtrend_entry_date=excluded.downtrend_entry_date,
+      entry_window_date=excluded.entry_window_date,
+      entry_window_exit_date=excluded.entry_window_exit_date,
+      entry_window_exit_state=excluded.entry_window_exit_state,
+      close_at_entry=excluded.close_at_entry,
+      close_at_ew_start=excluded.close_at_ew_start,
+      close_at_ew_exit=excluded.close_at_ew_exit,
+      days_entry_to_ew_trading=excluded.days_entry_to_ew_trading,
+      days_in_entry_window_trading=excluded.days_in_entry_window_trading,
+      exit_reasons_json=excluded.exit_reasons_json,
+      computed_at=excluded.computed_at,
+      pipeline_version=excluded.pipeline_version
+    """
+
+    for row in entry_window_starts:
+        ticker = row["ticker"]
+        entry_window_date = row["date"]
+
+        downtrend_row = rc_conn.execute(
+            """
+            SELECT MAX(date)
+            FROM rc_transition
+            WHERE ticker=? AND from_state='NO_TRADE' AND to_state='DOWNTREND_EARLY' AND date<=?
+            """,
+            (ticker, entry_window_date),
+        ).fetchone()
+        downtrend_entry_date = downtrend_row[0] if downtrend_row else None
+        if not downtrend_entry_date:
+            continue
+
+        exit_row = rc_conn.execute(
+            """
+            SELECT date, to_state, reasons_json
+            FROM rc_transition
+            WHERE ticker=? AND from_state='ENTRY_WINDOW' AND date>?
+            ORDER BY date ASC
+            LIMIT 1
+            """,
+            (ticker, entry_window_date),
+        ).fetchone()
+
+        entry_window_exit_date = exit_row["date"] if exit_row else None
+        entry_window_exit_state = exit_row["to_state"] if exit_row else None
+        exit_reasons_json = exit_row["reasons_json"] if exit_row else None
+
+        close_entry_row = md_conn.execute(
+            "SELECT close FROM osakedata WHERE osake=? AND pvm=? LIMIT 1",
+            (ticker, downtrend_entry_date),
+        ).fetchone()
+        close_at_entry = close_entry_row[0] if close_entry_row else None
+
+        close_ew_row = md_conn.execute(
+            "SELECT close FROM osakedata WHERE osake=? AND pvm=? LIMIT 1",
+            (ticker, entry_window_date),
+        ).fetchone()
+        close_at_ew_start = close_ew_row[0] if close_ew_row else None
+
+        close_at_ew_exit = None
+        if entry_window_exit_date:
+            close_exit_row = md_conn.execute(
+                "SELECT close FROM osakedata WHERE osake=? AND pvm=? LIMIT 1",
+                (ticker, entry_window_exit_date),
+            ).fetchone()
+            close_at_ew_exit = close_exit_row[0] if close_exit_row else None
+
+        days_entry_to_ew_trading = md_conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM osakedata
+            WHERE osake=? AND pvm>=? AND pvm<=?
+            """,
+            (ticker, downtrend_entry_date, entry_window_date),
+        ).fetchone()[0]
+
+        days_in_entry_window_trading = None
+        if entry_window_exit_date:
+            days_in_entry_window_trading = md_conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM osakedata
+                WHERE osake=? AND pvm>=? AND pvm<=?
+                """,
+                (ticker, entry_window_date, entry_window_exit_date),
+            ).fetchone()[0]
+
+        episode_id = f"{ticker}|{downtrend_entry_date}|{entry_window_date}"
+        computed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        rc_conn.execute(
+            upsert_sql,
+            (
+                episode_id,
+                ticker,
+                downtrend_entry_date,
+                entry_window_date,
+                entry_window_exit_date,
+                entry_window_exit_state,
+                close_at_entry,
+                close_at_ew_start,
+                close_at_ew_exit,
+                days_entry_to_ew_trading,
+                days_in_entry_window_trading,
+                exit_reasons_json,
+                computed_at,
+                pipeline_version,
+            ),
+        )
+
+
+def populate_rc_pipeline_episode_sma_extremes(rc_conn, md_db_path: str) -> None:
+    rc_conn.execute("ATTACH DATABASE ? AS os", (md_db_path,))
+    rc_conn.executescript(
+        """
+        WITH
+        episodes AS (
+          SELECT
+            episode_id,
+            ticker,
+            downtrend_entry_date AS entry_date,
+            entry_window_exit_date AS exit_date
+          FROM rc_pipeline_episode
+          WHERE entry_window_exit_date IS NOT NULL
+        ),
+
+        pipe_prices AS (
+          SELECT
+            e.episode_id,
+            o.pvm,
+            o.close,
+            AVG(o.close) OVER (
+              PARTITION BY e.episode_id
+              ORDER BY o.pvm
+              ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+            ) AS sma3
+          FROM episodes e
+          JOIN os.osakedata o
+            ON o.osake = e.ticker
+           AND o.pvm BETWEEN e.entry_date AND e.exit_date
+        ),
+        pipe_sma3_minmax AS (
+          SELECT
+            episode_id,
+            MIN(sma3) AS pipe_min_sma3,
+            MAX(sma3) AS pipe_max_sma3
+          FROM pipe_prices
+          WHERE sma3 IS NOT NULL
+          GROUP BY episode_id
+        ),
+
+        pre40_base AS (
+          SELECT
+            e.episode_id,
+            o.pvm,
+            o.close,
+            ROW_NUMBER() OVER (
+              PARTITION BY e.episode_id
+              ORDER BY o.pvm DESC
+            ) AS rn_desc
+          FROM episodes e
+          JOIN os.osakedata o
+            ON o.osake = e.ticker
+           AND o.pvm < e.entry_date
+        ),
+        pre40_limited AS (
+          SELECT
+            episode_id,
+            pvm,
+            close
+          FROM pre40_base
+          WHERE rn_desc <= 40
+        ),
+        pre40_sma AS (
+          SELECT
+            episode_id,
+            pvm,
+            AVG(close) OVER (
+              PARTITION BY episode_id
+              ORDER BY pvm
+              ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
+            ) AS sma5
+          FROM pre40_limited
+        ),
+        pre40_sma5_minmax AS (
+          SELECT
+            episode_id,
+            MIN(sma5) AS pre40_min_sma5,
+            MAX(sma5) AS pre40_max_sma5
+          FROM pre40_sma
+          WHERE sma5 IS NOT NULL
+          GROUP BY episode_id
+        ),
+
+        post60_base AS (
+          SELECT
+            e.episode_id,
+            o.pvm,
+            o.close,
+            ROW_NUMBER() OVER (
+              PARTITION BY e.episode_id
+              ORDER BY o.pvm ASC
+            ) AS rn_asc
+          FROM episodes e
+          JOIN os.osakedata o
+            ON o.osake = e.ticker
+           AND o.pvm > e.exit_date
+        ),
+        post60_limited AS (
+          SELECT
+            episode_id,
+            pvm,
+            close
+          FROM post60_base
+          WHERE rn_asc <= 60
+        ),
+        post60_sma AS (
+          SELECT
+            episode_id,
+            pvm,
+            AVG(close) OVER (
+              PARTITION BY episode_id
+              ORDER BY pvm
+              ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
+            ) AS sma5
+          FROM post60_limited
+        ),
+        post60_sma5_minmax AS (
+          SELECT
+            episode_id,
+            MIN(sma5) AS post60_min_sma5,
+            MAX(sma5) AS post60_max_sma5
+          FROM post60_sma
+          WHERE sma5 IS NOT NULL
+          GROUP BY episode_id
+        ),
+
+        all_updates AS (
+          SELECT
+            e.episode_id,
+            p.pipe_min_sma3,
+            p.pipe_max_sma3,
+            pre.pre40_min_sma5,
+            pre.pre40_max_sma5,
+            post.post60_min_sma5,
+            post.post60_max_sma5
+          FROM episodes e
+          LEFT JOIN pipe_sma3_minmax p  ON p.episode_id = e.episode_id
+          LEFT JOIN pre40_sma5_minmax pre ON pre.episode_id = e.episode_id
+          LEFT JOIN post60_sma5_minmax post ON post.episode_id = e.episode_id
+        )
+
+        UPDATE rc_pipeline_episode
+        SET
+          pipe_min_sma3 = (SELECT a.pipe_min_sma3 FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          pipe_max_sma3 = (SELECT a.pipe_max_sma3 FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          pre40_min_sma5 = (SELECT a.pre40_min_sma5 FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          pre40_max_sma5 = (SELECT a.pre40_max_sma5 FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          post60_min_sma5 = (SELECT a.post60_min_sma5 FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          post60_max_sma5 = (SELECT a.post60_max_sma5 FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          computed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        WHERE episode_id IN (SELECT episode_id FROM all_updates);
+        """
+    )
+    rc_conn.execute("DETACH DATABASE os")
+
+
+def populate_rc_pipeline_episode_peak_timing_fields(rc_conn, md_db_path: str) -> None:
+    rc_conn.execute("ATTACH DATABASE ? AS os", (md_db_path,))
+    rc_conn.executescript(
+        """
+        WITH
+        episodes AS (
+          SELECT
+            episode_id,
+            ticker,
+            downtrend_entry_date,
+            entry_window_date,
+            entry_window_exit_date,
+            close_at_ew_start
+          FROM rc_pipeline_episode
+        ),
+
+        forward_base AS (
+          SELECT
+            e.episode_id,
+            o.pvm,
+            o.close,
+            ROW_NUMBER() OVER (
+              PARTITION BY e.episode_id
+              ORDER BY o.pvm
+            ) - 1 AS day_idx
+          FROM episodes e
+          JOIN os.osakedata o
+            ON o.osake = e.ticker
+           AND o.pvm >= e.entry_window_date
+        ),
+        forward_0_60 AS (
+          SELECT *
+          FROM forward_base
+          WHERE day_idx BETWEEN 0 AND 60
+        ),
+        forward_sma AS (
+          SELECT
+            episode_id,
+            pvm,
+            close,
+            day_idx,
+            AVG(close) OVER (
+              PARTITION BY episode_id
+              ORDER BY pvm
+              ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
+            ) AS sma5
+          FROM forward_0_60
+        ),
+        peak60_ranked AS (
+          SELECT
+            fs.episode_id,
+            fs.pvm AS peak60_sma5_date,
+            fs.day_idx AS peak60_days_from_ew_start,
+            fs.sma5 AS peak60_sma5,
+            ((fs.close / e.close_at_ew_start) - 1.0) * 100.0 AS peak60_growth_pct_close_ew_to_peak,
+            ROW_NUMBER() OVER (
+              PARTITION BY fs.episode_id
+              ORDER BY fs.sma5 DESC, fs.pvm ASC
+            ) AS rn
+          FROM forward_sma fs
+          JOIN episodes e
+            ON e.episode_id = fs.episode_id
+          WHERE fs.sma5 IS NOT NULL
+            AND e.close_at_ew_start IS NOT NULL
+        ),
+        peak60_pick AS (
+          SELECT
+            episode_id,
+            peak60_sma5_date,
+            peak60_days_from_ew_start,
+            peak60_sma5,
+            peak60_growth_pct_close_ew_to_peak
+          FROM peak60_ranked
+          WHERE rn = 1
+        ),
+
+        pre40_base AS (
+          SELECT
+            e.episode_id,
+            o.pvm,
+            o.close,
+            ROW_NUMBER() OVER (
+              PARTITION BY e.episode_id
+              ORDER BY o.pvm DESC
+            ) AS days_before_entry
+          FROM episodes e
+          JOIN os.osakedata o
+            ON o.osake = e.ticker
+           AND o.pvm < e.downtrend_entry_date
+        ),
+        pre40_limited AS (
+          SELECT
+            episode_id,
+            pvm,
+            close,
+            days_before_entry
+          FROM pre40_base
+          WHERE days_before_entry <= 40
+        ),
+        pre40_sma AS (
+          SELECT
+            episode_id,
+            pvm,
+            close,
+            days_before_entry,
+            AVG(close) OVER (
+              PARTITION BY episode_id
+              ORDER BY pvm
+              ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
+            ) AS sma5
+          FROM pre40_limited
+        ),
+        pre40_peak_ranked AS (
+          SELECT
+            episode_id,
+            pvm AS pre40_peak_sma5_date,
+            days_before_entry AS pre40_peak_days_before_entry,
+            sma5 AS pre40_peak_sma5,
+            ROW_NUMBER() OVER (
+              PARTITION BY episode_id
+              ORDER BY sma5 DESC, pvm ASC
+            ) AS rn
+          FROM pre40_sma
+          WHERE sma5 IS NOT NULL
+        ),
+        pre40_peak_pick AS (
+          SELECT
+            episode_id,
+            pre40_peak_sma5_date,
+            pre40_peak_days_before_entry,
+            pre40_peak_sma5
+          FROM pre40_peak_ranked
+          WHERE rn = 1
+        ),
+        pre40_trough_ranked AS (
+          SELECT
+            episode_id,
+            pvm AS pre40_trough_sma5_date,
+            days_before_entry AS pre40_trough_days_before_entry,
+            sma5 AS pre40_trough_sma5,
+            ROW_NUMBER() OVER (
+              PARTITION BY episode_id
+              ORDER BY sma5 ASC, pvm ASC
+            ) AS rn
+          FROM pre40_sma
+          WHERE sma5 IS NOT NULL
+        ),
+        pre40_trough_pick AS (
+          SELECT
+            episode_id,
+            pre40_trough_sma5_date,
+            pre40_trough_days_before_entry,
+            pre40_trough_sma5
+          FROM pre40_trough_ranked
+          WHERE rn = 1
+        ),
+
+        post60_base AS (
+          SELECT
+            e.episode_id,
+            o.pvm,
+            o.close,
+            ROW_NUMBER() OVER (
+              PARTITION BY e.episode_id
+              ORDER BY o.pvm ASC
+            ) AS days_from_exit
+          FROM episodes e
+          JOIN os.osakedata o
+            ON o.osake = e.ticker
+           AND e.entry_window_exit_date IS NOT NULL
+           AND o.pvm > e.entry_window_exit_date
+        ),
+        post60_limited AS (
+          SELECT
+            episode_id,
+            pvm,
+            close,
+            days_from_exit
+          FROM post60_base
+          WHERE days_from_exit <= 60
+        ),
+        post60_sma AS (
+          SELECT
+            episode_id,
+            pvm,
+            close,
+            days_from_exit,
+            AVG(close) OVER (
+              PARTITION BY episode_id
+              ORDER BY pvm
+              ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
+            ) AS sma5
+          FROM post60_limited
+        ),
+        post60_peak_ranked AS (
+          SELECT
+            episode_id,
+            pvm AS post60_peak_sma5_date,
+            days_from_exit AS post60_peak_days_from_exit,
+            sma5 AS post60_peak_sma5,
+            ROW_NUMBER() OVER (
+              PARTITION BY episode_id
+              ORDER BY sma5 DESC, pvm ASC
+            ) AS rn
+          FROM post60_sma
+          WHERE sma5 IS NOT NULL
+        ),
+        post60_peak_pick AS (
+          SELECT
+            episode_id,
+            post60_peak_sma5_date,
+            post60_peak_days_from_exit,
+            post60_peak_sma5
+          FROM post60_peak_ranked
+          WHERE rn = 1
+        ),
+
+        all_updates AS (
+          SELECT
+            e.episode_id,
+            p60.peak60_sma5_date,
+            p60.peak60_days_from_ew_start,
+            p60.peak60_sma5,
+            p60.peak60_growth_pct_close_ew_to_peak,
+            p40p.pre40_peak_sma5_date,
+            p40p.pre40_peak_days_before_entry,
+            p40p.pre40_peak_sma5,
+            p40t.pre40_trough_sma5_date,
+            p40t.pre40_trough_days_before_entry,
+            p40t.pre40_trough_sma5,
+            p60x.post60_peak_sma5_date,
+            p60x.post60_peak_days_from_exit,
+            p60x.post60_peak_sma5
+          FROM episodes e
+          LEFT JOIN peak60_pick p60
+            ON p60.episode_id = e.episode_id
+          LEFT JOIN pre40_peak_pick p40p
+            ON p40p.episode_id = e.episode_id
+          LEFT JOIN pre40_trough_pick p40t
+            ON p40t.episode_id = e.episode_id
+          LEFT JOIN post60_peak_pick p60x
+            ON p60x.episode_id = e.episode_id
+        )
+
+        UPDATE rc_pipeline_episode
+        SET
+          peak60_sma5_date = (SELECT a.peak60_sma5_date FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          peak60_days_from_ew_start = (SELECT a.peak60_days_from_ew_start FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          peak60_sma5 = (SELECT a.peak60_sma5 FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          peak60_growth_pct_close_ew_to_peak = (SELECT a.peak60_growth_pct_close_ew_to_peak FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          pre40_peak_sma5_date = (SELECT a.pre40_peak_sma5_date FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          pre40_peak_days_before_entry = (SELECT a.pre40_peak_days_before_entry FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          pre40_peak_sma5 = (SELECT a.pre40_peak_sma5 FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          pre40_trough_sma5_date = (SELECT a.pre40_trough_sma5_date FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          pre40_trough_days_before_entry = (SELECT a.pre40_trough_days_before_entry FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          pre40_trough_sma5 = (SELECT a.pre40_trough_sma5 FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          post60_peak_sma5_date = (SELECT a.post60_peak_sma5_date FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          post60_peak_days_from_exit = (SELECT a.post60_peak_days_from_exit FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          post60_peak_sma5 = (SELECT a.post60_peak_sma5 FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          computed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        WHERE episode_id IN (SELECT episode_id FROM all_updates);
+        """
+    )
+    rc_conn.execute("DETACH DATABASE os")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -343,6 +998,7 @@ def main() -> None:
     rc_conn = get_connection(args.rc_db)
     try:
         apply_migrations(rc_conn)
+        ensure_rc_pipeline_episode_table(rc_conn)
         rc_conn.commit()
 
         universe_reader = TickerUniverseReader(md_conn)
@@ -534,6 +1190,17 @@ def main() -> None:
                     else:
                         names = []
                     print(f"SIGNALS ticker={t} signals={json.dumps(names)}")
+
+        populate_rc_pipeline_episode(
+            rc_conn=rc_conn,
+            md_conn=md_conn,
+            date_from=args.date_from,
+            date_to=args.date_to,
+            pipeline_version="rc_pipeline_episode_v1",
+        )
+        populate_rc_pipeline_episode_sma_extremes(rc_conn=rc_conn, md_db_path=args.md_db)
+        populate_rc_pipeline_episode_peak_timing_fields(rc_conn=rc_conn, md_db_path=args.md_db)
+        rc_conn.commit()
 
         if last_run_id and trading_days:
             last_day = trading_days[-1]

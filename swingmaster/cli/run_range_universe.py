@@ -77,6 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--debug-show-mismatches", action="store_true", help="Show entry-like vs RC mismatches on final day")
     parser.add_argument("--print-signals", action="store_true", help="Print per-day per-ticker signal keys")
     parser.add_argument("--print-signals-limit", type=int, default=20, help="Max tickers per day for --print-signals")
+    parser.add_argument("--report", action="store_true", help="Print episode report after run completes")
     return parser.parse_args()
 
 
@@ -297,6 +298,202 @@ def print_missing_asof_summary(
             print(f"  {ticker} days_insufficient={count}")
     else:
         print("  (none)")
+
+
+def print_episode_report(rc_conn, rc_db_path: str) -> None:
+    columns = {
+        row[1] for row in rc_conn.execute("PRAGMA table_info(rc_pipeline_episode)").fetchall()
+    }
+    has_confirm_above_5 = "ew_confirm_above_5" in columns
+    has_confirm_confirmed = "ew_confirm_confirmed" in columns
+    has_peak60_days = "peak60_days_from_ew_start" in columns
+    has_pipe = "pipe_min_sma3" in columns and "pipe_max_sma3" in columns
+    has_pre40 = "pre40_min_sma5" in columns and "pre40_max_sma5" in columns
+    has_post60 = "post60_min_sma5" in columns and "post60_max_sma5" in columns
+
+    pipeline_version_row = rc_conn.execute(
+        """
+        SELECT pipeline_version
+        FROM rc_pipeline_episode
+        WHERE pipeline_version IS NOT NULL
+        ORDER BY computed_at DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    pipeline_version = pipeline_version_row[0] if pipeline_version_row else "NA"
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    print("")
+    print("EPISODE_REPORT")
+    print(f"db_path={rc_db_path}")
+    print(f"pipeline_version={pipeline_version}")
+    print(f"generated_at_utc={now_utc}")
+
+    counts_row = rc_conn.execute(
+        """
+        SELECT
+          COUNT(*) AS n_total,
+          SUM(CASE WHEN entry_window_exit_date IS NULL THEN 1 ELSE 0 END) AS n_open,
+          SUM(CASE WHEN entry_window_exit_date IS NOT NULL THEN 1 ELSE 0 END) AS n_closed,
+          SUM(CASE WHEN close_at_entry IS NULL OR close_at_ew_start IS NULL THEN 1 ELSE 0 END) AS n_missing_core_close,
+          SUM(CASE WHEN days_entry_to_ew_trading IS NULL THEN 1 ELSE 0 END) AS n_missing_days_to_ew
+        FROM rc_pipeline_episode
+        """
+    ).fetchone()
+    print("")
+    print("COUNTS")
+    print(f"n_total={counts_row['n_total']}")
+    print(f"n_open={counts_row['n_open']}")
+    print(f"n_closed={counts_row['n_closed']}")
+    print(f"n_missing_core_close={counts_row['n_missing_core_close']}")
+    print(f"n_missing_days_to_ew={counts_row['n_missing_days_to_ew']}")
+
+    exit_rows = rc_conn.execute(
+        """
+        SELECT
+          COALESCE(entry_window_exit_state, 'NULL') AS exit_state,
+          COUNT(*) AS n,
+          ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM rc_pipeline_episode), 4) AS pct
+        FROM rc_pipeline_episode
+        GROUP BY COALESCE(entry_window_exit_state, 'NULL')
+        ORDER BY n DESC, exit_state
+        """
+    ).fetchall()
+    print("")
+    print("EXIT_STATE_DISTRIBUTION")
+    print(f"{'exit_state':<24} {'n':>8} {'pct':>8}")
+    for row in exit_rows:
+        print(f"{row['exit_state']:<24} {row['n']:>8} {row['pct']:>8}")
+
+    if has_confirm_confirmed:
+        confirm_row = rc_conn.execute(
+            """
+            SELECT
+              SUM(CASE WHEN ew_confirm_confirmed IS NOT NULL THEN 1 ELSE 0 END) AS n_has_confirm,
+              SUM(CASE WHEN ew_confirm_confirmed = 1 THEN 1 ELSE 0 END) AS n_confirmed
+            FROM rc_pipeline_episode
+            """
+        ).fetchone()
+        n_has_confirm = confirm_row["n_has_confirm"] or 0
+        n_confirmed = confirm_row["n_confirmed"] or 0
+        pct_confirmed = round((n_confirmed * 1.0 / n_has_confirm), 4) if n_has_confirm > 0 else 0.0
+        group_rows = rc_conn.execute(
+            """
+            SELECT
+              CASE
+                WHEN ew_confirm_confirmed IS NULL THEN 'NULL'
+                WHEN ew_confirm_confirmed = 1 THEN '1'
+                ELSE '0'
+              END AS confirmed_bucket,
+              COUNT(*) AS n,
+              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM rc_pipeline_episode), 4) AS pct
+            FROM rc_pipeline_episode
+            GROUP BY confirmed_bucket
+            ORDER BY confirmed_bucket
+            """
+        ).fetchall()
+        print("")
+        print("CONFIRMATION_DISTRIBUTION")
+        print(f"n_has_confirm={n_has_confirm}")
+        print(f"n_confirmed={n_confirmed}")
+        print(f"pct_confirmed_among_has_confirm={pct_confirmed}")
+        print(f"{'ew_confirm_confirmed':<24} {'n':>8} {'pct':>8}")
+        for row in group_rows:
+            print(f"{row['confirmed_bucket']:<24} {row['n']:>8} {row['pct']:>8}")
+
+    latest_sql = f"""
+        SELECT
+          ticker,
+          downtrend_entry_date,
+          entry_window_date,
+          entry_window_exit_date,
+          entry_window_exit_state,
+          days_entry_to_ew_trading,
+          days_in_entry_window_trading,
+          close_at_entry,
+          close_at_ew_start,
+          close_at_ew_exit,
+          {'pipe_min_sma3' if has_pipe else 'NULL AS pipe_min_sma3'},
+          {'pipe_max_sma3' if has_pipe else 'NULL AS pipe_max_sma3'},
+          {'pre40_min_sma5' if has_pre40 else 'NULL AS pre40_min_sma5'},
+          {'pre40_max_sma5' if has_pre40 else 'NULL AS pre40_max_sma5'},
+          {'post60_min_sma5' if has_post60 else 'NULL AS post60_min_sma5'},
+          {'post60_max_sma5' if has_post60 else 'NULL AS post60_max_sma5'},
+          {'ew_confirm_above_5' if has_confirm_above_5 else 'NULL AS ew_confirm_above_5'},
+          {'ew_confirm_confirmed' if has_confirm_confirmed else 'NULL AS ew_confirm_confirmed'}
+        FROM rc_pipeline_episode
+        ORDER BY entry_window_date DESC
+        LIMIT 10
+    """
+    latest_rows = rc_conn.execute(latest_sql).fetchall()
+    print("")
+    print("LATEST_10_EPISODES")
+    header = (
+        "ticker | downtrend_entry_date | entry_window_date | entry_window_exit_date | "
+        "entry_window_exit_state | days_entry_to_ew_trading | days_in_entry_window_trading | "
+        "close_at_entry | close_at_ew_start | close_at_ew_exit | pipe_min_sma3 | pipe_max_sma3 | "
+        "pre40_min_sma5 | pre40_max_sma5 | post60_min_sma5 | post60_max_sma5 | "
+        "ew_confirm_above_5 | ew_confirm_confirmed"
+    )
+    print(header)
+    for row in latest_rows:
+        vals = [
+            row["ticker"],
+            row["downtrend_entry_date"],
+            row["entry_window_date"],
+            row["entry_window_exit_date"] if row["entry_window_exit_date"] is not None else "NA",
+            row["entry_window_exit_state"] if row["entry_window_exit_state"] is not None else "NA",
+            row["days_entry_to_ew_trading"] if row["days_entry_to_ew_trading"] is not None else "NA",
+            row["days_in_entry_window_trading"] if row["days_in_entry_window_trading"] is not None else "NA",
+            row["close_at_entry"] if row["close_at_entry"] is not None else "NA",
+            row["close_at_ew_start"] if row["close_at_ew_start"] is not None else "NA",
+            row["close_at_ew_exit"] if row["close_at_ew_exit"] is not None else "NA",
+            row["pipe_min_sma3"] if row["pipe_min_sma3"] is not None else "NA",
+            row["pipe_max_sma3"] if row["pipe_max_sma3"] is not None else "NA",
+            row["pre40_min_sma5"] if row["pre40_min_sma5"] is not None else "NA",
+            row["pre40_max_sma5"] if row["pre40_max_sma5"] is not None else "NA",
+            row["post60_min_sma5"] if row["post60_min_sma5"] is not None else "NA",
+            row["post60_max_sma5"] if row["post60_max_sma5"] is not None else "NA",
+            row["ew_confirm_above_5"] if row["ew_confirm_above_5"] is not None else "NA",
+            row["ew_confirm_confirmed"] if row["ew_confirm_confirmed"] is not None else "NA",
+        ]
+        print(" | ".join(str(v) for v in vals))
+
+    if has_post60:
+        top_sql = f"""
+            SELECT
+              ticker,
+              entry_window_date,
+              entry_window_exit_state,
+              ROUND((post60_max_sma5 / close_at_ew_start - 1.0) * 100.0, 4) AS growth_pct,
+              post60_max_sma5,
+              close_at_ew_start,
+              {'peak60_days_from_ew_start' if has_peak60_days else 'NULL AS peak60_days_from_ew_start'}
+            FROM rc_pipeline_episode
+            WHERE post60_max_sma5 IS NOT NULL
+              AND close_at_ew_start IS NOT NULL
+              AND close_at_ew_start > 0
+            ORDER BY growth_pct DESC
+            LIMIT 10
+        """
+        top_rows = rc_conn.execute(top_sql).fetchall()
+        print("")
+        print("TOP_10_BY_EW_TO_POST60_MAX_SMA5_GROWTH")
+        print(
+            "ticker | entry_window_date | exit_state | growth_pct | post60_max_sma5 | "
+            "close_at_ew_start | peak60_days_from_ew_start"
+        )
+        for row in top_rows:
+            vals = [
+                row["ticker"],
+                row["entry_window_date"],
+                row["entry_window_exit_state"] if row["entry_window_exit_state"] is not None else "NA",
+                row["growth_pct"],
+                row["post60_max_sma5"],
+                row["close_at_ew_start"],
+                row["peak60_days_from_ew_start"] if row["peak60_days_from_ew_start"] is not None else "NA",
+            ]
+            print(" | ".join(str(v) for v in vals))
 
 
 def collect_signal_stats(signal_provider, tickers: List[str], day: str) -> tuple[Counter, dict[str, int], Dict[str, object]]:
@@ -1376,6 +1573,8 @@ def main() -> None:
             rc_conn=rc_conn, md_db_path=args.md_db
         )
         rc_conn.commit()
+        if args.report:
+            print_episode_report(rc_conn, args.rc_db)
 
         if last_run_id and trading_days:
             last_day = trading_days[-1]

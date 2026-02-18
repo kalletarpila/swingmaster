@@ -408,12 +408,29 @@ def ensure_rc_pipeline_episode_table(rc_conn) -> None:
         ("post60_peak_sma5_date", "TEXT NULL"),
         ("post60_peak_days_from_exit", "INTEGER NULL"),
         ("post60_peak_sma5", "REAL NULL"),
+        ("ew_confirm_rule", "TEXT NULL"),
+        ("ew_confirm_above_5", "INTEGER NULL"),
+        ("ew_confirm_confirmed", "INTEGER NULL"),
     ]
     for column_name, column_type in columns_to_add:
         if column_name not in existing_columns:
             rc_conn.execute(
                 f"ALTER TABLE rc_pipeline_episode ADD COLUMN {column_name} {column_type}"
             )
+    transition_columns = {
+        row[1] for row in rc_conn.execute("PRAGMA table_info(rc_transition)").fetchall()
+    }
+    if "state_attrs_json" not in transition_columns:
+        rc_conn.execute(
+            "ALTER TABLE rc_transition ADD COLUMN state_attrs_json TEXT NULL"
+        )
+    state_daily_columns = {
+        row[1] for row in rc_conn.execute("PRAGMA table_info(rc_state_daily)").fetchall()
+    }
+    if "state_attrs_json" not in state_daily_columns:
+        rc_conn.execute(
+            "ALTER TABLE rc_state_daily ADD COLUMN state_attrs_json TEXT NULL"
+        )
 
 
 def populate_rc_pipeline_episode(
@@ -984,6 +1001,161 @@ def populate_rc_pipeline_episode_peak_timing_fields(rc_conn, md_db_path: str) ->
     rc_conn.execute("DETACH DATABASE os")
 
 
+def populate_rc_pipeline_episode_entry_confirmation(rc_conn, md_db_path: str) -> None:
+    rc_conn.execute("ATTACH DATABASE ? AS os", (md_db_path,))
+    rc_conn.executescript(
+        """
+        DROP TABLE IF EXISTS temp._ew_confirm_updates;
+
+        CREATE TEMP TABLE _ew_confirm_updates AS
+        WITH episodes AS (
+          SELECT
+            episode_id,
+            ticker,
+            entry_window_date AS ew_date
+          FROM rc_pipeline_episode
+          WHERE entry_window_date IS NOT NULL
+        ),
+        series AS (
+          SELECT
+            e.episode_id,
+            e.ticker,
+            e.ew_date,
+            o.pvm,
+            o.close,
+            AVG(o.close) OVER (
+              PARTITION BY e.episode_id
+              ORDER BY o.pvm
+              ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
+            ) AS sma5
+          FROM episodes e
+          JOIN os.osakedata o
+            ON o.osake = e.ticker
+           AND o.pvm BETWEEN date(e.ew_date, '-40 day') AND date(e.ew_date, '+10 day')
+        ),
+        forward AS (
+          SELECT
+            episode_id,
+            ticker,
+            ew_date,
+            pvm,
+            close,
+            sma5,
+            ROW_NUMBER() OVER (
+              PARTITION BY episode_id
+              ORDER BY pvm
+            ) AS fwd_idx
+          FROM series
+          WHERE pvm >= ew_date
+        ),
+        per_episode AS (
+          SELECT
+            episode_id,
+            ticker,
+            ew_date,
+            SUM(CASE WHEN fwd_idx <= 5 AND sma5 IS NOT NULL AND close > sma5 THEN 1 ELSE 0 END) AS above_5,
+            MAX(CASE WHEN fwd_idx = 5 THEN pvm END) AS decision_date,
+            MAX(fwd_idx) AS max_fwd_idx
+          FROM forward
+          WHERE fwd_idx <= 5
+          GROUP BY episode_id, ticker, ew_date
+        )
+        SELECT
+          episode_id,
+          ticker,
+          ew_date,
+          decision_date,
+          above_5,
+          CASE WHEN above_5 >= 3 THEN 1 ELSE 0 END AS confirmed
+        FROM per_episode
+        WHERE max_fwd_idx = 5;
+
+        UPDATE rc_pipeline_episode
+        SET
+          ew_confirm_rule = 'CLOSE_GT_SMA5_3_OF_5',
+          ew_confirm_above_5 = (
+            SELECT u.above_5
+            FROM _ew_confirm_updates u
+            WHERE u.episode_id = rc_pipeline_episode.episode_id
+          ),
+          ew_confirm_confirmed = (
+            SELECT u.confirmed
+            FROM _ew_confirm_updates u
+            WHERE u.episode_id = rc_pipeline_episode.episode_id
+          ),
+          computed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        WHERE episode_id IN (SELECT episode_id FROM _ew_confirm_updates);
+
+        UPDATE rc_transition
+        SET
+          state_attrs_json = json_set(
+            json_set(
+              json_set(
+                CASE
+                  WHEN COALESCE(state_attrs_json, '') = '' THEN '{}'
+                  ELSE state_attrs_json
+                END,
+                '$.status.entry_continuation_rule',
+                'CLOSE_GT_SMA5_3_OF_5'
+              ),
+              '$.status.entry_continuation_above_5',
+              (
+                SELECT u.above_5
+                FROM _ew_confirm_updates u
+                WHERE u.ticker = rc_transition.ticker
+                  AND u.ew_date = rc_transition.date
+              )
+            ),
+            '$.status.entry_continuation_confirmed',
+            CASE
+              WHEN (
+                SELECT u.confirmed
+                FROM _ew_confirm_updates u
+                WHERE u.ticker = rc_transition.ticker
+                  AND u.ew_date = rc_transition.date
+              ) = 1 THEN json('true')
+              ELSE json('false')
+            END
+          )
+        WHERE to_state = 'ENTRY_WINDOW'
+          AND EXISTS (
+            SELECT 1
+            FROM _ew_confirm_updates u
+            WHERE u.ticker = rc_transition.ticker
+              AND u.ew_date = rc_transition.date
+          );
+
+        UPDATE rc_state_daily
+        SET
+          state_attrs_json = json_set(
+            CASE
+              WHEN COALESCE(state_attrs_json, '') = '' THEN '{}'
+              ELSE state_attrs_json
+            END,
+            '$.status.entry_continuation_confirmed',
+            CASE
+              WHEN (
+                SELECT u.confirmed
+                FROM _ew_confirm_updates u
+                WHERE u.ticker = rc_state_daily.ticker
+                  AND u.decision_date = rc_state_daily.date
+              ) = 1 THEN json('true')
+              ELSE json('false')
+            END
+          )
+        WHERE EXISTS (
+          SELECT 1
+          FROM _ew_confirm_updates u
+          WHERE u.ticker = rc_state_daily.ticker
+            AND u.decision_date = rc_state_daily.date
+        );
+
+        DROP TABLE IF EXISTS temp._ew_confirm_updates;
+        """
+    )
+    rc_conn.execute("DETACH DATABASE os")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -1200,6 +1372,9 @@ def main() -> None:
         )
         populate_rc_pipeline_episode_sma_extremes(rc_conn=rc_conn, md_db_path=args.md_db)
         populate_rc_pipeline_episode_peak_timing_fields(rc_conn=rc_conn, md_db_path=args.md_db)
+        populate_rc_pipeline_episode_entry_confirmation(
+            rc_conn=rc_conn, md_db_path=args.md_db
+        )
         rc_conn.commit()
 
         if last_run_id and trading_days:

@@ -271,6 +271,31 @@ def test_downtrend_entry_type_carry_forward_not_overwritten() -> None:
     assert payload["downtrend_entry_type"] == "SLOW_SOFT"
 
 
+def test_no_trade_entry_with_both_signals_and_trend_reason_keeps_trend_entry_type_family() -> None:
+    policy = RuleBasedTransitionPolicyV3()
+
+    decision = policy.decide(
+        prev_state=State.NO_TRADE,
+        prev_attrs=StateAttrs(
+            confidence=None,
+            age=0,
+            status=json.dumps({"custom_keep": "ok"}, separators=(",", ":"), ensure_ascii=False),
+        ),
+        signals=_signal_set(
+            SignalKey.TREND_STARTED,
+            SignalKey.SLOW_DECLINE_STARTED,
+        ),
+    )
+
+    assert decision.next_state == State.DOWNTREND_EARLY
+    assert ReasonCode.TREND_STARTED in decision.reason_codes
+    assert decision.attrs_update is not None
+    assert decision.attrs_update.downtrend_origin == "TREND"
+    assert decision.attrs_update.downtrend_entry_type is not None
+    assert decision.attrs_update.downtrend_entry_type.startswith("TREND_")
+    assert not decision.attrs_update.downtrend_entry_type.startswith("SLOW_")
+
+
 def test_stabilization_phase_carry_forward_and_updates() -> None:
     conn = _conn_memory()
     conn.execute("PRAGMA foreign_keys = ON")
@@ -441,6 +466,52 @@ def test_entry_gate_and_quality_persistence_carry_forward() -> None:
     payload = json.loads(row["state_attrs_json"])
     assert payload["entry_gate"] == "EARLY_STAB_MA20_HL"
     assert payload["entry_quality"] == "A"
+
+
+def test_no_trade_transition_clears_v3_metadata_keys_from_status() -> None:
+    policy = RuleBasedTransitionPolicyV3()
+    prev_status = json.dumps(
+        {
+            "custom_keep": "ok",
+            "downtrend_origin": "SLOW",
+            "downtrend_entry_type": "SLOW_STRUCTURAL",
+            "decline_profile": "SLOW_DRIFT",
+            "stabilization_phase": "EARLY_REVERSAL",
+            "entry_gate": "LEGACY_ENTRY_SETUP_VALID",
+            "entry_quality": "LEGACY",
+        },
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+    decision = policy.decide(
+        prev_state=State.STABILIZING,
+        prev_attrs=StateAttrs(
+            confidence=None,
+            age=2,
+            status=prev_status,
+            downtrend_origin="SLOW",
+            downtrend_entry_type="SLOW_STRUCTURAL",
+            decline_profile="SLOW_DRIFT",
+            stabilization_phase="EARLY_REVERSAL",
+            entry_gate="LEGACY_ENTRY_SETUP_VALID",
+            entry_quality="LEGACY",
+        ),
+        signals=_signal_set(SignalKey.INVALIDATED),
+    )
+
+    assert decision.next_state == State.NO_TRADE
+    assert decision.attrs_update is not None
+    assert decision.attrs_update.downtrend_origin is None
+    assert decision.attrs_update.downtrend_entry_type is None
+    assert decision.attrs_update.decline_profile is None
+    assert decision.attrs_update.stabilization_phase is None
+    assert decision.attrs_update.entry_gate is None
+    assert decision.attrs_update.entry_quality is None
+
+    assert decision.attrs_update.status is not None
+    payload = json.loads(decision.attrs_update.status)
+    assert payload == {"custom_keep": "ok"}
 
 
 @pytest.mark.parametrize("module,args_builder", [(run_daily_universe, _run_daily_args), (run_range_universe, _run_range_args)])

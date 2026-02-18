@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from swingmaster.core.domain.enums import State
+from swingmaster.core.domain.enums import ReasonCode, State
 from swingmaster.core.domain.models import Decision, StateAttrs
 from swingmaster.core.policy.ports.state_history_port import StateHistoryPort
 from swingmaster.core.policy.rule_v2 import RuleBasedTransitionPolicyV2Impl
@@ -124,6 +124,11 @@ class RuleBasedTransitionPolicyV3Impl:
             next_origin = _resolve_downtrend_origin(signals, prev_origin)
             if next_entry_type is None:
                 next_entry_type = _classify_downtrend_entry_type(signals)
+            if ReasonCode.TREND_STARTED in decision.reason_codes:
+                if next_entry_type == ENTRY_TYPE_SLOW_STRUCTURAL:
+                    next_entry_type = ENTRY_TYPE_TREND_STRUCTURAL
+                elif next_entry_type == ENTRY_TYPE_SLOW_SOFT:
+                    next_entry_type = ENTRY_TYPE_TREND_SOFT
             next_profile = _apply_one_way_profile(prev_profile, candidate_profile, allow_unknown=True)
         elif (
             prev_state in {State.DOWNTREND_EARLY, State.DOWNTREND_LATE}
@@ -131,9 +136,20 @@ class RuleBasedTransitionPolicyV3Impl:
         ):
             next_profile = _upgrade_unknown_profile(prev_profile, candidate_profile)
 
+        if final_next_state == State.NO_TRADE:
+            next_origin = None
+            next_entry_type = None
+            next_profile = None
+            next_stabilization_phase = None
+            next_entry_gate = None
+            next_entry_quality = None
+
         attrs = decision.attrs_update or prev_attrs
+        status_source = attrs.status
+        if final_next_state == State.NO_TRADE and status_source is None:
+            status_source = prev_attrs.status
         status = _merge_status_json(
-            attrs.status,
+            status_source,
             next_origin,
             next_entry_type,
             next_profile,

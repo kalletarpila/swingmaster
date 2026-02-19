@@ -307,9 +307,11 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
     has_confirm_above_5 = "ew_confirm_above_5" in columns
     has_confirm_confirmed = "ew_confirm_confirmed" in columns
     has_peak60_days = "peak60_days_from_ew_start" in columns
+    has_peak60_sma5 = "peak60_sma5" in columns
     has_pipe = "pipe_min_sma3" in columns and "pipe_max_sma3" in columns
     has_pre40 = "pre40_min_sma5" in columns and "pre40_max_sma5" in columns
     has_post60 = "post60_min_sma5" in columns and "post60_max_sma5" in columns
+    has_post60_peak = "post60_peak_sma5" in columns
 
     pipeline_version_row = rc_conn.execute(
         """
@@ -401,76 +403,228 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
         for row in group_rows:
             print(f"{row['confirmed_bucket']:<24} {row['n']:>8} {row['pct']:>8}")
 
-    latest_sql = f"""
-        SELECT
-          ticker,
-          downtrend_entry_date,
-          entry_window_date,
-          entry_window_exit_date,
-          entry_window_exit_state,
-          days_entry_to_ew_trading,
-          days_in_entry_window_trading,
-          close_at_entry,
-          close_at_ew_start,
-          close_at_ew_exit,
-          {'pipe_min_sma3' if has_pipe else 'NULL AS pipe_min_sma3'},
-          {'pipe_max_sma3' if has_pipe else 'NULL AS pipe_max_sma3'},
-          {'pre40_min_sma5' if has_pre40 else 'NULL AS pre40_min_sma5'},
-          {'pre40_max_sma5' if has_pre40 else 'NULL AS pre40_max_sma5'},
-          {'post60_min_sma5' if has_post60 else 'NULL AS post60_min_sma5'},
-          {'post60_max_sma5' if has_post60 else 'NULL AS post60_max_sma5'},
-          {'ew_confirm_above_5' if has_confirm_above_5 else 'NULL AS ew_confirm_above_5'},
-          {'ew_confirm_confirmed' if has_confirm_confirmed else 'NULL AS ew_confirm_confirmed'}
-        FROM rc_pipeline_episode
-        ORDER BY entry_window_date DESC
-        LIMIT 10
-    """
-    latest_rows = rc_conn.execute(latest_sql).fetchall()
-    print("")
-    print("LATEST_10_EPISODES")
-    header = (
-        "ticker | downtrend_entry_date | entry_window_date | entry_window_exit_date | "
-        "entry_window_exit_state | days_entry_to_ew_trading | days_in_entry_window_trading | "
-        "close_at_entry | close_at_ew_start | close_at_ew_exit | pipe_min_sma3 | pipe_max_sma3 | "
-        "pre40_min_sma5 | pre40_max_sma5 | post60_min_sma5 | post60_max_sma5 | "
-        "ew_confirm_above_5 | ew_confirm_confirmed"
-    )
-    print(header)
-    for row in latest_rows:
-        vals = [
-            row["ticker"],
-            row["downtrend_entry_date"],
-            row["entry_window_date"],
-            row["entry_window_exit_date"] if row["entry_window_exit_date"] is not None else "NA",
-            row["entry_window_exit_state"] if row["entry_window_exit_state"] is not None else "NA",
-            row["days_entry_to_ew_trading"] if row["days_entry_to_ew_trading"] is not None else "NA",
-            row["days_in_entry_window_trading"] if row["days_in_entry_window_trading"] is not None else "NA",
-            row["close_at_entry"] if row["close_at_entry"] is not None else "NA",
-            row["close_at_ew_start"] if row["close_at_ew_start"] is not None else "NA",
-            row["close_at_ew_exit"] if row["close_at_ew_exit"] is not None else "NA",
-            row["pipe_min_sma3"] if row["pipe_min_sma3"] is not None else "NA",
-            row["pipe_max_sma3"] if row["pipe_max_sma3"] is not None else "NA",
-            row["pre40_min_sma5"] if row["pre40_min_sma5"] is not None else "NA",
-            row["pre40_max_sma5"] if row["pre40_max_sma5"] is not None else "NA",
-            row["post60_min_sma5"] if row["post60_min_sma5"] is not None else "NA",
-            row["post60_max_sma5"] if row["post60_max_sma5"] is not None else "NA",
-            row["ew_confirm_above_5"] if row["ew_confirm_above_5"] is not None else "NA",
-            row["ew_confirm_confirmed"] if row["ew_confirm_confirmed"] is not None else "NA",
-        ]
-        print(" | ".join(str(v) for v in vals))
+    if has_peak60_sma5:
+        growth_bucket_rows = rc_conn.execute(
+            """
+            WITH growth AS (
+              SELECT ((peak60_sma5 / close_at_ew_start) - 1.0) * 100.0 AS growth_pct
+              FROM rc_pipeline_episode
+              WHERE peak60_sma5 IS NOT NULL
+                AND close_at_ew_start IS NOT NULL
+                AND close_at_ew_start > 0
+            )
+            SELECT
+              CASE
+                WHEN growth_pct < -50 THEN '<-50%'
+                WHEN growth_pct < -40 THEN '-50..-40%'
+                WHEN growth_pct < -30 THEN '-40..-30%'
+                WHEN growth_pct < -20 THEN '-30..-20%'
+                WHEN growth_pct < -10 THEN '-20..-10%'
+                WHEN growth_pct < 0 THEN '-10..0%'
+                WHEN growth_pct < 10 THEN '0..10%'
+                WHEN growth_pct < 20 THEN '10..20%'
+                WHEN growth_pct < 30 THEN '20..30%'
+                WHEN growth_pct < 40 THEN '30..40%'
+                WHEN growth_pct < 50 THEN '40..50%'
+                WHEN growth_pct < 60 THEN '50..60%'
+                WHEN growth_pct < 70 THEN '60..70%'
+                WHEN growth_pct < 80 THEN '70..80%'
+                WHEN growth_pct < 90 THEN '80..90%'
+                WHEN growth_pct < 100 THEN '90..100%'
+                ELSE '100%+'
+              END AS growth_bucket_10pct,
+              COUNT(*) AS n,
+              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM growth), 4) AS pct
+            FROM growth
+            GROUP BY growth_bucket_10pct
+            ORDER BY
+              CASE growth_bucket_10pct
+                WHEN '<-50%' THEN 0
+                WHEN '-50..-40%' THEN 1
+                WHEN '-40..-30%' THEN 2
+                WHEN '-30..-20%' THEN 3
+                WHEN '-20..-10%' THEN 4
+                WHEN '-10..0%' THEN 5
+                WHEN '0..10%' THEN 6
+                WHEN '10..20%' THEN 7
+                WHEN '20..30%' THEN 8
+                WHEN '30..40%' THEN 9
+                WHEN '40..50%' THEN 10
+                WHEN '50..60%' THEN 11
+                WHEN '60..70%' THEN 12
+                WHEN '70..80%' THEN 13
+                WHEN '80..90%' THEN 14
+                WHEN '90..100%' THEN 15
+                ELSE 16
+              END
+            """
+        ).fetchall()
+        print("")
+        print("PEAK60_SMA5_GROWTH_BUCKETS_10")
+        print(f"{'bucket':<16} {'n':>8} {'pct':>8}")
+        for row in growth_bucket_rows:
+            print(f"{row['growth_bucket_10pct']:<16} {row['n']:>8} {row['pct']:>8}")
 
-    if has_post60:
+    if has_post60_peak:
+        peak_growth_bucket_rows = rc_conn.execute(
+            """
+            WITH growth AS (
+              SELECT ((post60_peak_sma5 / close_at_ew_start) - 1.0) * 100.0 AS growth_pct
+              FROM rc_pipeline_episode
+              WHERE post60_peak_sma5 IS NOT NULL
+                AND close_at_ew_start IS NOT NULL
+                AND close_at_ew_start > 0
+            )
+            SELECT
+              CASE
+                WHEN growth_pct < -50 THEN '<-50%'
+                WHEN growth_pct < -40 THEN '-50..-40%'
+                WHEN growth_pct < -30 THEN '-40..-30%'
+                WHEN growth_pct < -20 THEN '-30..-20%'
+                WHEN growth_pct < -10 THEN '-20..-10%'
+                WHEN growth_pct < 0 THEN '-10..0%'
+                WHEN growth_pct < 10 THEN '0..10%'
+                WHEN growth_pct < 20 THEN '10..20%'
+                WHEN growth_pct < 30 THEN '20..30%'
+                WHEN growth_pct < 40 THEN '30..40%'
+                WHEN growth_pct < 50 THEN '40..50%'
+                WHEN growth_pct < 60 THEN '50..60%'
+                WHEN growth_pct < 70 THEN '60..70%'
+                WHEN growth_pct < 80 THEN '70..80%'
+                WHEN growth_pct < 90 THEN '80..90%'
+                WHEN growth_pct < 100 THEN '90..100%'
+                ELSE '100%+'
+              END AS growth_bucket_10pct,
+              COUNT(*) AS n,
+              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM growth), 4) AS pct
+            FROM growth
+            GROUP BY growth_bucket_10pct
+            ORDER BY
+              CASE growth_bucket_10pct
+                WHEN '<-50%' THEN 0
+                WHEN '-50..-40%' THEN 1
+                WHEN '-40..-30%' THEN 2
+                WHEN '-30..-20%' THEN 3
+                WHEN '-20..-10%' THEN 4
+                WHEN '-10..0%' THEN 5
+                WHEN '0..10%' THEN 6
+                WHEN '10..20%' THEN 7
+                WHEN '20..30%' THEN 8
+                WHEN '30..40%' THEN 9
+                WHEN '40..50%' THEN 10
+                WHEN '50..60%' THEN 11
+                WHEN '60..70%' THEN 12
+                WHEN '70..80%' THEN 13
+                WHEN '80..90%' THEN 14
+                WHEN '90..100%' THEN 15
+                ELSE 16
+              END
+            """
+        ).fetchall()
+        print("")
+        print("POST60_PEAK_SMA5_GROWTH_BUCKETS_10")
+        print(f"{'bucket':<16} {'n':>8} {'pct':>8}")
+        for row in peak_growth_bucket_rows:
+            print(f"{row['growth_bucket_10pct']:<16} {row['n']:>8} {row['pct']:>8}")
+
+    if "peak60_days_from_ew_start" in columns:
+        peak60_bucket_rows = rc_conn.execute(
+            """
+            WITH base AS (
+              SELECT
+                peak60_days_from_ew_start AS days_to_peak60
+              FROM rc_pipeline_episode
+              WHERE peak60_days_from_ew_start IS NOT NULL
+            )
+            SELECT
+              CASE
+                WHEN days_to_peak60 < 0 THEN '<0'
+                WHEN days_to_peak60 <= 10 THEN '0-10'
+                WHEN days_to_peak60 <= 20 THEN '11-20'
+                WHEN days_to_peak60 <= 30 THEN '21-30'
+                WHEN days_to_peak60 <= 40 THEN '31-40'
+                WHEN days_to_peak60 <= 50 THEN '41-50'
+                WHEN days_to_peak60 <= 60 THEN '51-60'
+                ELSE '61+'
+              END AS peak60_date_bucket_10d,
+              COUNT(*) AS n,
+              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM base), 4) AS pct
+            FROM base
+            GROUP BY peak60_date_bucket_10d
+            ORDER BY
+              CASE peak60_date_bucket_10d
+                WHEN '<0' THEN 0
+                WHEN '0-10' THEN 1
+                WHEN '11-20' THEN 2
+                WHEN '21-30' THEN 3
+                WHEN '31-40' THEN 4
+                WHEN '41-50' THEN 5
+                WHEN '51-60' THEN 6
+                ELSE 7
+              END
+            """
+        ).fetchall()
+        print("")
+        print("PEAK60_SMA5_DATE_BUCKETS_10D")
+        print(f"{'bucket':<8} {'n':>8} {'pct':>8}")
+        for row in peak60_bucket_rows:
+            print(f"{row['peak60_date_bucket_10d']:<8} {row['n']:>8} {row['pct']:>8}")
+
+    if "post60_peak_days_from_exit" in columns:
+        post60_peak_bucket_rows = rc_conn.execute(
+            """
+            WITH base AS (
+              SELECT
+                post60_peak_days_from_exit AS days_to_post60_peak
+              FROM rc_pipeline_episode
+              WHERE post60_peak_days_from_exit IS NOT NULL
+            )
+            SELECT
+              CASE
+                WHEN days_to_post60_peak < 0 THEN '<0'
+                WHEN days_to_post60_peak <= 10 THEN '0-10'
+                WHEN days_to_post60_peak <= 20 THEN '11-20'
+                WHEN days_to_post60_peak <= 30 THEN '21-30'
+                WHEN days_to_post60_peak <= 40 THEN '31-40'
+                WHEN days_to_post60_peak <= 50 THEN '41-50'
+                WHEN days_to_post60_peak <= 60 THEN '51-60'
+                ELSE '61+'
+              END AS post60_peak_date_bucket_10d,
+              COUNT(*) AS n,
+              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM base), 4) AS pct
+            FROM base
+            GROUP BY post60_peak_date_bucket_10d
+            ORDER BY
+              CASE post60_peak_date_bucket_10d
+                WHEN '<0' THEN 0
+                WHEN '0-10' THEN 1
+                WHEN '11-20' THEN 2
+                WHEN '21-30' THEN 3
+                WHEN '31-40' THEN 4
+                WHEN '41-50' THEN 5
+                WHEN '51-60' THEN 6
+                ELSE 7
+              END
+            """
+        ).fetchall()
+        print("")
+        print("POST60_PEAK_SMA5_DATE_BUCKETS_10D")
+        print(f"{'bucket':<8} {'n':>8} {'pct':>8}")
+        for row in post60_peak_bucket_rows:
+            print(f"{row['post60_peak_date_bucket_10d']:<8} {row['n']:>8} {row['pct']:>8}")
+
+    if has_peak60_sma5:
         top_sql = f"""
             SELECT
               ticker,
               entry_window_date,
               entry_window_exit_state,
-              ROUND((post60_max_sma5 / close_at_ew_start - 1.0) * 100.0, 4) AS growth_pct,
-              post60_max_sma5,
+              ROUND((peak60_sma5 / close_at_ew_start - 1.0) * 100.0, 4) AS growth_pct,
+              peak60_sma5,
               close_at_ew_start,
               {'peak60_days_from_ew_start' if has_peak60_days else 'NULL AS peak60_days_from_ew_start'}
             FROM rc_pipeline_episode
-            WHERE post60_max_sma5 IS NOT NULL
+            WHERE peak60_sma5 IS NOT NULL
               AND close_at_ew_start IS NOT NULL
               AND close_at_ew_start > 0
             ORDER BY growth_pct DESC
@@ -478,9 +632,9 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
         """
         top_rows = rc_conn.execute(top_sql).fetchall()
         print("")
-        print("TOP_10_BY_EW_TO_POST60_MAX_SMA5_GROWTH")
+        print("TOP_10_BY_EW_TO_PEAK60_SMA5_GROWTH")
         print(
-            "ticker | entry_window_date | exit_state | growth_pct | post60_max_sma5 | "
+            "ticker | entry_window_date | exit_state | growth_pct | peak60_sma5 | "
             "close_at_ew_start | peak60_days_from_ew_start"
         )
         for row in top_rows:
@@ -489,7 +643,7 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
                 row["entry_window_date"],
                 row["entry_window_exit_state"] if row["entry_window_exit_state"] is not None else "NA",
                 row["growth_pct"],
-                row["post60_max_sma5"],
+                row["peak60_sma5"],
                 row["close_at_ew_start"],
                 row["peak60_days_from_ew_start"] if row["peak60_days_from_ew_start"] is not None else "NA",
             ]

@@ -300,7 +300,7 @@ def print_missing_asof_summary(
         print("  (none)")
 
 
-def print_episode_report(rc_conn, rc_db_path: str) -> None:
+def print_episode_report(rc_conn, rc_db_path: str, md_db_path: str) -> None:
     def _fmt_report_num(v):
         if isinstance(v, float):
             s = f"{v:.4f}".rstrip("0").rstrip(".")
@@ -413,6 +413,129 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
         print(f"{'ew_confirm_confirmed':<24} {'n':>8} {'pct':>8}")
         for row in group_rows:
             print(f"{row['confirmed_bucket']:<24} {row['n']:>8} {_fmt_report_num(row['pct']):>8}")
+
+    rc_conn.execute("ATTACH DATABASE ? AS os_report", (md_db_path,))
+    entry_type_h_rows = rc_conn.execute(
+        """
+        WITH episode_base AS (
+          SELECT
+            e.episode_id,
+            e.ticker,
+            e.entry_window_date AS ew_date,
+            e.peak60_sma5,
+            json_extract(sd.state_attrs_json, '$.downtrend_entry_type') AS downtrend_entry_type
+          FROM rc_pipeline_episode e
+          JOIN rc_state_daily sd
+            ON sd.ticker = e.ticker
+           AND sd.date = e.entry_window_date
+          WHERE sd.state = 'ENTRY_WINDOW'
+            AND json_extract(sd.state_attrs_json, '$.downtrend_entry_type') IS NOT NULL
+        ),
+        fwd AS (
+          SELECT
+            b.episode_id,
+            b.downtrend_entry_type,
+            o.pvm,
+            o.close,
+            ROW_NUMBER() OVER (PARTITION BY b.episode_id ORDER BY o.pvm) AS fwd_idx
+          FROM episode_base b
+          JOIN os_report.osakedata o
+            ON o.osake = b.ticker
+           AND o.pvm >= b.ew_date
+        ),
+        per_episode AS (
+          SELECT
+            episode_id,
+            downtrend_entry_type,
+            MAX(CASE WHEN fwd_idx = 1 THEN close END) AS c0,
+            MAX(CASE WHEN fwd_idx = 11 THEN close END) AS c10,
+            MAX(CASE WHEN fwd_idx = 21 THEN close END) AS c20,
+            MAX(CASE WHEN fwd_idx = 41 THEN close END) AS c40
+          FROM fwd
+          WHERE fwd_idx <= 41
+          GROUP BY episode_id, downtrend_entry_type
+        ),
+        ret AS (
+          SELECT
+            p.episode_id,
+            p.downtrend_entry_type,
+            CASE WHEN p.c0 > 0 AND p.c10 IS NOT NULL THEN (p.c10 / p.c0 - 1.0) * 100.0 END AS r10,
+            CASE WHEN p.c0 > 0 AND p.c20 IS NOT NULL THEN (p.c20 / p.c0 - 1.0) * 100.0 END AS r20,
+            CASE WHEN p.c0 > 0 AND p.c40 IS NOT NULL THEN (p.c40 / p.c0 - 1.0) * 100.0 END AS r40,
+            CASE WHEN p.c0 > 0 AND b.peak60_sma5 IS NOT NULL THEN (b.peak60_sma5 / p.c0 - 1.0) * 100.0 END AS r_peak60
+          FROM per_episode p
+          JOIN episode_base b
+            ON b.episode_id = p.episode_id
+        ),
+        long AS (
+          SELECT downtrend_entry_type, 'H10' AS horizon, r10 AS ret_pct FROM ret WHERE r10 IS NOT NULL
+          UNION ALL
+          SELECT downtrend_entry_type, 'H20' AS horizon, r20 AS ret_pct FROM ret WHERE r20 IS NOT NULL
+          UNION ALL
+          SELECT downtrend_entry_type, 'H40' AS horizon, r40 AS ret_pct FROM ret WHERE r40 IS NOT NULL
+          UNION ALL
+          SELECT downtrend_entry_type, 'PEAK60' AS horizon, r_peak60 AS ret_pct FROM ret WHERE r_peak60 IS NOT NULL
+        ),
+        ranked AS (
+          SELECT
+            downtrend_entry_type,
+            horizon,
+            ret_pct,
+            ROW_NUMBER() OVER (PARTITION BY downtrend_entry_type, horizon ORDER BY ret_pct) AS rn,
+            COUNT(*) OVER (PARTITION BY downtrend_entry_type, horizon) AS n
+          FROM long
+        )
+        SELECT
+          downtrend_entry_type,
+          horizon,
+          COUNT(*) AS n,
+          ROUND(AVG(ret_pct), 2) AS avg_ret_pct,
+          ROUND(
+            (SELECT r2.ret_pct
+             FROM ranked r2
+             WHERE r2.downtrend_entry_type = ranked.downtrend_entry_type
+               AND r2.horizon = ranked.horizon
+               AND r2.rn = CAST((r2.n + 1) / 2 AS INT)
+             LIMIT 1), 2
+          ) AS median_ret_pct,
+          ROUND(
+            (SELECT r2.ret_pct
+             FROM ranked r2
+             WHERE r2.downtrend_entry_type = ranked.downtrend_entry_type
+               AND r2.horizon = ranked.horizon
+               AND r2.rn = MAX(1, CAST(r2.n * 0.10 AS INT))
+             LIMIT 1), 2
+          ) AS p10_ret_pct,
+          ROUND(
+            (SELECT r2.ret_pct
+             FROM ranked r2
+             WHERE r2.downtrend_entry_type = ranked.downtrend_entry_type
+               AND r2.horizon = ranked.horizon
+               AND r2.rn = MAX(1, CAST(r2.n * 0.90 AS INT))
+             LIMIT 1), 2
+          ) AS p90_ret_pct,
+          ROUND(SUM(CASE WHEN ret_pct > 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 4) AS pct_positive
+        FROM ranked
+        GROUP BY downtrend_entry_type, horizon
+        ORDER BY downtrend_entry_type, horizon
+        """
+    ).fetchall()
+    rc_conn.execute("DETACH DATABASE os_report")
+
+    if entry_type_h_rows:
+        print("")
+        print("DOWNTREND_ENTRY_TYPE_RETURNS_H10_H20_H40")
+        print(
+            f"{'downtrend_entry_type':<20} {'horizon':<6} {'n':>6} {'avg_ret_pct':>12} "
+            f"{'median_ret_pct':>14} {'p10_ret_pct':>12} {'p90_ret_pct':>12} {'pct_positive':>14}"
+        )
+        for row in entry_type_h_rows:
+            print(
+                f"{row['downtrend_entry_type']:<20} {row['horizon']:<6} {row['n']:>6} "
+                f"{_fmt_report_num(row['avg_ret_pct']):>12} {_fmt_report_num(row['median_ret_pct']):>14} "
+                f"{_fmt_report_num(row['p10_ret_pct']):>12} {_fmt_report_num(row['p90_ret_pct']):>12} "
+                f"{_fmt_report_num(row['pct_positive']):>14}"
+            )
 
     confirm_expr = "ew_confirm_confirmed" if has_confirm_confirmed else "NULL AS ew_confirm_confirmed"
 
@@ -1795,7 +1918,7 @@ def main() -> None:
         )
         rc_conn.commit()
         if args.report:
-            print_episode_report(rc_conn, args.rc_db)
+            print_episode_report(rc_conn, args.rc_db, args.md_db)
 
         if last_run_id and trading_days:
             last_day = trading_days[-1]

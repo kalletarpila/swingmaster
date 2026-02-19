@@ -114,7 +114,11 @@ class RuleBasedTransitionPolicyV3Impl:
         elif gate_b_triggered:
             next_entry_gate = ENTRY_GATE_B
             next_entry_quality = ENTRY_QUALITY_B
-        elif final_next_state == State.ENTRY_WINDOW:
+        elif (
+            final_next_state == State.ENTRY_WINDOW
+            and prev_entry_gate is None
+            and prev_entry_quality is None
+        ):
             next_entry_gate = ENTRY_GATE_LEGACY
             next_entry_quality = ENTRY_QUALITY_LEGACY
 

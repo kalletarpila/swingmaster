@@ -468,6 +468,39 @@ def test_entry_gate_and_quality_persistence_carry_forward() -> None:
     assert payload["entry_quality"] == "A"
 
 
+def test_entry_window_stay_does_not_downgrade_existing_gate_and_quality_to_legacy() -> None:
+    policy = RuleBasedTransitionPolicyV3()
+
+    prev_status = json.dumps(
+        {
+            "entry_gate": "EARLY_STAB_MA20_HL",
+            "entry_quality": "A",
+        },
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    decision = policy.decide(
+        prev_state=State.ENTRY_WINDOW,
+        prev_attrs=StateAttrs(
+            confidence=None,
+            age=2,
+            status=prev_status,
+            entry_gate="EARLY_STAB_MA20_HL",
+            entry_quality="A",
+        ),
+        signals=_signal_set(SignalKey.ENTRY_SETUP_VALID),
+    )
+
+    assert decision.next_state == State.ENTRY_WINDOW
+    assert decision.attrs_update is not None
+    assert decision.attrs_update.entry_gate == "EARLY_STAB_MA20_HL"
+    assert decision.attrs_update.entry_quality == "A"
+    assert decision.attrs_update.status is not None
+    payload = json.loads(decision.attrs_update.status)
+    assert payload["entry_gate"] == "EARLY_STAB_MA20_HL"
+    assert payload["entry_quality"] == "A"
+
+
 def test_no_trade_transition_clears_v3_metadata_keys_from_status() -> None:
     policy = RuleBasedTransitionPolicyV3()
     prev_status = json.dumps(

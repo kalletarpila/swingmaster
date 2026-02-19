@@ -18,6 +18,7 @@ This is the unified V3 reference document for:
 - `swingmaster/core/policy/rule_v1/policy.py`
 - `swingmaster/core/policy/rule_v2/policy.py`
 - `swingmaster/core/policy/rule_v3/policy.py`
+- `swingmaster/cli/run_range_universe.py`
 
 ## 1. Signal Layer (V3)
 
@@ -290,11 +291,29 @@ Gate override from `STABILIZING`:
 - `stabilization_phase`
 - `entry_gate`
 - `entry_quality`
+- `entry_continuation_confirmed`
 
 Deterministic merge:
 - string value present -> write key
 - value absent -> remove key
 - empty payload -> `status=None`
+
+### 5.7 Entry continuation confirmation metadata
+This metadata is populated during range runs in `run_range_universe.py` from market data (not from delegated policy decision):
+- Rule: first 5 trading days from `ENTRY_WINDOW` start (`fwd_idx=1..5`, EW day inclusive)
+- Compute rolling `SMA5(close)` on trading-day series
+- `above_5 = count(close > SMA5)` across those 5 days where SMA5 is non-null
+- `entry_continuation_confirmed = (above_5 >= 3)`
+
+Write timing and storage:
+- The value becomes decidable on `fwd_idx=5` (decision day).
+- Canonical write target: `rc_state_daily.state_attrs_json` for `(ticker, decision_date)`:
+  - `$.status.entry_continuation_confirmed = true/false`
+- `rc_transition.state_attrs_json` is also enriched for `to_state='ENTRY_WINDOW'` rows with:
+  - `entry_continuation_rule`
+  - `entry_continuation_above_5`
+  - `entry_continuation_confirmed`
+  (kept for transition-audit compatibility)
 
 ## 6. Audit Notes
 - V3 may override delegated `next_state` (`STABILIZING -> ENTRY_WINDOW` via Gate A/B).
@@ -302,7 +321,7 @@ Deterministic merge:
 - For analysis, use together:
 - `state` / `prev_state`
 - `reason_codes`
-- `state_attrs_json` fields (`downtrend_origin`, `downtrend_entry_type`, `decline_profile`, `stabilization_phase`, `entry_gate`, `entry_quality`)
+- `state_attrs_json` fields (`downtrend_origin`, `downtrend_entry_type`, `decline_profile`, `stabilization_phase`, `entry_gate`, `entry_quality`, `entry_continuation_confirmed`)
 
 ---
 

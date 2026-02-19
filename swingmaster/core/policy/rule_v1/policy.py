@@ -179,6 +179,8 @@ def _with_trend_started_reason(decision: Decision, signals: SignalSet) -> Decisi
         return decision
     if ReasonCode.INVALIDATED in decision.reason_codes:
         return decision
+    if decision.next_state != State.DOWNTREND_EARLY:
+        return decision
     if not signals.has(SignalKey.TREND_STARTED):
         return decision
     if ReasonCode.TREND_STARTED in decision.reason_codes:

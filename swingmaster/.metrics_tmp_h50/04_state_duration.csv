@@ -1,0 +1,7 @@
+state,n_regimes,min_duration,max_duration,avg_duration,median_duration
+NO_TRADE,29510,1,5,4.55,5.0
+DOWNTREND_EARLY,1086,1,5,3.16,3.0
+STABILIZING,211,1,5,2.91,3.0
+DOWNTREND_LATE,87,1,5,3.57,4.0
+ENTRY_WINDOW,45,1,5,2.22,2.0
+PASS,24,1,2,1.75,2.0

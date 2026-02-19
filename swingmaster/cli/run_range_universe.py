@@ -301,6 +301,17 @@ def print_missing_asof_summary(
 
 
 def print_episode_report(rc_conn, rc_db_path: str) -> None:
+    def _fmt_report_num(v):
+        if isinstance(v, float):
+            s = f"{v:.4f}".rstrip("0").rstrip(".")
+            return s.replace(".", ",")
+        return str(v)
+
+    def _fmt_report_cell(v):
+        if v is None:
+            return "NA"
+        return _fmt_report_num(v)
+
     columns = {
         row[1] for row in rc_conn.execute("PRAGMA table_info(rc_pipeline_episode)").fetchall()
     }
@@ -398,16 +409,21 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
         print("CONFIRMATION_DISTRIBUTION")
         print(f"n_has_confirm={n_has_confirm}")
         print(f"n_confirmed={n_confirmed}")
-        print(f"pct_confirmed_among_has_confirm={pct_confirmed}")
+        print(f"pct_confirmed_among_has_confirm={_fmt_report_num(pct_confirmed)}")
         print(f"{'ew_confirm_confirmed':<24} {'n':>8} {'pct':>8}")
         for row in group_rows:
-            print(f"{row['confirmed_bucket']:<24} {row['n']:>8} {row['pct']:>8}")
+            print(f"{row['confirmed_bucket']:<24} {row['n']:>8} {_fmt_report_num(row['pct']):>8}")
+
+    confirm_expr = "ew_confirm_confirmed" if has_confirm_confirmed else "NULL AS ew_confirm_confirmed"
 
     if has_peak60_sma5:
         growth_bucket_rows = rc_conn.execute(
-            """
+            f"""
             WITH growth AS (
-              SELECT ((peak60_sma5 / close_at_ew_start) - 1.0) * 100.0 AS growth_pct
+              SELECT
+                ((peak60_sma5 / close_at_ew_start) - 1.0) * 100.0 AS growth_pct,
+                entry_window_exit_state,
+                {confirm_expr}
               FROM rc_pipeline_episode
               WHERE peak60_sma5 IS NOT NULL
                 AND close_at_ew_start IS NOT NULL
@@ -434,7 +450,11 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
                 ELSE '100%+'
               END AS growth_bucket_10pct,
               COUNT(*) AS n,
-              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM growth), 4) AS pct
+              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM growth), 4) AS pct,
+              SUM(CASE WHEN entry_window_exit_state = 'PASS' THEN 1 ELSE 0 END) AS n_exit_pass,
+              SUM(CASE WHEN entry_window_exit_state = 'NO_TRADE' THEN 1 ELSE 0 END) AS n_exit_no_trade,
+              SUM(CASE WHEN ew_confirm_confirmed = 0 THEN 1 ELSE 0 END) AS n_confirm_0,
+              SUM(CASE WHEN ew_confirm_confirmed = 1 THEN 1 ELSE 0 END) AS n_confirm_1
             FROM growth
             GROUP BY growth_bucket_10pct
             ORDER BY
@@ -461,15 +481,25 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
         ).fetchall()
         print("")
         print("PEAK60_SMA5_GROWTH_BUCKETS_10")
-        print(f"{'bucket':<16} {'n':>8} {'pct':>8}")
+        print(
+            f"{'bucket':<16} {'n':>8} {'pct':>8} {'n_exit_pass':>12} {'n_exit_no_trade':>16} "
+            f"{'n_confirm_0':>12} {'n_confirm_1':>12}"
+        )
         for row in growth_bucket_rows:
-            print(f"{row['growth_bucket_10pct']:<16} {row['n']:>8} {row['pct']:>8}")
+            print(
+                f"{row['growth_bucket_10pct']:<16} {row['n']:>8} {_fmt_report_num(row['pct']):>8} "
+                f"{row['n_exit_pass']:>12} {row['n_exit_no_trade']:>16} "
+                f"{row['n_confirm_0']:>12} {row['n_confirm_1']:>12}"
+            )
 
     if has_post60_peak:
         peak_growth_bucket_rows = rc_conn.execute(
-            """
+            f"""
             WITH growth AS (
-              SELECT ((post60_peak_sma5 / close_at_ew_start) - 1.0) * 100.0 AS growth_pct
+              SELECT
+                ((post60_peak_sma5 / close_at_ew_start) - 1.0) * 100.0 AS growth_pct,
+                entry_window_exit_state,
+                {confirm_expr}
               FROM rc_pipeline_episode
               WHERE post60_peak_sma5 IS NOT NULL
                 AND close_at_ew_start IS NOT NULL
@@ -496,7 +526,11 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
                 ELSE '100%+'
               END AS growth_bucket_10pct,
               COUNT(*) AS n,
-              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM growth), 4) AS pct
+              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM growth), 4) AS pct,
+              SUM(CASE WHEN entry_window_exit_state = 'PASS' THEN 1 ELSE 0 END) AS n_exit_pass,
+              SUM(CASE WHEN entry_window_exit_state = 'NO_TRADE' THEN 1 ELSE 0 END) AS n_exit_no_trade,
+              SUM(CASE WHEN ew_confirm_confirmed = 0 THEN 1 ELSE 0 END) AS n_confirm_0,
+              SUM(CASE WHEN ew_confirm_confirmed = 1 THEN 1 ELSE 0 END) AS n_confirm_1
             FROM growth
             GROUP BY growth_bucket_10pct
             ORDER BY
@@ -523,16 +557,25 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
         ).fetchall()
         print("")
         print("POST60_PEAK_SMA5_GROWTH_BUCKETS_10")
-        print(f"{'bucket':<16} {'n':>8} {'pct':>8}")
+        print(
+            f"{'bucket':<16} {'n':>8} {'pct':>8} {'n_exit_pass':>12} {'n_exit_no_trade':>16} "
+            f"{'n_confirm_0':>12} {'n_confirm_1':>12}"
+        )
         for row in peak_growth_bucket_rows:
-            print(f"{row['growth_bucket_10pct']:<16} {row['n']:>8} {row['pct']:>8}")
+            print(
+                f"{row['growth_bucket_10pct']:<16} {row['n']:>8} {_fmt_report_num(row['pct']):>8} "
+                f"{row['n_exit_pass']:>12} {row['n_exit_no_trade']:>16} "
+                f"{row['n_confirm_0']:>12} {row['n_confirm_1']:>12}"
+            )
 
     if "peak60_days_from_ew_start" in columns:
         peak60_bucket_rows = rc_conn.execute(
-            """
+            f"""
             WITH base AS (
               SELECT
-                peak60_days_from_ew_start AS days_to_peak60
+                peak60_days_from_ew_start AS days_to_peak60,
+                entry_window_exit_state,
+                {confirm_expr}
               FROM rc_pipeline_episode
               WHERE peak60_days_from_ew_start IS NOT NULL
             )
@@ -548,7 +591,11 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
                 ELSE '61+'
               END AS peak60_date_bucket_10d,
               COUNT(*) AS n,
-              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM base), 4) AS pct
+              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM base), 4) AS pct,
+              SUM(CASE WHEN entry_window_exit_state = 'PASS' THEN 1 ELSE 0 END) AS n_exit_pass,
+              SUM(CASE WHEN entry_window_exit_state = 'NO_TRADE' THEN 1 ELSE 0 END) AS n_exit_no_trade,
+              SUM(CASE WHEN ew_confirm_confirmed = 0 THEN 1 ELSE 0 END) AS n_confirm_0,
+              SUM(CASE WHEN ew_confirm_confirmed = 1 THEN 1 ELSE 0 END) AS n_confirm_1
             FROM base
             GROUP BY peak60_date_bucket_10d
             ORDER BY
@@ -566,16 +613,25 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
         ).fetchall()
         print("")
         print("PEAK60_SMA5_DATE_BUCKETS_10D")
-        print(f"{'bucket':<8} {'n':>8} {'pct':>8}")
+        print(
+            f"{'bucket':<8} {'n':>8} {'pct':>8} {'n_exit_pass':>12} {'n_exit_no_trade':>16} "
+            f"{'n_confirm_0':>12} {'n_confirm_1':>12}"
+        )
         for row in peak60_bucket_rows:
-            print(f"{row['peak60_date_bucket_10d']:<8} {row['n']:>8} {row['pct']:>8}")
+            print(
+                f"{row['peak60_date_bucket_10d']:<8} {row['n']:>8} {_fmt_report_num(row['pct']):>8} "
+                f"{row['n_exit_pass']:>12} {row['n_exit_no_trade']:>16} "
+                f"{row['n_confirm_0']:>12} {row['n_confirm_1']:>12}"
+            )
 
     if "post60_peak_days_from_exit" in columns:
         post60_peak_bucket_rows = rc_conn.execute(
-            """
+            f"""
             WITH base AS (
               SELECT
-                post60_peak_days_from_exit AS days_to_post60_peak
+                post60_peak_days_from_exit AS days_to_post60_peak,
+                entry_window_exit_state,
+                {confirm_expr}
               FROM rc_pipeline_episode
               WHERE post60_peak_days_from_exit IS NOT NULL
             )
@@ -591,7 +647,11 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
                 ELSE '61+'
               END AS post60_peak_date_bucket_10d,
               COUNT(*) AS n,
-              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM base), 4) AS pct
+              ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM base), 4) AS pct,
+              SUM(CASE WHEN entry_window_exit_state = 'PASS' THEN 1 ELSE 0 END) AS n_exit_pass,
+              SUM(CASE WHEN entry_window_exit_state = 'NO_TRADE' THEN 1 ELSE 0 END) AS n_exit_no_trade,
+              SUM(CASE WHEN ew_confirm_confirmed = 0 THEN 1 ELSE 0 END) AS n_confirm_0,
+              SUM(CASE WHEN ew_confirm_confirmed = 1 THEN 1 ELSE 0 END) AS n_confirm_1
             FROM base
             GROUP BY post60_peak_date_bucket_10d
             ORDER BY
@@ -609,9 +669,16 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
         ).fetchall()
         print("")
         print("POST60_PEAK_SMA5_DATE_BUCKETS_10D")
-        print(f"{'bucket':<8} {'n':>8} {'pct':>8}")
+        print(
+            f"{'bucket':<8} {'n':>8} {'pct':>8} {'n_exit_pass':>12} {'n_exit_no_trade':>16} "
+            f"{'n_confirm_0':>12} {'n_confirm_1':>12}"
+        )
         for row in post60_peak_bucket_rows:
-            print(f"{row['post60_peak_date_bucket_10d']:<8} {row['n']:>8} {row['pct']:>8}")
+            print(
+                f"{row['post60_peak_date_bucket_10d']:<8} {row['n']:>8} {_fmt_report_num(row['pct']):>8} "
+                f"{row['n_exit_pass']:>12} {row['n_exit_no_trade']:>16} "
+                f"{row['n_confirm_0']:>12} {row['n_confirm_1']:>12}"
+            )
 
     if has_peak60_sma5:
         top_sql = f"""
@@ -641,11 +708,11 @@ def print_episode_report(rc_conn, rc_db_path: str) -> None:
             vals = [
                 row["ticker"],
                 row["entry_window_date"],
-                row["entry_window_exit_state"] if row["entry_window_exit_state"] is not None else "NA",
-                row["growth_pct"],
-                row["peak60_sma5"],
-                row["close_at_ew_start"],
-                row["peak60_days_from_ew_start"] if row["peak60_days_from_ew_start"] is not None else "NA",
+                _fmt_report_cell(row["entry_window_exit_state"]),
+                _fmt_report_cell(row["growth_pct"]),
+                _fmt_report_cell(row["peak60_sma5"]),
+                _fmt_report_cell(row["close_at_ew_start"]),
+                _fmt_report_cell(row["peak60_days_from_ew_start"]),
             ]
             print(" | ".join(str(v) for v in vals))
 

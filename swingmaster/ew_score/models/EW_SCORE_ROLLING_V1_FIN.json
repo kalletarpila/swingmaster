@@ -1,0 +1,14 @@
+{
+  "rule_id": "EW_SCORE_ROLLING_V1_FIN",
+  "description": "Rolling EW score (day0->today) FIN baseline v1.1",
+  "beta0": -0.732656617080,
+  "beta1": 0.172656235053,
+  "trained_on_market": "FIN",
+  "cohort": "ALL_EW",
+  "n_used": 390,
+  "base_rate": 0.35641025641,
+  "auc": 0.614434348935,
+  "label_definition": "winner_60 = peak60_growth_pct_close_ew_to_peak >= 10",
+  "progressive_prefix_scoring": true,
+  "level3_score_threshold": 0.47
+}

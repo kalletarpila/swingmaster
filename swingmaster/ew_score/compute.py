@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+from datetime import date, timedelta
 
 from swingmaster.ew_score.model_config import load_model_config
 from swingmaster.ew_score.repo import RcEwScoreDailyRepo
@@ -66,28 +67,31 @@ def compute_and_store_ew_scores(
 
         px_rows = osakedata_conn.execute(
             """
-            SELECT close
+            SELECT pvm, close
             FROM osakedata
             WHERE osake = ?
               AND pvm >= ?
               AND pvm <= ?
             ORDER BY pvm ASC
-            LIMIT 4
             """,
             (ticker, entry_window_date, end_date),
         ).fetchall()
         if not px_rows:
             continue
 
-        rn_available = len(px_rows)
-        close_day0 = float(px_rows[0][0])
-        close_prefix = float(px_rows[-1][0])
+        rows_total = len(px_rows)
+        pvm_day0 = str(px_rows[0][0])
+        pvm_today = str(px_rows[-1][0])
+        close_day0 = float(px_rows[0][1])
+        close_today = float(px_rows[-1][1])
         if close_day0 == 0.0:
             continue
-        r_prefix_pct = 100.0 * (close_prefix / close_day0 - 1.0)
+        r_prefix_pct = 100.0 * (close_today / close_day0 - 1.0)
         ew_score_day3 = _sigmoid(model.beta0 + model.beta1 * r_prefix_pct)
-        if rn_available < 4:
+        if rows_total < 4:
             ew_level_day3 = 0
+            if model.level3_score_threshold is not None and ew_score_day3 >= model.level3_score_threshold:
+                ew_level_day3 = 1
         else:
             ew_level_day3 = 2
             if model.level3_score_threshold is not None and ew_score_day3 >= model.level3_score_threshold:
@@ -98,11 +102,13 @@ def compute_and_store_ew_scores(
             "beta0": model.beta0,
             "beta1": model.beta1,
             "close_day0": close_day0,
-            "close_prefix": close_prefix,
+            "close_today": close_today,
             "entry_window_date": entry_window_date,
             "entry_window_exit_date": entry_window_exit_date,
+            "pvm_day0": pvm_day0,
+            "pvm_today": pvm_today,
             "r_prefix_pct": r_prefix_pct,
-            "rn_available": rn_available,
+            "rows_total": rows_total,
             "rule_id": model.rule_id,
         }
         if model.level3_score_threshold is not None:
@@ -126,3 +132,34 @@ def compute_and_store_ew_scores(
             )
 
     return stored
+
+
+def compute_and_store_ew_scores_range(
+    rc_conn: sqlite3.Connection,
+    osakedata_conn: sqlite3.Connection,
+    date_from: str,
+    date_to: str,
+    rule_id: str,
+    print_rows: bool = False,
+) -> int:
+    d0 = date.fromisoformat(date_from)
+    d1 = date.fromisoformat(date_to)
+    if d1 < d0:
+        raise ValueError("date_to must be >= date_from")
+
+    total = 0
+    d = d0
+    while d <= d1:
+        as_of = d.isoformat()
+        if print_rows:
+            print(f"DATE {as_of}")
+        total += compute_and_store_ew_scores(
+            rc_conn=rc_conn,
+            osakedata_conn=osakedata_conn,
+            as_of_date=as_of,
+            rule_id=rule_id,
+            repo=None,
+            print_rows=print_rows,
+        )
+        d = d + timedelta(days=1)
+    return total

@@ -18,6 +18,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+# Must be set before sqlite3 usage so temp files use a writable location.
+os.environ["SQLITE_TMPDIR"] = "/tmp"
 import sqlite3
 import time
 from collections import Counter
@@ -1752,7 +1754,6 @@ def maybe_run_ew_score(
 
 def main() -> None:
     args = parse_args()
-    os.environ.setdefault("SQLITE_TMPDIR", "/tmp")
 
     if _debug_enabled(args):
         set_evaluator_debug(lambda msg: _dbg(args, msg))
@@ -1763,6 +1764,7 @@ def main() -> None:
 
     md_conn = get_readonly_connection(args.md_db)
     rc_conn = get_connection(args.rc_db)
+    rc_conn.execute("PRAGMA temp_store_directory='/tmp'")
     try:
         apply_migrations(rc_conn)
         ensure_rc_pipeline_episode_table(rc_conn)

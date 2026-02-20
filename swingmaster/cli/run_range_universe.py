@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sqlite3
 import time
 from collections import Counter
-from datetime import datetime, timezone
-from typing import Dict, List
+from datetime import date as date_cls
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Tuple
 
 from swingmaster.app_api.dto import UniverseSpec, UniverseMode, UniverseSample
 from swingmaster.app_api.factories import build_swingmaster_app
@@ -40,6 +43,8 @@ from swingmaster.infra.sqlite.db import get_connection
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
 from swingmaster.infra.sqlite.migrator import apply_migrations
 from swingmaster.infra.sqlite.repos.ticker_universe_reader import TickerUniverseReader
+from swingmaster.ew_score.compute import compute_and_store_ew_scores
+from swingmaster.ew_score.repo import RcEwScoreDailyRepo
 
 # Example:
 # python3 -m swingmaster.cli.run_range_universe --date-from 2026-01-01 --date-to 2026-01-31 --signal-version v2
@@ -78,6 +83,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--print-signals", action="store_true", help="Print per-day per-ticker signal keys")
     parser.add_argument("--print-signals-limit", type=int, default=20, help="Max tickers per day for --print-signals")
     parser.add_argument("--report", action="store_true", help="Print episode report after run completes")
+    parser.add_argument("--ew-score", action="store_true", help="Compute/store EW score daily rows for the processed date range")
+    parser.add_argument("--ew-score-rule", default="EW_SCORE_DAY3_V1_FIN", help="EW score model rule_id")
+    parser.add_argument("--osakedata-db", default="/home/kalle/projects/rawcandle/data/osakedata.db", help="Osakedata SQLite path for EW score computation")
     return parser.parse_args()
 
 
@@ -1697,8 +1705,54 @@ def populate_rc_pipeline_episode_entry_confirmation(rc_conn, md_db_path: str) ->
     rc_conn.execute("DETACH DATABASE os")
 
 
+def maybe_run_ew_score(
+    rc_conn,
+    osakedata_db_path: str,
+    date_from: str,
+    date_to: str,
+    rule_id: str,
+    enabled: bool,
+    print_rows: bool = False,
+) -> Tuple[int, int]:
+    if not enabled:
+        return (0, 0)
+
+    repo = RcEwScoreDailyRepo(rc_conn)
+    repo.ensure_schema()
+
+    d0 = date_cls.fromisoformat(date_from)
+    d1 = date_cls.fromisoformat(date_to)
+    if d1 < d0:
+        raise ValueError("date_to must be >= date_from")
+
+    total_rows_written = 0
+    dates_processed = 0
+    os_conn = sqlite3.connect(osakedata_db_path)
+    try:
+        d = d0
+        while d <= d1:
+            as_of_date = d.isoformat()
+            if print_rows:
+                print(f"DATE {as_of_date}")
+            total_rows_written += compute_and_store_ew_scores(
+                rc_conn=rc_conn,
+                osakedata_conn=os_conn,
+                as_of_date=as_of_date,
+                rule_id=rule_id,
+                repo=repo,
+                print_rows=print_rows,
+            )
+            dates_processed += 1
+            d += timedelta(days=1)
+    finally:
+        os_conn.close()
+
+    return (dates_processed, total_rows_written)
+
+
 def main() -> None:
     args = parse_args()
+    os.environ.setdefault("SQLITE_TMPDIR", "/tmp")
 
     if _debug_enabled(args):
         set_evaluator_debug(lambda msg: _dbg(args, msg))
@@ -1917,6 +1971,20 @@ def main() -> None:
             rc_conn=rc_conn, md_db_path=args.md_db
         )
         rc_conn.commit()
+        ew_dates_processed, ew_total_rows_written = maybe_run_ew_score(
+            rc_conn=rc_conn,
+            osakedata_db_path=args.osakedata_db,
+            date_from=args.date_from,
+            date_to=args.date_to,
+            rule_id=args.ew_score_rule,
+            enabled=args.ew_score,
+            print_rows=False,
+        )
+        if args.ew_score:
+            print(
+                f"EW_SCORE: dates_processed={ew_dates_processed} "
+                f"total_rows_written={ew_total_rows_written} rule={args.ew_score_rule}"
+            )
         if args.report:
             print_episode_report(rc_conn, args.rc_db, args.md_db)
 

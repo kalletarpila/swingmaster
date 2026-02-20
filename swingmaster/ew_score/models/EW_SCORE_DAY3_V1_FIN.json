@@ -1,0 +1,14 @@
+{
+  "rule_id": "EW_SCORE_DAY3_V1_FIN",
+  "description": "EW day3 logistic score for FIN market, trained on all EW episodes.",
+  "beta0": -0.73265661708,
+  "beta1": 0.172656235053,
+  "trained_on_market": "FIN",
+  "cohort": "ALL_EW",
+  "n_used": 390,
+  "base_rate": 0.35641025641,
+  "auc": 0.614434348935,
+  "label_definition": "winner_60 = peak60_growth_pct_close_ew_to_peak >= 10",
+  "progressive_prefix_scoring": true,
+  "level3_score_threshold": 0.47
+}

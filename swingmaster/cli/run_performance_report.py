@@ -120,10 +120,53 @@ def fetch_rows(conn: sqlite3.Connection, pipeline_version: Optional[str], limit:
             close_at_entry,
             close_at_ew_start,
             close_at_ew_exit,
-            peak60_growth_pct_close_ew_to_peak
+            peak60_growth_pct_close_ew_to_peak,
+            post60_peak_sma5
         FROM base
     """
     return conn.execute(sql, params).fetchall()
+
+
+def fetch_episode_max_levels(
+    conn: sqlite3.Connection, pipeline_version: Optional[str], limit: Optional[int]
+) -> Dict[str, Optional[int]]:
+    where_parts: List[str] = []
+    params: List[object] = []
+
+    if pipeline_version is not None:
+        where_parts.append("pipeline_version = ?")
+        params.append(pipeline_version)
+
+    where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+    limit_sql = ""
+    if limit is not None:
+        limit_sql = "LIMIT ?"
+        params.append(limit)
+
+    sql = f"""
+        WITH base AS (
+            SELECT *
+            FROM rc_pipeline_episode
+            {where_sql}
+            ORDER BY computed_at DESC, episode_id DESC
+            {limit_sql}
+        )
+        SELECT
+            b.episode_id,
+            MAX(s.ew_level_day3) AS episode_max_level
+        FROM base b
+        LEFT JOIN rc_ew_score_daily s
+          ON s.ticker = b.ticker
+         AND s.date >= b.entry_window_date
+         AND (b.entry_window_exit_date IS NULL OR s.date <= b.entry_window_exit_date)
+        GROUP BY b.episode_id
+    """
+    rows = conn.execute(sql, params).fetchall()
+    out: Dict[str, Optional[int]] = {}
+    for row in rows:
+        level = row["episode_max_level"]
+        out[row["episode_id"]] = None if level is None else int(level)
+    return out
 
 
 def main() -> None:
@@ -133,6 +176,7 @@ def main() -> None:
     conn.row_factory = sqlite3.Row
     try:
         rows = fetch_rows(conn, args.pipeline_version, args.limit)
+        episode_max_levels = fetch_episode_max_levels(conn, args.pipeline_version, args.limit)
     finally:
         conn.close()
 
@@ -141,13 +185,16 @@ def main() -> None:
         r_entry_to_ew_start = compute_return(row["close_at_ew_start"], row["close_at_entry"])
         r_ew_window = compute_return(row["close_at_ew_exit"], row["close_at_ew_start"])
         r_ew_start_to_peak60 = to_float(row["peak60_growth_pct_close_ew_to_peak"])
+        r_ew_start_to_post60_peak_sma5 = compute_return(row["post60_peak_sma5"], row["close_at_ew_start"])
         episodes.append(
             {
+                "episode_id": row["episode_id"],
                 "exit_state": row["entry_window_exit_state"],
                 "confirmed": row["ew_confirm_confirmed"],
                 "r_entry_to_ew_start": r_entry_to_ew_start,
                 "r_ew_window": r_ew_window,
                 "r_ew_start_to_peak60": r_ew_start_to_peak60,
+                "r_ew_start_to_post60_peak_sma5": r_ew_start_to_post60_peak_sma5,
             }
         )
 
@@ -160,7 +207,12 @@ def main() -> None:
     n_confirmed = sum(1 for e in episodes if e["confirmed"] == 1)
     pct_confirmed = (n_confirmed / n_has_confirm) if n_has_confirm > 0 else None
 
-    series_names = ["r_entry_to_ew_start", "r_ew_window", "r_ew_start_to_peak60"]
+    series_names = [
+        "r_entry_to_ew_start",
+        "r_ew_window",
+        "r_ew_start_to_peak60",
+        "r_ew_start_to_post60_peak_sma5",
+    ]
 
     overall_stats: Dict[str, Optional[Dict[str, float]]] = {}
     for s in series_names:
@@ -180,6 +232,23 @@ def main() -> None:
         for s in series_names:
             vals = [float(e[s]) for e in subset if e[s] is not None]
             by_confirm.append((confirmed, s, summarize(vals)))
+
+    for e in episodes:
+        e["episode_max_level"] = episode_max_levels.get(str(e["episode_id"]))
+
+    by_ewlevel_early: List[Tuple[int, str, Optional[Dict[str, float]]]] = []
+    for ew_level in (0, 1):
+        subset = [e for e in episodes if e["episode_max_level"] == ew_level]
+        for s in series_names:
+            vals = [float(e[s]) for e in subset if e[s] is not None]
+            by_ewlevel_early.append((ew_level, s, summarize(vals)))
+
+    by_ewlevel_mature: List[Tuple[int, str, Optional[Dict[str, float]]]] = []
+    for ew_level in (2, 3):
+        subset = [e for e in episodes if e["episode_max_level"] == ew_level]
+        for s in series_names:
+            vals = [float(e[s]) for e in subset if e[s] is not None]
+            by_ewlevel_mature.append((ew_level, s, summarize(vals)))
 
     out_file = None
     if args.out is not None:
@@ -248,6 +317,30 @@ def main() -> None:
                     continue
                 print(
                     f"{confirmed:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
+                    f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
+                )
+
+            print("")
+            print("EARLY_PHASE_BY_MAX_LEVEL")
+            print(f"{'max_level':<10} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
+            for ew_level, s, st in by_ewlevel_early:
+                if st is None:
+                    print(f"{ew_level:<10} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
+                    continue
+                print(
+                    f"{ew_level:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
+                    f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
+                )
+
+            print("")
+            print("MATURE_PHASE_BY_MAX_LEVEL")
+            print(f"{'max_level':<10} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
+            for ew_level, s, st in by_ewlevel_mature:
+                if st is None:
+                    print(f"{ew_level:<10} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
+                    continue
+                print(
+                    f"{ew_level:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
                     f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
                 )
     except OSError as exc:

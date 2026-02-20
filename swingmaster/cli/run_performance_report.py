@@ -184,7 +184,8 @@ def main() -> None:
     for row in rows:
         r_entry_to_ew_start = compute_return(row["close_at_ew_start"], row["close_at_entry"])
         r_ew_window = compute_return(row["close_at_ew_exit"], row["close_at_ew_start"])
-        r_ew_start_to_peak60 = to_float(row["peak60_growth_pct_close_ew_to_peak"])
+        peak60_pct = to_float(row["peak60_growth_pct_close_ew_to_peak"])
+        r_ew_start_to_peak60 = (peak60_pct / 100.0) if peak60_pct is not None else None
         r_ew_start_to_post60_peak_sma5 = compute_return(row["post60_peak_sma5"], row["close_at_ew_start"])
         episodes.append(
             {

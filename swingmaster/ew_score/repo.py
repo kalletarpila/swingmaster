@@ -4,6 +4,33 @@ import sqlite3
 from typing import Any
 
 
+def ensure_rc_ew_score_daily_dual_mode_columns(conn: sqlite3.Connection) -> None:
+    table_exists = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'rc_ew_score_daily'
+        """
+    ).fetchone()
+    if table_exists is None:
+        raise ValueError("rc_ew_score_daily table does not exist")
+
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(rc_ew_score_daily)").fetchall()}
+    if "ew_score_rolling" not in cols:
+        conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN ew_score_rolling REAL")
+    if "ew_level_rolling" not in cols:
+        conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN ew_level_rolling INTEGER")
+    if "ew_rule_fastpass" not in cols:
+        conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN ew_rule_fastpass TEXT")
+    if "ew_rule_rolling" not in cols:
+        conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN ew_rule_rolling TEXT")
+    if "inputs_json_fastpass" not in cols:
+        conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN inputs_json_fastpass TEXT")
+    if "inputs_json_rolling" not in cols:
+        conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN inputs_json_rolling TEXT")
+    conn.commit()
+
+
 class RcEwScoreDailyRepo:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
@@ -38,6 +65,7 @@ class RcEwScoreDailyRepo:
                 "ALTER TABLE rc_ew_score_daily ADD COLUMN ew_level_fastpass INTEGER"
             )
         self._conn.commit()
+        ensure_rc_ew_score_daily_dual_mode_columns(self._conn)
 
     def upsert_row(
         self,
@@ -104,14 +132,20 @@ class RcEwScoreDailyRepo:
     ) -> None:
         existing = self._conn.execute(
             """
-            SELECT ew_score_day3, ew_level_day3
+            SELECT ew_score_day3, ew_level_day3, ew_rule, inputs_json
             FROM rc_ew_score_daily
             WHERE ticker = ? AND date = ?
             """,
             (ticker, date),
         ).fetchone()
-        ew_score_day3 = float(existing[0]) if existing is not None else 0.0
-        ew_level_day3 = int(existing[1]) if existing is not None else 0
+        ew_score_day3 = (
+            float(existing[0]) if existing is not None and existing[0] is not None else 0.0
+        )
+        ew_level_day3 = (
+            int(existing[1]) if existing is not None and existing[1] is not None else 0
+        )
+        legacy_ew_rule = str(existing[2]) if existing is not None else ""
+        legacy_inputs_json = str(existing[3]) if existing is not None else "{}"
         self._conn.execute(
             """
             INSERT INTO rc_ew_score_daily (
@@ -121,17 +155,18 @@ class RcEwScoreDailyRepo:
               ew_level_day3,
               ew_score_fastpass,
               ew_level_fastpass,
+              ew_rule_fastpass,
+              inputs_json_fastpass,
               ew_rule,
               inputs_json,
               created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(ticker, date) DO UPDATE SET
               ew_score_fastpass = excluded.ew_score_fastpass,
               ew_level_fastpass = excluded.ew_level_fastpass,
-              ew_rule = excluded.ew_rule,
-              inputs_json = excluded.inputs_json,
-              created_at = excluded.created_at
+              ew_rule_fastpass = excluded.ew_rule_fastpass,
+              inputs_json_fastpass = excluded.inputs_json_fastpass
             """,
             (
                 ticker,
@@ -142,6 +177,70 @@ class RcEwScoreDailyRepo:
                 ew_level_fastpass,
                 ew_rule,
                 inputs_json,
+                legacy_ew_rule,
+                legacy_inputs_json,
+            ),
+        )
+        self._conn.commit()
+
+    def upsert_rolling_row(
+        self,
+        ticker: str,
+        date: str,
+        ew_score_rolling: float,
+        ew_level_rolling: int,
+        ew_rule_rolling: str,
+        inputs_json_rolling: str,
+    ) -> None:
+        existing = self._conn.execute(
+            """
+            SELECT ew_score_day3, ew_level_day3, ew_rule, inputs_json
+            FROM rc_ew_score_daily
+            WHERE ticker = ? AND date = ?
+            """,
+            (ticker, date),
+        ).fetchone()
+        ew_score_day3 = (
+            float(existing[0]) if existing is not None and existing[0] is not None else 0.0
+        )
+        ew_level_day3 = (
+            int(existing[1]) if existing is not None and existing[1] is not None else 0
+        )
+        legacy_ew_rule = str(existing[2]) if existing is not None else ""
+        legacy_inputs_json = str(existing[3]) if existing is not None else "{}"
+        self._conn.execute(
+            """
+            INSERT INTO rc_ew_score_daily (
+              ticker,
+              date,
+              ew_score_day3,
+              ew_level_day3,
+              ew_score_rolling,
+              ew_level_rolling,
+              ew_rule_rolling,
+              inputs_json_rolling,
+              ew_rule,
+              inputs_json,
+              created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(ticker, date) DO UPDATE SET
+              ew_score_rolling = excluded.ew_score_rolling,
+              ew_level_rolling = excluded.ew_level_rolling,
+              ew_rule_rolling = excluded.ew_rule_rolling,
+              inputs_json_rolling = excluded.inputs_json_rolling
+            """,
+            (
+                ticker,
+                date,
+                ew_score_day3,
+                ew_level_day3,
+                ew_score_rolling,
+                ew_level_rolling,
+                ew_rule_rolling,
+                inputs_json_rolling,
+                legacy_ew_rule,
+                legacy_inputs_json,
             ),
         )
         self._conn.commit()

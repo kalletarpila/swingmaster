@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from swingmaster.ew_score.compute import compute_and_store_ew_scores
+from swingmaster.ew_score.compute import FASTPASS_V1_SE_BETA0, FASTPASS_V1_SE_THRESHOLD, compute_and_store_ew_scores, _score_fastpass_v1_se
 from swingmaster.ew_score.model_config import load_model_config
 from swingmaster.ew_score.repo import RcEwScoreDailyRepo
 
@@ -226,11 +226,20 @@ def test_compute_and_store_ew_scores_fastpass_usa_small_writes_fastpass_columns(
 
     row = repo.get_row("AAA", "2020-01-13")
     assert row is not None
-    assert row["ew_rule"] == "EW_SCORE_FASTPASS_V1_USA_SMALL"
     assert row["ew_score_fastpass"] == pytest.approx(0.8279645997813881, abs=1e-12)
     assert row["ew_level_fastpass"] == 1
 
-    payload = json.loads(row["inputs_json"])
+    fastpass_row = rc_conn.execute(
+        """
+        SELECT ew_rule_fastpass, inputs_json_fastpass
+        FROM rc_ew_score_daily
+        WHERE ticker = ? AND date = ?
+        """,
+        ("AAA", "2020-01-13"),
+    ).fetchone()
+    assert fastpass_row is not None
+    assert fastpass_row[0] == "EW_SCORE_FASTPASS_V1_USA_SMALL"
+    payload = json.loads(fastpass_row[1])
     assert payload["rule_id"] == "EW_SCORE_FASTPASS_V1_USA_SMALL"
     assert payload["beta0"] == pytest.approx(0.002991128723180779, abs=1e-12)
     assert payload["threshold"] == pytest.approx(0.60, abs=1e-12)
@@ -242,3 +251,138 @@ def test_compute_and_store_ew_scores_fastpass_usa_small_writes_fastpass_columns(
     assert payload["decline_profile"] == "UNKNOWN"
     assert payload["entry_quality"] == "A"
     assert payload["score_raw_z"] == pytest.approx(1.5712701287231807, abs=1e-12)
+
+
+def test_router_market_modes_call_correct_upsert() -> None:
+    class SpyRepo:
+        def __init__(self) -> None:
+            self.rolling_calls = 0
+            self.fastpass_calls = 0
+            self.legacy_calls = 0
+
+        def ensure_schema(self) -> None:
+            return None
+
+        def upsert_rolling_row(self, **kwargs) -> None:
+            self.rolling_calls += 1
+
+        def upsert_fastpass_row(self, **kwargs) -> None:
+            self.fastpass_calls += 1
+
+        def upsert_row(self, **kwargs) -> None:
+            self.legacy_calls += 1
+
+    # FIN: rolling ON, fastpass OFF
+    rc_fin = sqlite3.connect(":memory:")
+    os_fin = sqlite3.connect(":memory:")
+    rc_fin.execute(
+        "CREATE TABLE rc_state_daily (ticker TEXT, date TEXT, state TEXT, state_attrs_json TEXT)"
+    )
+    rc_fin.execute(
+        "CREATE TABLE rc_pipeline_episode (ticker TEXT, entry_window_date TEXT, entry_window_exit_date TEXT, peak60_growth_pct_close_ew_to_peak REAL, ew_confirm_confirmed INTEGER)"
+    )
+    rc_fin.execute(
+        "INSERT INTO rc_state_daily (ticker, date, state, state_attrs_json) VALUES ('AAA','2020-01-10','ENTRY_WINDOW','{}')"
+    )
+    rc_fin.execute(
+        "INSERT INTO rc_pipeline_episode (ticker, entry_window_date, entry_window_exit_date, peak60_growth_pct_close_ew_to_peak, ew_confirm_confirmed) VALUES ('AAA','2020-01-10',NULL,NULL,NULL)"
+    )
+    rc_fin.commit()
+    os_fin.execute(
+        "CREATE TABLE osakedata (osake TEXT, pvm TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, market TEXT)"
+    )
+    os_fin.executemany(
+        "INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("AAA", "2020-01-10", 100.0, 100.0, 100.0, 100.0, 100, "omxh"),
+        ],
+    )
+    os_fin.commit()
+    spy_fin = SpyRepo()
+    compute_and_store_ew_scores(
+        rc_conn=rc_fin,
+        osakedata_conn=os_fin,
+        as_of_date="2020-01-10",
+        rule_id="EW_SCORE_DAY3_V1_FIN",
+        repo=spy_fin,  # type: ignore[arg-type]
+        print_rows=False,
+    )
+    assert spy_fin.rolling_calls == 1
+    assert spy_fin.fastpass_calls == 0
+
+    # USA: fastpass ON, rolling OFF
+    rc_usa = sqlite3.connect(":memory:")
+    os_usa = sqlite3.connect(":memory:")
+    rc_usa.execute(
+        "CREATE TABLE rc_state_daily (ticker TEXT, date TEXT, state TEXT, state_attrs_json TEXT)"
+    )
+    rc_usa.execute(
+        "CREATE TABLE rc_pipeline_episode (ticker TEXT, entry_window_date TEXT, entry_window_exit_date TEXT, peak60_growth_pct_close_ew_to_peak REAL, ew_confirm_confirmed INTEGER)"
+    )
+    rc_usa.executemany(
+        "INSERT INTO rc_state_daily (ticker, date, state, state_attrs_json) VALUES (?, ?, ?, ?)",
+        [
+            ("BBB", "2020-01-09", "STABILIZING", None),
+            ("BBB", "2020-01-10", "ENTRY_WINDOW", '{"decline_profile":"UNKNOWN","entry_quality":"A"}'),
+        ],
+    )
+    rc_usa.execute(
+        "INSERT INTO rc_pipeline_episode (ticker, entry_window_date, entry_window_exit_date, peak60_growth_pct_close_ew_to_peak, ew_confirm_confirmed) VALUES ('BBB','2020-01-10',NULL,NULL,NULL)"
+    )
+    rc_usa.commit()
+    os_usa.execute(
+        "CREATE TABLE osakedata (osake TEXT, pvm TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, market TEXT)"
+    )
+    os_usa.executemany(
+        "INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("BBB", "2020-01-09", 100.0, 100.0, 100.0, 100.0, 100, "usa"),
+            ("BBB", "2020-01-10", 105.0, 105.0, 105.0, 105.0, 100, "usa"),
+        ],
+    )
+    os_usa.commit()
+    spy_usa = SpyRepo()
+    compute_and_store_ew_scores(
+        rc_conn=rc_usa,
+        osakedata_conn=os_usa,
+        as_of_date="2020-01-10",
+        rule_id="EW_SCORE_DAY3_V1_FIN",
+        repo=spy_usa,  # type: ignore[arg-type]
+        print_rows=False,
+    )
+    assert spy_usa.fastpass_calls == 1
+    assert spy_usa.rolling_calls == 0
+
+
+def test_score_fastpass_v1_se_deterministic() -> None:
+    assert FASTPASS_V1_SE_THRESHOLD == pytest.approx(0.65, abs=1e-12)
+
+    r_stab_to_entry_pct = 2.5
+    downtrend_origin = "SLOW"
+    downtrend_entry_type = "TREND_SOFT"
+    decline_profile = "SLOW_DRIFT"
+    stabilization_phase = "EARLY_REVERSAL"
+    entry_gate = "EARLY_STAB_MA20"
+    entry_quality = "B"
+
+    z_expected = FASTPASS_V1_SE_BETA0
+    z_expected += 0.4235956974235532 * r_stab_to_entry_pct
+    z_expected += -0.5567538554589132
+    z_expected += 0.6865754008841269
+    z_expected += 2.290586835702952
+    z_expected += -0.3624012303920593
+    z_expected += 0.1382594006923378
+    z_expected += 0.1382594006923378
+    score_expected = 1.0 / (1.0 + math.exp(-z_expected))
+
+    z_actual, score_actual = _score_fastpass_v1_se(
+        r_stab_to_entry_pct=r_stab_to_entry_pct,
+        downtrend_origin=downtrend_origin,
+        downtrend_entry_type=downtrend_entry_type,
+        decline_profile=decline_profile,
+        stabilization_phase=stabilization_phase,
+        entry_gate=entry_gate,
+        entry_quality=entry_quality,
+    )
+    assert z_actual == pytest.approx(z_expected, abs=1e-12)
+    assert score_actual == pytest.approx(score_expected, abs=1e-12)

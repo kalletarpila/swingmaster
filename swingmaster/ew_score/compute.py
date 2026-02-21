@@ -10,6 +10,7 @@ from swingmaster.ew_score.model_config import load_model_config
 from swingmaster.ew_score.repo import RcEwScoreDailyRepo
 
 EW_SCORE_FASTPASS_V1_USA_SMALL = "EW_SCORE_FASTPASS_V1_USA_SMALL"
+EW_SCORE_FASTPASS_V1_FIN = "EW_SCORE_FASTPASS_V1_FIN"
 EW_SCORE_FASTPASS_V1_SE = "EW_SCORE_FASTPASS_V1_SE"
 EW_SCORE_ROLLING_V2_FIN = "EW_SCORE_ROLLING_V2_FIN"
 EW_SCORE_ROLLING_V2_SE = "EW_SCORE_ROLLING_V2_SE"
@@ -23,6 +24,20 @@ FASTPASS_V1_USA_SMALL_BETAS = {
     "entry_quality_A": 0.915410,
     "entry_quality_B": 0.305710,
     "entry_quality_LEGACY": -1.218129,
+}
+FASTPASS_V1_FIN_BETA0 = 0.04320388586976014
+FASTPASS_V1_FIN_THRESHOLD = 0.60
+FASTPASS_V1_FIN_BETAS = {
+    "r_stab_to_entry_pct": 0.3648069498223057,
+    "decline_profile_SLOW_DRIFT": -0.4146314482330478,
+    "decline_profile_STRUCTURAL_DOWNTREND": -0.4553625631210215,
+    "decline_profile_UNKNOWN": 0.9131978972238293,
+    "entry_quality_A": 0.5990937159986941,
+    "entry_quality_B": -0.3714590327901604,
+    "entry_quality_LEGACY": -0.18443079733877465,
+    "entry_gate_EARLY_STAB_MA20": -0.3714590327901604,
+    "entry_gate_EARLY_STAB_MA20_HL": 0.599093715998696,
+    "entry_gate_LEGACY_ENTRY_SETUP_VALID": -0.18443079733877607,
 }
 FASTPASS_V1_SE_BETA0 = -0.36240123039204225
 FASTPASS_V1_SE_THRESHOLD = 0.65
@@ -94,6 +109,20 @@ def _score_fastpass_v1_se(
     z += FASTPASS_V1_SE_BETAS.get(f"stabilization_phase_{stabilization_phase}", 0.0)
     z += FASTPASS_V1_SE_BETAS.get(f"entry_gate_{entry_gate}", 0.0)
     z += FASTPASS_V1_SE_BETAS.get(f"entry_quality_{entry_quality}", 0.0)
+    return z, _sigmoid(z)
+
+
+def _score_fastpass_v1_fin(
+    r_stab_to_entry_pct: float,
+    decline_profile: str,
+    entry_gate: str,
+    entry_quality: str,
+) -> tuple[float, float]:
+    z = FASTPASS_V1_FIN_BETA0
+    z += FASTPASS_V1_FIN_BETAS["r_stab_to_entry_pct"] * r_stab_to_entry_pct
+    z += FASTPASS_V1_FIN_BETAS.get(f"decline_profile_{decline_profile}", 0.0)
+    z += FASTPASS_V1_FIN_BETAS.get(f"entry_gate_{entry_gate}", 0.0)
+    z += FASTPASS_V1_FIN_BETAS.get(f"entry_quality_{entry_quality}", 0.0)
     return z, _sigmoid(z)
 
 
@@ -310,6 +339,111 @@ def compute_and_store_ew_scores(
                             ew_score_fastpass=ew_score_fastpass,
                             ew_level_fastpass=ew_level_fastpass,
                             ew_rule=EW_SCORE_FASTPASS_V1_USA_SMALL,
+                            inputs_json=fastpass_inputs_json,
+                        )
+                        stored += 1
+                        routed = True
+
+        if market == "omxh":
+            last_stab_row = rc_conn.execute(
+                """
+                SELECT MAX(date)
+                FROM rc_state_daily
+                WHERE ticker = ?
+                  AND date < ?
+                  AND state = 'STABILIZING'
+                """,
+                (ticker, entry_window_date),
+            ).fetchone()
+            if last_stab_row is not None and last_stab_row[0] is not None:
+                last_stab_date = str(last_stab_row[0])
+                fastpass_px_rows = osakedata_conn.execute(
+                    """
+                    SELECT pvm, close
+                    FROM osakedata
+                    WHERE osake = ?
+                      AND market = 'omxh'
+                      AND pvm >= ?
+                      AND pvm <= ?
+                    ORDER BY pvm ASC
+                    """,
+                    (ticker, entry_window_date, as_of_date),
+                ).fetchall()
+                close_last_stab_row = osakedata_conn.execute(
+                    """
+                    SELECT close
+                    FROM osakedata
+                    WHERE osake = ?
+                      AND market = 'omxh'
+                      AND pvm = ?
+                    LIMIT 1
+                    """,
+                    (ticker, last_stab_date),
+                ).fetchone()
+                if fastpass_px_rows and close_last_stab_row is not None:
+                    rows_total = len(fastpass_px_rows)
+                    close_entry = float(fastpass_px_rows[0][1])
+                    close_last_stab = float(close_last_stab_row[0])
+                    if close_last_stab != 0.0:
+                        attrs_row = rc_conn.execute(
+                            """
+                            SELECT
+                              json_extract(state_attrs_json, '$.decline_profile') AS decline_profile,
+                              json_extract(state_attrs_json, '$.entry_gate') AS entry_gate,
+                              json_extract(state_attrs_json, '$.entry_quality') AS entry_quality
+                            FROM rc_state_daily
+                            WHERE ticker = ?
+                              AND date = ?
+                            LIMIT 1
+                            """,
+                            (ticker, entry_window_date),
+                        ).fetchone()
+                        decline_profile = "NULL"
+                        entry_gate = "NULL"
+                        entry_quality = "NULL"
+                        if attrs_row is not None:
+                            if attrs_row[0] is not None:
+                                decline_profile = str(attrs_row[0])
+                            if attrs_row[1] is not None:
+                                entry_gate = str(attrs_row[1])
+                            if attrs_row[2] is not None:
+                                entry_quality = str(attrs_row[2])
+
+                        r_stab_to_entry_pct = 100.0 * (close_entry / close_last_stab - 1.0)
+                        score_raw_z, ew_score_fastpass = _score_fastpass_v1_fin(
+                            r_stab_to_entry_pct=r_stab_to_entry_pct,
+                            decline_profile=decline_profile,
+                            entry_gate=entry_gate,
+                            entry_quality=entry_quality,
+                        )
+                        ew_level_fastpass = _level_from_rows_total(
+                            ew_score_fastpass,
+                            FASTPASS_V1_FIN_THRESHOLD,
+                            rows_total,
+                        )
+                        fastpass_inputs_json = json.dumps(
+                            {
+                                "beta0": FASTPASS_V1_FIN_BETA0,
+                                "close_entry": close_entry,
+                                "close_last_stab": close_last_stab,
+                                "decline_profile": decline_profile,
+                                "entry_date": entry_window_date,
+                                "entry_gate": entry_gate,
+                                "entry_quality": entry_quality,
+                                "last_stab_date": last_stab_date,
+                                "r_stab_to_entry_pct": r_stab_to_entry_pct,
+                                "rule_id": EW_SCORE_FASTPASS_V1_FIN,
+                                "score_raw_z": score_raw_z,
+                                "threshold": FASTPASS_V1_FIN_THRESHOLD,
+                            },
+                            sort_keys=True,
+                        )
+                        target_repo.upsert_fastpass_row(
+                            ticker=ticker,
+                            date=as_of_date,
+                            ew_score_fastpass=ew_score_fastpass,
+                            ew_level_fastpass=ew_level_fastpass,
+                            ew_rule=EW_SCORE_FASTPASS_V1_FIN,
                             inputs_json=fastpass_inputs_json,
                         )
                         stored += 1

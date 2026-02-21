@@ -132,6 +132,12 @@ def fetch_rows(conn: sqlite3.Connection, pipeline_version: Optional[str], limit:
 def fetch_episode_max_levels(
     conn: sqlite3.Connection, pipeline_version: Optional[str], limit: Optional[int]
 ) -> Dict[str, Optional[int]]:
+    cols = {str(row["name"]) for row in conn.execute("PRAGMA table_info(rc_ew_score_daily)").fetchall()}
+    if "ew_level_rolling" in cols:
+        level_expr = "s.ew_level_rolling"
+    else:
+        level_expr = "s.ew_level_day3"
+
     where_parts: List[str] = []
     params: List[object] = []
 
@@ -155,7 +161,7 @@ def fetch_episode_max_levels(
         )
         SELECT
             b.episode_id,
-            MAX(s.ew_level_day3) AS episode_max_level
+            MAX({level_expr}) AS episode_max_level
         FROM base b
         LEFT JOIN rc_ew_score_daily s
           ON s.ticker = b.ticker
@@ -171,6 +177,52 @@ def fetch_episode_max_levels(
     return out
 
 
+def fetch_episode_max_fastpass_levels(
+    conn: sqlite3.Connection, pipeline_version: Optional[str], limit: Optional[int]
+) -> Dict[str, Optional[int]]:
+    cols = {str(row["name"]) for row in conn.execute("PRAGMA table_info(rc_ew_score_daily)").fetchall()}
+    if "ew_level_fastpass" not in cols:
+        return {}
+
+    where_parts: List[str] = []
+    params: List[object] = []
+
+    if pipeline_version is not None:
+        where_parts.append("pipeline_version = ?")
+        params.append(pipeline_version)
+
+    where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+    limit_sql = ""
+    if limit is not None:
+        limit_sql = "LIMIT ?"
+        params.append(limit)
+
+    sql = f"""
+        WITH base AS (
+            SELECT *
+            FROM rc_pipeline_episode
+            {where_sql}
+            ORDER BY computed_at DESC, episode_id DESC
+            {limit_sql}
+        )
+        SELECT
+            b.episode_id,
+            MAX(s.ew_level_fastpass) AS episode_max_fastpass_level
+        FROM base b
+        LEFT JOIN rc_ew_score_daily s
+          ON s.ticker = b.ticker
+         AND s.date >= b.entry_window_date
+         AND (b.entry_window_exit_date IS NULL OR s.date <= b.entry_window_exit_date)
+        GROUP BY b.episode_id
+    """
+    rows = conn.execute(sql, params).fetchall()
+    out: Dict[str, Optional[int]] = {}
+    for row in rows:
+        level = row["episode_max_fastpass_level"]
+        out[row["episode_id"]] = None if level is None else int(level)
+    return out
+
+
 def fetch_single_or_mixed(conn: sqlite3.Connection, sql: str) -> str:
     rows = conn.execute(sql).fetchall()
     values = [row[0] for row in rows if row[0] is not None]
@@ -180,6 +232,30 @@ def fetch_single_or_mixed(conn: sqlite3.Connection, sql: str) -> str:
     if len(uniq) == 1:
         return uniq[0]
     return "MIXED"
+
+
+def fetch_ew_rules_used(conn: sqlite3.Connection) -> str:
+    cols = {str(row["name"]) for row in conn.execute("PRAGMA table_info(rc_ew_score_daily)").fetchall()}
+
+    def _distinct_non_null(col: str) -> List[str]:
+        if col not in cols:
+            return []
+        rows = conn.execute(f"SELECT DISTINCT {col} FROM rc_ew_score_daily WHERE {col} IS NOT NULL").fetchall()
+        return sorted(str(row[0]) for row in rows if row[0] is not None and str(row[0]) != "")
+
+    parts: List[str] = []
+    legacy = _distinct_non_null("ew_rule")
+    rolling = _distinct_non_null("ew_rule_rolling")
+    fastpass = _distinct_non_null("ew_rule_fastpass")
+    if legacy:
+        parts.append(f"legacy={','.join(legacy)}")
+    if rolling:
+        parts.append(f"rolling={','.join(rolling)}")
+    if fastpass:
+        parts.append(f"fastpass={','.join(fastpass)}")
+    if not parts:
+        return "NONE"
+    return " | ".join(parts)
 
 
 def infer_signal_version(policy_version: str) -> str:
@@ -200,6 +276,9 @@ def main() -> None:
     try:
         rows = fetch_rows(conn, args.pipeline_version, args.limit)
         episode_max_levels = fetch_episode_max_levels(conn, args.pipeline_version, args.limit)
+        episode_max_fastpass_levels = fetch_episode_max_fastpass_levels(
+            conn, args.pipeline_version, args.limit
+        )
         policy_id_used = fetch_single_or_mixed(
             conn,
             "SELECT DISTINCT policy_id FROM rc_run",
@@ -208,10 +287,7 @@ def main() -> None:
             conn,
             "SELECT DISTINCT policy_version FROM rc_run",
         )
-        ew_rule_used = fetch_single_or_mixed(
-            conn,
-            "SELECT DISTINCT ew_rule FROM rc_ew_score_daily",
-        )
+        ew_rule_used = fetch_ew_rules_used(conn)
     finally:
         conn.close()
     signal_version_used = infer_signal_version(policy_version_used)
@@ -286,6 +362,23 @@ def main() -> None:
         for s in series_names:
             vals = [float(e[s]) for e in subset if e[s] is not None]
             by_ewlevel_mature.append((ew_level, s, summarize(vals)))
+
+    for e in episodes:
+        e["episode_max_fastpass_level"] = episode_max_fastpass_levels.get(str(e["episode_id"]))
+
+    by_fastpass_early: List[Tuple[int, str, Optional[Dict[str, float]]]] = []
+    for ew_level in (0, 1):
+        subset = [e for e in episodes if e["episode_max_fastpass_level"] == ew_level]
+        for s in series_names:
+            vals = [float(e[s]) for e in subset if e[s] is not None]
+            by_fastpass_early.append((ew_level, s, summarize(vals)))
+
+    by_fastpass_mature: List[Tuple[int, str, Optional[Dict[str, float]]]] = []
+    for ew_level in (2, 3):
+        subset = [e for e in episodes if e["episode_max_fastpass_level"] == ew_level]
+        for s in series_names:
+            vals = [float(e[s]) for e in subset if e[s] is not None]
+            by_fastpass_mature.append((ew_level, s, summarize(vals)))
 
     out_file = None
     if args.out is not None:
@@ -369,6 +462,18 @@ def main() -> None:
                         writer.writerow(["metric", "MATURE_PHASE_BY_MAX_LEVEL", str(ew_level), s, "", "", 0, "NA", "NA", "NA", "NA", "NA", "NA"])
                     else:
                         writer.writerow(["metric", "MATURE_PHASE_BY_MAX_LEVEL", str(ew_level), s, "", "", st["n"], fmt6(st["mean"]), fmt6(st["median"]), fmt6(st["std"]), fmt6(st["min"]), fmt6(st["max"]), fmt6(st["win_rate"])])
+
+                for ew_level, s, st in by_fastpass_early:
+                    if st is None:
+                        writer.writerow(["metric", "EARLY_PHASE_BY_MAX_FASTPASS_LEVEL", str(ew_level), s, "", "", 0, "NA", "NA", "NA", "NA", "NA", "NA"])
+                    else:
+                        writer.writerow(["metric", "EARLY_PHASE_BY_MAX_FASTPASS_LEVEL", str(ew_level), s, "", "", st["n"], fmt6(st["mean"]), fmt6(st["median"]), fmt6(st["std"]), fmt6(st["min"]), fmt6(st["max"]), fmt6(st["win_rate"])])
+
+                for ew_level, s, st in by_fastpass_mature:
+                    if st is None:
+                        writer.writerow(["metric", "MATURE_PHASE_BY_MAX_FASTPASS_LEVEL", str(ew_level), s, "", "", 0, "NA", "NA", "NA", "NA", "NA", "NA"])
+                    else:
+                        writer.writerow(["metric", "MATURE_PHASE_BY_MAX_FASTPASS_LEVEL", str(ew_level), s, "", "", st["n"], fmt6(st["mean"]), fmt6(st["median"]), fmt6(st["std"]), fmt6(st["min"]), fmt6(st["max"]), fmt6(st["win_rate"])])
             else:
                 print("PERFORMANCE_REPORT")
                 print(f"db_path={args.db}")
@@ -443,6 +548,30 @@ def main() -> None:
                 print("MATURE_PHASE_BY_MAX_LEVEL")
                 print(f"{'max_level':<10} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
                 for ew_level, s, st in by_ewlevel_mature:
+                    if st is None:
+                        print(f"{ew_level:<10} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
+                        continue
+                    print(
+                        f"{ew_level:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
+                        f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
+                    )
+
+                print("")
+                print("EARLY_PHASE_BY_MAX_FASTPASS_LEVEL")
+                print(f"{'max_level':<10} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
+                for ew_level, s, st in by_fastpass_early:
+                    if st is None:
+                        print(f"{ew_level:<10} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
+                        continue
+                    print(
+                        f"{ew_level:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
+                        f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
+                    )
+
+                print("")
+                print("MATURE_PHASE_BY_MAX_FASTPASS_LEVEL")
+                print(f"{'max_level':<10} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
+                for ew_level, s, st in by_fastpass_mature:
                     if st is None:
                         print(f"{ew_level:<10} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
                         continue

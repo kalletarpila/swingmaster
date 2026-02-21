@@ -9,6 +9,7 @@ import os
 import sqlite3
 import statistics
 import sys
+import csv
 from typing import Dict, Iterable, List, Optional, Tuple
 
 
@@ -35,6 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pipeline-version", default=None, help="Optional pipeline_version filter")
     parser.add_argument("--limit", type=int, default=None, help="Optional row limit by computed_at DESC")
     parser.add_argument("--out", default=None, help="Optional output file path for full report")
+    parser.add_argument("--format", choices=["text", "csv"], default="text", help="Output format")
     return parser.parse_args()
 
 
@@ -169,6 +171,27 @@ def fetch_episode_max_levels(
     return out
 
 
+def fetch_single_or_mixed(conn: sqlite3.Connection, sql: str) -> str:
+    rows = conn.execute(sql).fetchall()
+    values = [row[0] for row in rows if row[0] is not None]
+    if not values:
+        return "NONE"
+    uniq = sorted(set(str(v) for v in values))
+    if len(uniq) == 1:
+        return uniq[0]
+    return "MIXED"
+
+
+def infer_signal_version(policy_version: str) -> str:
+    if policy_version == "v3":
+        return "v3"
+    if policy_version in {"v1", "v2"}:
+        return "v2"
+    if policy_version in {"NONE", "MIXED"}:
+        return policy_version
+    return "UNKNOWN"
+
+
 def main() -> None:
     args = parse_args()
 
@@ -177,8 +200,21 @@ def main() -> None:
     try:
         rows = fetch_rows(conn, args.pipeline_version, args.limit)
         episode_max_levels = fetch_episode_max_levels(conn, args.pipeline_version, args.limit)
+        policy_id_used = fetch_single_or_mixed(
+            conn,
+            "SELECT DISTINCT policy_id FROM rc_run",
+        )
+        policy_version_used = fetch_single_or_mixed(
+            conn,
+            "SELECT DISTINCT policy_version FROM rc_run",
+        )
+        ew_rule_used = fetch_single_or_mixed(
+            conn,
+            "SELECT DISTINCT ew_rule FROM rc_ew_score_daily",
+        )
     finally:
         conn.close()
+    signal_version_used = infer_signal_version(policy_version_used)
 
     episodes: List[Dict[str, object]] = []
     for row in rows:
@@ -267,83 +303,153 @@ def main() -> None:
 
     try:
         with ctx:
-            print("PERFORMANCE_REPORT")
-            print(f"db_path={args.db}")
-            print(f"generated_at_utc={utc_now_z()}")
-            print(f"pipeline_version_filter={args.pipeline_version if args.pipeline_version is not None else 'NONE'}")
-            print(f"limit={args.limit if args.limit is not None else 'NONE'}")
-
-            print("")
-            print("COUNTS")
-            print(f"n_total={n_total}")
-            print(f"n_closed={n_closed}")
-            print(f"n_open={n_open}")
-            print(f"n_exit_pass={n_exit_pass}")
-            print(f"n_exit_no_trade={n_exit_no_trade}")
-            print(f"n_has_confirm={n_has_confirm}")
-            print(f"n_confirmed={n_confirmed}")
-            print(f"pct_confirmed_among_has_confirm={fmt6(pct_confirmed)}")
-
-            print("")
-            print("RETURNS_OVERALL")
-            print(f"{'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
-            for s in series_names:
-                st = overall_stats[s]
-                if st is None:
-                    print(f"{s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
-                    continue
-                print(
-                    f"{s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
-                    f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
+            if args.format == "csv":
+                writer = csv.writer(sys.stdout, delimiter=";")
+                writer.writerow(
+                    [
+                        "row_type",
+                        "section",
+                        "group",
+                        "series_name",
+                        "key",
+                        "value",
+                        "n",
+                        "mean",
+                        "median",
+                        "std",
+                        "min",
+                        "max",
+                        "win_rate",
+                    ]
                 )
+                writer.writerow(["meta", "META", "", "", "db_path", args.db, "", "", "", "", "", "", ""])
+                writer.writerow(["meta", "META", "", "", "generated_at_utc", utc_now_z(), "", "", "", "", "", "", ""])
+                writer.writerow(["meta", "META", "", "", "pipeline_version_filter", args.pipeline_version if args.pipeline_version is not None else "NONE", "", "", "", "", "", "", ""])
+                writer.writerow(["meta", "META", "", "", "policy_used", f"{policy_id_used} ({policy_version_used})", "", "", "", "", "", "", ""])
+                writer.writerow(["meta", "META", "", "", "signal_used", signal_version_used, "", "", "", "", "", "", ""])
+                writer.writerow(["meta", "META", "", "", "ew_score_rule_used", ew_rule_used, "", "", "", "", "", "", ""])
+                writer.writerow(["meta", "META", "", "", "limit", args.limit if args.limit is not None else "NONE", "", "", "", "", "", "", ""])
 
-            print("")
-            print("RETURNS_BY_EXIT_STATE")
-            print(f"{'exit_state':<12} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
-            for exit_state, s, st in by_exit:
-                if st is None:
-                    print(f"{exit_state:<12} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
-                    continue
-                print(
-                    f"{exit_state:<12} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
-                    f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
-                )
+                writer.writerow(["count", "COUNTS", "", "", "n_total", n_total, "", "", "", "", "", "", ""])
+                writer.writerow(["count", "COUNTS", "", "", "n_closed", n_closed, "", "", "", "", "", "", ""])
+                writer.writerow(["count", "COUNTS", "", "", "n_open", n_open, "", "", "", "", "", "", ""])
+                writer.writerow(["count", "COUNTS", "", "", "n_exit_pass", n_exit_pass, "", "", "", "", "", "", ""])
+                writer.writerow(["count", "COUNTS", "", "", "n_exit_no_trade", n_exit_no_trade, "", "", "", "", "", "", ""])
+                writer.writerow(["count", "COUNTS", "", "", "n_has_confirm", n_has_confirm, "", "", "", "", "", "", ""])
+                writer.writerow(["count", "COUNTS", "", "", "n_confirmed", n_confirmed, "", "", "", "", "", "", ""])
+                writer.writerow(["count", "COUNTS", "", "", "pct_confirmed_among_has_confirm", fmt6(pct_confirmed), "", "", "", "", "", "", ""])
 
-            print("")
-            print("RETURNS_BY_CONFIRM")
-            print(f"{'confirmed':<10} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
-            for confirmed, s, st in by_confirm:
-                if st is None:
-                    print(f"{confirmed:<10} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
-                    continue
-                print(
-                    f"{confirmed:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
-                    f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
-                )
+                for s in series_names:
+                    st = overall_stats[s]
+                    if st is None:
+                        writer.writerow(["metric", "RETURNS_OVERALL", "", s, "", "", 0, "NA", "NA", "NA", "NA", "NA", "NA"])
+                    else:
+                        writer.writerow(["metric", "RETURNS_OVERALL", "", s, "", "", st["n"], fmt6(st["mean"]), fmt6(st["median"]), fmt6(st["std"]), fmt6(st["min"]), fmt6(st["max"]), fmt6(st["win_rate"])])
 
-            print("")
-            print("EARLY_PHASE_BY_MAX_LEVEL")
-            print(f"{'max_level':<10} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
-            for ew_level, s, st in by_ewlevel_early:
-                if st is None:
-                    print(f"{ew_level:<10} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
-                    continue
-                print(
-                    f"{ew_level:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
-                    f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
-                )
+                for exit_state, s, st in by_exit:
+                    if st is None:
+                        writer.writerow(["metric", "RETURNS_BY_EXIT_STATE", exit_state, s, "", "", 0, "NA", "NA", "NA", "NA", "NA", "NA"])
+                    else:
+                        writer.writerow(["metric", "RETURNS_BY_EXIT_STATE", exit_state, s, "", "", st["n"], fmt6(st["mean"]), fmt6(st["median"]), fmt6(st["std"]), fmt6(st["min"]), fmt6(st["max"]), fmt6(st["win_rate"])])
 
-            print("")
-            print("MATURE_PHASE_BY_MAX_LEVEL")
-            print(f"{'max_level':<10} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
-            for ew_level, s, st in by_ewlevel_mature:
-                if st is None:
-                    print(f"{ew_level:<10} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
-                    continue
-                print(
-                    f"{ew_level:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
-                    f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
-                )
+                for confirmed, s, st in by_confirm:
+                    if st is None:
+                        writer.writerow(["metric", "RETURNS_BY_CONFIRM", str(confirmed), s, "", "", 0, "NA", "NA", "NA", "NA", "NA", "NA"])
+                    else:
+                        writer.writerow(["metric", "RETURNS_BY_CONFIRM", str(confirmed), s, "", "", st["n"], fmt6(st["mean"]), fmt6(st["median"]), fmt6(st["std"]), fmt6(st["min"]), fmt6(st["max"]), fmt6(st["win_rate"])])
+
+                for ew_level, s, st in by_ewlevel_early:
+                    if st is None:
+                        writer.writerow(["metric", "EARLY_PHASE_BY_MAX_LEVEL", str(ew_level), s, "", "", 0, "NA", "NA", "NA", "NA", "NA", "NA"])
+                    else:
+                        writer.writerow(["metric", "EARLY_PHASE_BY_MAX_LEVEL", str(ew_level), s, "", "", st["n"], fmt6(st["mean"]), fmt6(st["median"]), fmt6(st["std"]), fmt6(st["min"]), fmt6(st["max"]), fmt6(st["win_rate"])])
+
+                for ew_level, s, st in by_ewlevel_mature:
+                    if st is None:
+                        writer.writerow(["metric", "MATURE_PHASE_BY_MAX_LEVEL", str(ew_level), s, "", "", 0, "NA", "NA", "NA", "NA", "NA", "NA"])
+                    else:
+                        writer.writerow(["metric", "MATURE_PHASE_BY_MAX_LEVEL", str(ew_level), s, "", "", st["n"], fmt6(st["mean"]), fmt6(st["median"]), fmt6(st["std"]), fmt6(st["min"]), fmt6(st["max"]), fmt6(st["win_rate"])])
+            else:
+                print("PERFORMANCE_REPORT")
+                print(f"db_path={args.db}")
+                print(f"generated_at_utc={utc_now_z()}")
+                print(f"pipeline_version_filter={args.pipeline_version if args.pipeline_version is not None else 'NONE'}")
+                print(f"policy_used={policy_id_used} ({policy_version_used})")
+                print(f"signal_used={signal_version_used}")
+                print(f"ew_score_rule_used={ew_rule_used}")
+                print(f"limit={args.limit if args.limit is not None else 'NONE'}")
+
+                print("")
+                print("COUNTS")
+                print(f"n_total={n_total}")
+                print(f"n_closed={n_closed}")
+                print(f"n_open={n_open}")
+                print(f"n_exit_pass={n_exit_pass}")
+                print(f"n_exit_no_trade={n_exit_no_trade}")
+                print(f"n_has_confirm={n_has_confirm}")
+                print(f"n_confirmed={n_confirmed}")
+                print(f"pct_confirmed_among_has_confirm={fmt6(pct_confirmed)}")
+
+                print("")
+                print("RETURNS_OVERALL")
+                print(f"{'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
+                for s in series_names:
+                    st = overall_stats[s]
+                    if st is None:
+                        print(f"{s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
+                        continue
+                    print(
+                        f"{s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
+                        f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
+                    )
+
+                print("")
+                print("RETURNS_BY_EXIT_STATE")
+                print(f"{'exit_state':<12} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
+                for exit_state, s, st in by_exit:
+                    if st is None:
+                        print(f"{exit_state:<12} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
+                        continue
+                    print(
+                        f"{exit_state:<12} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
+                        f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
+                    )
+
+                print("")
+                print("RETURNS_BY_CONFIRM")
+                print(f"{'confirmed':<10} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
+                for confirmed, s, st in by_confirm:
+                    if st is None:
+                        print(f"{confirmed:<10} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
+                        continue
+                    print(
+                        f"{confirmed:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
+                        f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
+                    )
+
+                print("")
+                print("EARLY_PHASE_BY_MAX_LEVEL")
+                print(f"{'max_level':<10} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
+                for ew_level, s, st in by_ewlevel_early:
+                    if st is None:
+                        print(f"{ew_level:<10} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
+                        continue
+                    print(
+                        f"{ew_level:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
+                        f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
+                    )
+
+                print("")
+                print("MATURE_PHASE_BY_MAX_LEVEL")
+                print(f"{'max_level':<10} {'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
+                for ew_level, s, st in by_ewlevel_mature:
+                    if st is None:
+                        print(f"{ew_level:<10} {s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
+                        continue
+                    print(
+                        f"{ew_level:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
+                        f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
+                    )
     except OSError as exc:
         if args.out is not None:
             raise SystemExit(f"ERROR: failed to write report to {args.out}: {exc}")

@@ -1,0 +1,20 @@
+{
+  "rule_id": "EW_SCORE_ROLLING_V2_FIN",
+  "description": "FIN rolling EW score trained on day4 return (winner_60 >= 10%), full-universe update.",
+  "beta0": -0.5279132420252578,
+  "beta1": 0.1673438370775658,
+  "trained_on_market": "FIN",
+  "cohort": "ALL_EW",
+  "n_used": 465,
+  "base_rate": 0.3720430107526882,
+  "auc": 0.6347295906247525,
+  "label_definition": "winner_60 = peak60_growth_pct_close_ew_to_peak >= 10",
+  "progressive_prefix_scoring": true,
+  "level3_score_threshold": 0.45,
+  "market": "omxh",
+  "feature": "r_ew_day4_pct",
+  "auc_training": 0.6347295906247525,
+  "training_sample_size": 465,
+  "training_horizon_trading_days": 4,
+  "notes": "FIN full universe update (episodes=465). Threshold sweep showed weak monotonic lift; 0.45 chosen for non-trivial sample."
+}

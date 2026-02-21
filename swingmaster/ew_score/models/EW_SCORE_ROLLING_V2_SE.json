@@ -1,0 +1,20 @@
+{
+  "rule_id": "EW_SCORE_ROLLING_V2_SE",
+  "description": "Sweden rolling EW score trained on day4 return (winner_60 >= 10%)",
+  "market": "omxs",
+  "feature": "r_ew_day4_pct",
+  "beta0": -0.4018210063425051,
+  "beta1": 0.13369263330216363,
+  "trained_on_market": "SE",
+  "cohort": "ALL_EW",
+  "n_used": 886,
+  "base_rate": 0.4164785553047404,
+  "auc": 0.6444675085048723,
+  "label_definition": "winner_60 = peak60_growth_pct_close_ew_to_peak >= 10",
+  "progressive_prefix_scoring": true,
+  "level3_score_threshold": 0.47,
+  "auc_training": 0.6444675085048723,
+  "training_sample_size": 886,
+  "training_horizon_trading_days": 4,
+  "notes": "Trained on SE full universe (n_tickers_in_state=334, episodes=886). Day5 AUC higher but many episodes are <5 trading days; Day4 chosen for production viability."
+}

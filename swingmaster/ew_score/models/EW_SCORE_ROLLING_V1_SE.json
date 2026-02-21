@@ -1,0 +1,30 @@
+{
+  "rule_id": "EW_SCORE_ROLLING_V1_SE",
+  "description": "Sweden rolling EW score trained on day3 return (winner_60 >= 10%)",
+  "beta0": -0.5788748631488445,
+  "beta1": 0.13778364899579057,
+  "trained_on_market": "SE",
+  "cohort": "ALL_EW",
+  "n_used": 141,
+  "base_rate": 0.36879432624113473,
+  "auc": 0.6127917026793431,
+  "label_definition": "winner_60 = peak60_growth_pct_close_ew_to_peak >= 10",
+  "progressive_prefix_scoring": true,
+  "level3_score_threshold": 0.47,
+  "training_market": "omxs",
+  "training_period": "2020-01-01 to 2025-12-31",
+  "level_logic": {
+    "level3_score_threshold": 0.47,
+    "threshold_candidates_swept": [0.45, 0.47, 0.49, 0.50, 0.52],
+    "sweep_summary": {
+      "note": "SE 2020-2025: max_level=3 did not occur for any candidate threshold; score>=threshold occurred mainly when rows_total<4 (level1). Keeping 0.47 for comparability and determinism.",
+      "sweep_results": {
+        "0.45": {"max_level_0": {"n": 58, "win_rate_60": 0.396551724137931}, "max_level_1": {"n": 13, "win_rate_60": 0.307692307692308}, "max_level_2": {"n": 66, "win_rate_60": 0.333333333333333}},
+        "0.47": {"max_level_0": {"n": 64, "win_rate_60": 0.390625},             "max_level_1": {"n": 7,  "win_rate_60": 0.285714285714286}, "max_level_2": {"n": 66, "win_rate_60": 0.333333333333333}},
+        "0.49": {"max_level_0": {"n": 64, "win_rate_60": 0.390625},             "max_level_1": {"n": 7,  "win_rate_60": 0.285714285714286}, "max_level_2": {"n": 66, "win_rate_60": 0.333333333333333}},
+        "0.50": {"max_level_0": {"n": 64, "win_rate_60": 0.390625},             "max_level_1": {"n": 7,  "win_rate_60": 0.285714285714286}, "max_level_2": {"n": 66, "win_rate_60": 0.333333333333333}},
+        "0.52": {"max_level_0": {"n": 64, "win_rate_60": 0.390625},             "max_level_1": {"n": 7,  "win_rate_60": 0.285714285714286}, "max_level_2": {"n": 66, "win_rate_60": 0.333333333333333}}
+      }
+    }
+  }
+}

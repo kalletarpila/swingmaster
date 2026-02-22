@@ -14,6 +14,9 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 
 DEFAULT_DB = "/home/kalle/projects/swingmaster/swingmaster_rc.db"
+DEFAULT_REPORT_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "perf_reports")
+)
 
 
 class TeeWriter:
@@ -35,7 +38,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", default=DEFAULT_DB, help="RC SQLite database path")
     parser.add_argument("--pipeline-version", default=None, help="Optional pipeline_version filter")
     parser.add_argument("--limit", type=int, default=None, help="Optional row limit by computed_at DESC")
-    parser.add_argument("--out", default=None, help="Optional output file path for full report")
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Optional output file path for full report (default: auto-save under perf_reports/)",
+    )
     parser.add_argument("--format", choices=["text", "csv"], default="text", help="Output format")
     return parser.parse_args()
 
@@ -270,6 +277,11 @@ def infer_signal_version(policy_version: str) -> str:
 
 def main() -> None:
     args = parse_args()
+    if args.out is None:
+        os.makedirs(DEFAULT_REPORT_DIR, exist_ok=True)
+        db_stem = os.path.splitext(os.path.basename(args.db))[0]
+        ext = "csv" if args.format == "csv" else "txt"
+        args.out = os.path.join(DEFAULT_REPORT_DIR, f"{db_stem}_performance_report.{ext}")
 
     conn = sqlite3.connect(args.db)
     conn.row_factory = sqlite3.Row

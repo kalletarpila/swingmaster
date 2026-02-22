@@ -163,6 +163,16 @@ class RuleBasedTransitionPolicyV1Impl:
             reason_codes=proposal.reasons,
             attrs_update=attrs_update,
         )
+        if (
+            prev_state == State.STABILIZING
+            and signals.has(SignalKey.TREND_STARTED)
+            and ReasonCode.TREND_STARTED not in decision.reason_codes
+        ):
+            decision = Decision(
+                next_state=decision.next_state,
+                reason_codes=[*decision.reason_codes, ReasonCode.TREND_STARTED],
+                attrs_update=decision.attrs_update,
+            )
         return _with_trend_started_reason(decision, signals)
 
 

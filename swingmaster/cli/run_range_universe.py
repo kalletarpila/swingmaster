@@ -1754,6 +1754,13 @@ def maybe_run_ew_score(
 
 def main() -> None:
     args = parse_args()
+    policy_version = args.policy_version
+    if policy_version == "dev":
+        policy_version = "v2"
+    if (args.signal_version == "v3") != (policy_version == "v3"):
+        raise RuntimeError(
+            "Incompatible versions: signal-version and policy-version must both be v3, or both non-v3."
+        )
 
     if _debug_enabled(args):
         set_evaluator_debug(lambda msg: _dbg(args, msg))
@@ -1767,8 +1774,6 @@ def main() -> None:
     rc_conn.execute("PRAGMA temp_store_directory='/tmp'")
     try:
         apply_migrations(rc_conn)
-        ensure_rc_pipeline_episode_table(rc_conn)
-        rc_conn.commit()
 
         universe_reader = TickerUniverseReader(md_conn)
         spec = build_spec(args)
@@ -1873,13 +1878,6 @@ def main() -> None:
                     print("DAYS tail:", ",".join(tail))
             return
 
-        policy_version = args.policy_version
-        if policy_version == "dev":
-            policy_version = "v2"
-        if (args.signal_version == "v3") != (policy_version == "v3"):
-            raise RuntimeError(
-                "Incompatible versions: signal-version and policy-version must both be v3, or both non-v3."
-            )
         policy_id = args.policy_id
         if policy_version == "v3" and policy_id == "rule_v2":
             policy_id = "rule_v3"
@@ -1896,6 +1894,9 @@ def main() -> None:
             debug=args.debug,
         )
         signal_provider = app._signal_provider
+
+        ensure_rc_pipeline_episode_table(rc_conn)
+        rc_conn.commit()
 
         last_run_id = None
         run_ids_by_day: Dict[str, str] = {}

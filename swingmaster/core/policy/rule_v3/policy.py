@@ -144,7 +144,14 @@ class RuleBasedTransitionPolicyV3Impl:
             next_origin = None
             next_entry_type = None
             next_profile = None
-            next_stabilization_phase = None
+            if (
+                prev_state == State.STABILIZING
+                and signals.has(SignalKey.ENTRY_SETUP_VALID)
+                and signals.has(SignalKey.INVALIDATED)
+            ):
+                next_stabilization_phase = PHASE_EARLY_STABILIZATION
+            else:
+                next_stabilization_phase = None
             next_entry_gate = None
             next_entry_quality = None
 

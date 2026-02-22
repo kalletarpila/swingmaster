@@ -14,6 +14,25 @@ EW_SCORE_FASTPASS_V1_FIN = "EW_SCORE_FASTPASS_V1_FIN"
 EW_SCORE_FASTPASS_V1_SE = "EW_SCORE_FASTPASS_V1_SE"
 EW_SCORE_ROLLING_V2_FIN = "EW_SCORE_ROLLING_V2_FIN"
 EW_SCORE_ROLLING_V2_SE = "EW_SCORE_ROLLING_V2_SE"
+ROLLING_ENABLED_BY_MARKET = {
+    "omxh": True,
+    "omxs": True,
+    "usa": False,
+}
+FASTPASS_ENABLED_BY_MARKET = {
+    "omxh": True,
+    "omxs": True,
+    "usa": True,
+}
+ROLLING_RULE_BY_MARKET = {
+    "omxh": EW_SCORE_ROLLING_V2_FIN,
+    "omxs": EW_SCORE_ROLLING_V2_SE,
+}
+FASTPASS_RULE_BY_MARKET = {
+    "omxh": EW_SCORE_FASTPASS_V1_FIN,
+    "omxs": EW_SCORE_FASTPASS_V1_SE,
+    "usa": EW_SCORE_FASTPASS_V1_USA_SMALL,
+}
 FASTPASS_V1_USA_SMALL_BETA0 = 0.002991128723180779
 FASTPASS_V1_USA_SMALL_THRESHOLD = 0.60
 FASTPASS_V1_USA_SMALL_BETAS = {
@@ -153,10 +172,6 @@ def compute_and_store_ew_scores(
         print("EW_SCORE_DAILY")
         print("ticker | ew_level_day3 | ew_score_day3 | r_prefix_pct | entry_window_date")
 
-    rolling_rule_by_market = {
-        "omxh": EW_SCORE_ROLLING_V2_FIN,
-        "omxs": EW_SCORE_ROLLING_V2_SE,
-    }
     model_cache: dict[str, Any] = {}
 
     stored = 0
@@ -181,170 +196,69 @@ def compute_and_store_ew_scores(
         market = _resolve_market_for_ticker(osakedata_conn, ticker, as_of_date)
         routed = False
 
-        if market in rolling_rule_by_market:
-            rolling_rule = rolling_rule_by_market[market]
-            if rolling_rule not in model_cache:
-                model_cache[rolling_rule] = load_model_config(rolling_rule)
-            rolling_model = model_cache[rolling_rule]
+        if market is not None and ROLLING_ENABLED_BY_MARKET.get(market, False):
+            rolling_rule = ROLLING_RULE_BY_MARKET.get(market)
+            if rolling_rule is not None:
+                if rolling_rule not in model_cache:
+                    model_cache[rolling_rule] = load_model_config(rolling_rule)
+                rolling_model = model_cache[rolling_rule]
 
-            rolling_px_rows = osakedata_conn.execute(
-                """
-                SELECT pvm, close
-                FROM osakedata
-                WHERE osake = ?
-                  AND market = ?
-                  AND pvm >= ?
-                  AND pvm <= ?
-                ORDER BY pvm ASC
-                """,
-                (ticker, market, entry_window_date, as_of_date),
-            ).fetchall()
-            if rolling_px_rows and rolling_model.level3_score_threshold is not None:
-                rows_total = len(rolling_px_rows)
-                close_day0 = float(rolling_px_rows[0][1])
-                close_today = float(rolling_px_rows[-1][1])
-                if close_day0 != 0.0:
-                    r_prefix_pct = 100.0 * (close_today / close_day0 - 1.0)
-                    score_raw_z = rolling_model.beta0 + rolling_model.beta1 * r_prefix_pct
-                    ew_score_rolling = _sigmoid(score_raw_z)
-                    ew_level_rolling = _level_from_rows_total(
-                        ew_score_rolling,
-                        float(rolling_model.level3_score_threshold),
-                        rows_total,
-                    )
-                    rolling_inputs_json = json.dumps(
-                        {
-                            "as_of_date": as_of_date,
-                            "beta0": rolling_model.beta0,
-                            "beta1": rolling_model.beta1,
-                            "close_day0": close_day0,
-                            "close_today": close_today,
-                            "entry_date": entry_window_date,
-                            "r_prefix_pct": r_prefix_pct,
-                            "rows_total": rows_total,
-                            "rule_id": rolling_model.rule_id,
-                            "score_raw_z": score_raw_z,
-                            "threshold": rolling_model.level3_score_threshold,
-                        },
-                        sort_keys=True,
-                    )
-                    target_repo.upsert_rolling_row(
-                        ticker=ticker,
-                        date=as_of_date,
-                        ew_score_rolling=ew_score_rolling,
-                        ew_level_rolling=ew_level_rolling,
-                        ew_rule_rolling=rolling_model.rule_id,
-                        inputs_json_rolling=rolling_inputs_json,
-                    )
-                    stored += 1
-                    routed = True
-
-        if market == "usa":
-            last_stab_row = rc_conn.execute(
-                """
-                SELECT MAX(date)
-                FROM rc_state_daily
-                WHERE ticker = ?
-                  AND date < ?
-                  AND state = 'STABILIZING'
-                """,
-                (ticker, entry_window_date),
-            ).fetchone()
-            if last_stab_row is not None and last_stab_row[0] is not None:
-                last_stab_date = str(last_stab_row[0])
-                fastpass_px_rows = osakedata_conn.execute(
+                rolling_px_rows = osakedata_conn.execute(
                     """
                     SELECT pvm, close
                     FROM osakedata
                     WHERE osake = ?
-                      AND market = 'usa'
+                      AND market = ?
                       AND pvm >= ?
                       AND pvm <= ?
                     ORDER BY pvm ASC
                     """,
-                    (ticker, entry_window_date, as_of_date),
+                    (ticker, market, entry_window_date, as_of_date),
                 ).fetchall()
-                close_last_stab_row = osakedata_conn.execute(
-                    """
-                    SELECT close
-                    FROM osakedata
-                    WHERE osake = ?
-                      AND market = 'usa'
-                      AND pvm = ?
-                    LIMIT 1
-                    """,
-                    (ticker, last_stab_date),
-                ).fetchone()
-                if fastpass_px_rows and close_last_stab_row is not None:
-                    rows_total = len(fastpass_px_rows)
-                    close_entry = float(fastpass_px_rows[0][1])
-                    close_last_stab = float(close_last_stab_row[0])
-                    if close_last_stab != 0.0:
-                        attrs_row = rc_conn.execute(
-                            """
-                            SELECT
-                              json_extract(state_attrs_json, '$.decline_profile') AS decline_profile,
-                              json_extract(state_attrs_json, '$.entry_quality') AS entry_quality
-                            FROM rc_state_daily
-                            WHERE ticker = ?
-                              AND date = ?
-                            LIMIT 1
-                            """,
-                            (ticker, entry_window_date),
-                        ).fetchone()
-                        decline_profile = "NULL"
-                        entry_quality = "NULL"
-                        if attrs_row is not None:
-                            if attrs_row[0] is not None:
-                                decline_profile = str(attrs_row[0])
-                            if attrs_row[1] is not None:
-                                entry_quality = str(attrs_row[1])
-
-                        r_stab_to_entry_pct = 100.0 * (close_entry / close_last_stab - 1.0)
-                        score_raw_z = FASTPASS_V1_USA_SMALL_BETA0
-                        score_raw_z += FASTPASS_V1_USA_SMALL_BETAS["r_stab_to_entry_pct"] * r_stab_to_entry_pct
-                        score_raw_z += FASTPASS_V1_USA_SMALL_BETAS.get(
-                            f"decline_profile_{decline_profile}", 0.0
-                        )
-                        score_raw_z += FASTPASS_V1_USA_SMALL_BETAS.get(
-                            f"entry_quality_{entry_quality}", 0.0
-                        )
-                        ew_score_fastpass = _sigmoid(score_raw_z)
-                        ew_level_fastpass = _level_from_rows_total(
-                            ew_score_fastpass,
-                            FASTPASS_V1_USA_SMALL_THRESHOLD,
+                if rolling_px_rows and rolling_model.level3_score_threshold is not None:
+                    rows_total = len(rolling_px_rows)
+                    close_day0 = float(rolling_px_rows[0][1])
+                    close_today = float(rolling_px_rows[-1][1])
+                    if close_day0 != 0.0:
+                        r_prefix_pct = 100.0 * (close_today / close_day0 - 1.0)
+                        score_raw_z = rolling_model.beta0 + rolling_model.beta1 * r_prefix_pct
+                        ew_score_rolling = _sigmoid(score_raw_z)
+                        ew_level_rolling = _level_from_rows_total(
+                            ew_score_rolling,
+                            float(rolling_model.level3_score_threshold),
                             rows_total,
                         )
-
-                        fastpass_inputs_json = json.dumps(
+                        rolling_inputs_json = json.dumps(
                             {
-                                "beta0": FASTPASS_V1_USA_SMALL_BETA0,
-                                "close_entry": close_entry,
-                                "close_last_stab": close_last_stab,
-                                "decline_profile": decline_profile,
+                                "as_of_date": as_of_date,
+                                "beta0": rolling_model.beta0,
+                                "beta1": rolling_model.beta1,
+                                "close_day0": close_day0,
+                                "close_today": close_today,
                                 "entry_date": entry_window_date,
-                                "entry_quality": entry_quality,
-                                "last_stab_date": last_stab_date,
-                                "r_stab_to_entry_pct": r_stab_to_entry_pct,
+                                "r_prefix_pct": r_prefix_pct,
                                 "rows_total": rows_total,
-                                "rule_id": EW_SCORE_FASTPASS_V1_USA_SMALL,
+                                "rule_id": rolling_model.rule_id,
                                 "score_raw_z": score_raw_z,
-                                "threshold": FASTPASS_V1_USA_SMALL_THRESHOLD,
+                                "threshold": rolling_model.level3_score_threshold,
                             },
                             sort_keys=True,
                         )
-                        target_repo.upsert_fastpass_row(
+                        target_repo.upsert_rolling_row(
                             ticker=ticker,
                             date=as_of_date,
-                            ew_score_fastpass=ew_score_fastpass,
-                            ew_level_fastpass=ew_level_fastpass,
-                            ew_rule=EW_SCORE_FASTPASS_V1_USA_SMALL,
-                            inputs_json=fastpass_inputs_json,
+                            ew_score_rolling=ew_score_rolling,
+                            ew_level_rolling=ew_level_rolling,
+                            ew_rule_rolling=rolling_model.rule_id,
+                            inputs_json_rolling=rolling_inputs_json,
                         )
                         stored += 1
                         routed = True
 
-        if market == "omxh":
+        if market is not None and FASTPASS_ENABLED_BY_MARKET.get(market, False):
+            fastpass_rule = FASTPASS_RULE_BY_MARKET.get(market)
+            if fastpass_rule is None:
+                fastpass_rule = ""
             last_stab_row = rc_conn.execute(
                 """
                 SELECT MAX(date)
@@ -362,215 +276,240 @@ def compute_and_store_ew_scores(
                     SELECT pvm, close
                     FROM osakedata
                     WHERE osake = ?
-                      AND market = 'omxh'
+                      AND market = ?
                       AND pvm >= ?
                       AND pvm <= ?
                     ORDER BY pvm ASC
                     """,
-                    (ticker, entry_window_date, as_of_date),
+                    (ticker, market, entry_window_date, as_of_date),
                 ).fetchall()
                 close_last_stab_row = osakedata_conn.execute(
                     """
                     SELECT close
                     FROM osakedata
                     WHERE osake = ?
-                      AND market = 'omxh'
+                      AND market = ?
                       AND pvm = ?
                     LIMIT 1
                     """,
-                    (ticker, last_stab_date),
+                    (ticker, market, last_stab_date),
                 ).fetchone()
                 if fastpass_px_rows and close_last_stab_row is not None:
                     rows_total = len(fastpass_px_rows)
                     close_entry = float(fastpass_px_rows[0][1])
                     close_last_stab = float(close_last_stab_row[0])
                     if close_last_stab != 0.0:
-                        attrs_row = rc_conn.execute(
-                            """
-                            SELECT
-                              json_extract(state_attrs_json, '$.decline_profile') AS decline_profile,
-                              json_extract(state_attrs_json, '$.entry_gate') AS entry_gate,
-                              json_extract(state_attrs_json, '$.entry_quality') AS entry_quality
-                            FROM rc_state_daily
-                            WHERE ticker = ?
-                              AND date = ?
-                            LIMIT 1
-                            """,
-                            (ticker, entry_window_date),
-                        ).fetchone()
-                        decline_profile = "NULL"
-                        entry_gate = "NULL"
-                        entry_quality = "NULL"
-                        if attrs_row is not None:
-                            if attrs_row[0] is not None:
-                                decline_profile = str(attrs_row[0])
-                            if attrs_row[1] is not None:
-                                entry_gate = str(attrs_row[1])
-                            if attrs_row[2] is not None:
-                                entry_quality = str(attrs_row[2])
+                        if fastpass_rule == EW_SCORE_FASTPASS_V1_USA_SMALL:
+                            attrs_row = rc_conn.execute(
+                                """
+                                SELECT
+                                  json_extract(state_attrs_json, '$.decline_profile') AS decline_profile,
+                                  json_extract(state_attrs_json, '$.entry_quality') AS entry_quality
+                                FROM rc_state_daily
+                                WHERE ticker = ?
+                                  AND date = ?
+                                LIMIT 1
+                                """,
+                                (ticker, entry_window_date),
+                            ).fetchone()
+                            decline_profile = "NULL"
+                            entry_quality = "NULL"
+                            if attrs_row is not None:
+                                if attrs_row[0] is not None:
+                                    decline_profile = str(attrs_row[0])
+                                if attrs_row[1] is not None:
+                                    entry_quality = str(attrs_row[1])
 
-                        r_stab_to_entry_pct = 100.0 * (close_entry / close_last_stab - 1.0)
-                        score_raw_z, ew_score_fastpass = _score_fastpass_v1_fin(
-                            r_stab_to_entry_pct=r_stab_to_entry_pct,
-                            decline_profile=decline_profile,
-                            entry_gate=entry_gate,
-                            entry_quality=entry_quality,
-                        )
-                        ew_level_fastpass = _level_from_rows_total(
-                            ew_score_fastpass,
-                            FASTPASS_V1_FIN_THRESHOLD,
-                            rows_total,
-                        )
-                        fastpass_inputs_json = json.dumps(
-                            {
-                                "beta0": FASTPASS_V1_FIN_BETA0,
-                                "close_entry": close_entry,
-                                "close_last_stab": close_last_stab,
-                                "decline_profile": decline_profile,
-                                "entry_date": entry_window_date,
-                                "entry_gate": entry_gate,
-                                "entry_quality": entry_quality,
-                                "last_stab_date": last_stab_date,
-                                "r_stab_to_entry_pct": r_stab_to_entry_pct,
-                                "rule_id": EW_SCORE_FASTPASS_V1_FIN,
-                                "score_raw_z": score_raw_z,
-                                "threshold": FASTPASS_V1_FIN_THRESHOLD,
-                            },
-                            sort_keys=True,
-                        )
-                        target_repo.upsert_fastpass_row(
-                            ticker=ticker,
-                            date=as_of_date,
-                            ew_score_fastpass=ew_score_fastpass,
-                            ew_level_fastpass=ew_level_fastpass,
-                            ew_rule=EW_SCORE_FASTPASS_V1_FIN,
-                            inputs_json=fastpass_inputs_json,
-                        )
-                        stored += 1
-                        routed = True
+                            r_stab_to_entry_pct = 100.0 * (close_entry / close_last_stab - 1.0)
+                            score_raw_z = FASTPASS_V1_USA_SMALL_BETA0
+                            score_raw_z += FASTPASS_V1_USA_SMALL_BETAS["r_stab_to_entry_pct"] * r_stab_to_entry_pct
+                            score_raw_z += FASTPASS_V1_USA_SMALL_BETAS.get(
+                                f"decline_profile_{decline_profile}", 0.0
+                            )
+                            score_raw_z += FASTPASS_V1_USA_SMALL_BETAS.get(
+                                f"entry_quality_{entry_quality}", 0.0
+                            )
+                            ew_score_fastpass = _sigmoid(score_raw_z)
+                            ew_level_fastpass = _level_from_rows_total(
+                                ew_score_fastpass,
+                                FASTPASS_V1_USA_SMALL_THRESHOLD,
+                                rows_total,
+                            )
+                            fastpass_inputs_json = json.dumps(
+                                {
+                                    "beta0": FASTPASS_V1_USA_SMALL_BETA0,
+                                    "close_entry": close_entry,
+                                    "close_last_stab": close_last_stab,
+                                    "decline_profile": decline_profile,
+                                    "entry_date": entry_window_date,
+                                    "entry_quality": entry_quality,
+                                    "last_stab_date": last_stab_date,
+                                    "r_stab_to_entry_pct": r_stab_to_entry_pct,
+                                    "rows_total": rows_total,
+                                    "rule_id": EW_SCORE_FASTPASS_V1_USA_SMALL,
+                                    "score_raw_z": score_raw_z,
+                                    "threshold": FASTPASS_V1_USA_SMALL_THRESHOLD,
+                                },
+                                sort_keys=True,
+                            )
+                            target_repo.upsert_fastpass_row(
+                                ticker=ticker,
+                                date=as_of_date,
+                                ew_score_fastpass=ew_score_fastpass,
+                                ew_level_fastpass=ew_level_fastpass,
+                                ew_rule=EW_SCORE_FASTPASS_V1_USA_SMALL,
+                                inputs_json=fastpass_inputs_json,
+                            )
+                            stored += 1
+                            routed = True
 
-        if market == "omxs":
-            last_stab_row = rc_conn.execute(
-                """
-                SELECT MAX(date)
-                FROM rc_state_daily
-                WHERE ticker = ?
-                  AND date < ?
-                  AND state = 'STABILIZING'
-                """,
-                (ticker, entry_window_date),
-            ).fetchone()
-            if last_stab_row is not None and last_stab_row[0] is not None:
-                last_stab_date = str(last_stab_row[0])
-                fastpass_px_rows = osakedata_conn.execute(
-                    """
-                    SELECT pvm, close
-                    FROM osakedata
-                    WHERE osake = ?
-                      AND market = 'omxs'
-                      AND pvm >= ?
-                      AND pvm <= ?
-                    ORDER BY pvm ASC
-                    """,
-                    (ticker, entry_window_date, as_of_date),
-                ).fetchall()
-                close_last_stab_row = osakedata_conn.execute(
-                    """
-                    SELECT close
-                    FROM osakedata
-                    WHERE osake = ?
-                      AND market = 'omxs'
-                      AND pvm = ?
-                    LIMIT 1
-                    """,
-                    (ticker, last_stab_date),
-                ).fetchone()
-                if fastpass_px_rows and close_last_stab_row is not None:
-                    rows_total = len(fastpass_px_rows)
-                    close_entry = float(fastpass_px_rows[0][1])
-                    close_last_stab = float(close_last_stab_row[0])
-                    if close_last_stab != 0.0:
-                        attrs_row = rc_conn.execute(
-                            """
-                            SELECT
-                              json_extract(state_attrs_json, '$.downtrend_origin') AS downtrend_origin,
-                              json_extract(state_attrs_json, '$.downtrend_entry_type') AS downtrend_entry_type,
-                              json_extract(state_attrs_json, '$.decline_profile') AS decline_profile,
-                              json_extract(state_attrs_json, '$.stabilization_phase') AS stabilization_phase,
-                              json_extract(state_attrs_json, '$.entry_gate') AS entry_gate,
-                              json_extract(state_attrs_json, '$.entry_quality') AS entry_quality
-                            FROM rc_state_daily
-                            WHERE ticker = ?
-                              AND date = ?
-                            LIMIT 1
-                            """,
-                            (ticker, entry_window_date),
-                        ).fetchone()
-                        downtrend_origin = "NULL"
-                        downtrend_entry_type = "NULL"
-                        decline_profile = "NULL"
-                        stabilization_phase = "NULL"
-                        entry_gate = "NULL"
-                        entry_quality = "NULL"
-                        if attrs_row is not None:
-                            if attrs_row[0] is not None:
-                                downtrend_origin = str(attrs_row[0])
-                            if attrs_row[1] is not None:
-                                downtrend_entry_type = str(attrs_row[1])
-                            if attrs_row[2] is not None:
-                                decline_profile = str(attrs_row[2])
-                            if attrs_row[3] is not None:
-                                stabilization_phase = str(attrs_row[3])
-                            if attrs_row[4] is not None:
-                                entry_gate = str(attrs_row[4])
-                            if attrs_row[5] is not None:
-                                entry_quality = str(attrs_row[5])
+                        if fastpass_rule == EW_SCORE_FASTPASS_V1_FIN:
+                            attrs_row = rc_conn.execute(
+                                """
+                                SELECT
+                                  json_extract(state_attrs_json, '$.decline_profile') AS decline_profile,
+                                  json_extract(state_attrs_json, '$.entry_gate') AS entry_gate,
+                                  json_extract(state_attrs_json, '$.entry_quality') AS entry_quality
+                                FROM rc_state_daily
+                                WHERE ticker = ?
+                                  AND date = ?
+                                LIMIT 1
+                                """,
+                                (ticker, entry_window_date),
+                            ).fetchone()
+                            decline_profile = "NULL"
+                            entry_gate = "NULL"
+                            entry_quality = "NULL"
+                            if attrs_row is not None:
+                                if attrs_row[0] is not None:
+                                    decline_profile = str(attrs_row[0])
+                                if attrs_row[1] is not None:
+                                    entry_gate = str(attrs_row[1])
+                                if attrs_row[2] is not None:
+                                    entry_quality = str(attrs_row[2])
 
-                        r_stab_to_entry_pct = 100.0 * (close_entry / close_last_stab - 1.0)
-                        score_raw_z, ew_score_fastpass = _score_fastpass_v1_se(
-                            r_stab_to_entry_pct=r_stab_to_entry_pct,
-                            downtrend_origin=downtrend_origin,
-                            downtrend_entry_type=downtrend_entry_type,
-                            decline_profile=decline_profile,
-                            stabilization_phase=stabilization_phase,
-                            entry_gate=entry_gate,
-                            entry_quality=entry_quality,
-                        )
-                        ew_level_fastpass = _level_from_rows_total(
-                            ew_score_fastpass,
-                            FASTPASS_V1_SE_THRESHOLD,
-                            rows_total,
-                        )
-                        fastpass_inputs_json = json.dumps(
-                            {
-                                "beta0": FASTPASS_V1_SE_BETA0,
-                                "close_entry": close_entry,
-                                "close_last_stab": close_last_stab,
-                                "decline_profile": decline_profile,
-                                "downtrend_entry_type": downtrend_entry_type,
-                                "downtrend_origin": downtrend_origin,
-                                "entry_date": entry_window_date,
-                                "entry_gate": entry_gate,
-                                "entry_quality": entry_quality,
-                                "last_stab_date": last_stab_date,
-                                "r_stab_to_entry_pct": r_stab_to_entry_pct,
-                                "rule_id": EW_SCORE_FASTPASS_V1_SE,
-                                "score_raw_z": score_raw_z,
-                                "stabilization_phase": stabilization_phase,
-                                "threshold": FASTPASS_V1_SE_THRESHOLD,
-                            },
-                            sort_keys=True,
-                        )
-                        target_repo.upsert_fastpass_row(
-                            ticker=ticker,
-                            date=as_of_date,
-                            ew_score_fastpass=ew_score_fastpass,
-                            ew_level_fastpass=ew_level_fastpass,
-                            ew_rule=EW_SCORE_FASTPASS_V1_SE,
-                            inputs_json=fastpass_inputs_json,
-                        )
-                        stored += 1
-                        routed = True
+                            r_stab_to_entry_pct = 100.0 * (close_entry / close_last_stab - 1.0)
+                            score_raw_z, ew_score_fastpass = _score_fastpass_v1_fin(
+                                r_stab_to_entry_pct=r_stab_to_entry_pct,
+                                decline_profile=decline_profile,
+                                entry_gate=entry_gate,
+                                entry_quality=entry_quality,
+                            )
+                            ew_level_fastpass = _level_from_rows_total(
+                                ew_score_fastpass,
+                                FASTPASS_V1_FIN_THRESHOLD,
+                                rows_total,
+                            )
+                            fastpass_inputs_json = json.dumps(
+                                {
+                                    "beta0": FASTPASS_V1_FIN_BETA0,
+                                    "close_entry": close_entry,
+                                    "close_last_stab": close_last_stab,
+                                    "decline_profile": decline_profile,
+                                    "entry_date": entry_window_date,
+                                    "entry_gate": entry_gate,
+                                    "entry_quality": entry_quality,
+                                    "last_stab_date": last_stab_date,
+                                    "r_stab_to_entry_pct": r_stab_to_entry_pct,
+                                    "rule_id": EW_SCORE_FASTPASS_V1_FIN,
+                                    "score_raw_z": score_raw_z,
+                                    "threshold": FASTPASS_V1_FIN_THRESHOLD,
+                                },
+                                sort_keys=True,
+                            )
+                            target_repo.upsert_fastpass_row(
+                                ticker=ticker,
+                                date=as_of_date,
+                                ew_score_fastpass=ew_score_fastpass,
+                                ew_level_fastpass=ew_level_fastpass,
+                                ew_rule=EW_SCORE_FASTPASS_V1_FIN,
+                                inputs_json=fastpass_inputs_json,
+                            )
+                            stored += 1
+                            routed = True
+
+                        if fastpass_rule == EW_SCORE_FASTPASS_V1_SE:
+                            attrs_row = rc_conn.execute(
+                                """
+                                SELECT
+                                  json_extract(state_attrs_json, '$.downtrend_origin') AS downtrend_origin,
+                                  json_extract(state_attrs_json, '$.downtrend_entry_type') AS downtrend_entry_type,
+                                  json_extract(state_attrs_json, '$.decline_profile') AS decline_profile,
+                                  json_extract(state_attrs_json, '$.stabilization_phase') AS stabilization_phase,
+                                  json_extract(state_attrs_json, '$.entry_gate') AS entry_gate,
+                                  json_extract(state_attrs_json, '$.entry_quality') AS entry_quality
+                                FROM rc_state_daily
+                                WHERE ticker = ?
+                                  AND date = ?
+                                LIMIT 1
+                                """,
+                                (ticker, entry_window_date),
+                            ).fetchone()
+                            downtrend_origin = "NULL"
+                            downtrend_entry_type = "NULL"
+                            decline_profile = "NULL"
+                            stabilization_phase = "NULL"
+                            entry_gate = "NULL"
+                            entry_quality = "NULL"
+                            if attrs_row is not None:
+                                if attrs_row[0] is not None:
+                                    downtrend_origin = str(attrs_row[0])
+                                if attrs_row[1] is not None:
+                                    downtrend_entry_type = str(attrs_row[1])
+                                if attrs_row[2] is not None:
+                                    decline_profile = str(attrs_row[2])
+                                if attrs_row[3] is not None:
+                                    stabilization_phase = str(attrs_row[3])
+                                if attrs_row[4] is not None:
+                                    entry_gate = str(attrs_row[4])
+                                if attrs_row[5] is not None:
+                                    entry_quality = str(attrs_row[5])
+
+                            r_stab_to_entry_pct = 100.0 * (close_entry / close_last_stab - 1.0)
+                            score_raw_z, ew_score_fastpass = _score_fastpass_v1_se(
+                                r_stab_to_entry_pct=r_stab_to_entry_pct,
+                                downtrend_origin=downtrend_origin,
+                                downtrend_entry_type=downtrend_entry_type,
+                                decline_profile=decline_profile,
+                                stabilization_phase=stabilization_phase,
+                                entry_gate=entry_gate,
+                                entry_quality=entry_quality,
+                            )
+                            ew_level_fastpass = _level_from_rows_total(
+                                ew_score_fastpass,
+                                FASTPASS_V1_SE_THRESHOLD,
+                                rows_total,
+                            )
+                            fastpass_inputs_json = json.dumps(
+                                {
+                                    "beta0": FASTPASS_V1_SE_BETA0,
+                                    "close_entry": close_entry,
+                                    "close_last_stab": close_last_stab,
+                                    "decline_profile": decline_profile,
+                                    "downtrend_entry_type": downtrend_entry_type,
+                                    "downtrend_origin": downtrend_origin,
+                                    "entry_date": entry_window_date,
+                                    "entry_gate": entry_gate,
+                                    "entry_quality": entry_quality,
+                                    "last_stab_date": last_stab_date,
+                                    "r_stab_to_entry_pct": r_stab_to_entry_pct,
+                                    "rule_id": EW_SCORE_FASTPASS_V1_SE,
+                                    "score_raw_z": score_raw_z,
+                                    "stabilization_phase": stabilization_phase,
+                                    "threshold": FASTPASS_V1_SE_THRESHOLD,
+                                },
+                                sort_keys=True,
+                            )
+                            target_repo.upsert_fastpass_row(
+                                ticker=ticker,
+                                date=as_of_date,
+                                ew_score_fastpass=ew_score_fastpass,
+                                ew_level_fastpass=ew_level_fastpass,
+                                ew_rule=EW_SCORE_FASTPASS_V1_SE,
+                                inputs_json=fastpass_inputs_json,
+                            )
+                            stored += 1
+                            routed = True
 
         if routed:
             continue

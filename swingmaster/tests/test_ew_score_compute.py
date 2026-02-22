@@ -386,3 +386,65 @@ def test_score_fastpass_v1_se_deterministic() -> None:
     )
     assert z_actual == pytest.approx(z_expected, abs=1e-12)
     assert score_actual == pytest.approx(score_expected, abs=1e-12)
+
+
+def test_router_usa_rolling_stays_off() -> None:
+    class SpyRepo:
+        def __init__(self) -> None:
+            self.rolling_calls = 0
+            self.fastpass_calls = 0
+
+        def ensure_schema(self) -> None:
+            return None
+
+        def upsert_rolling_row(self, **kwargs) -> None:
+            self.rolling_calls += 1
+
+        def upsert_fastpass_row(self, **kwargs) -> None:
+            self.fastpass_calls += 1
+
+        def upsert_row(self, **kwargs) -> None:
+            return None
+
+    rc_conn = sqlite3.connect(":memory:")
+    os_conn = sqlite3.connect(":memory:")
+    rc_conn.execute(
+        "CREATE TABLE rc_state_daily (ticker TEXT, date TEXT, state TEXT, state_attrs_json TEXT)"
+    )
+    rc_conn.execute(
+        "CREATE TABLE rc_pipeline_episode (ticker TEXT, entry_window_date TEXT, entry_window_exit_date TEXT, peak60_growth_pct_close_ew_to_peak REAL, ew_confirm_confirmed INTEGER)"
+    )
+    rc_conn.executemany(
+        "INSERT INTO rc_state_daily (ticker, date, state, state_attrs_json) VALUES (?, ?, ?, ?)",
+        [
+            ("AAA", "2020-01-09", "STABILIZING", None),
+            ("AAA", "2020-01-10", "ENTRY_WINDOW", '{"decline_profile":"UNKNOWN","entry_quality":"A"}'),
+        ],
+    )
+    rc_conn.execute(
+        "INSERT INTO rc_pipeline_episode (ticker, entry_window_date, entry_window_exit_date, peak60_growth_pct_close_ew_to_peak, ew_confirm_confirmed) VALUES ('AAA','2020-01-10',NULL,NULL,NULL)"
+    )
+    rc_conn.commit()
+    os_conn.execute(
+        "CREATE TABLE osakedata (osake TEXT, pvm TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, market TEXT)"
+    )
+    os_conn.executemany(
+        "INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("AAA", "2020-01-09", 100.0, 100.0, 100.0, 100.0, 100, "usa"),
+            ("AAA", "2020-01-10", 105.0, 105.0, 105.0, 105.0, 100, "usa"),
+        ],
+    )
+    os_conn.commit()
+
+    spy = SpyRepo()
+    compute_and_store_ew_scores(
+        rc_conn=rc_conn,
+        osakedata_conn=os_conn,
+        as_of_date="2020-01-10",
+        rule_id="EW_SCORE_ROLLING_V2_FIN",
+        repo=spy,  # type: ignore[arg-type]
+        print_rows=False,
+    )
+    assert spy.fastpass_calls >= 1
+    assert spy.rolling_calls == 0

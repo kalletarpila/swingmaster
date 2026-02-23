@@ -941,54 +941,69 @@ def main() -> None:
         calendar = debug_ctx["calendar"]
         if debug_date not in calendar:
             print("DEBUG_DATE status=NOT_IN_CALENDAR")
-            return
-        if cap_enabled:
+        else:
+            if cap_enabled:
+                snapshot = debug_ctx["snapshot"]
+                if snapshot is None:
+                    print(f"DEBUG_DATE max_open_positions={int(args.max_open_positions)}")
+                    print("DEBUG_DATE entries_candidates=0")
+                    print("DEBUG_DATE entries_accepted=0")
+                    print("DEBUG_DATE entries_dropped=0")
+                else:
+                    print(f"DEBUG_DATE max_open_positions={int(args.max_open_positions)}")
+                    print(f"DEBUG_DATE entries_candidates={snapshot['entries_candidates']}")
+                    print(f"DEBUG_DATE entries_accepted={snapshot['entries_accepted']}")
+                    print(f"DEBUG_DATE entries_dropped={snapshot['entries_dropped']}")
+                    if args.rank_by_fastpass_score:
+                        for ticker, score, accepted in snapshot["cap_ranked_rows"]:
+                            score_str = "NA" if score is None else str(score)
+                            if accepted:
+                                print(f"DEBUG_POS_ACCEPT ticker={ticker} score_fastpass={score_str}")
+                            else:
+                                print(f"DEBUG_POS_DROP ticker={ticker} score_fastpass={score_str}")
+            regime_on_debug = True
+            if args.regime_filter_sma200:
+                regime_on_debug = bool(regime_on_by_date.get(debug_date, False))
+                print(f"DEBUG_DATE regime_symbol={args.regime_symbol}")
+                print(f"DEBUG_DATE regime_on={1 if regime_on_debug else 0}")
             snapshot = debug_ctx["snapshot"]
-            if snapshot is None:
-                print(f"DEBUG_DATE max_open_positions={int(args.max_open_positions)}")
-                print("DEBUG_DATE entries_candidates=0")
-                print("DEBUG_DATE entries_accepted=0")
-                print("DEBUG_DATE entries_dropped=0")
+            if snapshot is None or not regime_on_debug:
+                print("DEBUG_DATE n_open=0")
+                print("DEBUG_DATE portfolio_r=0.0")
+                print("DEBUG_DATE status=NO_OPEN_POSITIONS")
             else:
-                print(f"DEBUG_DATE max_open_positions={int(args.max_open_positions)}")
-                print(f"DEBUG_DATE entries_candidates={snapshot['entries_candidates']}")
-                print(f"DEBUG_DATE entries_accepted={snapshot['entries_accepted']}")
-                print(f"DEBUG_DATE entries_dropped={snapshot['entries_dropped']}")
-                if args.rank_by_fastpass_score:
-                    for ticker, score, accepted in snapshot["cap_ranked_rows"]:
-                        score_str = "NA" if score is None else str(score)
-                        if accepted:
-                            print(f"DEBUG_POS_ACCEPT ticker={ticker} score_fastpass={score_str}")
+                n_open = int(snapshot["n_open"])
+                portfolio_r = float(snapshot["portfolio_r"])
+                print(f"DEBUG_DATE n_open={n_open}")
+                print(f"DEBUG_DATE portfolio_r={portfolio_r}")
+                if n_open == 0:
+                    print("DEBUG_DATE status=NO_OPEN_POSITIONS")
+                else:
+                    for pos in snapshot["positions"]:
+                        if pos["r"] is None:
+                            r_str = "NA"
                         else:
-                            print(f"DEBUG_POS_DROP ticker={ticker} score_fastpass={score_str}")
-        regime_on_debug = True
-        if args.regime_filter_sma200:
-            regime_on_debug = bool(regime_on_by_date.get(debug_date, False))
-            print(f"DEBUG_DATE regime_symbol={args.regime_symbol}")
-            print(f"DEBUG_DATE regime_on={1 if regime_on_debug else 0}")
-        snapshot = debug_ctx["snapshot"]
-        if snapshot is None or not regime_on_debug:
-            print("DEBUG_DATE n_open=0")
-            print("DEBUG_DATE portfolio_r=0.0")
-            print("DEBUG_DATE status=NO_OPEN_POSITIONS")
-            return
-        n_open = int(snapshot["n_open"])
-        portfolio_r = float(snapshot["portfolio_r"])
-        print(f"DEBUG_DATE n_open={n_open}")
-        print(f"DEBUG_DATE portfolio_r={portfolio_r}")
-        if n_open == 0:
-            print("DEBUG_DATE status=NO_OPEN_POSITIONS")
-            return
-        for pos in snapshot["positions"]:
-            if pos["r"] is None:
-                r_str = "NA"
-            else:
-                r_str = str(pos["r"])
-            print(
-                f"DEBUG_POS ticker={pos['ticker']} r={r_str} "
-                f"weight={pos['weight']} contrib={pos['contrib']}"
-            )
-        print(f"DEBUG_DATE mean_used={snapshot['mean_used']}")
+                            r_str = str(pos["r"])
+                        print(
+                            f"DEBUG_POS ticker={pos['ticker']} r={r_str} "
+                            f"weight={pos['weight']} contrib={pos['contrib']}"
+                        )
+                    print(f"DEBUG_DATE mean_used={snapshot['mean_used']}")
+
+    n_open_eq_1_mask = report_df["n_open_effective"].astype(int) == 1
+    n_days_n_open_eq_1 = int(n_open_eq_1_mask.sum())
+    n_days_n_open_eq_1_abs_r_gt_0_15 = int(
+        (n_open_eq_1_mask & (report_df["portfolio_r_effective"].astype(float).abs() > 0.15)).sum()
+    )
+    if n_days_n_open_eq_1 == 0:
+        worst_single_day_when_n_open_eq_1: float | None = None
+    else:
+        worst_single_day_when_n_open_eq_1 = float(
+            report_df.loc[n_open_eq_1_mask, "portfolio_r_effective"].astype(float).min()
+        )
+    print(f"TAIL_STATS n_days_n_open_eq_1={n_days_n_open_eq_1}")
+    print(f"TAIL_STATS n_days_n_open_eq_1_abs_r_gt_0_15={n_days_n_open_eq_1_abs_r_gt_0_15}")
+    print(f"TAIL_STATS worst_single_day_when_n_open_eq_1={worst_single_day_when_n_open_eq_1}")
 
 
 if __name__ == "__main__":

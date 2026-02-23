@@ -959,6 +959,7 @@ def ensure_rc_pipeline_episode_table(rc_conn) -> None:
         ("post60_peak_sma5_date", "TEXT NULL"),
         ("post60_peak_days_from_exit", "INTEGER NULL"),
         ("post60_peak_sma5", "REAL NULL"),
+        ("post60_growth_pct_close_ew_exit_to_peak", "REAL NULL"),
         ("ew_confirm_rule", "TEXT NULL"),
         ("ew_confirm_above_5", "INTEGER NULL"),
         ("ew_confirm_confirmed", "INTEGER NULL"),
@@ -1298,7 +1299,8 @@ def populate_rc_pipeline_episode_peak_timing_fields(rc_conn, md_db_path: str) ->
             downtrend_entry_date,
             entry_window_date,
             entry_window_exit_date,
-            close_at_ew_start
+            close_at_ew_start,
+            close_at_ew_exit
           FROM rc_pipeline_episode
         ),
 
@@ -1518,7 +1520,14 @@ def populate_rc_pipeline_episode_peak_timing_fields(rc_conn, md_db_path: str) ->
             p40t.pre40_trough_sma5,
             p60x.post60_peak_sma5_date,
             p60x.post60_peak_days_from_exit,
-            p60x.post60_peak_sma5
+            p60x.post60_peak_sma5,
+            CASE
+              WHEN e.close_at_ew_exit IS NOT NULL
+               AND e.close_at_ew_exit != 0
+               AND p60x.post60_peak_sma5 IS NOT NULL
+              THEN ((p60x.post60_peak_sma5 / e.close_at_ew_exit) - 1.0) * 100.0
+              ELSE NULL
+            END AS post60_growth_pct_close_ew_exit_to_peak
           FROM episodes e
           LEFT JOIN peak60_pick p60
             ON p60.episode_id = e.episode_id
@@ -1545,6 +1554,7 @@ def populate_rc_pipeline_episode_peak_timing_fields(rc_conn, md_db_path: str) ->
           post60_peak_sma5_date = (SELECT a.post60_peak_sma5_date FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
           post60_peak_days_from_exit = (SELECT a.post60_peak_days_from_exit FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
           post60_peak_sma5 = (SELECT a.post60_peak_sma5 FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
+          post60_growth_pct_close_ew_exit_to_peak = (SELECT a.post60_growth_pct_close_ew_exit_to_peak FROM all_updates a WHERE a.episode_id = rc_pipeline_episode.episode_id),
           computed_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
         WHERE episode_id IN (SELECT episode_id FROM all_updates);
         """

@@ -130,7 +130,9 @@ def fetch_rows(conn: sqlite3.Connection, pipeline_version: Optional[str], limit:
             close_at_ew_start,
             close_at_ew_exit,
             peak60_growth_pct_close_ew_to_peak,
-            post60_peak_sma5
+            post60_peak_days_from_exit,
+            post60_peak_sma5,
+            post60_growth_pct_close_ew_exit_to_peak
         FROM base
     """
     return conn.execute(sql, params).fetchall()
@@ -311,6 +313,10 @@ def main() -> None:
         peak60_pct = to_float(row["peak60_growth_pct_close_ew_to_peak"])
         r_ew_start_to_peak60 = (peak60_pct / 100.0) if peak60_pct is not None else None
         r_ew_start_to_post60_peak_sma5 = compute_return(row["post60_peak_sma5"], row["close_at_ew_start"])
+        post60_peak_days_from_exit = to_float(row["post60_peak_days_from_exit"])
+        post60_growth_pct_close_ew_exit_to_peak = to_float(
+            row["post60_growth_pct_close_ew_exit_to_peak"]
+        )
         episodes.append(
             {
                 "episode_id": row["episode_id"],
@@ -320,6 +326,8 @@ def main() -> None:
                 "r_ew_window": r_ew_window,
                 "r_ew_start_to_peak60": r_ew_start_to_peak60,
                 "r_ew_start_to_post60_peak_sma5": r_ew_start_to_post60_peak_sma5,
+                "post60_peak_days_from_exit": post60_peak_days_from_exit,
+                "post60_growth_pct_close_ew_exit_to_peak": post60_growth_pct_close_ew_exit_to_peak,
             }
         )
 
@@ -337,6 +345,8 @@ def main() -> None:
         "r_ew_window",
         "r_ew_start_to_peak60",
         "r_ew_start_to_post60_peak_sma5",
+        "post60_peak_days_from_exit",
+        "post60_growth_pct_close_ew_exit_to_peak",
     ]
 
     overall_stats: Dict[str, Optional[Dict[str, float]]] = {}

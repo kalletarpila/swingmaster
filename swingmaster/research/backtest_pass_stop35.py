@@ -46,6 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-open-positions", type=int, default=0)
     parser.add_argument("--rank-by-fastpass-score", action="store_true")
     parser.add_argument("--rc-db", default=None)
+    parser.add_argument("--cash-buffer", type=float, default=0.0)
     return parser.parse_args()
 
 
@@ -114,6 +115,7 @@ def _build_portfolio_series(
     trades: list[Trade],
     prices: pd.DataFrame,
     include_equity: bool,
+    cash_buffer: float = 0.0,
     debug_date: pd.Timestamp | None = None,
     max_open_positions: int = 0,
     rank_by_fastpass_score: bool = False,
@@ -209,13 +211,14 @@ def _build_portfolio_series(
                 day_vals = returns_pivot.loc[d, tickers_present]
                 mean_r = day_vals.mean(skipna=True)
                 portfolio_r = 0.0 if pd.isna(mean_r) else float(mean_r)
+                portfolio_r *= (1.0 - cash_buffer)
 
         if debug_date is not None and d == debug_date:
             open_tickers = sorted(open_set)
             debug_positions: list[dict[str, object]] = []
             mean_used = 0
             if open_tickers:
-                weight = 1.0 / len(open_tickers)
+                weight = (1.0 - cash_buffer) / len(open_tickers)
                 for ticker in open_tickers:
                     if ticker in returns_pivot.columns:
                         r_val = returns_pivot.loc[d, ticker]
@@ -572,6 +575,10 @@ def _load_regime_on_by_date(
 def main() -> None:
     args = parse_args()
     cap_enabled = int(args.max_open_positions) > 0
+    cash_buffer = float(args.cash_buffer)
+
+    if cash_buffer < 0.0 or cash_buffer >= 1.0:
+        raise SystemExit("--cash-buffer must satisfy 0.0 <= cash_buffer < 1.0")
 
     if args.rank_by_fastpass_score and not args.rc_db:
         print("SUMMARY status=ERROR message=RC_DB_REQUIRED_FOR_RANKING")
@@ -638,6 +645,7 @@ def main() -> None:
         trades=trades,
         prices=prices,
         include_equity=args.include_equity,
+        cash_buffer=cash_buffer,
         debug_date=debug_date,
         max_open_positions=int(args.max_open_positions),
         rank_by_fastpass_score=bool(args.rank_by_fastpass_score),
@@ -657,6 +665,7 @@ def main() -> None:
     print(f"n_days_total={n_days_total}")
     print(f"n_days_open={n_days_open}")
     print(f"max_n_open={max_n_open}")
+    print(f"CASH_BUFFER enabled={1 if cash_buffer > 0.0 else 0} cash_buffer={cash_buffer}")
 
     report_df = out_df.copy()
     report_df["date_dt"] = pd.to_datetime(report_df["date"]).dt.normalize()

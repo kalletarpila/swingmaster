@@ -367,6 +367,13 @@ def main() -> None:
         for s in series_names:
             vals = [float(e[s]) for e in subset if e[s] is not None]
             by_confirm.append((confirmed, s, summarize(vals)))
+    by_pass_confirmed: List[Tuple[str, Optional[Dict[str, float]]]] = []
+    pass_confirmed_subset = [
+        e for e in episodes if e["exit_state"] == "PASS" and e["confirmed"] == 1
+    ]
+    for s in series_names:
+        vals = [float(e[s]) for e in pass_confirmed_subset if e[s] is not None]
+        by_pass_confirmed.append((s, summarize(vals)))
 
     for e in episodes:
         e["episode_max_level"] = episode_max_levels.get(str(e["episode_id"]))
@@ -472,6 +479,11 @@ def main() -> None:
                         writer.writerow(["metric", "RETURNS_BY_CONFIRM", str(confirmed), s, "", "", 0, "NA", "NA", "NA", "NA", "NA", "NA"])
                     else:
                         writer.writerow(["metric", "RETURNS_BY_CONFIRM", str(confirmed), s, "", "", st["n"], fmt6(st["mean"]), fmt6(st["median"]), fmt6(st["std"]), fmt6(st["min"]), fmt6(st["max"]), fmt6(st["win_rate"])])
+                for s, st in by_pass_confirmed:
+                    if st is None:
+                        writer.writerow(["metric", "RETURNS_PASS_CONFIRMED", "PASS_CONFIRMED_1", s, "", "", 0, "NA", "NA", "NA", "NA", "NA", "NA"])
+                    else:
+                        writer.writerow(["metric", "RETURNS_PASS_CONFIRMED", "PASS_CONFIRMED_1", s, "", "", st["n"], fmt6(st["mean"]), fmt6(st["median"]), fmt6(st["std"]), fmt6(st["min"]), fmt6(st["max"]), fmt6(st["win_rate"])])
 
                 for ew_level, s, st in by_ewlevel_early:
                     if st is None:
@@ -551,6 +563,17 @@ def main() -> None:
                         continue
                     print(
                         f"{confirmed:<10} {s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
+                        f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
+                    )
+                print("")
+                print("RETURNS_PASS_CONFIRMED")
+                print(f"{'series_name':<24} {'n':>8} {'mean':>12} {'median':>12} {'std':>12} {'min':>12} {'max':>12} {'win_rate':>12}")
+                for s, st in by_pass_confirmed:
+                    if st is None:
+                        print(f"{s:<24} {0:>8} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12} {'NA':>12}")
+                        continue
+                    print(
+                        f"{s:<24} {st['n']:>8} {fmt6(st['mean']):>12} {fmt6(st['median']):>12} {fmt6(st['std']):>12} "
                         f"{fmt6(st['min']):>12} {fmt6(st['max']):>12} {fmt6(st['win_rate']):>12}"
                     )
 

@@ -23,6 +23,9 @@ class PassEvent:
 class Episode:
     entry_window_date: str
     entry_window_exit_date: Optional[str]
+    ew_confirm_confirmed: Optional[int]
+    close_at_ew_start: Optional[float]
+    close_at_ew_exit: Optional[float]
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,6 +46,9 @@ def parse_args() -> argparse.Namespace:
         default="ew_level_rolling",
         choices=["ew_level_rolling", "ew_level_fastpass"],
     )
+    parser.add_argument("--require-ew-window-positive", action="store_true")
+    parser.add_argument("--require-confirmed", action="store_true")
+    parser.add_argument("--min-fastpass-score", type=float, default=None)
     return parser.parse_args()
 
 
@@ -91,14 +97,28 @@ def load_episodes_for_ticker(
         params.append(pipeline_version)
 
     sql = f"""
-        SELECT entry_window_date, entry_window_exit_date
+        SELECT
+            entry_window_date,
+            entry_window_exit_date,
+            ew_confirm_confirmed,
+            close_at_ew_start,
+            close_at_ew_exit
         FROM rc_pipeline_episode
         WHERE {' AND '.join(where_parts)}
           AND entry_window_date IS NOT NULL
         ORDER BY entry_window_date ASC
     """
     rows = conn.execute(sql, params).fetchall()
-    episodes = [Episode(entry_window_date=str(r[0]), entry_window_exit_date=(None if r[1] is None else str(r[1]))) for r in rows]
+    episodes = [
+        Episode(
+            entry_window_date=str(r[0]),
+            entry_window_exit_date=(None if r[1] is None else str(r[1])),
+            ew_confirm_confirmed=(None if r[2] is None else int(r[2])),
+            close_at_ew_start=(None if r[3] is None else float(r[3])),
+            close_at_ew_exit=(None if r[4] is None else float(r[4])),
+        )
+        for r in rows
+    ]
     cache[key] = episodes
     return episodes
 
@@ -180,6 +200,31 @@ def load_ew_levels_for_ticker(
     return levels
 
 
+def load_ew_fastpass_scores_for_ticker(
+    conn: sqlite3.Connection,
+    ticker: str,
+    cache: Dict[str, Dict[str, Optional[float]]],
+) -> Dict[str, Optional[float]]:
+    cached = cache.get(ticker)
+    if cached is not None:
+        return cached
+
+    rows = conn.execute(
+        """
+        SELECT date, ew_score_fastpass
+        FROM rc_ew_score_daily
+        WHERE ticker = ?
+        """,
+        [ticker],
+    ).fetchall()
+
+    scores: Dict[str, Optional[float]] = {}
+    for row in rows:
+        scores[str(row[0])] = None if row[1] is None else float(row[1])
+    cache[ticker] = scores
+    return scores
+
+
 def main() -> None:
     args = parse_args()
 
@@ -199,6 +244,10 @@ def main() -> None:
         dropped_pass_gt_4td = 0
         dropped_prevday_missing = 0
         dropped_prevday_ew_not_ok = 0
+        trades_r_ew_window_pos = 0
+        dropped_ew_window_not_pos = 0
+        dropped_not_confirmed = 0
+        dropped_min_fastpass_score = 0
         dropped_exit_oob = 0
 
         exit_stop_out = 0
@@ -207,6 +256,7 @@ def main() -> None:
         episode_cache: Dict[Tuple[str, Optional[str]], List[Episode]] = {}
         price_cache: Dict[Tuple[str, str], Tuple[List[str], List[Optional[float]], Dict[str, int]]] = {}
         ew_cache: Dict[Tuple[str, str], Dict[str, Optional[int]]] = {}
+        ew_score_cache: Dict[str, Dict[str, Optional[float]]] = {}
 
         out_rows: List[Dict[str, object]] = []
 
@@ -251,6 +301,35 @@ def main() -> None:
                 dropped_prevday_ew_not_ok += 1
                 continue
             trades_prevday_ew_ok += 1
+
+            if args.min_fastpass_score is not None:
+                ew_scores = load_ew_fastpass_scores_for_ticker(
+                    rc_conn, ev.ticker, ew_score_cache
+                )
+                prev_score = ew_scores.get(prev_date)
+                if prev_score is None or prev_score < args.min_fastpass_score:
+                    dropped_min_fastpass_score += 1
+                    continue
+
+            r_ew_window: Optional[float] = None
+            if (
+                ep.close_at_ew_start is not None
+                and ep.close_at_ew_exit is not None
+                and ep.close_at_ew_start != 0
+            ):
+                r_ew_window = (ep.close_at_ew_exit / ep.close_at_ew_start) - 1.0
+            if r_ew_window is not None and r_ew_window > 0:
+                trades_r_ew_window_pos += 1
+            if args.require_ew_window_positive and not (
+                r_ew_window is not None and r_ew_window > 0
+            ):
+                dropped_ew_window_not_pos += 1
+                continue
+
+            is_confirmed = ep.ew_confirm_confirmed == 1
+            if args.require_confirmed and not is_confirmed:
+                dropped_not_confirmed += 1
+                continue
 
             time_exit_rn = entry_rn + 49
             if time_exit_rn >= len(dates):
@@ -330,6 +409,16 @@ def main() -> None:
         print(f"SUMMARY dropped_exit_oob={dropped_exit_oob}")
         print(f"SUMMARY exit_STOP_OUT={exit_stop_out}")
         print(f"SUMMARY exit_TIME_50D={exit_time_50d}")
+        print(
+            f"SUMMARY require_ew_window_positive={1 if args.require_ew_window_positive else 0}"
+        )
+        print(f"SUMMARY require_confirmed={1 if args.require_confirmed else 0}")
+        print(f"SUMMARY trades_r_ew_window_pos={trades_r_ew_window_pos}")
+        print(f"SUMMARY dropped_ew_window_not_pos={dropped_ew_window_not_pos}")
+        print(f"SUMMARY dropped_not_confirmed={dropped_not_confirmed}")
+        if args.min_fastpass_score is not None:
+            print(f"SUMMARY min_fastpass_score={args.min_fastpass_score}")
+            print(f"SUMMARY dropped_min_fastpass_score={dropped_min_fastpass_score}")
     finally:
         rc_conn.close()
         od_conn.close()

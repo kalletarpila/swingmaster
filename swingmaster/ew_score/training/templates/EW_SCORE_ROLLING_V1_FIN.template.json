@@ -1,0 +1,43 @@
+{
+  "rule_id": "EW_SCORE_ROLLING_V1_FIN",
+  "description": "Rolling EW score (day0->today) FIN baseline v1.1 template",
+  "trained_on_market": "FIN",
+  "cohort": {
+    "name": "ALL_EW",
+    "pipeline_version_filter": "v3",
+    "require_columns": [
+      "ticker",
+      "entry_window_date",
+      "entry_window_exit_date",
+      "peak60_growth_pct_close_ew_to_peak"
+    ],
+    "where_sql": "1=1"
+  },
+  "label": {
+    "name": "winner_60",
+    "definition": "winner_60 = peak60_growth_pct_close_ew_to_peak >= 10",
+    "sql_expr": "CASE WHEN peak60_growth_pct_close_ew_to_peak >= 10 THEN 1 ELSE 0 END"
+  },
+  "feature": {
+    "name": "r_prefix_pct",
+    "type": "PREFIX_RETURN_PCT",
+    "maturity": {
+      "mode": "DAY_N_READY",
+      "n": 3
+    }
+  },
+  "model": {
+    "type": "LOGISTIC_1D",
+    "x": "r_prefix_pct"
+  },
+  "split": {
+    "type": "TIME_BY_ENTRY_DATE",
+    "train_frac": 0.8
+  },
+  "threshold": {
+    "level3": {
+      "method": "TARGET_SELECTION_RATE_TRAIN",
+      "target_rate": 0.10
+    }
+  }
+}

@@ -5,6 +5,8 @@ import sqlite3
 from datetime import date
 
 from swingmaster.ew_score.compute import compute_and_store_ew_scores, compute_and_store_ew_scores_range
+from swingmaster.ew_score.model_config import load_model_config
+from swingmaster.ew_score.models.resolve_model import EwScoreRuleResolutionError, resolve_ew_score_rule
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,6 +32,16 @@ def main() -> None:
     if range_mode and (args.date_from is None or args.date_to is None):
         raise SystemExit("ERROR: range mode requires both --date-from and --date-to")
 
+    try:
+        resolved_rule_id, resolved_rule_path = resolve_ew_score_rule(args.rule)
+        load_model_config(resolved_rule_id)
+    except (EwScoreRuleResolutionError, ValueError):
+        print("SUMMARY status=ERROR message=EW_SCORE_RULE_NOT_FOUND")
+        raise SystemExit(2)
+
+    print(f"SUMMARY resolved_rule_id={resolved_rule_id}")
+    print(f"SUMMARY resolved_rule_path={resolved_rule_path.resolve()}")
+
     rc_conn = sqlite3.connect(args.db)
     os_conn = sqlite3.connect(args.osakedata)
     try:
@@ -38,7 +50,7 @@ def main() -> None:
                 rc_conn=rc_conn,
                 osakedata_conn=os_conn,
                 as_of_date=args.date,
-                rule_id=args.rule,
+                rule_id=resolved_rule_id,
                 repo=None,
                 print_rows=args.print_rows,
             )
@@ -49,7 +61,7 @@ def main() -> None:
                 osakedata_conn=os_conn,
                 date_from=args.date_from,
                 date_to=args.date_to,
-                rule_id=args.rule,
+                rule_id=resolved_rule_id,
                 print_rows=args.print_rows,
             )
             d0 = date.fromisoformat(args.date_from)

@@ -1,18 +1,14 @@
 .headers on
 .nullvalue ""
 
--- FIN daily report
--- Edit :AS_OF_DATE as needed before running.
--- Run:
---   sqlite3 /home/kalle/projects/swingmaster/swingmaster_rc.db < /home/kalle/projects/swingmaster/daily_reports/fin_daily_report.sql
---
--- Outputs when run via companion script:
---   /home/kalle/projects/swingmaster/daily_reports/fin_daily_report_<AS_OF_DATE>.txt
---   /home/kalle/projects/swingmaster/daily_reports/fin_daily_report_<AS_OF_DATE>.csv
---
--- CSV format:
---   delimiter = ;
---   decimal marker = ,
+-- Generic daily report template.
+-- This file is intended to be run via the companion shell script, which
+-- substitutes these placeholders before execution:
+--   __AS_OF_DATE__
+--   __MARKET__
+--   __BUY_SECTION__
+--   __BUY_RULE__
+--   __FP_THRESHOLD__
 
 DROP TABLE IF EXISTS temp.report_raw;
 
@@ -41,10 +37,9 @@ CREATE TEMP TABLE report_raw (
 INSERT INTO report_raw
 WITH RECURSIVE
 params AS (
-  -- Edit this date before running the script.
   SELECT
-    date('2025-12-12') AS as_of_date,
-    date('2025-12-12', '-1 day') AS prev_date
+    date('__AS_OF_DATE__') AS as_of_date,
+    date('__AS_OF_DATE__', '-1 day') AS prev_date
 ),
 st_today AS (
   SELECT s.ticker, s.state
@@ -207,7 +202,7 @@ rolling_today AS (
   FROM rc_ew_score_daily ew
   JOIN params p ON ew.date = p.as_of_date
 ),
-buys_fin AS (
+buys_market AS (
   SELECT
     np.ticker,
     np.event_date AS pass_date,
@@ -219,7 +214,81 @@ buys_fin AS (
   LEFT JOIN fp_at_entry fpe
     ON fpe.ticker = np.ticker
    AND fpe.entry_window_date = pew.entry_window_date
-  WHERE fpe.fp_score >= 0.60
+  WHERE fpe.fp_score >= __FP_THRESHOLD__
+),
+buys_2_se AS (
+  SELECT
+    ne.ticker,
+    ne.event_date AS buy_date,
+    ne.event_date AS entry_window_date,
+    fpe.fp_score,
+    fpe.fp_level
+  FROM new_ew ne
+  LEFT JOIN fp_at_entry fpe
+    ON fpe.ticker = ne.ticker
+   AND fpe.entry_window_date = ne.event_date
+  WHERE '__MARKET__' = 'SE'
+    AND fpe.fp_score >= 0.80
+),
+buys_3_se AS (
+  SELECT
+    np.ticker,
+    np.event_date AS pass_date,
+    pew.entry_window_date,
+    fpe.fp_score,
+    fpe.fp_level,
+    (
+      SELECT ew2.ew_score_rolling
+      FROM rc_ew_score_daily ew2
+      WHERE ew2.ticker = np.ticker
+        AND ew2.date >= pew.entry_window_date
+        AND ew2.date < np.event_date
+        AND ew2.ew_level_rolling IS NOT NULL
+      ORDER BY ew2.date DESC
+      LIMIT 1
+    ) AS ew_score_rolling_end,
+    (
+      SELECT ew2.ew_level_rolling
+      FROM rc_ew_score_daily ew2
+      WHERE ew2.ticker = np.ticker
+        AND ew2.date >= pew.entry_window_date
+        AND ew2.date < np.event_date
+        AND ew2.ew_level_rolling IS NOT NULL
+      ORDER BY ew2.date DESC
+      LIMIT 1
+    ) AS ew_level_rolling_end
+  FROM new_pass np
+  JOIN pass_entry_window pew
+    ON pew.ticker = np.ticker
+  LEFT JOIN fp_at_entry fpe
+    ON fpe.ticker = np.ticker
+   AND fpe.entry_window_date = pew.entry_window_date
+  WHERE '__MARKET__' = 'SE'
+    AND (
+      SELECT ew2.ew_level_rolling
+      FROM rc_ew_score_daily ew2
+      WHERE ew2.ticker = np.ticker
+        AND ew2.date >= pew.entry_window_date
+        AND ew2.date < np.event_date
+        AND ew2.ew_level_rolling IS NOT NULL
+      ORDER BY ew2.date DESC
+      LIMIT 1
+    ) = 1
+),
+buys_4_se AS (
+  SELECT
+    b2.ticker,
+    b2.buy_date,
+    b2.entry_window_date,
+    b2.fp_score,
+    b2.fp_level,
+    b3.pass_date,
+    b3.ew_score_rolling_end,
+    b3.ew_level_rolling_end
+  FROM buys_2_se b2
+  JOIN buys_3_se b3
+    ON b3.ticker = b2.ticker
+   AND b3.entry_window_date = b2.entry_window_date
 ),
 ew_snapshot_ranked AS (
   SELECT
@@ -301,7 +370,7 @@ alerts_raw AS (
     b.fp_level,
     NULL AS ew_score_rolling,
     NULL AS ew_level_rolling
-  FROM buys_fin b
+  FROM buys_market b
   JOIN params p ON 1 = 1
   LEFT JOIN episode_at_pass epx
     ON epx.ticker = b.ticker
@@ -338,7 +407,7 @@ SELECT * FROM (
     1 AS section_sort,
     'NEW_EW' AS section,
     p.as_of_date AS as_of_date,
-    'FIN' AS market,
+    '__MARKET__' AS market,
     ne.ticker,
     sp.state AS state_prev,
     st.state AS state_today,
@@ -378,7 +447,7 @@ SELECT * FROM (
     1 AS section_sort,
     'NEW_EW' AS section,
     p.as_of_date AS as_of_date,
-    'FIN' AS market,
+    '__MARKET__' AS market,
     '(none)' AS ticker,
     NULL AS state_prev,
     NULL AS state_today,
@@ -403,7 +472,7 @@ SELECT * FROM (
     2 AS section_sort,
     'NEW_PASS' AS section,
     p.as_of_date AS as_of_date,
-    'FIN' AS market,
+    '__MARKET__' AS market,
     np.ticker,
     sp.state AS state_prev,
     st.state AS state_today,
@@ -441,7 +510,7 @@ SELECT * FROM (
     2 AS section_sort,
     'NEW_PASS' AS section,
     p.as_of_date AS as_of_date,
-    'FIN' AS market,
+    '__MARKET__' AS market,
     '(none)' AS ticker,
     NULL AS state_prev,
     NULL AS state_today,
@@ -464,9 +533,9 @@ SELECT * FROM (
 
   SELECT
     3 AS section_sort,
-    'BUYS_FIN' AS section,
+    '__BUY_SECTION__' AS section,
     p.as_of_date AS as_of_date,
-    'FIN' AS market,
+    '__MARKET__' AS market,
     b.ticker,
     sp.state AS state_prev,
     st.state AS state_today,
@@ -481,8 +550,8 @@ SELECT * FROM (
     b.fp_level AS ew_level_fastpass,
     NULL AS ew_score_rolling,
     NULL AS ew_level_rolling,
-    'FIN_PASS_FP60' AS rule_hit
-  FROM buys_fin b
+    '__BUY_RULE__' AS rule_hit
+  FROM buys_market b
   JOIN params p ON 1 = 1
   LEFT JOIN st_prev sp ON sp.ticker = b.ticker
   LEFT JOIN st_today st ON st.ticker = b.ticker
@@ -498,9 +567,9 @@ SELECT * FROM (
 
   SELECT
     3 AS section_sort,
-    'BUYS_FIN' AS section,
+    '__BUY_SECTION__' AS section,
     p.as_of_date AS as_of_date,
-    'FIN' AS market,
+    '__MARKET__' AS market,
     '(none)' AS ticker,
     NULL AS state_prev,
     NULL AS state_today,
@@ -517,15 +586,198 @@ SELECT * FROM (
     NULL AS ew_level_rolling,
     'EMPTY_SECTION' AS rule_hit
   FROM params p
-  WHERE NOT EXISTS (SELECT 1 FROM buys_fin)
+  WHERE NOT EXISTS (SELECT 1 FROM buys_market)
 
   UNION ALL
 
   SELECT
     4 AS section_sort,
+    'BUYS_2_SE' AS section,
+    p.as_of_date AS as_of_date,
+    '__MARKET__' AS market,
+    b.ticker,
+    sp.state AS state_prev,
+    st.state AS state_today,
+    NULL AS from_state,
+    'ENTRY_WINDOW' AS to_state,
+    b.buy_date AS event_date,
+    b.entry_window_date AS entry_window_date,
+    CASE WHEN fe.first_ew_date = b.entry_window_date THEN 1 ELSE 0 END AS first_time_in_ew_ever,
+    COALESCE(sc.days_in_stabilizing_before_ew, 0) AS days_in_stabilizing_before_ew,
+    CAST((julianday(p.as_of_date) - julianday(epx.downtrend_entry_date) + 1) AS INTEGER) AS days_in_current_episode,
+    b.fp_score AS ew_score_fastpass,
+    b.fp_level AS ew_level_fastpass,
+    rt.ew_score_rolling,
+    rt.ew_level_rolling,
+    'SE_BUY_2_ENTRY_FP80' AS rule_hit
+  FROM buys_2_se b
+  JOIN params p ON 1 = 1
+  LEFT JOIN st_prev sp ON sp.ticker = b.ticker
+  LEFT JOIN st_today st ON st.ticker = b.ticker
+  LEFT JOIN first_ew fe ON fe.ticker = b.ticker
+  LEFT JOIN episode_at_new_ew epx
+    ON epx.ticker = b.ticker
+   AND epx.entry_window_date = b.entry_window_date
+  LEFT JOIN stab_counts sc
+    ON sc.ticker = b.ticker
+   AND sc.entry_window_date = b.entry_window_date
+  LEFT JOIN rolling_today rt
+    ON rt.ticker = b.ticker
+   AND rt.as_of_date = p.as_of_date
+
+  UNION ALL
+
+  SELECT
+    4 AS section_sort,
+    'BUYS_2_SE' AS section,
+    p.as_of_date AS as_of_date,
+    '__MARKET__' AS market,
+    '(none)' AS ticker,
+    NULL AS state_prev,
+    NULL AS state_today,
+    NULL AS from_state,
+    NULL AS to_state,
+    NULL AS event_date,
+    NULL AS entry_window_date,
+    NULL AS first_time_in_ew_ever,
+    NULL AS days_in_stabilizing_before_ew,
+    NULL AS days_in_current_episode,
+    NULL AS ew_score_fastpass,
+    NULL AS ew_level_fastpass,
+    NULL AS ew_score_rolling,
+    NULL AS ew_level_rolling,
+    'EMPTY_SECTION' AS rule_hit
+  FROM params p
+  WHERE '__MARKET__' = 'SE'
+    AND NOT EXISTS (SELECT 1 FROM buys_2_se)
+
+  UNION ALL
+
+  SELECT
+    5 AS section_sort,
+    'BUYS_3_SE' AS section,
+    p.as_of_date AS as_of_date,
+    '__MARKET__' AS market,
+    b.ticker,
+    sp.state AS state_prev,
+    st.state AS state_today,
+    NULL AS from_state,
+    'PASS' AS to_state,
+    b.pass_date AS event_date,
+    b.entry_window_date AS entry_window_date,
+    CASE WHEN fe.first_ew_date = b.entry_window_date THEN 1 ELSE 0 END AS first_time_in_ew_ever,
+    COALESCE(sc.days_in_stabilizing_before_ew, 0) AS days_in_stabilizing_before_ew,
+    CAST((julianday(p.as_of_date) - julianday(epx.downtrend_entry_date) + 1) AS INTEGER) AS days_in_current_episode,
+    b.fp_score AS ew_score_fastpass,
+    b.fp_level AS ew_level_fastpass,
+    b.ew_score_rolling_end AS ew_score_rolling,
+    b.ew_level_rolling_end AS ew_level_rolling,
+    'SE_BUY_3_PASS_ROLL_LVL1' AS rule_hit
+  FROM buys_3_se b
+  JOIN params p ON 1 = 1
+  LEFT JOIN st_prev sp ON sp.ticker = b.ticker
+  LEFT JOIN st_today st ON st.ticker = b.ticker
+  LEFT JOIN first_ew fe ON fe.ticker = b.ticker
+  LEFT JOIN episode_at_pass epx
+    ON epx.ticker = b.ticker
+   AND epx.entry_window_date = b.entry_window_date
+  LEFT JOIN stab_counts sc
+    ON sc.ticker = b.ticker
+   AND sc.entry_window_date = b.entry_window_date
+
+  UNION ALL
+
+  SELECT
+    5 AS section_sort,
+    'BUYS_3_SE' AS section,
+    p.as_of_date AS as_of_date,
+    '__MARKET__' AS market,
+    '(none)' AS ticker,
+    NULL AS state_prev,
+    NULL AS state_today,
+    NULL AS from_state,
+    NULL AS to_state,
+    NULL AS event_date,
+    NULL AS entry_window_date,
+    NULL AS first_time_in_ew_ever,
+    NULL AS days_in_stabilizing_before_ew,
+    NULL AS days_in_current_episode,
+    NULL AS ew_score_fastpass,
+    NULL AS ew_level_fastpass,
+    NULL AS ew_score_rolling,
+    NULL AS ew_level_rolling,
+    'EMPTY_SECTION' AS rule_hit
+  FROM params p
+  WHERE '__MARKET__' = 'SE'
+    AND NOT EXISTS (SELECT 1 FROM buys_3_se)
+
+  UNION ALL
+
+  SELECT
+    6 AS section_sort,
+    'BUYS_4_SE' AS section,
+    p.as_of_date AS as_of_date,
+    '__MARKET__' AS market,
+    b.ticker,
+    sp.state AS state_prev,
+    st.state AS state_today,
+    NULL AS from_state,
+    'PASS' AS to_state,
+    b.pass_date AS event_date,
+    b.entry_window_date AS entry_window_date,
+    CASE WHEN fe.first_ew_date = b.entry_window_date THEN 1 ELSE 0 END AS first_time_in_ew_ever,
+    COALESCE(sc.days_in_stabilizing_before_ew, 0) AS days_in_stabilizing_before_ew,
+    CAST((julianday(p.as_of_date) - julianday(epx.downtrend_entry_date) + 1) AS INTEGER) AS days_in_current_episode,
+    b.fp_score AS ew_score_fastpass,
+    b.fp_level AS ew_level_fastpass,
+    b.ew_score_rolling_end AS ew_score_rolling,
+    b.ew_level_rolling_end AS ew_level_rolling,
+    'SE_BUY_4_ENTRY_FP80_AND_PASS_ROLL_LVL1' AS rule_hit
+  FROM buys_4_se b
+  JOIN params p ON 1 = 1
+  LEFT JOIN st_prev sp ON sp.ticker = b.ticker
+  LEFT JOIN st_today st ON st.ticker = b.ticker
+  LEFT JOIN first_ew fe ON fe.ticker = b.ticker
+  LEFT JOIN episode_at_pass epx
+    ON epx.ticker = b.ticker
+   AND epx.entry_window_date = b.entry_window_date
+  LEFT JOIN stab_counts sc
+    ON sc.ticker = b.ticker
+   AND sc.entry_window_date = b.entry_window_date
+
+  UNION ALL
+
+  SELECT
+    6 AS section_sort,
+    'BUYS_4_SE' AS section,
+    p.as_of_date AS as_of_date,
+    '__MARKET__' AS market,
+    '(none)' AS ticker,
+    NULL AS state_prev,
+    NULL AS state_today,
+    NULL AS from_state,
+    NULL AS to_state,
+    NULL AS event_date,
+    NULL AS entry_window_date,
+    NULL AS first_time_in_ew_ever,
+    NULL AS days_in_stabilizing_before_ew,
+    NULL AS days_in_current_episode,
+    NULL AS ew_score_fastpass,
+    NULL AS ew_level_fastpass,
+    NULL AS ew_score_rolling,
+    NULL AS ew_level_rolling,
+    'EMPTY_SECTION' AS rule_hit
+  FROM params p
+  WHERE '__MARKET__' = 'SE'
+    AND NOT EXISTS (SELECT 1 FROM buys_4_se)
+
+  UNION ALL
+
+  SELECT
+    7 AS section_sort,
     'EW_SNAPSHOT' AS section,
     p.as_of_date AS as_of_date,
-    'FIN' AS market,
+    '__MARKET__' AS market,
     s.ticker,
     sp.state AS state_prev,
     st.state AS state_today,
@@ -550,10 +802,10 @@ SELECT * FROM (
   UNION ALL
 
   SELECT
-    4 AS section_sort,
+    7 AS section_sort,
     'EW_SNAPSHOT' AS section,
     p.as_of_date AS as_of_date,
-    'FIN' AS market,
+    '__MARKET__' AS market,
     '(none)' AS ticker,
     NULL AS state_prev,
     NULL AS state_today,
@@ -575,10 +827,10 @@ SELECT * FROM (
   UNION ALL
 
   SELECT
-    5 AS section_sort,
+    8 AS section_sort,
     'ALERTS' AS section,
     p.as_of_date AS as_of_date,
-    'FIN' AS market,
+    '__MARKET__' AS market,
     a.ticker,
     sp.state AS state_prev,
     st.state AS state_today,
@@ -603,10 +855,10 @@ SELECT * FROM (
   UNION ALL
 
   SELECT
-    5 AS section_sort,
+    8 AS section_sort,
     'ALERTS' AS section,
     p.as_of_date AS as_of_date,
-    'FIN' AS market,
+    '__MARKET__' AS market,
     '(none)' AS ticker,
     NULL AS state_prev,
     NULL AS state_today,

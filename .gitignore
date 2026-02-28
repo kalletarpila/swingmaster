@@ -18,3 +18,7 @@ venv/
 # VS Code artifacts
 .vscode/
 *.code-workspace
+
+# Generated daily report outputs
+daily_reports/*.txt
+daily_reports/*.csv

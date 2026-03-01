@@ -375,6 +375,31 @@ def fill_trading_day_fields(
     return filled_current, filled_stabilizing
 
 
+def group_buy_rows(buy_rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+    grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    rule_hits_by_key: Dict[Tuple[str, str], List[str]] = {}
+
+    for row in buy_rows:
+        key = (str(row.get("ticker") or ""), str(row.get("event_date") or ""))
+        if key not in grouped:
+            grouped[key] = dict(row)
+            rule_hits_by_key[key] = []
+
+        rule_hit = row.get("rule_hit")
+        if rule_hit is not None and rule_hit not in rule_hits_by_key[key]:
+            rule_hits_by_key[key].append(str(rule_hit))
+
+    multi_rule_buys = 0
+    out: List[Dict[str, Any]] = []
+    for key in sorted(grouped.keys(), key=lambda item: (item[1], item[0])):
+        grouped_row = grouped[key]
+        if len(rule_hits_by_key[key]) > 1:
+            multi_rule_buys += 1
+        grouped_row["rule_hit"] = ";".join(rule_hits_by_key[key]) if rule_hits_by_key[key] else None
+        out.append(grouped_row)
+    return out, multi_rule_buys
+
+
 def build_transactions(
     buy_rows: List[Dict[str, Any]],
     market: str,
@@ -492,7 +517,8 @@ def main() -> None:
             candidate_rows, date_to_idx
         )
 
-        buy_rows, missing_field_count = apply_buy_rules(candidate_rows, rules_config, buy_section_name="BUYS")
+        raw_buy_rows, missing_field_count = apply_buy_rules(candidate_rows, rules_config, buy_section_name="BUYS")
+        buy_rows, multi_rule_buys = group_buy_rows(raw_buy_rows)
         buy_rows.sort(
             key=lambda row: (
                 str(row.get("event_date") or ""),
@@ -528,7 +554,9 @@ def main() -> None:
     summary(new_ew_candidates=len(new_ew_candidates))
     summary(new_pass_candidates=len(new_pass_candidates))
     summary(candidate_rows_total=len(candidate_rows))
+    summary(buy_rows_total_raw=len(raw_buy_rows))
     summary(buy_rows_total=len(buy_rows))
+    summary(multi_rule_buys=multi_rule_buys)
     summary(missing_field_count=missing_field_count)
     summary(days_filled_current_episode=days_filled_current_episode)
     summary(days_filled_stabilizing_before_ew=days_filled_stabilizing_before_ew)

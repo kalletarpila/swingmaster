@@ -243,6 +243,28 @@ def apply_buy_rules(
     return out, missing_field_count
 
 
+def group_buy_rows(buy_rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    rule_hits_by_key: Dict[Tuple[str, str], List[str]] = {}
+
+    for row in buy_rows:
+        key = (str(row.get("ticker") or ""), str(row.get("event_date") or ""))
+        if key not in grouped:
+            grouped[key] = dict(row)
+            rule_hits_by_key[key] = []
+
+        rule_hit = row.get("rule_hit")
+        if rule_hit is not None and str(rule_hit) not in rule_hits_by_key[key]:
+            rule_hits_by_key[key].append(str(rule_hit))
+
+    out: List[Dict[str, Any]] = []
+    for key in sorted(grouped.keys(), key=lambda item: (item[1], item[0])):
+        grouped_row = grouped[key]
+        grouped_row["rule_hit"] = ";".join(rule_hits_by_key[key]) if rule_hits_by_key[key] else None
+        out.append(grouped_row)
+    return out
+
+
 def _format_cell(value: Any) -> str:
     if value is None:
         return ""
@@ -418,7 +440,8 @@ def build_daily_report_rows(
     all_rows, missing_fastpass_table = fetch_report_raw_rows(db_path, config, as_of_date)
     rules_config = load_buy_rules_config(config.rules_market)
     base_rows = [row for row in all_rows if not str(row.get("section", "")).startswith("BUYS")]
-    json_buy_rows, _ = apply_buy_rules(base_rows, rules_config, buy_section_name="BUYS")
+    raw_buy_rows, _ = apply_buy_rules(base_rows, rules_config, buy_section_name="BUYS")
+    json_buy_rows = group_buy_rows(raw_buy_rows)
     final_rows = build_report_rows_json_mode(
         all_rows=all_rows,
         buy_rows=json_buy_rows,
@@ -436,7 +459,8 @@ def build_buy_rows_for_date(
     all_rows, missing_fastpass_table = fetch_report_raw_rows(db_path, config, as_of_date)
     rules_config = load_buy_rules_config(config.rules_market)
     base_rows = [row for row in all_rows if not str(row.get("section", "")).startswith("BUYS")]
-    json_buy_rows, _ = apply_buy_rules(base_rows, rules_config, buy_section_name="BUYS")
+    raw_buy_rows, _ = apply_buy_rules(base_rows, rules_config, buy_section_name="BUYS")
+    json_buy_rows = group_buy_rows(raw_buy_rows)
     return json_buy_rows, missing_fastpass_table
 
 

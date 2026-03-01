@@ -428,6 +428,18 @@ def build_daily_report_rows(
     return final_rows, missing_fastpass_table
 
 
+def build_buy_rows_for_date(
+    db_path: Path,
+    config: MarketConfig,
+    as_of_date: str,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    all_rows, missing_fastpass_table = fetch_report_raw_rows(db_path, config, as_of_date)
+    rules_config = load_buy_rules_config(config.rules_market)
+    base_rows = [row for row in all_rows if not str(row.get("section", "")).startswith("BUYS")]
+    json_buy_rows, _ = apply_buy_rules(base_rows, rules_config, buy_section_name="BUYS")
+    return json_buy_rows, missing_fastpass_table
+
+
 def write_outputs(rows: Sequence[Dict[str, Any]], txt_out: Path, csv_out: Path) -> None:
     txt_out.write_text(_render_text(rows), encoding="utf-8")
     csv_out.write_text(_render_csv(rows), encoding="utf-8")

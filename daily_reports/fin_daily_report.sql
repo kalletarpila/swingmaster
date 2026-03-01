@@ -50,7 +50,16 @@ st_today AS (
 st_prev AS (
   SELECT s.ticker, s.state
   FROM rc_state_daily s
-  JOIN params p ON s.date = p.prev_date
+  JOIN (
+    SELECT
+      s1.ticker,
+      MAX(s1.date) AS prev_trade_date
+    FROM rc_state_daily s1
+    JOIN params p ON s1.date < p.as_of_date
+    GROUP BY s1.ticker
+  ) prev
+    ON prev.ticker = s.ticker
+   AND prev.prev_trade_date = s.date
 ),
 state_rows AS (
   SELECT

@@ -1,0 +1,13 @@
+{
+  "market": "FIN",
+  "version": 1,
+  "rules": [
+    {
+      "rule_hit": "FIN_PASS_FP60",
+      "trigger": "NEW_PASS",
+      "conditions": {
+        "fastpass_score_gte": 0.60
+      }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "market": "USA",
+  "version": 1,
+  "rules": [
+    {
+      "rule_hit": "USA_PASS_FP80",
+      "trigger": "NEW_PASS",
+      "conditions": {
+        "fastpass_score_gte": 0.80
+      }
+    }
+  ]
+}

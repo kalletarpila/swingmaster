@@ -1,0 +1,392 @@
+from __future__ import annotations
+
+import csv
+import io
+import json
+import os
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
+
+
+ROOT = Path("/home/kalle/projects/swingmaster")
+SQL_TEMPLATE_PATH = ROOT / "daily_reports" / "fin_daily_report.sql"
+BUY_RULES_DIR = ROOT / "daily_reports" / "buy_rules"
+OUTPUT_COLUMNS = [
+    "section",
+    "as_of_date",
+    "market",
+    "ticker",
+    "state_prev",
+    "state_today",
+    "from_state",
+    "to_state",
+    "event_date",
+    "entry_window_date",
+    "first_time_in_ew_ever",
+    "days_in_stabilizing_before_ew",
+    "days_in_current_episode",
+    "days_in_ew_trading",
+    "ew_score_fastpass",
+    "ew_level_fastpass",
+    "ew_score_rolling",
+    "ew_level_rolling",
+    "rule_hit",
+]
+ALLOWED_TRIGGERS = {"NEW_EW", "NEW_PASS", "EW_SNAPSHOT"}
+ALLOWED_CONDITION_KEYS = {
+    "fastpass_score_gte",
+    "fastpass_level_eq",
+    "rolling_end_level_eq",
+    "days_in_current_episode_gte",
+    "days_in_current_episode_lte",
+    "days_in_stabilizing_before_ew_gte",
+    "days_in_stabilizing_before_ew_eq",
+}
+CONDITION_FIELD_MAP = {
+    "fastpass_score_gte": "ew_score_fastpass",
+    "fastpass_level_eq": "ew_level_fastpass",
+    "rolling_end_level_eq": "ew_level_rolling",
+    "days_in_current_episode_gte": "days_in_current_episode",
+    "days_in_current_episode_lte": "days_in_current_episode",
+    "days_in_stabilizing_before_ew_gte": "days_in_stabilizing_before_ew",
+    "days_in_stabilizing_before_ew_eq": "days_in_stabilizing_before_ew",
+}
+
+
+@dataclass(frozen=True)
+class MarketConfig:
+    market_arg: str
+    display_market: str
+    rules_market: str
+    db_path: Path
+    hardcoded_buy_section: str
+    hardcoded_buy_rule: str
+    hardcoded_fp_threshold: float
+    output_prefix: str
+
+
+MARKET_CONFIGS: Dict[str, MarketConfig] = {
+    "fin": MarketConfig(
+        market_arg="fin",
+        display_market="FIN",
+        rules_market="FIN",
+        db_path=ROOT / "swingmaster_rc.db",
+        hardcoded_buy_section="BUYS_FIN",
+        hardcoded_buy_rule="FIN_PASS_FP60",
+        hardcoded_fp_threshold=0.60,
+        output_prefix="fin",
+    ),
+    "omxh": MarketConfig(
+        market_arg="omxh",
+        display_market="FIN",
+        rules_market="FIN",
+        db_path=ROOT / "swingmaster_rc.db",
+        hardcoded_buy_section="BUYS_FIN",
+        hardcoded_buy_rule="FIN_PASS_FP60",
+        hardcoded_fp_threshold=0.60,
+        output_prefix="fin",
+    ),
+    "se": MarketConfig(
+        market_arg="se",
+        display_market="SE",
+        rules_market="SE",
+        db_path=ROOT / "swingmaster_rc_se.db",
+        hardcoded_buy_section="BUYS_1_SE",
+        hardcoded_buy_rule="SE_BUY_1_FP80",
+        hardcoded_fp_threshold=0.80,
+        output_prefix="se",
+    ),
+    "omxs": MarketConfig(
+        market_arg="omxs",
+        display_market="SE",
+        rules_market="SE",
+        db_path=ROOT / "swingmaster_rc_se.db",
+        hardcoded_buy_section="BUYS_1_SE",
+        hardcoded_buy_rule="SE_BUY_1_FP80",
+        hardcoded_fp_threshold=0.80,
+        output_prefix="se",
+    ),
+    "usa": MarketConfig(
+        market_arg="usa",
+        display_market="USA",
+        rules_market="USA",
+        db_path=ROOT / "swingmaster_rc_usa_2024_2025.db",
+        hardcoded_buy_section="BUYS_USA",
+        hardcoded_buy_rule="USA_PASS_FP80",
+        hardcoded_fp_threshold=0.80,
+        output_prefix="usa",
+    ),
+    "usa500": MarketConfig(
+        market_arg="usa500",
+        display_market="USA500",
+        rules_market="USA",
+        db_path=ROOT / "swingmaster_rc_usa_500.db",
+        hardcoded_buy_section="BUYS_USA500",
+        hardcoded_buy_rule="USA500_PASS_FP80",
+        hardcoded_fp_threshold=0.80,
+        output_prefix="usa500",
+    ),
+}
+
+
+def infer_market_from_db_path(db_path: str) -> str:
+    lower = db_path.lower()
+    if "swingmaster_rc_se" in lower:
+        return "se"
+    if "swingmaster_rc_usa" in lower:
+        return "usa"
+    if "swingmaster_rc" in lower:
+        return "fin"
+    raise ValueError(f"Cannot infer market from rc-db path: {db_path}")
+
+
+def validate_buy_rules_config(config: Dict[str, Any], requested_market: str) -> Dict[str, Any]:
+    top_level_keys = set(config.keys())
+    if top_level_keys != {"market", "version", "rules"}:
+        raise ValueError("Invalid buy-rules config: top-level keys must be exactly market, version, rules")
+    if config["version"] != 1 or not isinstance(config["version"], int):
+        raise ValueError("Invalid buy-rules config: version must be integer 1")
+    if config["market"] != requested_market:
+        raise ValueError(
+            f"Invalid buy-rules config: market {config['market']} does not match requested market {requested_market}"
+        )
+    if not isinstance(config["rules"], list):
+        raise ValueError("Invalid buy-rules config: rules must be a list")
+
+    for rule in config["rules"]:
+        rule_keys = set(rule.keys())
+        if rule_keys != {"rule_hit", "trigger", "conditions"}:
+            raise ValueError("Invalid buy-rules config: each rule must have exactly rule_hit, trigger, conditions")
+        if rule["trigger"] not in ALLOWED_TRIGGERS:
+            raise ValueError(f"Invalid buy-rules config: unknown trigger {rule['trigger']}")
+        if not isinstance(rule["conditions"], dict):
+            raise ValueError("Invalid buy-rules config: conditions must be an object")
+        for condition_key in rule["conditions"]:
+            if condition_key not in ALLOWED_CONDITION_KEYS:
+                raise ValueError(f"Invalid buy-rules config: unknown condition key {condition_key}")
+
+    return config
+
+
+def load_buy_rules_config(market: str) -> Dict[str, Any]:
+    path = BUY_RULES_DIR / f"{market.lower()}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Missing buy-rules file: {path}")
+    config = json.loads(path.read_text(encoding="utf-8"))
+    return validate_buy_rules_config(config, market)
+
+
+def _compare_condition(row_value: Any, op: str, threshold: Any) -> bool:
+    if row_value is None:
+        return False
+    if op == "gte":
+        return row_value >= threshold
+    if op == "lte":
+        return row_value <= threshold
+    if op == "eq":
+        return row_value == threshold
+    raise ValueError(f"Unsupported condition operator: {op}")
+
+
+def apply_buy_rules(
+    base_rows: Sequence[Dict[str, Any]],
+    config: Dict[str, Any],
+    buy_section_name: str = "BUYS",
+) -> Tuple[List[Dict[str, Any]], int]:
+    out: List[Dict[str, Any]] = []
+    missing_field_count = 0
+
+    for rule in config["rules"]:
+        trigger = rule["trigger"]
+        matched_rows: List[Dict[str, Any]] = []
+        for row in base_rows:
+            if row.get("section") != trigger:
+                continue
+            if row.get("ticker") in {None, "", "(none)"}:
+                continue
+
+            ok = True
+            for condition_key, condition_value in rule["conditions"].items():
+                field_name = CONDITION_FIELD_MAP[condition_key]
+                if field_name not in row:
+                    missing_field_count += 1
+                    ok = False
+                    break
+
+                if condition_key.endswith("_gte"):
+                    if not _compare_condition(row.get(field_name), "gte", condition_value):
+                        ok = False
+                        break
+                elif condition_key.endswith("_lte"):
+                    if not _compare_condition(row.get(field_name), "lte", condition_value):
+                        ok = False
+                        break
+                elif condition_key.endswith("_eq"):
+                    if not _compare_condition(row.get(field_name), "eq", condition_value):
+                        ok = False
+                        break
+                else:
+                    raise ValueError(f"Unsupported condition key: {condition_key}")
+
+            if ok:
+                buy_row = dict(row)
+                buy_row["section"] = buy_section_name
+                buy_row["rule_hit"] = rule["rule_hit"]
+                matched_rows.append(buy_row)
+
+        matched_rows.sort(key=lambda r: str(r.get("ticker") or ""))
+        out.extend(matched_rows)
+
+    return out, missing_field_count
+
+
+def _format_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def build_report_rows_json_mode(
+    all_rows: Sequence[Dict[str, Any]],
+    buy_rows: Sequence[Dict[str, Any]],
+    market_label: str,
+    as_of_date: str,
+) -> List[Dict[str, Any]]:
+    section_order = ["NEW_EW", "NEW_PASS", "BUYS", "EW_SNAPSHOT", "ALERTS"]
+    base_by_section: Dict[str, List[Dict[str, Any]]] = {name: [] for name in section_order if name != "BUYS"}
+    for row in all_rows:
+        section = row.get("section")
+        if section in base_by_section and not str(section).startswith("BUYS"):
+            base_by_section[section].append(dict(row))
+
+    buy_rows_sorted = list(buy_rows)
+    if not buy_rows_sorted:
+        buy_rows_sorted = [
+            {
+                "section": "BUYS",
+                "as_of_date": as_of_date,
+                "market": market_label,
+                "ticker": "(none)",
+                "state_prev": None,
+                "state_today": None,
+                "from_state": None,
+                "to_state": None,
+                "event_date": None,
+                "entry_window_date": None,
+                "first_time_in_ew_ever": None,
+                "days_in_stabilizing_before_ew": None,
+                "days_in_current_episode": None,
+                "days_in_ew_trading": None,
+                "ew_score_fastpass": None,
+                "ew_level_fastpass": None,
+                "ew_score_rolling": None,
+                "ew_level_rolling": None,
+                "rule_hit": "EMPTY_SECTION",
+            }
+        ]
+
+    out: List[Dict[str, Any]] = []
+    for section in section_order:
+        if section == "BUYS":
+            out.extend(buy_rows_sorted)
+        else:
+            out.extend(base_by_section.get(section, []))
+    return out
+
+
+def _render_text(rows: Sequence[Dict[str, Any]]) -> str:
+    str_rows = [[_format_cell(row.get(col)) for col in OUTPUT_COLUMNS] for row in rows]
+    widths = [len(col) for col in OUTPUT_COLUMNS]
+    for row in str_rows:
+        for idx, value in enumerate(row):
+            widths[idx] = max(widths[idx], len(value))
+
+    def fmt_row(values: Sequence[str]) -> str:
+        return "  ".join(value.ljust(widths[idx]) for idx, value in enumerate(values))
+
+    out = io.StringIO()
+    out.write(fmt_row(OUTPUT_COLUMNS) + "\n")
+    out.write(fmt_row(["-" * width for width in widths]) + "\n")
+    for row in str_rows:
+        out.write(fmt_row(row) + "\n")
+    return out.getvalue()
+
+
+def _format_csv_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        return f"{value}".replace(".", ",")
+    return str(value)
+
+
+def _render_csv(rows: Sequence[Dict[str, Any]]) -> str:
+    out = io.StringIO()
+    writer = csv.writer(out, delimiter=";", lineterminator="\n")
+    writer.writerow(OUTPUT_COLUMNS)
+    for row in rows:
+        writer.writerow([_format_csv_value(row.get(col)) for col in OUTPUT_COLUMNS])
+    return out.getvalue()
+
+
+def _substitute_sql_template(template: str, config: MarketConfig, as_of_date: str) -> str:
+    raw = (
+        template.replace("__AS_OF_DATE__", as_of_date)
+        .replace("__MARKET__", config.display_market)
+        .replace("__BUY_SECTION__", config.hardcoded_buy_section)
+        .replace("__BUY_RULE__", config.hardcoded_buy_rule)
+        .replace("__FP_THRESHOLD__", f"{config.hardcoded_fp_threshold:.2f}")
+    )
+    filtered_lines = [line for line in raw.splitlines() if not line.lstrip().startswith(".")]
+    return "\n".join(filtered_lines)
+
+
+def _has_table(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _ensure_temp_ew_score_table(conn: sqlite3.Connection) -> bool:
+    if _has_table(conn, "rc_ew_score_daily"):
+        return False
+    conn.executescript(
+        """
+        CREATE TEMP TABLE rc_ew_score_daily (
+          ticker TEXT,
+          date TEXT,
+          ew_score_fastpass REAL,
+          ew_level_fastpass INTEGER,
+          ew_score_rolling REAL,
+          ew_level_rolling INTEGER
+        );
+        """
+    )
+    return True
+
+
+def fetch_report_raw_rows(db_path: Path, config: MarketConfig, as_of_date: str) -> Tuple[List[Dict[str, Any]], bool]:
+    os.environ.setdefault("SQLITE_TMPDIR", "/tmp")
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        missing_fastpass_table = _ensure_temp_ew_score_table(conn)
+        conn.execute("PRAGMA temp_store = MEMORY")
+        sql = _substitute_sql_template(SQL_TEMPLATE_PATH.read_text(encoding="utf-8"), config, as_of_date)
+        conn.executescript(sql)
+        rows = conn.execute(
+            "SELECT section_sort, " + ", ".join(OUTPUT_COLUMNS) + " FROM report_raw ORDER BY section_sort, market, ticker"
+        ).fetchall()
+        out = [dict(row) for row in rows]
+        return out, missing_fastpass_table
+    finally:
+        conn.close()
+
+
+def write_outputs(rows: Sequence[Dict[str, Any]], txt_out: Path, csv_out: Path) -> None:
+    txt_out.write_text(_render_text(rows), encoding="utf-8")
+    csv_out.write_text(_render_csv(rows), encoding="utf-8")

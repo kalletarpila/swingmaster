@@ -1,0 +1,13 @@
+{
+  "market": "SE",
+  "version": 1,
+  "rules": [
+    {
+      "rule_hit": "SE_ENTRY_FP80",
+      "trigger": "NEW_EW",
+      "conditions": {
+        "fastpass_score_gte": 0.80
+      }
+    }
+  ]
+}

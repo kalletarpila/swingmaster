@@ -22,3 +22,13 @@ venv/
 # Generated daily report outputs
 daily_reports/*.txt
 daily_reports/*.csv
+
+# Daily report outputs
+daily_reports/fin_daily_report_*.txt
+daily_reports/fin_daily_report_*.csv
+daily_reports/*_daily_report_*.txt
+daily_reports/*_daily_report_*.csv
+
+# Weekly report outputs
+weekly_reports/*.txt
+weekly_reports/*.csv

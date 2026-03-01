@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Sequence, Tuple
 ROOT = Path("/home/kalle/projects/swingmaster")
 SQL_TEMPLATE_PATH = ROOT / "daily_reports" / "fin_daily_report.sql"
 BUY_RULES_DIR = ROOT / "daily_reports" / "buy_rules"
+WEEKLY_REPORTS_DIR = ROOT / "weekly_reports"
 OUTPUT_COLUMNS = [
     "section",
     "as_of_date",
@@ -385,6 +386,46 @@ def fetch_report_raw_rows(db_path: Path, config: MarketConfig, as_of_date: str) 
         return out, missing_fastpass_table
     finally:
         conn.close()
+
+
+def fetch_recent_trading_dates(db_path: Path, as_of_date: str, limit: int = 7) -> List[str]:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute(
+            """
+            SELECT date
+            FROM (
+              SELECT DISTINCT date
+              FROM rc_state_daily
+              WHERE date <= ?
+              ORDER BY date DESC
+              LIMIT ?
+            )
+            ORDER BY date ASC
+            """,
+            (as_of_date, limit),
+        ).fetchall()
+        return [str(row[0]) for row in rows]
+    finally:
+        conn.close()
+
+
+def build_daily_report_rows(
+    db_path: Path,
+    config: MarketConfig,
+    as_of_date: str,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    all_rows, missing_fastpass_table = fetch_report_raw_rows(db_path, config, as_of_date)
+    rules_config = load_buy_rules_config(config.rules_market)
+    base_rows = [row for row in all_rows if not str(row.get("section", "")).startswith("BUYS")]
+    json_buy_rows, _ = apply_buy_rules(base_rows, rules_config, buy_section_name="BUYS")
+    final_rows = build_report_rows_json_mode(
+        all_rows=all_rows,
+        buy_rows=json_buy_rows,
+        market_label=config.display_market,
+        as_of_date=as_of_date,
+    )
+    return final_rows, missing_fastpass_table
 
 
 def write_outputs(rows: Sequence[Dict[str, Any]], txt_out: Path, csv_out: Path) -> None:

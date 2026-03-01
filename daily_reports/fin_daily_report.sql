@@ -27,6 +27,7 @@ CREATE TEMP TABLE report_raw (
   first_time_in_ew_ever INTEGER,
   days_in_stabilizing_before_ew INTEGER,
   days_in_current_episode INTEGER,
+  days_in_ew_trading INTEGER,
   ew_score_fastpass REAL,
   ew_level_fastpass INTEGER,
   ew_score_rolling REAL,
@@ -50,6 +51,17 @@ st_prev AS (
   SELECT s.ticker, s.state
   FROM rc_state_daily s
   JOIN params p ON s.date = p.prev_date
+),
+state_rows AS (
+  SELECT
+    s.ticker,
+    s.date,
+    s.state,
+    ROW_NUMBER() OVER (
+      PARTITION BY s.ticker
+      ORDER BY s.date
+    ) AS rn
+  FROM rc_state_daily s
 ),
 first_ew AS (
   SELECT ticker, MIN(date) AS first_ew_date
@@ -80,6 +92,7 @@ new_pass AS (
 pass_entry_window AS (
   SELECT
     np.ticker,
+    np.event_date AS pass_date,
     (
       SELECT MAX(tr.date)
       FROM rc_transition tr
@@ -89,6 +102,42 @@ pass_entry_window AS (
         AND tr.date <= p.prev_date
     ) AS entry_window_date
   FROM new_pass np
+),
+pass_window_stats AS (
+  SELECT
+    pew.ticker,
+    pew.pass_date,
+    pew.entry_window_date,
+    (
+      SELECT COUNT(*)
+      FROM rc_state_daily s
+      WHERE s.ticker = pew.ticker
+        AND s.state = 'ENTRY_WINDOW'
+        AND s.date >= pew.entry_window_date
+        AND s.date < pew.pass_date
+    ) AS days_in_ew_trading,
+    (
+      SELECT ew2.ew_score_rolling
+      FROM rc_ew_score_daily ew2
+      WHERE ew2.ticker = pew.ticker
+        AND ew2.date >= pew.entry_window_date
+        AND ew2.date < pew.pass_date
+        AND ew2.ew_level_rolling IS NOT NULL
+      ORDER BY ew2.date DESC
+      LIMIT 1
+    ) AS ew_score_rolling_end,
+    (
+      SELECT ew2.ew_level_rolling
+      FROM rc_ew_score_daily ew2
+      WHERE ew2.ticker = pew.ticker
+        AND ew2.date >= pew.entry_window_date
+        AND ew2.date < pew.pass_date
+        AND ew2.ew_level_rolling IS NOT NULL
+      ORDER BY ew2.date DESC
+      LIMIT 1
+    ) AS ew_level_rolling_end
+  FROM pass_entry_window pew
+  WHERE pew.entry_window_date IS NOT NULL
 ),
 episode_at_new_ew AS (
   SELECT
@@ -137,6 +186,30 @@ active_ew AS (
   FROM active_ew_candidates
   WHERE rn = 1
 ),
+episode_catalog AS (
+  SELECT ticker, entry_window_date, downtrend_entry_date
+  FROM episode_at_new_ew
+  UNION
+  SELECT ticker, entry_window_date, downtrend_entry_date
+  FROM episode_at_pass
+  UNION
+  SELECT ticker, entry_window_date, downtrend_entry_date
+  FROM active_ew
+),
+episode_day_counts AS (
+  SELECT
+    ec.ticker,
+    ec.entry_window_date,
+    (
+      SELECT COUNT(*)
+      FROM rc_state_daily s
+      JOIN params p ON 1 = 1
+      WHERE s.ticker = ec.ticker
+        AND s.date >= ec.downtrend_entry_date
+        AND s.date <= p.as_of_date
+    ) AS days_in_current_episode
+  FROM episode_catalog ec
+),
 entry_points AS (
   SELECT ticker, event_date AS entry_window_date FROM new_ew
   UNION
@@ -148,39 +221,37 @@ stab_run AS (
   SELECT
     ep.ticker,
     ep.entry_window_date,
-    date(ep.entry_window_date, '-1 day') AS d
+    sr.rn - 1 AS rn
   FROM entry_points ep
+  JOIN state_rows sr
+    ON sr.ticker = ep.ticker
+   AND sr.date = ep.entry_window_date
+  WHERE sr.rn > 1
 
   UNION ALL
 
   SELECT
-    sr.ticker,
-    sr.entry_window_date,
-    date(sr.d, '-1 day') AS d
-  FROM stab_run sr
-  JOIN rc_state_daily s
-    ON s.ticker = sr.ticker
-   AND s.date = sr.d
+    prev.ticker,
+    prev.entry_window_date,
+    prev.rn - 1 AS rn
+  FROM stab_run prev
+  JOIN state_rows s
+    ON s.ticker = prev.ticker
+   AND s.rn = prev.rn
   WHERE s.state = 'STABILIZING'
+    AND prev.rn > 1
 ),
 stab_counts AS (
   SELECT
-    ticker,
-    entry_window_date,
-    SUM(
-      CASE
-        WHEN EXISTS (
-          SELECT 1
-          FROM rc_state_daily s
-          WHERE s.ticker = stab_run.ticker
-            AND s.date = stab_run.d
-            AND s.state = 'STABILIZING'
-        )
-        THEN 1 ELSE 0
-      END
-    ) AS days_in_stabilizing_before_ew
+    stab_run.ticker,
+    stab_run.entry_window_date,
+    COUNT(*) AS days_in_stabilizing_before_ew
   FROM stab_run
-  GROUP BY ticker, entry_window_date
+  JOIN state_rows sr2
+    ON sr2.ticker = stab_run.ticker
+   AND sr2.rn = stab_run.rn
+  WHERE sr2.state = 'STABILIZING'
+  GROUP BY stab_run.ticker, stab_run.entry_window_date
 ),
 fp_at_entry AS (
   SELECT
@@ -237,43 +308,20 @@ buys_3_se AS (
     pew.entry_window_date,
     fpe.fp_score,
     fpe.fp_level,
-    (
-      SELECT ew2.ew_score_rolling
-      FROM rc_ew_score_daily ew2
-      WHERE ew2.ticker = np.ticker
-        AND ew2.date >= pew.entry_window_date
-        AND ew2.date < np.event_date
-        AND ew2.ew_level_rolling IS NOT NULL
-      ORDER BY ew2.date DESC
-      LIMIT 1
-    ) AS ew_score_rolling_end,
-    (
-      SELECT ew2.ew_level_rolling
-      FROM rc_ew_score_daily ew2
-      WHERE ew2.ticker = np.ticker
-        AND ew2.date >= pew.entry_window_date
-        AND ew2.date < np.event_date
-        AND ew2.ew_level_rolling IS NOT NULL
-      ORDER BY ew2.date DESC
-      LIMIT 1
-    ) AS ew_level_rolling_end
+    pws.ew_score_rolling_end,
+    pws.ew_level_rolling_end
   FROM new_pass np
   JOIN pass_entry_window pew
     ON pew.ticker = np.ticker
+  LEFT JOIN pass_window_stats pws
+    ON pws.ticker = np.ticker
+   AND pws.pass_date = np.event_date
+   AND pws.entry_window_date = pew.entry_window_date
   LEFT JOIN fp_at_entry fpe
     ON fpe.ticker = np.ticker
    AND fpe.entry_window_date = pew.entry_window_date
   WHERE '__MARKET__' = 'SE'
-    AND (
-      SELECT ew2.ew_level_rolling
-      FROM rc_ew_score_daily ew2
-      WHERE ew2.ticker = np.ticker
-        AND ew2.date >= pew.entry_window_date
-        AND ew2.date < np.event_date
-        AND ew2.ew_level_rolling IS NOT NULL
-      ORDER BY ew2.date DESC
-      LIMIT 1
-    ) = 1
+    AND pws.ew_level_rolling_end = 1
 ),
 buys_4_se AS (
   SELECT
@@ -296,7 +344,7 @@ ew_snapshot_ranked AS (
     a.entry_window_date,
     a.downtrend_entry_date,
     COALESCE(sc.days_in_stabilizing_before_ew, 0) AS days_in_stabilizing_before_ew,
-    CAST((julianday(p.as_of_date) - julianday(a.downtrend_entry_date) + 1) AS INTEGER) AS days_in_current_episode,
+    edc.days_in_current_episode,
     fpe.fp_score,
     fpe.fp_level,
     rt.ew_score_rolling,
@@ -314,6 +362,9 @@ ew_snapshot_ranked AS (
   LEFT JOIN stab_counts sc
     ON sc.ticker = a.ticker
    AND sc.entry_window_date = a.entry_window_date
+  LEFT JOIN episode_day_counts edc
+    ON edc.ticker = a.ticker
+   AND edc.entry_window_date = a.entry_window_date
   LEFT JOIN fp_at_entry fpe
     ON fpe.ticker = a.ticker
    AND fpe.entry_window_date = a.entry_window_date
@@ -365,7 +416,7 @@ alerts_raw AS (
     'LATE_BUY_SIGNAL' AS alert_type,
     b.entry_window_date,
     COALESCE(sc.days_in_stabilizing_before_ew, 0) AS days_in_stabilizing_before_ew,
-    CAST((julianday(p.as_of_date) - julianday(epx.downtrend_entry_date) + 1) AS INTEGER) AS days_in_current_episode,
+    edc.days_in_current_episode,
     b.fp_score,
     b.fp_level,
     NULL AS ew_score_rolling,
@@ -378,7 +429,10 @@ alerts_raw AS (
   LEFT JOIN stab_counts sc
     ON sc.ticker = b.ticker
    AND sc.entry_window_date = b.entry_window_date
-  WHERE CAST((julianday(p.as_of_date) - julianday(epx.downtrend_entry_date) + 1) AS INTEGER) >= 30
+  LEFT JOIN episode_day_counts edc
+    ON edc.ticker = b.ticker
+   AND edc.entry_window_date = b.entry_window_date
+  WHERE edc.days_in_current_episode >= 30
 ),
 alerts AS (
   SELECT
@@ -417,7 +471,8 @@ SELECT * FROM (
     ne.event_date AS entry_window_date,
     CASE WHEN fe.first_ew_date = ne.event_date THEN 1 ELSE 0 END AS first_time_in_ew_ever,
     COALESCE(sc.days_in_stabilizing_before_ew, 0) AS days_in_stabilizing_before_ew,
-    CAST((julianday(p.as_of_date) - julianday(epx.downtrend_entry_date) + 1) AS INTEGER) AS days_in_current_episode,
+    edc.days_in_current_episode,
+    NULL AS days_in_ew_trading,
     fpe.fp_score AS ew_score_fastpass,
     fpe.fp_level AS ew_level_fastpass,
     rt.ew_score_rolling,
@@ -434,6 +489,9 @@ SELECT * FROM (
   LEFT JOIN stab_counts sc
     ON sc.ticker = ne.ticker
    AND sc.entry_window_date = ne.event_date
+  LEFT JOIN episode_day_counts edc
+    ON edc.ticker = ne.ticker
+   AND edc.entry_window_date = ne.event_date
   LEFT JOIN fp_at_entry fpe
     ON fpe.ticker = ne.ticker
    AND fpe.entry_window_date = ne.event_date
@@ -458,6 +516,7 @@ SELECT * FROM (
     NULL AS first_time_in_ew_ever,
     NULL AS days_in_stabilizing_before_ew,
     NULL AS days_in_current_episode,
+    NULL AS days_in_ew_trading,
     NULL AS ew_score_fastpass,
     NULL AS ew_level_fastpass,
     NULL AS ew_score_rolling,
@@ -482,11 +541,12 @@ SELECT * FROM (
     pew.entry_window_date AS entry_window_date,
     CASE WHEN fe.first_ew_date = pew.entry_window_date THEN 1 ELSE 0 END AS first_time_in_ew_ever,
     COALESCE(sc.days_in_stabilizing_before_ew, 0) AS days_in_stabilizing_before_ew,
-    CAST((julianday(p.as_of_date) - julianday(epx.downtrend_entry_date) + 1) AS INTEGER) AS days_in_current_episode,
+    edc.days_in_current_episode,
+    pws.days_in_ew_trading,
     fpe.fp_score AS ew_score_fastpass,
     fpe.fp_level AS ew_level_fastpass,
-    NULL AS ew_score_rolling,
-    NULL AS ew_level_rolling,
+    pws.ew_score_rolling_end AS ew_score_rolling,
+    pws.ew_level_rolling_end AS ew_level_rolling,
     NULL AS rule_hit
   FROM new_pass np
   JOIN params p ON 1 = 1
@@ -500,9 +560,16 @@ SELECT * FROM (
   LEFT JOIN stab_counts sc
     ON sc.ticker = np.ticker
    AND sc.entry_window_date = pew.entry_window_date
+  LEFT JOIN episode_day_counts edc
+    ON edc.ticker = np.ticker
+   AND edc.entry_window_date = pew.entry_window_date
   LEFT JOIN fp_at_entry fpe
     ON fpe.ticker = np.ticker
    AND fpe.entry_window_date = pew.entry_window_date
+  LEFT JOIN pass_window_stats pws
+    ON pws.ticker = np.ticker
+   AND pws.pass_date = np.event_date
+   AND pws.entry_window_date = pew.entry_window_date
 
   UNION ALL
 
@@ -521,6 +588,7 @@ SELECT * FROM (
     NULL AS first_time_in_ew_ever,
     NULL AS days_in_stabilizing_before_ew,
     NULL AS days_in_current_episode,
+    NULL AS days_in_ew_trading,
     NULL AS ew_score_fastpass,
     NULL AS ew_level_fastpass,
     NULL AS ew_score_rolling,
@@ -545,7 +613,8 @@ SELECT * FROM (
     b.entry_window_date AS entry_window_date,
     CASE WHEN fe.first_ew_date = b.entry_window_date THEN 1 ELSE 0 END AS first_time_in_ew_ever,
     COALESCE(sc.days_in_stabilizing_before_ew, 0) AS days_in_stabilizing_before_ew,
-    CAST((julianday(p.as_of_date) - julianday(epx.downtrend_entry_date) + 1) AS INTEGER) AS days_in_current_episode,
+    edc.days_in_current_episode,
+    NULL AS days_in_ew_trading,
     b.fp_score AS ew_score_fastpass,
     b.fp_level AS ew_level_fastpass,
     NULL AS ew_score_rolling,
@@ -562,6 +631,9 @@ SELECT * FROM (
   LEFT JOIN stab_counts sc
     ON sc.ticker = b.ticker
    AND sc.entry_window_date = b.entry_window_date
+  LEFT JOIN episode_day_counts edc
+    ON edc.ticker = b.ticker
+   AND edc.entry_window_date = b.entry_window_date
 
   UNION ALL
 
@@ -580,6 +652,7 @@ SELECT * FROM (
     NULL AS first_time_in_ew_ever,
     NULL AS days_in_stabilizing_before_ew,
     NULL AS days_in_current_episode,
+    NULL AS days_in_ew_trading,
     NULL AS ew_score_fastpass,
     NULL AS ew_level_fastpass,
     NULL AS ew_score_rolling,
@@ -604,7 +677,8 @@ SELECT * FROM (
     b.entry_window_date AS entry_window_date,
     CASE WHEN fe.first_ew_date = b.entry_window_date THEN 1 ELSE 0 END AS first_time_in_ew_ever,
     COALESCE(sc.days_in_stabilizing_before_ew, 0) AS days_in_stabilizing_before_ew,
-    CAST((julianday(p.as_of_date) - julianday(epx.downtrend_entry_date) + 1) AS INTEGER) AS days_in_current_episode,
+    edc.days_in_current_episode,
+    NULL AS days_in_ew_trading,
     b.fp_score AS ew_score_fastpass,
     b.fp_level AS ew_level_fastpass,
     rt.ew_score_rolling,
@@ -621,6 +695,9 @@ SELECT * FROM (
   LEFT JOIN stab_counts sc
     ON sc.ticker = b.ticker
    AND sc.entry_window_date = b.entry_window_date
+  LEFT JOIN episode_day_counts edc
+    ON edc.ticker = b.ticker
+   AND edc.entry_window_date = b.entry_window_date
   LEFT JOIN rolling_today rt
     ON rt.ticker = b.ticker
    AND rt.as_of_date = p.as_of_date
@@ -642,6 +719,7 @@ SELECT * FROM (
     NULL AS first_time_in_ew_ever,
     NULL AS days_in_stabilizing_before_ew,
     NULL AS days_in_current_episode,
+    NULL AS days_in_ew_trading,
     NULL AS ew_score_fastpass,
     NULL AS ew_level_fastpass,
     NULL AS ew_score_rolling,
@@ -667,7 +745,8 @@ SELECT * FROM (
     b.entry_window_date AS entry_window_date,
     CASE WHEN fe.first_ew_date = b.entry_window_date THEN 1 ELSE 0 END AS first_time_in_ew_ever,
     COALESCE(sc.days_in_stabilizing_before_ew, 0) AS days_in_stabilizing_before_ew,
-    CAST((julianday(p.as_of_date) - julianday(epx.downtrend_entry_date) + 1) AS INTEGER) AS days_in_current_episode,
+    edc.days_in_current_episode,
+    pws.days_in_ew_trading,
     b.fp_score AS ew_score_fastpass,
     b.fp_level AS ew_level_fastpass,
     b.ew_score_rolling_end AS ew_score_rolling,
@@ -684,6 +763,13 @@ SELECT * FROM (
   LEFT JOIN stab_counts sc
     ON sc.ticker = b.ticker
    AND sc.entry_window_date = b.entry_window_date
+  LEFT JOIN episode_day_counts edc
+    ON edc.ticker = b.ticker
+   AND edc.entry_window_date = b.entry_window_date
+  LEFT JOIN pass_window_stats pws
+    ON pws.ticker = b.ticker
+   AND pws.pass_date = b.pass_date
+   AND pws.entry_window_date = b.entry_window_date
 
   UNION ALL
 
@@ -702,6 +788,7 @@ SELECT * FROM (
     NULL AS first_time_in_ew_ever,
     NULL AS days_in_stabilizing_before_ew,
     NULL AS days_in_current_episode,
+    NULL AS days_in_ew_trading,
     NULL AS ew_score_fastpass,
     NULL AS ew_level_fastpass,
     NULL AS ew_score_rolling,
@@ -727,7 +814,8 @@ SELECT * FROM (
     b.entry_window_date AS entry_window_date,
     CASE WHEN fe.first_ew_date = b.entry_window_date THEN 1 ELSE 0 END AS first_time_in_ew_ever,
     COALESCE(sc.days_in_stabilizing_before_ew, 0) AS days_in_stabilizing_before_ew,
-    CAST((julianday(p.as_of_date) - julianday(epx.downtrend_entry_date) + 1) AS INTEGER) AS days_in_current_episode,
+    edc.days_in_current_episode,
+    pws.days_in_ew_trading,
     b.fp_score AS ew_score_fastpass,
     b.fp_level AS ew_level_fastpass,
     b.ew_score_rolling_end AS ew_score_rolling,
@@ -744,6 +832,13 @@ SELECT * FROM (
   LEFT JOIN stab_counts sc
     ON sc.ticker = b.ticker
    AND sc.entry_window_date = b.entry_window_date
+  LEFT JOIN episode_day_counts edc
+    ON edc.ticker = b.ticker
+   AND edc.entry_window_date = b.entry_window_date
+  LEFT JOIN pass_window_stats pws
+    ON pws.ticker = b.ticker
+   AND pws.pass_date = b.pass_date
+   AND pws.entry_window_date = b.entry_window_date
 
   UNION ALL
 
@@ -762,6 +857,7 @@ SELECT * FROM (
     NULL AS first_time_in_ew_ever,
     NULL AS days_in_stabilizing_before_ew,
     NULL AS days_in_current_episode,
+    NULL AS days_in_ew_trading,
     NULL AS ew_score_fastpass,
     NULL AS ew_level_fastpass,
     NULL AS ew_score_rolling,
@@ -788,6 +884,7 @@ SELECT * FROM (
     CASE WHEN fe.first_ew_date = s.entry_window_date THEN 1 ELSE 0 END AS first_time_in_ew_ever,
     s.days_in_stabilizing_before_ew,
     s.days_in_current_episode,
+    NULL AS days_in_ew_trading,
     s.fp_score AS ew_score_fastpass,
     s.fp_level AS ew_level_fastpass,
     s.ew_score_rolling,
@@ -816,6 +913,7 @@ SELECT * FROM (
     NULL AS first_time_in_ew_ever,
     NULL AS days_in_stabilizing_before_ew,
     NULL AS days_in_current_episode,
+    NULL AS days_in_ew_trading,
     NULL AS ew_score_fastpass,
     NULL AS ew_level_fastpass,
     NULL AS ew_score_rolling,
@@ -841,6 +939,7 @@ SELECT * FROM (
     CASE WHEN fe.first_ew_date = a.entry_window_date THEN 1 ELSE 0 END AS first_time_in_ew_ever,
     a.days_in_stabilizing_before_ew,
     a.days_in_current_episode,
+    NULL AS days_in_ew_trading,
     a.fp_score AS ew_score_fastpass,
     a.fp_level AS ew_level_fastpass,
     a.ew_score_rolling,
@@ -869,6 +968,7 @@ SELECT * FROM (
     NULL AS first_time_in_ew_ever,
     NULL AS days_in_stabilizing_before_ew,
     NULL AS days_in_current_episode,
+    NULL AS days_in_ew_trading,
     NULL AS ew_score_fastpass,
     NULL AS ew_level_fastpass,
     NULL AS ew_score_rolling,
@@ -893,6 +993,7 @@ SELECT
   first_time_in_ew_ever,
   days_in_stabilizing_before_ew,
   days_in_current_episode,
+  days_in_ew_trading,
   ew_score_fastpass,
   ew_level_fastpass,
   ew_score_rolling,

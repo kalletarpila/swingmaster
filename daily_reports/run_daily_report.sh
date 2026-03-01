@@ -109,9 +109,9 @@ for market in "${MARKETS[@]}"; do
     -e "s/__FP_THRESHOLD__/${FP_THRESHOLD}/g" \
     "$SQL_TEMPLATE" > "$TMP_SQL"
 
-  sqlite3 -header -column "$DB_PATH" < "$TMP_SQL" > "$TXT_OUT"
+  SQLITE_TMPDIR=/tmp sqlite3 -header -column "$DB_PATH" < "$TMP_SQL" > "$TXT_OUT"
 
-  sqlite3 -header -csv "$DB_PATH" < "$TMP_SQL" \
+  SQLITE_TMPDIR=/tmp sqlite3 -header -csv "$DB_PATH" < "$TMP_SQL" \
     | python3 -c "import csv, re, sys; out_path = sys.argv[1]; reader = csv.reader(sys.stdin); num_re = re.compile(r'^-?\\d+(?:\\.\\d+)?$'); f = open(out_path, 'w', newline='', encoding='utf-8'); writer = csv.writer(f, delimiter=';', lineterminator='\\n'); [writer.writerow([(v.replace('.', ',') if num_re.match(v) else v) for v in row]) for row in reader]; f.close()" "$CSV_OUT"
 
   printf '%s TXT: %s\n' "$MARKET_LABEL" "$TXT_OUT"

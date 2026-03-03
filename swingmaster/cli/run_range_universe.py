@@ -152,6 +152,23 @@ def build_trading_days(md_conn, tickers: List[str], date_from: str, date_to: str
     return sorted(days)
 
 
+def filter_tickers_with_row_on_date(md_conn, tickers: List[str], as_of_date: str) -> List[str]:
+    if not tickers:
+        return []
+    present = set()
+    chunk_size = 500
+    for i in range(0, len(tickers), chunk_size):
+        chunk = tickers[i : i + chunk_size]
+        placeholders = ",".join("?" for _ in chunk)
+        rows = md_conn.execute(
+            f"SELECT DISTINCT osake FROM osakedata WHERE pvm=? AND osake IN ({placeholders})",
+            [as_of_date, *chunk],
+        ).fetchall()
+        for row in rows:
+            present.add(row[0])
+    return [ticker for ticker in tickers if ticker in present]
+
+
 def print_report(rc_conn, as_of_date: str, run_id: str) -> None:
     dist_rows = rc_conn.execute(
         """
@@ -1764,6 +1781,7 @@ def maybe_run_ew_score(
 
 def main() -> None:
     args = parse_args()
+    effective_require_row_on_date = True
     policy_version = args.policy_version
     if policy_version == "dev":
         policy_version = "v2"
@@ -1796,7 +1814,7 @@ def main() -> None:
                 as_of_date=args.date_from,
                 osakedata_table="osakedata",
                 min_history_rows=args.min_history_rows,
-                require_row_on_date=args.require_row_on_date,
+                require_row_on_date=effective_require_row_on_date,
             )
             removed_list = [t for t in tickers_before if t not in set(tickers)]
             _dbg(args, f"FILTER min_history_rows before={before_filter} after={len(tickers)} removed={len(removed_list)}")
@@ -1827,7 +1845,7 @@ def main() -> None:
                 (
                     f"ARGS date_from={args.date_from} date_to={args.date_to} mode={args.mode} market={args.market} "
                     f"sector={args.sector} industry={args.industry} limit={args.limit} sample={args.sample} seed={args.seed} "
-                    f"signal_version={args.signal_version} require_row_on_date={args.require_row_on_date} "
+                    f"signal_version={args.signal_version} require_row_on_date={effective_require_row_on_date} "
                     f"min_history_rows={args.min_history_rows} max_days={args.max_days}"
                 ),
             )
@@ -1858,16 +1876,16 @@ def main() -> None:
         if args.min_history_rows > 0:
             print(
                 f"FILTER min_history_rows={args.min_history_rows} "
-                f"require_row_on_date={args.require_row_on_date} -> TICKERS_AFTER_FILTER={len(tickers)}"
+                f"require_row_on_date={effective_require_row_on_date} -> TICKERS_AFTER_FILTER={len(tickers)}"
             )
-            if args.require_row_on_date:
+            if effective_require_row_on_date:
                 print(
                     "NOTE: Universe filtering applies --require-row-on-date only against date_from. "
                     "Trading days are derived only from the selected tickers (no cross-market dates). "
                     "With signal_version=v2, each processed day also requires an as-of row; missing days emit DATA_INSUFFICIENT "
                     "and a MISSING_ASOF summary is printed after the run."
                 )
-        if args.require_row_on_date and args.signal_version == "v2":
+        if effective_require_row_on_date and args.signal_version == "v2":
             print(
                 "NOTE: signal_version=v2 enforces an as-of row for every processed trading day; missing rows emit DATA_INSUFFICIENT."
             )
@@ -1898,7 +1916,7 @@ def main() -> None:
             enable_history=False,
             provider=provider_name,
             md_conn=md_conn,
-            require_row_on_date=args.require_row_on_date,
+            require_row_on_date=effective_require_row_on_date,
             policy_id=policy_id,
             engine_version="dev",
             debug=args.debug,
@@ -1913,12 +1931,23 @@ def main() -> None:
         for idx, day in enumerate(trading_days, start=1):
             _dbg(args, f"DAY_START {idx}/{len(trading_days)} date={day}")
             start = time.perf_counter()
-            run_id = app.run_daily(as_of_date=day, tickers=tickers)
+            tickers_for_day = (
+                filter_tickers_with_row_on_date(md_conn, tickers, day)
+                if effective_require_row_on_date
+                else tickers
+            )
+            if not tickers_for_day:
+                _dbg(args, f"DAY_SKIP date={day} reason=no_tickers_with_asof_row")
+                continue
+            run_id = app.run_daily(as_of_date=day, tickers=tickers_for_day)
             elapsed_ms = (time.perf_counter() - start) * 1000
             last_run_id = run_id
             run_ids_by_day[day] = run_id
             if idx == 1 or idx == len(trading_days) or idx % 5 == 0:
-                print(f"DAY {idx}/{len(trading_days)} {day} run_id={run_id} ms={elapsed_ms:.1f}")
+                print(
+                    f"DAY {idx}/{len(trading_days)} {day} run_id={run_id} "
+                    f"tickers={len(tickers_for_day)} ms={elapsed_ms:.1f}"
+                )
             _dbg(args, f"DAY_END date={day} run_id={run_id} ms={elapsed_ms:.1f} rc_rows_pending=unknown")
             if _debug_enabled(args):
                 rc_rows = rc_conn.execute(
@@ -1929,7 +1958,7 @@ def main() -> None:
                     "SELECT COUNT(DISTINCT ticker) FROM rc_state_daily WHERE date=? AND run_id=?",
                     (day, run_id),
                 ).fetchone()[0]
-                expected = len(tickers)
+                expected = len(tickers_for_day)
                 ok_rows = rc_rows == expected
                 ok_distinct = distinct_rc == expected
                 _dbg(
@@ -1943,8 +1972,8 @@ def main() -> None:
                         (day, run_id),
                     ).fetchall()
                     rc_set = {r[0] for r in rc_tickers}
-                    ticker_set = set(tickers)
-                    missing = [t for t in tickers if t not in rc_set]
+                    ticker_set = set(tickers_for_day)
+                    missing = [t for t in tickers_for_day if t not in rc_set]
                     extra = [t for t in rc_set if t not in ticker_set]
                     miss_limit = _effective_limit(args, missing)
                     extra_limit = _effective_limit(args, extra)
@@ -1960,7 +1989,9 @@ def main() -> None:
                         _dbg(args, f"INVARIANT_FAIL extra_in_rc_sample={sample}")
             if args.print_signals:
                 limit = args.print_signals_limit
-                tickers_to_show = tickers if limit <= 0 or len(tickers) <= limit else tickers[:limit]
+                tickers_to_show = (
+                    tickers_for_day if limit <= 0 or len(tickers_for_day) <= limit else tickers_for_day[:limit]
+                )
                 print(f"PRINT_SIGNALS date={day}")
                 for t in tickers_to_show:
                     signal_set = signal_provider.get_signals(t, day)
@@ -2016,7 +2047,7 @@ def main() -> None:
                 }
                 for row in rc_rows_full
             }
-            if args.signal_version == "v2" and args.require_row_on_date:
+            if args.signal_version == "v2" and effective_require_row_on_date:
                 _dbg(
                     args,
                     "NOTE: trading_days derived from selected tickers; osakedata holds only trading days. "

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
-from swingmaster.cli.daily_report import apply_buy_rules, validate_buy_rules_config
+from swingmaster.cli.daily_report import _attach_buy_badges, apply_buy_rules, validate_buy_rules_config
 
 
 @pytest.mark.parametrize(
@@ -91,3 +93,44 @@ def test_validate_buy_rules_config_rejects_unknown_condition_key() -> None:
 
     with pytest.raises(ValueError, match="unknown condition key"):
         validate_buy_rules_config(config, "FIN")
+
+
+def test_attach_buy_badges_enriches_matching_buy_rows() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE rc_transactions_simu (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ticker TEXT NOT NULL,
+          buy_date TEXT NOT NULL,
+          buy_badges TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO rc_transactions_simu (ticker, buy_date, buy_badges, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        ("AAA", "2026-01-02", '["LOW_VOLUME","PENNY_STOCK"]', "2026-01-03T00:00:00Z"),
+    )
+    buy_rows = [
+        {
+            "section": "BUYS",
+            "ticker": "AAA",
+            "event_date": "2026-01-02",
+            "rule_hit": "FIN_PASS_FP60",
+        },
+        {
+            "section": "BUYS",
+            "ticker": "BBB",
+            "event_date": "2026-01-02",
+            "rule_hit": "FIN_PASS_FP60",
+        },
+    ]
+
+    out = _attach_buy_badges(conn, buy_rows)
+
+    assert out[0]["buy_badges"] == '["LOW_VOLUME","PENNY_STOCK"]'
+    assert out[1]["buy_badges"] is None

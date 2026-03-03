@@ -14,11 +14,44 @@ from swingmaster.cli.daily_report import apply_buy_rules, load_buy_rules_config
 ENGINE_VERSION = "SIMU_TX_FAST_V1"
 ROOT = Path(__file__).resolve().parents[2]
 BUY_RULES_DIR = ROOT / "daily_reports" / "buy_rules"
+OSAKEDATA_DB_DEFAULT = "/home/kalle/projects/rawcandle/data/osakedata.db"
+ANALYSIS_DB_DEFAULT = "/home/kalle/projects/rawcandle/data/analysis.db"
+LOW_VOLUME_WINDOW_DAYS = 20
+LOW_VOLUME_THRESHOLDS = {
+    "FIN": 35000,
+    "SE": 1000000,
+    "USA": 1500000,
+}
+PENNY_STOCK_THRESHOLDS = {
+    "FIN": 1.0,
+    "SE": 10.0,
+    "USA": 1.0,
+}
+BUY_BULL_DIV_PATTERNS = {
+    "bullish divergence",
+    "bulldiv & hammer",
+    "bulldiv & piercing pattern",
+    "bulldiv & bullish engulfing",
+    "bulldiv & dragonfly doji",
+}
+BUY_BADGE_KEYS = (
+    "downtrend_entry_type",
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fast BUY simulation from NEW_EW and NEW_PASS transitions")
     parser.add_argument("--rc-db", required=True, help="RC SQLite database path")
+    parser.add_argument(
+        "--osakedata-db",
+        default=OSAKEDATA_DB_DEFAULT,
+        help="osakedata SQLite database path",
+    )
+    parser.add_argument(
+        "--analysis-db",
+        default=ANALYSIS_DB_DEFAULT,
+        help="analysis SQLite database path",
+    )
     parser.add_argument("--market", required=True, help="Market code (FIN|SE|USA)")
     parser.add_argument("--start-date", required=True, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end-date", required=True, help="End date (YYYY-MM-DD)")
@@ -49,6 +82,16 @@ def validate_date_range(start_date: str, end_date: str) -> None:
         raise ValueError("INVALID_DATE_RANGE") from exc
     if start > end:
         raise ValueError("INVALID_DATE_RANGE")
+
+
+def osakedata_market_for_simu_market(market: str) -> str:
+    if market == "FIN":
+        return "omxh"
+    if market == "SE":
+        return "omxs"
+    if market == "USA":
+        return "usa"
+    raise ValueError("INVALID_MARKET")
 
 
 def ruleset_identity_for_market(market: str) -> str:
@@ -94,6 +137,7 @@ def inspect_schema(conn: sqlite3.Connection) -> Dict[str, bool]:
         "has_pipeline_episode": has_pipeline_episode,
         "has_days_in_current_episode": column_exists(conn, "rc_state_daily", "days_in_current_episode"),
         "has_days_in_stabilizing_before_ew": column_exists(conn, "rc_state_daily", "days_in_stabilizing_before_ew"),
+        "has_state_attrs_json": column_exists(conn, "rc_state_daily", "state_attrs_json"),
         "has_close_at_ew_start": column_exists(conn, "rc_pipeline_episode", "close_at_ew_start"),
         "has_close_at_ew_exit": column_exists(conn, "rc_pipeline_episode", "close_at_ew_exit"),
         "has_entry_window_exit_date": column_exists(conn, "rc_pipeline_episode", "entry_window_exit_date"),
@@ -400,27 +444,126 @@ def group_buy_rows(buy_rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]]
     return out, multi_rule_buys
 
 
+def resolve_buy_badges(
+    rc_conn: sqlite3.Connection,
+    os_conn: sqlite3.Connection,
+    analysis_conn: sqlite3.Connection,
+    ticker: str,
+    buy_date: str,
+    market: str,
+    has_state_attrs_json: bool,
+    cache: Dict[Tuple[str, str], str],
+) -> str:
+    key = (ticker, buy_date)
+    if key in cache:
+        return cache[key]
+
+    badges: List[str] = []
+    if has_state_attrs_json:
+        row = rc_conn.execute(
+            """
+            SELECT state_attrs_json
+            FROM rc_state_daily
+            WHERE ticker = ? AND date = ?
+            LIMIT 1
+            """,
+            (ticker, buy_date),
+        ).fetchone()
+        if row is not None and row[0] not in {None, ""}:
+            try:
+                payload = json.loads(str(row[0]))
+            except (TypeError, ValueError):
+                payload = {}
+            if isinstance(payload, dict):
+                for badge_key in BUY_BADGE_KEYS:
+                    badge_value = payload.get(badge_key)
+                    if isinstance(badge_value, str) and badge_value:
+                        badges.append(f"{badge_key}={badge_value}")
+
+    price_rows = os_conn.execute(
+        """
+        SELECT pvm, close, volume
+        FROM osakedata
+        WHERE osake = ?
+          AND market = ?
+          AND pvm <= ?
+          AND close IS NOT NULL
+          AND volume IS NOT NULL
+        ORDER BY pvm DESC
+        LIMIT ?
+        """,
+        (ticker, osakedata_market_for_simu_market(market), buy_date, LOW_VOLUME_WINDOW_DAYS),
+    ).fetchall()
+    if len(price_rows) == LOW_VOLUME_WINDOW_DAYS:
+        avg_dollar_volume = sum(float(close) * int(volume) for _pvm, close, volume in price_rows) / LOW_VOLUME_WINDOW_DAYS
+        if avg_dollar_volume < LOW_VOLUME_THRESHOLDS[market]:
+            badges.append("LOW_VOLUME")
+        avg_close = sum(float(close) for _pvm, close, _volume in price_rows) / LOW_VOLUME_WINDOW_DAYS
+        if avg_close < PENNY_STOCK_THRESHOLDS[market]:
+            badges.append("PENNY_STOCK")
+        trading_dates = {str(pvm) for pvm, _close, _volume in price_rows}
+        findings = analysis_conn.execute(
+            """
+            SELECT date, pattern
+            FROM analysis_findings
+            WHERE ticker = ?
+              AND date >= ?
+              AND date <= ?
+            """,
+            (ticker, min(trading_dates), max(trading_dates)),
+        ).fetchall()
+        for finding_date, pattern in findings:
+            if str(finding_date) not in trading_dates:
+                continue
+            if isinstance(pattern, str) and pattern.strip().lower() in BUY_BULL_DIV_PATTERNS:
+                badges.append("BULL_DIV_IN_LAST_20_DAYS")
+                break
+
+    encoded = json.dumps(badges, separators=(",", ":"))
+    cache[key] = encoded
+    return encoded
+
+
 def build_transactions(
+    rc_conn: sqlite3.Connection,
+    os_conn: sqlite3.Connection,
+    analysis_conn: sqlite3.Connection,
     buy_rows: List[Dict[str, Any]],
     market: str,
     run_id: str,
     created_at: str,
+    has_state_attrs_json: bool,
 ) -> Tuple[List[Tuple[Any, ...]], int]:
     transactions: List[Tuple[Any, ...]] = []
     skipped_null_price = 0
+    buy_badges_cache: Dict[Tuple[str, str], str] = {}
     for row in buy_rows:
         buy_price = row.get("buy_price")
         if buy_price is None:
             skipped_null_price += 1
             continue
+        buy_date = str(row["event_date"])
+        buy_badges = (
+            resolve_buy_badges(
+                rc_conn,
+                os_conn,
+                analysis_conn,
+                str(row["ticker"]),
+                buy_date,
+                market,
+                has_state_attrs_json,
+                buy_badges_cache,
+            )
+        )
         transactions.append(
             (
                 row["ticker"],
                 market,
-                row["event_date"],
+                buy_date,
                 buy_price,
                 1,
                 row.get("rule_hit"),
+                buy_badges,
                 None,
                 None,
                 None,
@@ -446,10 +589,10 @@ def insert_transactions(
     ignored = 0
     sql = """
     INSERT OR IGNORE INTO rc_transactions_simu (
-      ticker, market, buy_date, buy_price, buy_qty, buy_rule_hit,
+      ticker, market, buy_date, buy_price, buy_qty, buy_rule_hit, buy_badges,
       sell_date, sell_price, sell_qty, sell_reason, holding_trading_days,
       run_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     for tx in transactions:
         before = conn.total_changes
@@ -526,7 +669,24 @@ def main() -> None:
                 str(row.get("rule_hit") or ""),
             )
         )
-        transactions, skipped_null_price = build_transactions(buy_rows, market, run_id, created_at)
+        with sqlite3.connect(str(Path(args.osakedata_db))) as os_conn:
+            if not table_exists(os_conn, "osakedata"):
+                summary(status="ERROR", message="OSAKEDATA_TABLE_MISSING")
+                raise SystemExit(2)
+            with sqlite3.connect(str(Path(args.analysis_db))) as analysis_conn:
+                if not table_exists(analysis_conn, "analysis_findings"):
+                    summary(status="ERROR", message="ANALYSIS_FINDINGS_MISSING")
+                    raise SystemExit(2)
+                transactions, skipped_null_price = build_transactions(
+                    conn,
+                    os_conn,
+                    analysis_conn,
+                    buy_rows,
+                    market,
+                    run_id,
+                    created_at,
+                    schema["has_state_attrs_json"],
+                )
 
         if not table_exists(conn, "rc_transactions_simu"):
             summary(status="ERROR", message="RC_TRANSACTIONS_SIMU_MISSING")

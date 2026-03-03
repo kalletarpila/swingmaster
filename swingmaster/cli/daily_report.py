@@ -34,6 +34,7 @@ OUTPUT_COLUMNS = [
     "ew_score_rolling",
     "ew_level_rolling",
     "rule_hit",
+    "buy_badges",
 ]
 ALLOWED_TRIGGERS = {"NEW_EW", "NEW_PASS", "EW_SNAPSHOT"}
 ALLOWED_CONDITION_KEYS = {
@@ -374,6 +375,61 @@ def _has_table(conn: sqlite3.Connection, table_name: str) -> bool:
     return row is not None
 
 
+def _has_column(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+    if not _has_table(conn, table_name):
+        return False
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return any(str(row[1]) == column_name for row in rows)
+
+
+def _load_buy_badges_by_key(conn: sqlite3.Connection, buy_rows: Sequence[Dict[str, Any]]) -> Dict[Tuple[str, str], str]:
+    if not buy_rows or not _has_column(conn, "rc_transactions_simu", "buy_badges"):
+        return {}
+
+    keys = sorted(
+        {
+            (str(row.get("ticker") or ""), str(row.get("event_date") or ""))
+            for row in buy_rows
+            if row.get("ticker") not in {None, "", "(none)"} and row.get("event_date") not in {None, ""}
+        }
+    )
+    if not keys:
+        return {}
+
+    out: Dict[Tuple[str, str], str] = {}
+    for ticker, buy_date in keys:
+        row = conn.execute(
+            """
+            SELECT buy_badges
+            FROM rc_transactions_simu
+            WHERE ticker = ?
+              AND buy_date = ?
+              AND buy_badges IS NOT NULL
+              AND buy_badges <> '[]'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (ticker, buy_date),
+        ).fetchone()
+        if row is not None and row[0] not in {None, "", "[]"}:
+            out[(ticker, buy_date)] = str(row[0])
+    return out
+
+
+def _attach_buy_badges(
+    conn: sqlite3.Connection,
+    buy_rows: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    badges_by_key = _load_buy_badges_by_key(conn, buy_rows)
+    out: List[Dict[str, Any]] = []
+    for row in buy_rows:
+        enriched = dict(row)
+        key = (str(row.get("ticker") or ""), str(row.get("event_date") or ""))
+        enriched["buy_badges"] = badges_by_key.get(key)
+        out.append(enriched)
+    return out
+
+
 def _ensure_temp_ew_score_table(conn: sqlite3.Connection) -> bool:
     if _has_table(conn, "rc_ew_score_daily"):
         return False
@@ -437,18 +493,23 @@ def build_daily_report_rows(
     config: MarketConfig,
     as_of_date: str,
 ) -> Tuple[List[Dict[str, Any]], bool]:
-    all_rows, missing_fastpass_table = fetch_report_raw_rows(db_path, config, as_of_date)
-    rules_config = load_buy_rules_config(config.rules_market)
-    base_rows = [row for row in all_rows if not str(row.get("section", "")).startswith("BUYS")]
-    raw_buy_rows, _ = apply_buy_rules(base_rows, rules_config, buy_section_name="BUYS")
-    json_buy_rows = group_buy_rows(raw_buy_rows)
-    final_rows = build_report_rows_json_mode(
-        all_rows=all_rows,
-        buy_rows=json_buy_rows,
-        market_label=config.display_market,
-        as_of_date=as_of_date,
-    )
-    return final_rows, missing_fastpass_table
+    conn = sqlite3.connect(str(db_path))
+    try:
+        all_rows, missing_fastpass_table = fetch_report_raw_rows(db_path, config, as_of_date)
+        rules_config = load_buy_rules_config(config.rules_market)
+        base_rows = [row for row in all_rows if not str(row.get("section", "")).startswith("BUYS")]
+        raw_buy_rows, _ = apply_buy_rules(base_rows, rules_config, buy_section_name="BUYS")
+        json_buy_rows = group_buy_rows(raw_buy_rows)
+        enriched_buy_rows = _attach_buy_badges(conn, json_buy_rows)
+        final_rows = build_report_rows_json_mode(
+            all_rows=all_rows,
+            buy_rows=enriched_buy_rows,
+            market_label=config.display_market,
+            as_of_date=as_of_date,
+        )
+        return final_rows, missing_fastpass_table
+    finally:
+        conn.close()
 
 
 def build_buy_rows_for_date(
@@ -456,12 +517,16 @@ def build_buy_rows_for_date(
     config: MarketConfig,
     as_of_date: str,
 ) -> Tuple[List[Dict[str, Any]], bool]:
-    all_rows, missing_fastpass_table = fetch_report_raw_rows(db_path, config, as_of_date)
-    rules_config = load_buy_rules_config(config.rules_market)
-    base_rows = [row for row in all_rows if not str(row.get("section", "")).startswith("BUYS")]
-    raw_buy_rows, _ = apply_buy_rules(base_rows, rules_config, buy_section_name="BUYS")
-    json_buy_rows = group_buy_rows(raw_buy_rows)
-    return json_buy_rows, missing_fastpass_table
+    conn = sqlite3.connect(str(db_path))
+    try:
+        all_rows, missing_fastpass_table = fetch_report_raw_rows(db_path, config, as_of_date)
+        rules_config = load_buy_rules_config(config.rules_market)
+        base_rows = [row for row in all_rows if not str(row.get("section", "")).startswith("BUYS")]
+        raw_buy_rows, _ = apply_buy_rules(base_rows, rules_config, buy_section_name="BUYS")
+        json_buy_rows = group_buy_rows(raw_buy_rows)
+        return _attach_buy_badges(conn, json_buy_rows), missing_fastpass_table
+    finally:
+        conn.close()
 
 
 def write_outputs(rows: Sequence[Dict[str, Any]], txt_out: Path, csv_out: Path) -> None:

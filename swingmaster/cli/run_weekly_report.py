@@ -86,6 +86,7 @@ def main() -> None:
                 "ew_score_rolling": None,
                 "ew_level_rolling": None,
                 "rule_hit": "EMPTY_SECTION",
+                "buy_badges": None,
             }
         ]
 

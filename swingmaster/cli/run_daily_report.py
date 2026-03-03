@@ -7,11 +7,8 @@ from typing import List
 
 from swingmaster.cli.daily_report import (
     MARKET_CONFIGS,
-    apply_buy_rules,
-    build_report_rows_json_mode,
-    fetch_report_raw_rows,
+    build_daily_report_rows,
     infer_market_from_db_path,
-    load_buy_rules_config,
     write_outputs,
 )
 
@@ -73,24 +70,14 @@ def main() -> None:
         config = MARKET_CONFIGS[market]
         db_path = Path(args.rc_db) if args.rc_db and len(markets) == 1 else config.db_path
 
-        all_rows, missing_fastpass_table = fetch_report_raw_rows(db_path, config, as_of_date)
-        if missing_fastpass_table:
-            print("WARNING FASTPASS_TABLE_MISSING")
-
         try:
-            rules_config = load_buy_rules_config(config.rules_market)
+            final_rows, missing_fastpass_table = build_daily_report_rows(db_path, config, as_of_date)
         except FileNotFoundError as exc:
             print(str(exc), file=sys.stderr)
             raise SystemExit(2)
 
-        base_rows = [row for row in all_rows if not str(row.get("section", "")).startswith("BUYS")]
-        json_buy_rows, _ = apply_buy_rules(base_rows, rules_config, buy_section_name="BUYS")
-        final_rows = build_report_rows_json_mode(
-            all_rows=all_rows,
-            buy_rows=json_buy_rows,
-            market_label=config.display_market,
-            as_of_date=as_of_date,
-        )
+        if missing_fastpass_table:
+            print("WARNING FASTPASS_TABLE_MISSING")
 
         txt_out = out_dir / f"{config.output_prefix}_daily_report_{as_of_date}.txt"
         csv_out = out_dir / f"{config.output_prefix}_daily_report_{as_of_date}.csv"

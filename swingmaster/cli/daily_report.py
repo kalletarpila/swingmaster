@@ -36,6 +36,7 @@ OUTPUT_COLUMNS = [
     "rule_hit",
     "buy_badges",
 ]
+REPORT_RAW_COLUMNS = [column for column in OUTPUT_COLUMNS if column != "buy_badges"]
 ALLOWED_TRIGGERS = {"NEW_EW", "NEW_PASS", "EW_SNAPSHOT"}
 ALLOWED_CONDITION_KEYS = {
     "fastpass_score_gte",
@@ -269,6 +270,14 @@ def group_buy_rows(buy_rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def _format_cell(value: Any) -> str:
     if value is None:
         return ""
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list) and all(isinstance(item, str) for item in parsed):
+            cleaned = [item.split("=", 1)[1] if "=" in item else item for item in parsed]
+            return json.dumps(cleaned, separators=(",", ":"))
     return str(value)
 
 
@@ -343,6 +352,14 @@ def _format_csv_value(value: Any) -> str:
         return ""
     if isinstance(value, float):
         return f"{value}".replace(".", ",")
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list) and all(isinstance(item, str) for item in parsed):
+            cleaned = [item.split("=", 1)[1] if "=" in item else item for item in parsed]
+            return json.dumps(cleaned, separators=(",", ":"))
     return str(value)
 
 
@@ -458,9 +475,13 @@ def fetch_report_raw_rows(db_path: Path, config: MarketConfig, as_of_date: str) 
         sql = _substitute_sql_template(SQL_TEMPLATE_PATH.read_text(encoding="utf-8"), config, as_of_date)
         conn.executescript(sql)
         rows = conn.execute(
-            "SELECT section_sort, " + ", ".join(OUTPUT_COLUMNS) + " FROM report_raw ORDER BY section_sort, market, ticker"
+            "SELECT section_sort, " + ", ".join(REPORT_RAW_COLUMNS) + " FROM report_raw ORDER BY section_sort, market, ticker"
         ).fetchall()
-        out = [dict(row) for row in rows]
+        out = []
+        for row in rows:
+            payload = dict(row)
+            payload["buy_badges"] = None
+            out.append(payload)
         return out, missing_fastpass_table
     finally:
         conn.close()

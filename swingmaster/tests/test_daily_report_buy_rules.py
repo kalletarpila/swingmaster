@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from swingmaster.cli.daily_report import _attach_buy_badges, apply_buy_rules, validate_buy_rules_config
+from swingmaster.cli.daily_report import _attach_buy_badges, _format_cell, _format_csv_value, apply_buy_rules, validate_buy_rules_config
 
 
 @pytest.mark.parametrize(
@@ -134,3 +134,10 @@ def test_attach_buy_badges_enriches_matching_buy_rows() -> None:
 
     assert out[0]["buy_badges"] == '["LOW_VOLUME","PENNY_STOCK"]'
     assert out[1]["buy_badges"] is None
+
+
+def test_format_buy_badges_strips_key_prefix_from_display_values() -> None:
+    value = '["downtrend_entry_type=SLOW_SOFT","LOW_VOLUME"]'
+
+    assert _format_cell(value) == '["SLOW_SOFT","LOW_VOLUME"]'
+    assert _format_csv_value(value) == '["SLOW_SOFT","LOW_VOLUME"]'

@@ -9,8 +9,8 @@ This is the unified V3 reference document for:
 
 ## Document update provenance
 - Previous update baseline: commit `4808bc32f7dd96df9be1f16b604d52df52acb01f` (2026-02-19 18:46:56 +0200)
-- Current sync point: commit `b5159d19c5890e40335369e379f25cfd1fc1f7f8` (2026-02-22 09:02:42 +0200)
-- This revision reflects all program changes in `4808bc3..b5159d1` that affect V3 behavior, runtime integration, scoring outputs, and reporting contracts.
+- Current sync point: commit `4fcca833be75b3d623b67e2a7152a387eed5185f` (2026-03-03 16:41:46 +0200)
+- This revision reflects all program changes in `4808bc3..4fcca83` that affect V3 behavior, runtime integration, scoring outputs, and reporting contracts.
 
 ## Sources (code)
 - `swingmaster/core/signals/enums.py`
@@ -25,6 +25,15 @@ This is the unified V3 reference document for:
 - `swingmaster/core/policy/rule_v2/policy.py`
 - `swingmaster/core/policy/rule_v3/policy.py`
 - `swingmaster/cli/run_range_universe.py`
+- `swingmaster/cli/daily_report.py`
+- `swingmaster/cli/run_daily_report.py`
+- `swingmaster/cli/run_weekly_report.py`
+- `swingmaster/cli/run_transactions_simu_fast.py`
+- `swingmaster/cli/run_transactions_simu_sell_fast.py`
+- `swingmaster/reporting/sell_rules_engine.py`
+- `daily_reports/buy_rules/*.json`
+- `daily_reports/buy_rules/schema_v1.md`
+- `daily_reports/sell_rules/*.json`
 - `swingmaster/ew_score/model_config.py`
 - `swingmaster/ew_score/repo.py`
 - `swingmaster/ew_score/compute.py`
@@ -36,6 +45,7 @@ This is the unified V3 reference document for:
 ## 1. Signal Layer (V3)
 
 ### 1.1 Active SignalKey set
+SignalKey enum superset (current identifiers in code):
 - `SLOW_DECLINE_STARTED`
 - `SLOW_DRIFT_DETECTED`
 - `SHARP_SELL_OFF_DETECTED`
@@ -54,6 +64,37 @@ This is the unified V3 reference document for:
 - all `DOW_*` keys
 - `DATA_INSUFFICIENT`
 - `NO_SIGNAL`
+
+Current `OsakeDataSignalProviderV3` emitted set:
+- `SLOW_DRIFT_DETECTED`
+- `SLOW_DECLINE_STARTED`
+- `SHARP_SELL_OFF_DETECTED`
+- `VOLATILITY_COMPRESSION_DETECTED`
+- `MA20_RECLAIMED`
+- `TREND_MATURED`
+- `STABILIZATION_CONFIRMED`
+- `ENTRY_SETUP_VALID`
+- `INVALIDATED`
+- `STRUCTURAL_DOWNTREND_DETECTED`
+- `TREND_STARTED`
+- all computed `DOW_*` facts
+- `HIGHER_LOW_CONFIRMED` (derived from `DOW_LAST_LOW_HL`)
+- `STRUCTURE_BREAKOUT_UP_CONFIRMED` (derived from `DOW_BOS_BREAK_UP`)
+- `DATA_INSUFFICIENT`
+- `NO_SIGNAL`
+
+Enum keys currently consumed by policy but not emitted by the current V3 provider:
+- `SELLING_PRESSURE_EASED`
+- `EDGE_GONE`
+
+Important interpretation:
+- `DOW_*` keys are structural facts, not a mutually-exclusive single label.
+- A single day may emit multiple `DOW_*` facts at the same time, for example:
+  - trend state (`DOW_TREND_*`)
+  - last confirmed low classification (`DOW_LAST_LOW_*`)
+  - last confirmed high classification (`DOW_LAST_HIGH_*`)
+  - new-break event (`DOW_NEW_LL`, `DOW_NEW_HH`, `DOW_BOS_BREAK_*`)
+- This is expected current behavior, not a provider conflict.
 
 ### 1.2 Provider defaults (`OsakeDataSignalProviderV3`)
 - `sma_window=20`
@@ -161,7 +202,10 @@ Provider details:
 - `TREND_STARTED` is forced if `DOW_TREND_CHANGE_UP_TO_NEUTRAL` and `DOW_LAST_LOW_LL`; otherwise base `eval_trend_started(...)` is used.
 - If `DOW_LAST_LOW_HL` exists: emit `HIGHER_LOW_CONFIRMED`.
 - If `DOW_BOS_BREAK_UP` exists: emit `STRUCTURE_BREAKOUT_UP_CONFIRMED`.
+- All computed Dow facts are written through to the final signal set after primary/non-primary signals are resolved.
 - If no primary signals and no `INVALIDATED`: emit `NO_SIGNAL`.
+- `SELLING_PRESSURE_EASED` remains part of the policy contract, but no dedicated V3 provider module emits it in the current codebase.
+- `EDGE_GONE` is a policy/helper concept in current runtime, not a primary V3 provider output.
 
 ## 3. State Machine
 
@@ -271,7 +315,7 @@ V3 uses same reason codes as v2:
 - `CHURN_GUARD`
 - `MIN_STATE_AGE_LOCK`
 - `DATA_INSUFFICIENT`
-- `NO_SIGNAL`
+- `NO_SIGNAL` 
 
 Persisted as `POLICY:<ReasonCode>`.
 
@@ -375,10 +419,321 @@ Write timing and storage:
   - rejected: mixed pair -> `RuntimeError("Incompatible versions: signal-version and policy-version must both be v3, or both non-v3.")`
 - Guard runs before opening SQLite connections and before any schema ensure calls.
 - SQLite temp directory is forced to `/tmp` in CLI startup (`SQLITE_TMPDIR` env + `PRAGMA temp_store_directory='/tmp'`) to keep range runs stable in this environment.
+- Current range-run behavior forces `effective_require_row_on_date = True` internally.
+- Universe filtering may apply `require_row_on_date` against `date_from`, and daily processing also filters tickers to those that actually have an as-of row on each processed trading day.
+- Practical effect:
+  - daily `run_daily(...)` is executed only for tickers present on that trading day
+  - tickers missing an as-of row are skipped for that day instead of being processed against stale last row data
 - Optional EW scoring integration from range CLI:
   - flags: `--ew-score`, `--ew-score-rule`, `--osakedata-db`
-  - execution point: after state data exists for processed dates
+  - execution point: after state data exists for processed dates and after episode post phases have populated `rc_pipeline_episode`
   - summary line: dates processed + total rows written.
+- Post-run episode enrichment phases execute after the day loop, in this order:
+  - `populate_rc_pipeline_episode`
+  - `populate_rc_pipeline_episode_sma_extremes`
+  - `populate_rc_pipeline_episode_peak_timing_fields`
+  - `populate_rc_pipeline_episode_entry_confirmation`
+- Current CLI prints explicit progress markers for these phases:
+  - `POST_PHASE_START phase=...`
+  - `POST_PHASE_END phase=... ms=...`
+  - `POST_PHASE_SUMMARY ...`
+- Operational implication:
+  - `rc_state_daily` / `rc_transition` daily data is committed inside each `run_daily(...)`
+  - if a long range run is interrupted during post phases, the main day-level state machine output is already persisted; risk is limited to incomplete episode/post-processing fields until the range post phases are re-run.
+
+### 6.1 Daily report base sections
+Current `daily_report.py` builds report output in this order:
+- `NEW_EW`
+- `NEW_PASS`
+- `BUYS`
+- `EW_SNAPSHOT`
+- `ALERTS`
+
+Base rows come from the SQL template `daily_reports/fin_daily_report.sql`, which is parameterized by market config.
+
+Operational meaning of the buy-rule triggers:
+- `NEW_EW`: ticker transitioned to `ENTRY_WINDOW` on `as_of_date`
+- `NEW_PASS`: ticker transitioned to `PASS` on `as_of_date`
+- `EW_SNAPSHOT`: ticker is in `ENTRY_WINDOW` on `as_of_date`
+
+`buy_badges` is not part of the base `report_raw` SQL temp table.
+Current reporting path enriches it afterwards from `rc_transactions_simu`:
+- only `BUYS` rows are eligible
+- match key is `(ticker, buy_date)`
+- when multiple persisted BUY rows exist, reporting prefers latest by `created_at DESC, id DESC`
+- empty `[]` stays hidden in rendered output
+
+Current market routing in `daily_report.py`:
+- `FIN` / `OMXH` -> db `swingmaster_rc.db`
+- `SE` / `OMXS` -> db `swingmaster_rc_se.db`
+- `USA` -> db `swingmaster_rc_usa_2024_2025.db`
+- `USA500` -> db `swingmaster_rc_usa_500.db`
+
+Current hardcoded report identities:
+- `FIN`: section `BUYS_FIN`, rule label `FIN_PASS_FP60`, threshold `0.60`
+- `SE`: section `BUYS_1_SE`, rule label `SE_BUY_1_FP80`, threshold `0.80`
+- `USA`: section `BUYS_USA`, rule label `USA_PASS_FP80`, threshold `0.80`
+- `USA500`: section `BUYS_USA500`, rule label `USA500_PASS_FP80`, threshold `0.80`
+
+Important distinction:
+- these hardcoded section/rule placeholders belong to the parameterized SQL template path
+- current authoritative BUY recommendation rows are then rebuilt in Python from market JSON buy rules
+- therefore a hardcoded SQL label may differ from final JSON-driven `rule_hit` values
+- `USA500` currently reuses `rules_market="USA"` for JSON buy-rule loading, while keeping its own hardcoded section label for the SQL template path
+
+### 6.2 Buy-rule JSON contract and current live rules
+Buy rules are metadata/reporting layer only:
+- they do not alter signal generation
+- they do not alter policy logic
+- they do not alter state transitions
+- they filter already-produced report candidate rows
+
+Validation contract (`version = 1`):
+- top-level keys exactly: `market`, `version`, `rules`
+- allowed triggers:
+  - `NEW_EW`
+  - `NEW_PASS`
+  - `EW_SNAPSHOT`
+- allowed condition keys:
+  - `fastpass_score_gte`
+  - `fastpass_level_eq`
+  - `rolling_end_level_eq`
+  - `days_in_current_episode_gte`
+  - `days_in_current_episode_lte`
+  - `days_in_stabilizing_before_ew_gte`
+  - `days_in_stabilizing_before_ew_eq`
+- conditions are ANDed
+- no OR logic
+- no nested logic
+
+Field mapping used by the engine:
+- `fastpass_score_gte` -> `ew_score_fastpass`
+- `fastpass_level_eq` -> `ew_level_fastpass`
+- `rolling_end_level_eq` -> `ew_level_rolling`
+- `days_in_current_episode_*` -> `days_in_current_episode`
+- `days_in_stabilizing_before_ew_*` -> `days_in_stabilizing_before_ew`
+
+Current committed market configs:
+- `FIN`
+  - `FIN_PASS_FP60`
+  - trigger `NEW_PASS`
+  - condition `fastpass_score_gte = 0.60`
+- `SE`
+  - `SE_PASS_FP80`
+  - trigger `NEW_PASS`
+  - condition `fastpass_score_gte = 0.80`
+  - `SE_ENTRY_FP80`
+  - trigger `NEW_EW`
+  - condition `fastpass_score_gte = 0.80`
+  - `SE_PASS_ROLL_END_LVL1`
+  - trigger `NEW_PASS`
+  - condition `rolling_end_level_eq = 1`
+- `USA`
+  - `USA_PASS_FP80`
+  - trigger `NEW_PASS`
+  - condition `fastpass_score_gte = 0.80`
+
+Current buy-rule files:
+- `daily_reports/buy_rules/fin.json`
+- `daily_reports/buy_rules/se.json`
+- `daily_reports/buy_rules/usa.json`
+
+Rule application flow:
+- load JSON for market
+- filter base rows by trigger
+- evaluate all conditions against already-populated fields
+- create `BUYS` row for each match
+- group by `(ticker, event_date)`
+- join multiple rule hits with `;`
+
+### 6.3 BUY transaction simulation contract (`rc_transactions_simu`)
+Canonical persisted BUY simulator in current codebase:
+- `run_transactions_simu_fast.py`
+
+Purpose:
+- convert `NEW_EW` and `NEW_PASS` candidate rows into persisted simulated BUY rows
+- apply deterministic buy rules before persistence
+
+Current `rc_transactions_simu` schema used in runtime:
+- `id`
+- `ticker`
+- `market`
+- `buy_date`
+- `buy_price`
+- `buy_qty`
+- `buy_rule_hit`
+- `sell_date`
+- `sell_price`
+- `sell_qty`
+- `sell_reason`
+- `holding_trading_days`
+- `run_id`
+- `created_at`
+- `buy_badges`
+
+Constraints:
+- unique key: `(ticker, buy_date, run_id)`
+- `buy_badges TEXT NOT NULL DEFAULT '[]'`
+
+Fast BUY simulation flow:
+1. fetch candidate rows from `rc_transition` / `rc_pipeline_episode`:
+   - `NEW_EW` buys use `close_at_ew_start` as `buy_price`
+   - `NEW_PASS` buys use `close_at_ew_exit` as `buy_price`
+2. enrich missing `days_in_current_episode` / `days_in_stabilizing_before_ew` from trading-day map if needed
+3. apply buy rules
+4. group multi-rule hits per `(ticker, event_date)`
+5. build transaction tuples with `buy_qty = 1`
+6. `INSERT OR IGNORE` into `rc_transactions_simu`
+
+Current `run_transactions_simu_fast.py` CLI/runtime contract:
+- required:
+  - `--rc-db`
+  - `--market` (`FIN|SE|USA`)
+  - `--start-date`
+  - `--end-date`
+- optional:
+  - `--osakedata-db`
+  - `--analysis-db`
+  - `--mode append|replace-run`
+  - `--dry-run`
+  - `--run-id`
+  - `--created-at`
+
+Current fast BUY engine summary fields include:
+- `new_ew_candidates`
+- `new_pass_candidates`
+- `candidate_rows_total`
+- `buy_rows_total_raw`
+- `buy_rows_total`
+- `multi_rule_buys`
+- `missing_field_count`
+- `buys_inserted`
+- `buys_ignored`
+
+### 6.4 BUY badges contract
+`buy_badges` is persisted as deterministic JSON array text in `rc_transactions_simu`.
+
+Storage contract:
+- DB value is always JSON array text
+- empty array is stored as `[]`
+- display layer may simplify values, but storage remains canonical
+
+Current badge resolution order in `run_transactions_simu_fast.py`:
+1. `downtrend_entry_type=<VALUE>` from `rc_state_daily.state_attrs_json` on `buy_date`
+2. `LOW_VOLUME`
+3. `PENNY_STOCK`
+4. `BULL_DIV_IN_LAST_20_DAYS`
+
+Current metadata-derived badge keys:
+- only `downtrend_entry_type`
+
+Current market thresholds for `LOW_VOLUME`:
+- `FIN = 35000`
+- `SE = 1000000`
+- `USA = 1500000`
+
+Definition:
+- use last 20 trading days including `buy_date`
+- compute average of `close * volume`
+- require full 20 trading-day window
+- add badge if average is strictly below market threshold
+
+Current market thresholds for `PENNY_STOCK`:
+- `FIN = 1.0`
+- `SE = 10.0`
+- `USA = 1.0`
+
+Definition:
+- use last 20 trading days including `buy_date`
+- compute `SMA20(close)`
+- require full 20 trading-day window
+- add badge if average close is strictly below market threshold
+
+Current definition for `BULL_DIV_IN_LAST_20_DAYS`:
+- use same 20-trading-day window as above
+- query `analysis_findings`
+- case-insensitive pattern match against:
+  - `Bullish Divergence`
+  - `BullDiv & Hammer`
+  - `BullDiv & Piercing Pattern`
+  - `BullDiv & Bullish Engulfing`
+  - `BullDiv & Dragonfly Doji`
+- add badge if any matching pattern exists on any date inside the 20-trading-day window
+
+Report presentation contract:
+- daily/weekly output adds column `buy_badges`
+- display strips metadata prefix `downtrend_entry_type=` from rendered badge values
+- example:
+  - stored: `["downtrend_entry_type=SLOW_SOFT","LOW_VOLUME"]`
+  - rendered: `["SLOW_SOFT","LOW_VOLUME"]`
+
+### 6.5 SELL-rule JSON contract and SELL fast simulation
+SELL rules are also metadata/reporting layer only:
+- they do not alter signals
+- they do not alter policy
+- they do not alter state transitions
+- they operate on simulated open positions
+
+Current engine files:
+- `swingmaster/reporting/sell_rules_engine.py`
+- `swingmaster/cli/run_transactions_simu_sell_fast.py`
+
+Validation contract (`version = 1`):
+- top-level keys exactly: `market`, `version`, `rules`
+- allowed trigger:
+  - `OPEN_POSITION`
+- allowed condition keys:
+  - `holding_trading_days_gte`
+  - `holding_trading_days_eq`
+  - `last_close_return_gte`
+  - `last_close_return_lte`
+  - `close_to_buy_return_gte`
+  - `close_to_buy_return_lte`
+
+Value resolution rules:
+- `holding_trading_days_*` reads `holding_trading_days`
+- `last_close_return_*` prefers explicit `last_close_return`
+- if not present, engine derives return from:
+  - `last_close` or `close`
+  - and `buy_price`
+- `close_to_buy_return_*` uses same derived return logic
+
+Current committed sell configs for all three markets:
+- `FIN_TIME_40TD` / `SE_TIME_40TD` / `USA_TIME_40TD`
+  - `holding_trading_days >= 40`
+- `FIN_STOP_LOSS_5P` / `SE_STOP_LOSS_5P` / `USA_STOP_LOSS_5P`
+  - `close_to_buy_return <= -0.05`
+- `FIN_TAKE_PROFIT_10P` / `SE_TAKE_PROFIT_10P` / `USA_TAKE_PROFIT_10P`
+  - `close_to_buy_return >= 0.10`
+
+Current SELL fast simulation flow:
+1. read open positions from `rc_transactions_simu` where `sell_date IS NULL`
+2. load market closes from `osakedata`
+3. evaluate each open position over trading dates from `max(start_date, buy_date)` through `end_date`
+4. first matching sell rule wins for that position
+5. update existing `rc_transactions_simu` row in place:
+   - `sell_date`
+   - `sell_price`
+   - `sell_qty`
+   - `sell_reason`
+   - `holding_trading_days`
+
+Important runtime details:
+- `run_transactions_simu_sell_fast.py` default `--dry-run = true`
+- `replace-run` reverts prior sells from same run by matching `sell_reason` prefix
+- sell reason format:
+  - `SIMU_SELL_FAST_V1_RUNID=<run_id>|<rule_hit>`
+- safety guard:
+  - `MAX_EVAL_ROWS = 2_000_000`
+
+### 6.6 Weekly report aggregation
+`run_weekly_report.py`:
+- reads recent 7 trading dates from each market DB
+- rebuilds daily buy rows through the same `build_daily_report_rows(...)` path
+- keeps only `BUYS` rows
+- combines `FIN`, `SE`, `USA`
+- writes deterministic combined weekly text/csv output
+- preserves `buy_badges` column and current display formatting
 
 ## 7. EW Scoring Layer (current production contract)
 
@@ -401,7 +756,24 @@ Migration helper:
 - Idempotent on repeated runs.
 - Raises clear error if table `rc_ew_score_daily` does not exist.
 
-### 7.2 Router by market (explicit maps)
+### 7.2 Rule resolver + router by market
+`run_ew_score.py` resolves `--rule` through `resolve_ew_score_rule(...)` before scoring.
+
+Accepted input formats:
+- canonical versioned:
+  - `EW_SCORE_ROLLING_FIN_V2`
+  - `EW_SCORE_ROLLING_SE_V2`
+- alias form:
+  - `EW_SCORE_ROLLING_FIN`
+  - `EW_SCORE_ROLLING_SE`
+  - resolves to latest available canonical version for that market
+- legacy form:
+  - `EW_SCORE_ROLLING_V2_FIN`
+  - if exact file exists, use it
+  - otherwise resolve by market to latest canonical version
+
+After resolution, `compute.py` still applies explicit market routing when market-specific fastpass/rolling routes exist.
+
 In `ew_score/compute.py`:
 - `ROLLING_ENABLED_BY_MARKET = {"omxh": True, "omxs": True, "usa": False}`
 - `FASTPASS_ENABLED_BY_MARKET = {"omxh": True, "omxs": True, "usa": True}`
@@ -412,6 +784,10 @@ In `ew_score/compute.py`:
   - `omxh -> EW_SCORE_FASTPASS_V1_FIN`
   - `omxs -> EW_SCORE_FASTPASS_V1_SE`
   - `usa  -> EW_SCORE_FASTPASS_V1_USA_SMALL`
+
+Current routing semantics:
+- if market routing succeeds, routed rolling/fastpass writes are used and generic fallback scoring is skipped for that ticker/day
+- fallback to the explicit `rule_id` happens only when routing does not handle the ticker/day
 
 ### 7.3 Level contract (uniform 0/1/2/3)
 Both rolling and fastpass use same level mapping from `rows_total` and score threshold:
@@ -508,6 +884,140 @@ Rolling (`inputs_json_rolling`) required keys:
 - `state` / `prev_state`
 - `reason_codes`
 - `state_attrs_json` fields (`downtrend_origin`, `downtrend_entry_type`, `decline_profile`, `stabilization_phase`, `entry_gate`, `entry_quality`, `entry_continuation_confirmed`)
+
+## 12. USA Episode Dual-Score Build (Reproducible: `UP20` + `FAIL10`)
+This section documents the exact research pipeline used to produce two episode-level scores for USA episodes:
+- positive score: probability-style ranking for `+20%` within next 60 trading days,
+- negative risk score: probability-style ranking for `FAIL10` (does not reach `+10%` within next 60 trading days).
+
+### 12.1 Runtime environment and DBs
+- working DB: `/tmp/swingmaster_usa_episode_rank_test.db`
+- source RC DB (state/transition attrs): `/home/kalle/projects/swingmaster/swingmaster_rc_usa_2024_2025.db`
+- source OHLCV DB (already integrated into label tables in working DB): `/home/kalle/projects/rawcandle/data/osakedata.db`
+
+### 12.2 Label definitions and horizon
+All labels are anchored at episode decision timestamp `entry_window_exit_date` and use close-only forward window.
+
+Definitions:
+- `growth_60d_close_pct_from_exit = 100 * (max_close_next_60d - close_at_ew_exit) / close_at_ew_exit`
+- `UP20` label:
+  - `label_up20_60d_close = 1` if `growth_60d_close_pct_from_exit >= 20`
+  - else `0`
+- `FAIL10` label:
+  - `label_fail10_60d_close = 1` if `growth_60d_close_pct_from_exit < 10`
+  - else `0`
+- only rows with full forward horizon were used (`has_full_forward_60d = 1`)
+
+### 12.3 Temporal split (no random split)
+Primary split used in final model selection:
+- `train`: years `2020-2023`
+- `validation`: year `2024`
+- `test`: year `2025`
+
+Rationale: avoid leakage from random sampling across regimes; preserve chronological evaluation.
+
+### 12.4 Feature sets
+Training script: `swingmaster/research/train_episode_up20_baseline.py`
+
+Feature families:
+- `baseline`: EW/exit/badge features (`ew_score_fastpass`, `ew_level_fastpass`, `exit_state_*`, buy flags, badges)
+- `episode`: baseline + episode geometry (`close_at_*`, day counts, ranges, phase returns)
+- `full`: episode + stock/index context
+- `full_no_dow`: `full` without DOW index blocks (`dji_*`, `djt_*`)
+
+Final selected feature set for risk score:
+- `full_no_dow`
+
+### 12.5 Algorithms compared
+Using the same script, three algorithms were compared:
+- `logreg`:
+  - `SimpleImputer(constant=0) + StandardScaler + LogisticRegression(max_iter=2000, solver=lbfgs)`
+- `hgb`:
+  - `HistGradientBoostingClassifier(learning_rate=0.05, max_depth=3, max_iter=300, min_samples_leaf=20, random_state=42)`
+- `catboost`:
+  - `CatBoostClassifier(iterations=500, depth=5, learning_rate=0.05, loss_function=Logloss, eval_metric=PRAUC, random_seed=42, verbose=False)`
+
+### 12.6 Positive score (`UP20`) final construction
+Base score tables (already produced):
+- `rc_episode_model_full_up20_60d_close_scores_catboost` (`score_full_catboost`)
+- `rc_episode_model_full_no_dow_up20_60d_close_pass_only_scores_catboost` (`score_pass_only_catboost`)
+
+Meta rule (`meta_v1`):
+- if episode exited `ENTRY_WINDOW -> PASS`, use `score_pass_only_catboost`
+- otherwise use `score_full_catboost`
+
+Stored evaluation table:
+- `rc_episode_model_test_meta_rank_v1`
+  - includes `score_full_catboost`, `score_pass_only_catboost`, `score_meta_v1`
+
+### 12.7 Negative score (`FAIL10`) final construction
+Label table:
+- `rc_episode_label_fail10_60d_close`
+
+Modeling table:
+- `rc_episode_model_full_no_dow_fail10_60d_close`
+  - uses `full_no_dow` feature columns
+  - label is mapped to script-expected column name `label_up20_60d_close` for training compatibility
+
+Compared model outputs:
+- `rc_episode_model_full_no_dow_fail10_60d_close_scores_logreg`
+- `rc_episode_model_full_no_dow_fail10_60d_close_scores_hgb`
+- `rc_episode_model_full_no_dow_fail10_60d_close_scores_catboost`
+
+Selection result on 2025 test:
+- selected model: `HGB`
+- reason: best combined quality (`AP` and `Brier`) for risk-probability behavior
+
+Named score table used downstream:
+- `rc_episode_model_full_no_dow_fail10_60d_close_scores_hgb_named`
+  - `score_fail10_60d_close_hgb`
+
+### 12.8 Final dual-score table and locked thresholds
+Final dual score table (2025 test):
+- `rc_episode_model_test_dual_score_2025_hgb_fail10`
+  - `score_up20_meta_v1`
+  - `score_fail10_60d_close_hgb`
+
+Locked shortlist thresholds:
+- `score_up20_meta_v1 >= 0.60`
+- `score_fail10_60d_close_hgb <= 0.35`
+
+Materialized shortlist table (2025 test):
+- `rc_episode_model_test_buys_u060_f035`
+
+Materialized yearly shortlist table (2020-2024):
+- `rc_episode_model_dual_2020_2024_hgb_fail10`
+- `rc_episode_model_buys_u060_f035_2020_2024`
+
+### 12.9 Reproduction command template
+Train (example for `FAIL10` HGB):
+```bash
+python3 swingmaster/research/train_episode_up20_baseline.py \
+  --db /tmp/swingmaster_usa_episode_rank_test.db \
+  --table rc_episode_model_full_no_dow_fail10_60d_close \
+  --feature-set full_no_dow \
+  --model-type hgb \
+  --scores-table rc_episode_model_full_no_dow_fail10_60d_close_scores_hgb \
+  --top-k 50 100 200
+```
+
+Train (example for `UP20` full catboost):
+```bash
+python3 swingmaster/research/train_episode_up20_baseline.py \
+  --db /tmp/swingmaster_usa_episode_rank_test.db \
+  --table rc_episode_model_full_up20_60d_close \
+  --feature-set full \
+  --model-type catboost \
+  --scores-table rc_episode_model_full_up20_60d_close_scores_catboost \
+  --top-k 50 100 200
+```
+
+### 12.10 Operational interpretation
+- higher `score_up20_meta_v1` means stronger model belief of reaching `+20%` within 60 trading days.
+- higher `score_fail10_60d_close_hgb` means stronger model belief that episode fails to reach `+10%` within 60 trading days.
+- decision logic uses opposite directions:
+  - maximize `score_up20_meta_v1`
+  - minimize `score_fail10_60d_close_hgb`
 
 ---
 

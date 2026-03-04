@@ -1,0 +1,126 @@
+PERFORMANCE_REPORT
+db_path=/home/kalle/projects/swingmaster/swingmaster_rc_usa_500.db
+generated_at_utc=2026-02-23T10:05:01Z
+pipeline_version_filter=NONE
+policy_used=rule_v3 (v3)
+signal_used=v3
+ew_score_rule_used=legacy=EW_SCORE_ROLLING_V2_FIN | fastpass=EW_SCORE_FASTPASS_V1_USA_SMALL
+limit=50
+
+COUNTS
+n_total=50
+n_closed=50
+n_open=0
+n_exit_pass=31
+n_exit_no_trade=19
+n_has_confirm=50
+n_confirmed=28
+pct_confirmed_among_has_confirm=0,560000
+
+RETURNS_OVERALL
+series_name                     n         mean       median          std          min          max     win_rate
+r_entry_to_ew_start            50     0,098931     0,075985     0,088878    -0,007142     0,418526     0,960000
+r_ew_window                    50     0,012957     0,001557     0,065158    -0,070138     0,341176     0,520000
+r_ew_start_to_peak60           50     0,220077     0,083211     0,704752    -0,073171     5,029412     0,860000
+r_ew_start_to_post60_peak_sma5       50     0,207046     0,090580     0,595105    -0,061669     4,212941     0,900000
+post60_peak_days_from_exit       50    35,600000    37,000000    20,258332     1,000000    60,000000     1,000000
+post60_growth_pct_close_ew_exit_to_peak       50    17,221201     8,959181    41,151767    -4,521678   288,684223     0,860000
+
+RETURNS_BY_EXIT_STATE
+exit_state   series_name                     n         mean       median          std          min          max     win_rate
+PASS         r_entry_to_ew_start            31     0,094703     0,064257     0,087930    -0,007142     0,418526     0,935484
+PASS         r_ew_window                    31     0,039747     0,019467     0,068871    -0,051546     0,341176     0,806452
+PASS         r_ew_start_to_peak60           31     0,307829     0,103973     0,882143    -0,073171     5,029412     0,903226
+PASS         r_ew_start_to_post60_peak_sma5       31     0,290744     0,094618     0,740981    -0,004007     4,212941     0,967742
+PASS         post60_peak_days_from_exit       31    35,129032    40,000000    20,528096     1,000000    60,000000     1,000000
+PASS         post60_growth_pct_close_ew_exit_to_peak       31    21,372799     8,580923    51,467259    -3,366218   288,684223     0,806452
+NO_TRADE     r_entry_to_ew_start            19     0,105829     0,077878     0,089977     0,011859     0,373754     1,000000
+NO_TRADE     r_ew_window                    19    -0,030753    -0,027914     0,018767    -0,070138     0,000176     0,052632
+NO_TRADE     r_ew_start_to_peak60           19     0,076904     0,071174     0,065741     0,000000     0,211097     0,789474
+NO_TRADE     r_ew_start_to_post60_peak_sma5       19     0,070486     0,081317     0,077936    -0,061669     0,212306     0,789474
+NO_TRADE     post60_peak_days_from_exit       19    36,368421    33,000000    19,786254     1,000000    60,000000     1,000000
+NO_TRADE     post60_growth_pct_close_ew_exit_to_peak       19    10,447541    10,238663     7,786885    -4,521678    24,498170     0,947368
+
+RETURNS_BY_CONFIRM
+confirmed  series_name                     n         mean       median          std          min          max     win_rate
+0          r_entry_to_ew_start            22     0,077163     0,076052     0,054950    -0,007142     0,239306     0,954545
+0          r_ew_window                    22    -0,006663    -0,020662     0,049846    -0,070138     0,146875     0,318182
+0          r_ew_start_to_peak60           22     0,130153     0,074206     0,194916     0,000000     0,890566     0,818182
+0          r_ew_start_to_post60_peak_sma5       22     0,129649     0,081676     0,202944    -0,054239     0,904151     0,818182
+0          post60_peak_days_from_exit       22    34,545455    35,500000    18,573508     1,000000    60,000000     1,000000
+0          post60_growth_pct_close_ew_exit_to_peak       22    13,385640     8,226014    16,543065    -0,276944    79,572961     0,954545
+1          r_entry_to_ew_start            28     0,116034     0,075608     0,105207     0,000000     0,418526     0,964286
+1          r_ew_window                    28     0,028372     0,009222     0,071339    -0,043867     0,341176     0,678571
+1          r_ew_start_to_peak60           28     0,290732     0,089368     0,919632    -0,073171     5,029412     0,892857
+1          r_ew_start_to_post60_peak_sma5       28     0,267858     0,092540     0,769185    -0,061669     4,212941     0,964286
+1          post60_peak_days_from_exit       28    36,428571    39,500000    21,453319     1,000000    60,000000     1,000000
+1          post60_growth_pct_close_ew_exit_to_peak       28    20,234856     9,371363    52,805112    -4,521678   288,684223     0,785714
+
+RETURNS_PASS_CONFIRMED
+series_name                     n         mean       median          std          min          max     win_rate
+r_entry_to_ew_start            22     0,102640     0,069317     0,097398     0,000000     0,418526     0,954545
+r_ew_window                    22     0,041540     0,015513     0,074840    -0,007322     0,341176     0,818182
+r_ew_start_to_peak60           22     0,348380     0,105169     1,029478    -0,073171     5,029412     0,909091
+r_ew_start_to_post60_peak_sma5       22     0,321441     0,098587     0,859016     0,002430     4,212941     1,000000
+post60_peak_days_from_exit       22    37,000000    45,500000    21,612286     1,000000    60,000000     1,000000
+post60_growth_pct_close_ew_exit_to_peak       22    23,194873     8,901819    59,051681    -3,366218   288,684223     0,772727
+
+EARLY_PHASE_BY_MAX_LEVEL
+max_level  series_name                     n         mean       median          std          min          max     win_rate
+0          r_entry_to_ew_start             0           NA           NA           NA           NA           NA           NA
+0          r_ew_window                     0           NA           NA           NA           NA           NA           NA
+0          r_ew_start_to_peak60            0           NA           NA           NA           NA           NA           NA
+0          r_ew_start_to_post60_peak_sma5        0           NA           NA           NA           NA           NA           NA
+0          post60_peak_days_from_exit        0           NA           NA           NA           NA           NA           NA
+0          post60_growth_pct_close_ew_exit_to_peak        0           NA           NA           NA           NA           NA           NA
+1          r_entry_to_ew_start             0           NA           NA           NA           NA           NA           NA
+1          r_ew_window                     0           NA           NA           NA           NA           NA           NA
+1          r_ew_start_to_peak60            0           NA           NA           NA           NA           NA           NA
+1          r_ew_start_to_post60_peak_sma5        0           NA           NA           NA           NA           NA           NA
+1          post60_peak_days_from_exit        0           NA           NA           NA           NA           NA           NA
+1          post60_growth_pct_close_ew_exit_to_peak        0           NA           NA           NA           NA           NA           NA
+
+MATURE_PHASE_BY_MAX_LEVEL
+max_level  series_name                     n         mean       median          std          min          max     win_rate
+2          r_entry_to_ew_start             0           NA           NA           NA           NA           NA           NA
+2          r_ew_window                     0           NA           NA           NA           NA           NA           NA
+2          r_ew_start_to_peak60            0           NA           NA           NA           NA           NA           NA
+2          r_ew_start_to_post60_peak_sma5        0           NA           NA           NA           NA           NA           NA
+2          post60_peak_days_from_exit        0           NA           NA           NA           NA           NA           NA
+2          post60_growth_pct_close_ew_exit_to_peak        0           NA           NA           NA           NA           NA           NA
+3          r_entry_to_ew_start             0           NA           NA           NA           NA           NA           NA
+3          r_ew_window                     0           NA           NA           NA           NA           NA           NA
+3          r_ew_start_to_peak60            0           NA           NA           NA           NA           NA           NA
+3          r_ew_start_to_post60_peak_sma5        0           NA           NA           NA           NA           NA           NA
+3          post60_peak_days_from_exit        0           NA           NA           NA           NA           NA           NA
+3          post60_growth_pct_close_ew_exit_to_peak        0           NA           NA           NA           NA           NA           NA
+
+EARLY_PHASE_BY_MAX_FASTPASS_LEVEL
+max_level  series_name                     n         mean       median          std          min          max     win_rate
+0          r_entry_to_ew_start            27     0,093918     0,077878     0,079457    -0,007142     0,373754     0,962963
+0          r_ew_window                    27    -0,007111    -0,002227     0,030316    -0,063591     0,050897     0,444444
+0          r_ew_start_to_peak60           27     0,101760     0,062361     0,111696     0,000000     0,487631     0,814815
+0          r_ew_start_to_post60_peak_sma5       27     0,097715     0,080178     0,125807    -0,061669     0,534100     0,814815
+0          post60_peak_days_from_exit       27    35,333333    41,000000    22,787261     1,000000    60,000000     1,000000
+0          post60_growth_pct_close_ew_exit_to_peak       27    10,455770     8,580923    10,948012    -4,521678    45,979977     0,814815
+1          r_entry_to_ew_start            13     0,120630     0,072575     0,113559     0,000000     0,418526     0,923077
+1          r_ew_window                    13     0,063072     0,028133     0,100882    -0,070138     0,341176     0,692308
+1          r_ew_start_to_peak60           13     0,558717     0,103973     1,313245    -0,073171     5,029412     0,846154
+1          r_ew_start_to_post60_peak_sma5       13     0,512626     0,104491     1,094268     0,005437     4,212941     1,000000
+1          post60_peak_days_from_exit       13    38,461538    45,000000    17,180559     1,000000    60,000000     1,000000
+1          post60_growth_pct_close_ew_exit_to_peak       13    36,613726    14,778640    75,579481    -3,366218   288,684223     0,846154
+
+MATURE_PHASE_BY_MAX_FASTPASS_LEVEL
+max_level  series_name                     n         mean       median          std          min          max     win_rate
+2          r_entry_to_ew_start             9     0,085260     0,073150     0,072889     0,011859     0,243084     1,000000
+2          r_ew_window                     9     0,005128     0,000176     0,032575    -0,039821     0,059353     0,555556
+2          r_ew_start_to_peak60            9     0,107333     0,102179     0,079232     0,018152     0,283122     1,000000
+2          r_ew_start_to_post60_peak_sma5        9     0,112580     0,094618     0,086706     0,024807     0,316687     1,000000
+2          post60_peak_days_from_exit        9    34,111111    28,000000    15,842590    12,000000    60,000000     1,000000
+2          post60_growth_pct_close_ew_exit_to_peak        9    10,702040     9,520010     7,851159     1,697607    24,291603     1,000000
+3          r_entry_to_ew_start             0           NA           NA           NA           NA           NA           NA
+3          r_ew_window                     0           NA           NA           NA           NA           NA           NA
+3          r_ew_start_to_peak60            0           NA           NA           NA           NA           NA           NA
+3          r_ew_start_to_post60_peak_sma5        0           NA           NA           NA           NA           NA           NA
+3          post60_peak_days_from_exit        0           NA           NA           NA           NA           NA           NA
+3          post60_growth_pct_close_ew_exit_to_peak        0           NA           NA           NA           NA           NA           NA

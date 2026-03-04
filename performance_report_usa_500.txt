@@ -1,0 +1,91 @@
+PERFORMANCE_REPORT
+db_path=/home/kalle/projects/swingmaster/swingmaster_rc_usa_500.db
+generated_at_utc=2026-02-22T21:03:16Z
+pipeline_version_filter=NONE
+policy_used=rule_v3 (v3)
+signal_used=v3
+ew_score_rule_used=legacy=EW_SCORE_ROLLING_V2_FIN | fastpass=EW_SCORE_FASTPASS_V1_USA_SMALL
+limit=NONE
+
+COUNTS
+n_total=1231
+n_closed=1219
+n_open=12
+n_exit_pass=841
+n_exit_no_trade=378
+n_has_confirm=1231
+n_confirmed=706
+pct_confirmed_among_has_confirm=0,573517
+
+RETURNS_OVERALL
+series_name                     n         mean       median          std          min          max     win_rate
+r_entry_to_ew_start          1231     0,128538     0,080090     0,250201    -0,352968     5,486014     0,963444
+r_ew_window                  1218     0,003731     0,000635     0,073053    -0,249836     1,734694     0,505747
+r_ew_start_to_peak60         1231     0,159870     0,071954     0,461308    -0,073171    11,118356     0,872461
+r_ew_start_to_post60_peak_sma5     1219     0,161677     0,077381     0,447805    -0,274098    10,069809     0,860541
+
+RETURNS_BY_EXIT_STATE
+exit_state   series_name                     n         mean       median          std          min          max     win_rate
+PASS         r_entry_to_ew_start           841     0,138139     0,085763     0,280648    -0,195489     5,486014     0,967895
+PASS         r_ew_window                   840     0,017028     0,010962     0,081364    -0,249836     1,734694     0,673810
+PASS         r_ew_start_to_peak60          841     0,192630     0,087240     0,544863    -0,073171    11,118356     0,916766
+PASS         r_ew_start_to_post60_peak_sma5      841     0,195668     0,096273     0,522396    -0,274098    10,069809     0,917955
+NO_TRADE     r_entry_to_ew_start           378     0,107612     0,067392     0,166242    -0,352968     1,556522     0,952381
+NO_TRADE     r_ew_window                   378    -0,025817    -0,020826     0,034908    -0,190928     0,173502     0,132275
+NO_TRADE     r_ew_start_to_peak60          378     0,089918     0,037243     0,157669    -0,025680     1,697479     0,777778
+NO_TRADE     r_ew_start_to_post60_peak_sma5      378     0,086052     0,041641     0,176713    -0,182489     1,796639     0,732804
+
+RETURNS_BY_CONFIRM
+confirmed  series_name                     n         mean       median          std          min          max     win_rate
+0          r_entry_to_ew_start           525     0,116525     0,077953     0,168650    -0,352968     1,556522     0,952381
+0          r_ew_window                   516    -0,022206    -0,017216     0,035552    -0,249836     0,146875     0,191860
+0          r_ew_start_to_peak60          525     0,122212     0,038168     0,538512    -0,026882    11,118356     0,756190
+0          r_ew_start_to_post60_peak_sma5      516     0,116812     0,041913     0,507237    -0,274098    10,069809     0,736434
+1          r_entry_to_ew_start           706     0,137472     0,084434     0,296335    -0,195489     5,486014     0,971671
+1          r_ew_window                   702     0,022796     0,013378     0,086443    -0,172308     1,734694     0,736467
+1          r_ew_start_to_peak60          706     0,187874     0,095711     0,391876    -0,073171     6,415790     0,958924
+1          r_ew_start_to_post60_peak_sma5      703     0,194608     0,100406     0,395354    -0,223385     6,718947     0,951636
+
+EARLY_PHASE_BY_MAX_LEVEL
+max_level  series_name                     n         mean       median          std          min          max     win_rate
+0          r_entry_to_ew_start             0           NA           NA           NA           NA           NA           NA
+0          r_ew_window                     0           NA           NA           NA           NA           NA           NA
+0          r_ew_start_to_peak60            0           NA           NA           NA           NA           NA           NA
+0          r_ew_start_to_post60_peak_sma5        0           NA           NA           NA           NA           NA           NA
+1          r_entry_to_ew_start             0           NA           NA           NA           NA           NA           NA
+1          r_ew_window                     0           NA           NA           NA           NA           NA           NA
+1          r_ew_start_to_peak60            0           NA           NA           NA           NA           NA           NA
+1          r_ew_start_to_post60_peak_sma5        0           NA           NA           NA           NA           NA           NA
+
+MATURE_PHASE_BY_MAX_LEVEL
+max_level  series_name                     n         mean       median          std          min          max     win_rate
+2          r_entry_to_ew_start             0           NA           NA           NA           NA           NA           NA
+2          r_ew_window                     0           NA           NA           NA           NA           NA           NA
+2          r_ew_start_to_peak60            0           NA           NA           NA           NA           NA           NA
+2          r_ew_start_to_post60_peak_sma5        0           NA           NA           NA           NA           NA           NA
+3          r_entry_to_ew_start             0           NA           NA           NA           NA           NA           NA
+3          r_ew_window                     0           NA           NA           NA           NA           NA           NA
+3          r_ew_start_to_peak60            0           NA           NA           NA           NA           NA           NA
+3          r_ew_start_to_post60_peak_sma5        0           NA           NA           NA           NA           NA           NA
+
+EARLY_PHASE_BY_MAX_FASTPASS_LEVEL
+max_level  series_name                     n         mean       median          std          min          max     win_rate
+0          r_entry_to_ew_start           631     0,099442     0,072252     0,106145    -0,352968     0,802240     0,961965
+0          r_ew_window                   620    -0,000057     0,001101     0,032210    -0,157472     0,129771     0,511290
+0          r_ew_start_to_peak60          631     0,105560     0,065390     0,139292    -0,025680     1,697479     0,865293
+0          r_ew_start_to_post60_peak_sma5      621     0,105552     0,068440     0,149274    -0,164231     1,796639     0,858293
+1          r_entry_to_ew_start           333     0,216236     0,120120     0,437390    -0,195489     5,486014     0,960961
+1          r_ew_window                   333     0,014621     0,004237     0,129924    -0,249836     1,734694     0,537538
+1          r_ew_start_to_peak60          333     0,333774     0,133400     0,837969    -0,073171    11,118356     0,888889
+1          r_ew_start_to_post60_peak_sma5      333     0,337532     0,144144     0,801724    -0,274098    10,069809     0,885886
+
+MATURE_PHASE_BY_MAX_FASTPASS_LEVEL
+max_level  series_name                     n         mean       median          std          min          max     win_rate
+2          r_entry_to_ew_start           260     0,089415     0,062768     0,101628    -0,029008     0,997102     0,969231
+2          r_ew_window                   258    -0,000551    -0,002596     0,026128    -0,141544     0,077548     0,457364
+2          r_ew_start_to_peak60          260     0,072671     0,047253     0,084157    -0,006755     0,517533     0,873077
+2          r_ew_start_to_post60_peak_sma5      258     0,073680     0,049736     0,091164    -0,145223     0,473901     0,844961
+3          r_entry_to_ew_start             5     0,020792     0,022035     0,005380     0,013109     0,029093     1,000000
+3          r_ew_window                     5    -0,025856    -0,030901     0,015482    -0,042111     0,002789     0,200000
+3          r_ew_start_to_peak60            5     0,021012     0,002183     0,036295     0,000000     0,093257     0,600000
+3          r_ew_start_to_post60_peak_sma5        5     0,014505    -0,011506     0,073856    -0,047995     0,159460     0,200000

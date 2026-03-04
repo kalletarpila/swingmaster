@@ -1,0 +1,27 @@
+{
+  "market": "USA",
+  "version": 1,
+  "rules": [
+    {
+      "rule_hit": "USA_TIME_40TD",
+      "trigger": "OPEN_POSITION",
+      "conditions": {
+        "holding_trading_days_gte": 40
+      }
+    },
+    {
+      "rule_hit": "USA_STOP_LOSS_5P",
+      "trigger": "OPEN_POSITION",
+      "conditions": {
+        "close_to_buy_return_lte": -0.05
+      }
+    },
+    {
+      "rule_hit": "USA_TAKE_PROFIT_10P",
+      "trigger": "OPEN_POSITION",
+      "conditions": {
+        "close_to_buy_return_gte": 0.10
+      }
+    }
+  ]
+}

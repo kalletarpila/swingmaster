@@ -867,6 +867,39 @@ def print_episode_report(rc_conn, rc_db_path: str, md_db_path: str) -> None:
             print(" | ".join(str(v) for v in vals))
 
 
+def _episode_post_phase_summary(rc_conn) -> str:
+    row = rc_conn.execute(
+        """
+        SELECT
+          COUNT(*) AS n_episodes,
+          SUM(CASE WHEN close_at_ew_start IS NULL THEN 1 ELSE 0 END) AS n_null_close_at_ew_start,
+          SUM(CASE WHEN entry_window_exit_date IS NOT NULL AND close_at_ew_exit IS NULL THEN 1 ELSE 0 END) AS n_null_close_at_ew_exit_closed,
+          SUM(CASE WHEN entry_window_exit_date IS NOT NULL AND peak60_growth_pct_close_ew_to_peak IS NULL THEN 1 ELSE 0 END) AS n_null_peak60_growth_closed,
+          SUM(CASE WHEN entry_window_exit_date IS NOT NULL AND post60_growth_pct_close_ew_exit_to_peak IS NULL THEN 1 ELSE 0 END) AS n_null_post60_growth_closed,
+          SUM(CASE WHEN ew_confirm_confirmed IS NULL THEN 1 ELSE 0 END) AS n_null_ew_confirm_confirmed
+        FROM rc_pipeline_episode
+        """
+    ).fetchone()
+    if row is None:
+        return "episodes=0"
+    return (
+        f"episodes={row['n_episodes']} "
+        f"null_close_at_ew_start={row['n_null_close_at_ew_start']} "
+        f"null_close_at_ew_exit_closed={row['n_null_close_at_ew_exit_closed']} "
+        f"null_peak60_growth_closed={row['n_null_peak60_growth_closed']} "
+        f"null_post60_growth_closed={row['n_null_post60_growth_closed']} "
+        f"null_ew_confirm_confirmed={row['n_null_ew_confirm_confirmed']}"
+    )
+
+
+def _run_post_phase(rc_conn, phase_name: str, fn) -> None:
+    started = time.perf_counter()
+    print(f"POST_PHASE_START phase={phase_name}")
+    fn()
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    print(f"POST_PHASE_END phase={phase_name} ms={elapsed_ms:.1f}")
+
+
 def collect_signal_stats(signal_provider, tickers: List[str], day: str) -> tuple[Counter, dict[str, int], Dict[str, object]]:
     signals_counter: Counter[SignalKey] = Counter()
     entry = stab = both = invalidated = data_insufficient = 0
@@ -2002,19 +2035,36 @@ def main() -> None:
                         names = []
                     print(f"SIGNALS ticker={t} signals={json.dumps(names)}")
 
-        populate_rc_pipeline_episode(
-            rc_conn=rc_conn,
-            md_conn=md_conn,
-            date_from=args.date_from,
-            date_to=args.date_to,
-            pipeline_version="rc_pipeline_episode_v1",
+        _run_post_phase(
+            rc_conn,
+            "populate_rc_pipeline_episode",
+            lambda: populate_rc_pipeline_episode(
+                rc_conn=rc_conn,
+                md_conn=md_conn,
+                date_from=args.date_from,
+                date_to=args.date_to,
+                pipeline_version="rc_pipeline_episode_v1",
+            ),
         )
-        populate_rc_pipeline_episode_sma_extremes(rc_conn=rc_conn, md_db_path=args.md_db)
-        populate_rc_pipeline_episode_peak_timing_fields(rc_conn=rc_conn, md_db_path=args.md_db)
-        populate_rc_pipeline_episode_entry_confirmation(
-            rc_conn=rc_conn, md_db_path=args.md_db
+        _run_post_phase(
+            rc_conn,
+            "populate_rc_pipeline_episode_sma_extremes",
+            lambda: populate_rc_pipeline_episode_sma_extremes(rc_conn=rc_conn, md_db_path=args.md_db),
+        )
+        _run_post_phase(
+            rc_conn,
+            "populate_rc_pipeline_episode_peak_timing_fields",
+            lambda: populate_rc_pipeline_episode_peak_timing_fields(rc_conn=rc_conn, md_db_path=args.md_db),
+        )
+        _run_post_phase(
+            rc_conn,
+            "populate_rc_pipeline_episode_entry_confirmation",
+            lambda: populate_rc_pipeline_episode_entry_confirmation(
+                rc_conn=rc_conn, md_db_path=args.md_db
+            ),
         )
         rc_conn.commit()
+        print(f"POST_PHASE_SUMMARY {_episode_post_phase_summary(rc_conn)}")
         ew_dates_processed, ew_total_rows_written = maybe_run_ew_score(
             rc_conn=rc_conn,
             osakedata_db_path=args.osakedata_db,

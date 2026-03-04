@@ -22,6 +22,9 @@ from swingmaster.cli.daily_report import (
 ENGINE_VERSION = "SIMU_TX_V1"
 TRIGGER_FIELD_CANDIDATES = ["trigger", "trigger_key", "trigger_type", "buy_trigger", "event_type"]
 DATE_FIELD_CANDIDATES = ["buy_date", "date", "as_of_date"]
+BUY_BADGE_KEYS = (
+    "downtrend_entry_type",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -152,6 +155,19 @@ def check_transactions_table_exists(conn: sqlite3.Connection) -> bool:
     return row is not None
 
 
+def column_exists(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+    if not check_transactions_table_exists(conn) and table_name == "rc_transactions_simu":
+        return False
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        (table_name,),
+    ).fetchone()
+    if row is None:
+        return False
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return any(str(info[1]) == column_name for info in rows)
+
+
 def resolve_buy_price(conn: sqlite3.Connection, buy_row: Dict[str, Any]) -> float | None:
     ticker = buy_row.get("ticker")
     entry_window_date = buy_row.get("entry_window_date")
@@ -184,6 +200,42 @@ def resolve_buy_price(conn: sqlite3.Connection, buy_row: Dict[str, Any]) -> floa
     return None
 
 
+def resolve_buy_badges(
+    conn: sqlite3.Connection,
+    ticker: str,
+    buy_date: str,
+    cache: Dict[Tuple[str, str], str],
+) -> str:
+    key = (ticker, buy_date)
+    if key in cache:
+        return cache[key]
+
+    row = conn.execute(
+        """
+        SELECT state_attrs_json
+        FROM rc_state_daily
+        WHERE ticker = ? AND date = ?
+        LIMIT 1
+        """,
+        (ticker, buy_date),
+    ).fetchone()
+    badges: List[str] = []
+    if row is not None and row[0] not in {None, ""}:
+        try:
+            payload = json.loads(str(row[0]))
+        except (TypeError, ValueError):
+            payload = {}
+        if isinstance(payload, dict):
+            for badge_key in BUY_BADGE_KEYS:
+                badge_value = payload.get(badge_key)
+                if isinstance(badge_value, str) and badge_value:
+                    badges.append(f"{badge_key}={badge_value}")
+
+    encoded = json.dumps(badges, separators=(",", ":"))
+    cache[key] = encoded
+    return encoded
+
+
 def build_transactions(
     conn: sqlite3.Connection,
     buy_rows: Sequence[Dict[str, Any]],
@@ -192,11 +244,16 @@ def build_transactions(
     created_at: str,
 ) -> List[Dict[str, Any]]:
     transactions: List[Dict[str, Any]] = []
+    has_state_attrs_json = column_exists(conn, "rc_state_daily", "state_attrs_json")
+    buy_badges_cache: Dict[Tuple[str, str], str] = {}
     for buy_row in buy_rows:
         buy_date = str(buy_row.get("event_date") or buy_row.get("as_of_date") or "")
         buy_price = resolve_buy_price(conn, buy_row)
         if not buy_date or buy_price is None:
             continue
+        buy_badges = (
+            resolve_buy_badges(conn, str(buy_row["ticker"]), buy_date, buy_badges_cache) if has_state_attrs_json else "[]"
+        )
         transactions.append(
             {
                 "ticker": str(buy_row["ticker"]),
@@ -205,6 +262,7 @@ def build_transactions(
                 "buy_price": buy_price,
                 "buy_qty": 1,
                 "buy_rule_hit": buy_row.get("rule_hit"),
+                "buy_badges": buy_badges,
                 "sell_date": None,
                 "sell_price": None,
                 "sell_qty": None,
@@ -260,10 +318,10 @@ def write_transactions(
         conn.execute(
             """
             INSERT OR IGNORE INTO rc_transactions_simu (
-              ticker, market, buy_date, buy_price, buy_qty, buy_rule_hit,
+              ticker, market, buy_date, buy_price, buy_qty, buy_rule_hit, buy_badges,
               sell_date, sell_price, sell_qty, sell_reason, holding_trading_days,
               run_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 tx["ticker"],
@@ -272,6 +330,7 @@ def write_transactions(
                 tx["buy_price"],
                 tx["buy_qty"],
                 tx["buy_rule_hit"],
+                tx["buy_badges"],
                 tx["sell_date"],
                 tx["sell_price"],
                 tx["sell_qty"],

@@ -1,0 +1,37 @@
+{
+  "dataset_counts": {
+    "dataset_rows_test": 93,
+    "dataset_rows_total": 468,
+    "dataset_rows_train": 375,
+    "n_test_used": 93,
+    "n_total_episodes": 469,
+    "n_train_used": 375,
+    "n_used_total": 468,
+    "n_with_entry_window_date": 469,
+    "n_with_label_available": 469
+  },
+  "dropped_counts": {
+    "dropped_price_missing_day0": 0,
+    "dropped_price_missing_dayN": 1
+  },
+  "fit": {
+    "auc_test": 0.6700819672131147,
+    "auc_train": 0.612444686912772,
+    "backend": "statsmodels_logit",
+    "beta0": -0.5009474916441373,
+    "beta1": 0.13963842233542006,
+    "level3_score_threshold": 0.49164342076201833,
+    "level3_target_selection_rate": 0.1,
+    "level3_threshold_method": "TARGET_SELECTION_RATE_TRAIN",
+    "level3_threshold_percentile": null,
+    "regularization": "none"
+  },
+  "frozen_rule_path": "/home/kalle/projects/swingmaster/swingmaster/ew_score/models/EW_SCORE_ROLLING_FIN_V3.json",
+  "price_db_path": "/home/kalle/projects/rawcandle/data/osakedata.db",
+  "rc_db_path": "/home/kalle/projects/swingmaster/swingmaster_rc.db",
+  "rule_template_path": "/home/kalle/projects/swingmaster/swingmaster/ew_score/training/templates/EW_SCORE_ROLLING_V1_FIN.template.json",
+  "timestamps": {
+    "manifest_written_at_utc": "2026-02-27T15:08:59Z",
+    "trained_at_utc": "2026-02-27T15:08:59Z"
+  }
+}

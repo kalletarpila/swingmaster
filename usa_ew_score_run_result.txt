@@ -1,0 +1,19 @@
+USA EW SCORE RUN RESULT
+=======================
+
+Run command:
+PYTHONPATH=. python3 swingmaster/cli/run_ew_score.py \
+  --date-from 2020-01-01 \
+  --date-to 2025-12-31 \
+  --db /home/kalle/projects/swingmaster/swingmaster_rc_usa_500.db \
+  --osakedata /home/kalle/projects/rawcandle/data/osakedata.db \
+  --rule EW_SCORE_ROLLING_V2_FIN
+
+CLI output:
+- total_rows_written=3547
+- dates_processed=2192
+
+Database validation:
+- ew_rule_fastpass='EW_SCORE_FASTPASS_V1_USA_SMALL' rows: 3541
+- n_scored (ew_score_fastpass IS NOT NULL): 3541
+- n_level1 (ew_level_fastpass = 1): 578

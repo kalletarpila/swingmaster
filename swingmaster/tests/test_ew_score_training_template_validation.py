@@ -7,7 +7,7 @@ from swingmaster.ew_score.training.template_schema_v1 import (
     MATURITY_MODE_DAY_N_READY,
     MODEL_TYPE_LOGISTIC_1D,
     SPLIT_TYPE_TIME_BY_ENTRY_DATE,
-    THRESHOLD_METHOD_TRAIN_PERCENTILE,
+    THRESHOLD_METHOD_TARGET_SELECTION_RATE_TRAIN,
 )
 from swingmaster.ew_score.training.validate_template import load_and_validate_template
 
@@ -32,5 +32,5 @@ def test_ew_score_training_template_validation_fin() -> None:
     assert template.model.x == "r_prefix_pct"
     assert template.split.type == SPLIT_TYPE_TIME_BY_ENTRY_DATE
     assert template.split.train_frac == 0.8
-    assert template.threshold.level3.method == THRESHOLD_METHOD_TRAIN_PERCENTILE
-    assert template.threshold.level3.percentile == 70
+    assert template.threshold.level3.method == THRESHOLD_METHOD_TARGET_SELECTION_RATE_TRAIN
+    assert template.threshold.level3.target_rate == 0.10

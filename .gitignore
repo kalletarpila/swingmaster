@@ -14,6 +14,9 @@ venv/
 # SQLite artifacts
 *.sqlite
 *.db
+*.db3
+*.backupdb
+*.sqlite3
 
 # VS Code artifacts
 .vscode/

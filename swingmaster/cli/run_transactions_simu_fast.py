@@ -37,6 +37,22 @@ BUY_BULL_DIV_PATTERNS = {
 BUY_BADGE_KEYS = (
     "downtrend_entry_type",
 )
+DUAL_UP20_SCORE_COLUMN_CANDIDATES = (
+    "ew_score_up20_meta",
+    "score_up20_meta_v1",
+    "ew_score_up20",
+)
+DUAL_FAIL10_SCORE_COLUMN_CANDIDATES = (
+    "ew_score_fail10_hgb",
+    "score_fail10_60d_close_hgb",
+    "ew_score_fail10",
+)
+BUY_SCORE_BADGE_TIERS = (
+    ("BUY_PREMIUM", 0.80, 0.20),
+    ("BUY_ELITE", 0.72, 0.27),
+    ("BUY_STRONG", 0.66, 0.32),
+    ("BUY_QUALIFIED", 0.60, 0.35),
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -125,6 +141,59 @@ def column_exists(conn: sqlite3.Connection, table_name: str, column_name: str) -
         return False
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     return any(str(row[1]) == column_name for row in rows)
+
+
+def resolve_dual_score_columns(conn: sqlite3.Connection) -> Tuple[str, str] | None:
+    if not table_exists(conn, "rc_ew_score_daily"):
+        return None
+    rows = conn.execute("PRAGMA table_info(rc_ew_score_daily)").fetchall()
+    columns = {str(row[1]) for row in rows}
+    up20_column = next(
+        (column for column in DUAL_UP20_SCORE_COLUMN_CANDIDATES if column in columns),
+        None,
+    )
+    fail10_column = next(
+        (column for column in DUAL_FAIL10_SCORE_COLUMN_CANDIDATES if column in columns),
+        None,
+    )
+    if up20_column is None or fail10_column is None:
+        return None
+    return up20_column, fail10_column
+
+
+def resolve_score_buy_badge(
+    rc_conn: sqlite3.Connection,
+    ticker: str,
+    buy_date: str,
+    dual_score_columns: Tuple[str, str] | None,
+) -> str | None:
+    if dual_score_columns is None:
+        return None
+    up20_column, fail10_column = dual_score_columns
+    row = rc_conn.execute(
+        f"""
+        SELECT {up20_column}, {fail10_column}
+        FROM rc_ew_score_daily
+        WHERE ticker = ? AND date = ?
+        LIMIT 1
+        """,
+        (ticker, buy_date),
+    ).fetchone()
+    if row is None:
+        return None
+    up20_score_raw = row[0]
+    fail10_score_raw = row[1]
+    if up20_score_raw is None or fail10_score_raw is None:
+        return None
+    try:
+        up20_score = float(up20_score_raw)
+        fail10_score = float(fail10_score_raw)
+    except (TypeError, ValueError):
+        return None
+    for badge_name, up20_threshold, fail10_threshold in BUY_SCORE_BADGE_TIERS:
+        if up20_score >= up20_threshold and fail10_score <= fail10_threshold:
+            return badge_name
+    return None
 
 
 def inspect_schema(conn: sqlite3.Connection) -> Dict[str, bool]:
@@ -452,6 +521,7 @@ def resolve_buy_badges(
     buy_date: str,
     market: str,
     has_state_attrs_json: bool,
+    dual_score_columns: Tuple[str, str] | None,
     cache: Dict[Tuple[str, str], str],
 ) -> str:
     key = (ticker, buy_date)
@@ -479,6 +549,9 @@ def resolve_buy_badges(
                     badge_value = payload.get(badge_key)
                     if isinstance(badge_value, str) and badge_value:
                         badges.append(f"{badge_key}={badge_value}")
+    score_badge = resolve_score_buy_badge(rc_conn, ticker, buy_date, dual_score_columns)
+    if score_badge is not None:
+        badges.append(score_badge)
 
     price_rows = os_conn.execute(
         """
@@ -533,6 +606,7 @@ def build_transactions(
     run_id: str,
     created_at: str,
     has_state_attrs_json: bool,
+    dual_score_columns: Tuple[str, str] | None,
 ) -> Tuple[List[Tuple[Any, ...]], int]:
     transactions: List[Tuple[Any, ...]] = []
     skipped_null_price = 0
@@ -552,6 +626,7 @@ def build_transactions(
                 buy_date,
                 market,
                 has_state_attrs_json,
+                dual_score_columns,
                 buy_badges_cache,
             )
         )
@@ -643,6 +718,9 @@ def main() -> None:
             print("WARNING RC_STATE_DAILY_MISSING")
         if not schema["has_ew_score_daily"]:
             print("WARNING FASTPASS_TABLE_MISSING")
+        dual_score_columns = resolve_dual_score_columns(conn)
+        if schema["has_ew_score_daily"] and dual_score_columns is None:
+            print("WARNING DUAL_SCORE_COLUMNS_MISSING")
 
         new_ew_candidates = fetch_new_ew_candidates(conn, args.start_date, args.end_date, schema)
         new_pass_candidates = fetch_new_pass_candidates(conn, args.start_date, args.end_date, schema)
@@ -686,6 +764,7 @@ def main() -> None:
                     run_id,
                     created_at,
                     schema["has_state_attrs_json"],
+                    dual_score_columns,
                 )
 
         if not table_exists(conn, "rc_transactions_simu"):

@@ -56,7 +56,7 @@ BUY_SCORE_BADGE_TIERS = (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fast BUY simulation from NEW_EW and NEW_PASS transitions")
+    parser = argparse.ArgumentParser(description="Fast BUY simulation from NEW_EW/NEW_PASS/NEW_NOTRADE transitions")
     parser.add_argument("--rc-db", required=True, help="RC SQLite database path")
     parser.add_argument(
         "--osakedata-db",
@@ -405,6 +405,101 @@ def fetch_new_pass_candidates(
     return [dict(zip(columns, row)) for row in rows]
 
 
+def fetch_new_notrade_candidates(
+    conn: sqlite3.Connection,
+    start_date: str,
+    end_date: str,
+    schema: Dict[str, bool],
+) -> List[Dict[str, Any]]:
+    parts = build_shared_sql_parts(schema)
+    buy_price_expr = (
+        "ep.close_at_ew_exit AS buy_price"
+        if schema["has_pipeline_episode"] and schema["has_close_at_ew_exit"]
+        else "NULL AS buy_price"
+    )
+    if schema["has_ew_score_daily"]:
+        fastpass_score_expr = "fp.ew_score_fastpass AS ew_score_fastpass"
+        fastpass_level_expr = "fp.ew_level_fastpass AS ew_level_fastpass"
+        rolling_score_expr = "roll.ew_score_rolling AS ew_score_rolling"
+        rolling_level_expr = "roll.ew_level_rolling AS ew_level_rolling"
+        fastpass_join = "LEFT JOIN rc_ew_score_daily fp ON fp.ticker = t.ticker AND fp.date = ep.entry_window_date"
+        rolling_join = """
+        LEFT JOIN rc_ew_score_daily roll
+          ON roll.rowid = (
+            SELECT r2.rowid
+            FROM rc_ew_score_daily r2
+            WHERE r2.ticker = t.ticker
+              AND r2.date >= ep.entry_window_date
+              AND r2.date < t.date
+            ORDER BY r2.date DESC, r2.rowid DESC
+            LIMIT 1
+          )
+        """
+    else:
+        fastpass_score_expr = "NULL AS ew_score_fastpass"
+        fastpass_level_expr = "NULL AS ew_level_fastpass"
+        rolling_score_expr = "NULL AS ew_score_rolling"
+        rolling_level_expr = "NULL AS ew_level_rolling"
+        fastpass_join = ""
+        rolling_join = ""
+
+    if schema["has_entry_window_exit_date"]:
+        episode_join = """
+        LEFT JOIN rc_pipeline_episode ep
+          ON ep.rowid = (
+            SELECT MAX(ep2.rowid)
+            FROM rc_pipeline_episode ep2
+            WHERE ep2.ticker = t.ticker
+              AND ep2.entry_window_exit_date = t.date
+          )
+        """
+    elif schema["has_entry_window_exit_state"]:
+        episode_join = """
+        LEFT JOIN rc_pipeline_episode ep
+          ON ep.rowid = (
+            SELECT MAX(ep2.rowid)
+            FROM rc_pipeline_episode ep2
+            WHERE ep2.ticker = t.ticker
+              AND ep2.entry_window_exit_state = 'NO_TRADE'
+              AND ep2.entry_window_date <= t.date
+          )
+        """
+    else:
+        episode_join = ""
+
+    sql = f"""
+    SELECT
+      'NEW_NOTRADE' AS section,
+      t.ticker AS ticker,
+      t.date AS event_date,
+      ep.entry_window_date AS entry_window_date,
+      ep.downtrend_entry_date AS downtrend_entry_date,
+      t.from_state AS from_state,
+      t.to_state AS to_state,
+      {fastpass_score_expr},
+      {fastpass_level_expr},
+      {rolling_score_expr},
+      {rolling_level_expr},
+      {parts['days_current_expr']},
+      {parts['days_stab_expr']},
+      {buy_price_expr}
+    FROM rc_transition t
+    {episode_join}
+    {fastpass_join}
+    {rolling_join}
+    {parts['state_daily_join']}
+    WHERE t.to_state = 'NO_TRADE'
+      AND t.from_state = 'ENTRY_WINDOW'
+      AND t.date >= ?
+      AND t.date <= ?
+    ORDER BY t.date ASC, t.ticker ASC
+    """
+    cursor = conn.execute(sql, (start_date, end_date))
+    rows = cursor.fetchall()
+    columns = [desc[0] for desc in cursor.description]
+    return [dict(zip(columns, row)) for row in rows]
+
+
 def fetch_trading_day_map(
     conn: sqlite3.Connection,
     candidate_rows: List[Dict[str, Any]],
@@ -724,8 +819,9 @@ def main() -> None:
 
         new_ew_candidates = fetch_new_ew_candidates(conn, args.start_date, args.end_date, schema)
         new_pass_candidates = fetch_new_pass_candidates(conn, args.start_date, args.end_date, schema)
+        new_notrade_candidates = fetch_new_notrade_candidates(conn, args.start_date, args.end_date, schema)
         candidate_rows = sorted(
-            new_ew_candidates + new_pass_candidates,
+            new_ew_candidates + new_pass_candidates + new_notrade_candidates,
             key=lambda row: (
                 str(row.get("event_date") or ""),
                 str(row.get("ticker") or ""),
@@ -792,6 +888,7 @@ def main() -> None:
     summary(ruleset_identity=ruleset_identity)
     summary(new_ew_candidates=len(new_ew_candidates))
     summary(new_pass_candidates=len(new_pass_candidates))
+    summary(new_notrade_candidates=len(new_notrade_candidates))
     summary(candidate_rows_total=len(candidate_rows))
     summary(buy_rows_total_raw=len(raw_buy_rows))
     summary(buy_rows_total=len(buy_rows))

@@ -37,7 +37,7 @@ OUTPUT_COLUMNS = [
     "buy_badges",
 ]
 REPORT_RAW_COLUMNS = [column for column in OUTPUT_COLUMNS if column != "buy_badges"]
-ALLOWED_TRIGGERS = {"NEW_EW", "NEW_PASS", "EW_SNAPSHOT"}
+ALLOWED_TRIGGERS = {"NEW_EW", "NEW_PASS", "NEW_NOTRADE", "EW_SNAPSHOT"}
 ALLOWED_CONDITION_KEYS = {
     "fastpass_score_gte",
     "fastpass_level_eq",
@@ -287,7 +287,7 @@ def build_report_rows_json_mode(
     market_label: str,
     as_of_date: str,
 ) -> List[Dict[str, Any]]:
-    section_order = ["NEW_EW", "NEW_PASS", "BUYS", "EW_SNAPSHOT", "ALERTS"]
+    section_order = ["NEW_EW", "NEW_PASS", "NEW_NOTRADE", "BUYS", "EW_SNAPSHOT", "ALERTS"]
     base_by_section: Dict[str, List[Dict[str, Any]]] = {name: [] for name in section_order if name != "BUYS"}
     for row in all_rows:
         section = row.get("section")

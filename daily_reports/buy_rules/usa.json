@@ -8,6 +8,13 @@
       "conditions": {
         "fastpass_score_gte": 0.80
       }
+    },
+    {
+      "rule_hit": "USA_NOTRADE_FP80",
+      "trigger": "NEW_NOTRADE",
+      "conditions": {
+        "fastpass_score_gte": 0.80
+      }
     }
   ]
 }

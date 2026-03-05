@@ -22,6 +22,7 @@ from swingmaster.cli.daily_report import _attach_buy_badges, _format_cell, _form
         ("FIN", "FIN_PASS_FP60", "NEW_PASS", 0.60, "NEW_PASS", "AAA", "ZZZ", "BBB"),
         ("SE", "SE_ENTRY_FP80", "NEW_EW", 0.80, "NEW_EW", "CCC", "YYY", "DDD"),
         ("USA", "USA_PASS_FP80", "NEW_PASS", 0.80, "NEW_PASS", "EEE", "XXX", "FFF"),
+        ("USA", "USA_NOTRADE_FP80", "NEW_NOTRADE", 0.80, "NEW_NOTRADE", "GGG", "WWW", "HHH"),
     ],
 )
 def test_apply_buy_rules_fastpass_threshold_and_ordering(
@@ -93,6 +94,25 @@ def test_validate_buy_rules_config_rejects_unknown_condition_key() -> None:
 
     with pytest.raises(ValueError, match="unknown condition key"):
         validate_buy_rules_config(config, "FIN")
+
+
+def test_validate_buy_rules_config_accepts_new_notrade_trigger() -> None:
+    config = {
+        "market": "USA",
+        "version": 1,
+        "rules": [
+            {
+                "rule_hit": "USA_NOTRADE_FP80",
+                "trigger": "NEW_NOTRADE",
+                "conditions": {
+                    "fastpass_score_gte": 0.80,
+                },
+            }
+        ],
+    }
+
+    validated = validate_buy_rules_config(config, "USA")
+    assert validated["rules"][0]["trigger"] == "NEW_NOTRADE"
 
 
 def test_attach_buy_badges_enriches_matching_buy_rows() -> None:

@@ -15,6 +15,62 @@
       "conditions": {
         "fastpass_score_gte": 0.80
       }
+    },
+    {
+      "rule_hit": "USA_PASS_DUAL_PREMIUM_U80F20",
+      "trigger": "NEW_PASS",
+      "conditions": {
+        "dual_buy_badge_eq": "BUY_PREMIUM"
+      }
+    },
+    {
+      "rule_hit": "USA_PASS_DUAL_ELITE_U72F27",
+      "trigger": "NEW_PASS",
+      "conditions": {
+        "dual_buy_badge_eq": "BUY_ELITE"
+      }
+    },
+    {
+      "rule_hit": "USA_PASS_DUAL_STRONG_U66F32",
+      "trigger": "NEW_PASS",
+      "conditions": {
+        "dual_buy_badge_eq": "BUY_STRONG"
+      }
+    },
+    {
+      "rule_hit": "USA_PASS_DUAL_QUALIFIED_U60F35",
+      "trigger": "NEW_PASS",
+      "conditions": {
+        "dual_buy_badge_eq": "BUY_QUALIFIED"
+      }
+    },
+    {
+      "rule_hit": "USA_NOTRADE_DUAL_PREMIUM_U80F20",
+      "trigger": "NEW_NOTRADE",
+      "conditions": {
+        "dual_buy_badge_eq": "BUY_PREMIUM"
+      }
+    },
+    {
+      "rule_hit": "USA_NOTRADE_DUAL_ELITE_U72F27",
+      "trigger": "NEW_NOTRADE",
+      "conditions": {
+        "dual_buy_badge_eq": "BUY_ELITE"
+      }
+    },
+    {
+      "rule_hit": "USA_NOTRADE_DUAL_STRONG_U66F32",
+      "trigger": "NEW_NOTRADE",
+      "conditions": {
+        "dual_buy_badge_eq": "BUY_STRONG"
+      }
+    },
+    {
+      "rule_hit": "USA_NOTRADE_DUAL_QUALIFIED_U60F35",
+      "trigger": "NEW_NOTRADE",
+      "conditions": {
+        "dual_buy_badge_eq": "BUY_QUALIFIED"
+      }
     }
   ]
 }

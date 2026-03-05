@@ -115,6 +115,91 @@ def test_validate_buy_rules_config_accepts_new_notrade_trigger() -> None:
     assert validated["rules"][0]["trigger"] == "NEW_NOTRADE"
 
 
+def test_apply_buy_rules_dual_rules_match_all_eight_rule_names() -> None:
+    config = {
+        "market": "USA",
+        "version": 1,
+        "rules": [
+            {"rule_hit": "USA_PASS_DUAL_PREMIUM_U80F20", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_PREMIUM"}},
+            {"rule_hit": "USA_PASS_DUAL_ELITE_U72F27", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_ELITE"}},
+            {"rule_hit": "USA_PASS_DUAL_STRONG_U66F32", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_STRONG"}},
+            {
+                "rule_hit": "USA_PASS_DUAL_QUALIFIED_U60F35",
+                "trigger": "NEW_PASS",
+                "conditions": {"dual_buy_badge_eq": "BUY_QUALIFIED"},
+            },
+            {
+                "rule_hit": "USA_NOTRADE_DUAL_PREMIUM_U80F20",
+                "trigger": "NEW_NOTRADE",
+                "conditions": {"dual_buy_badge_eq": "BUY_PREMIUM"},
+            },
+            {
+                "rule_hit": "USA_NOTRADE_DUAL_ELITE_U72F27",
+                "trigger": "NEW_NOTRADE",
+                "conditions": {"dual_buy_badge_eq": "BUY_ELITE"},
+            },
+            {
+                "rule_hit": "USA_NOTRADE_DUAL_STRONG_U66F32",
+                "trigger": "NEW_NOTRADE",
+                "conditions": {"dual_buy_badge_eq": "BUY_STRONG"},
+            },
+            {
+                "rule_hit": "USA_NOTRADE_DUAL_QUALIFIED_U60F35",
+                "trigger": "NEW_NOTRADE",
+                "conditions": {"dual_buy_badge_eq": "BUY_QUALIFIED"},
+            },
+        ],
+    }
+    rows = [
+        {"section": "NEW_PASS", "ticker": "P1", "dual_buy_badge": "BUY_PREMIUM"},
+        {"section": "NEW_PASS", "ticker": "P2", "dual_buy_badge": "BUY_ELITE"},
+        {"section": "NEW_PASS", "ticker": "P3", "dual_buy_badge": "BUY_STRONG"},
+        {"section": "NEW_PASS", "ticker": "P4", "dual_buy_badge": "BUY_QUALIFIED"},
+        {"section": "NEW_NOTRADE", "ticker": "N1", "dual_buy_badge": "BUY_PREMIUM"},
+        {"section": "NEW_NOTRADE", "ticker": "N2", "dual_buy_badge": "BUY_ELITE"},
+        {"section": "NEW_NOTRADE", "ticker": "N3", "dual_buy_badge": "BUY_STRONG"},
+        {"section": "NEW_NOTRADE", "ticker": "N4", "dual_buy_badge": "BUY_QUALIFIED"},
+    ]
+
+    out, missing_field_count = apply_buy_rules(rows, config, buy_section_name="BUYS")
+
+    assert missing_field_count == 0
+    assert sorted(row["rule_hit"] for row in out) == [
+        "USA_NOTRADE_DUAL_ELITE_U72F27",
+        "USA_NOTRADE_DUAL_PREMIUM_U80F20",
+        "USA_NOTRADE_DUAL_QUALIFIED_U60F35",
+        "USA_NOTRADE_DUAL_STRONG_U66F32",
+        "USA_PASS_DUAL_ELITE_U72F27",
+        "USA_PASS_DUAL_PREMIUM_U80F20",
+        "USA_PASS_DUAL_QUALIFIED_U60F35",
+        "USA_PASS_DUAL_STRONG_U66F32",
+    ]
+
+
+def test_apply_buy_rules_dual_rules_only_highest_category_matches() -> None:
+    config = {
+        "market": "USA",
+        "version": 1,
+        "rules": [
+            {"rule_hit": "USA_PASS_DUAL_PREMIUM_U80F20", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_PREMIUM"}},
+            {"rule_hit": "USA_PASS_DUAL_ELITE_U72F27", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_ELITE"}},
+            {"rule_hit": "USA_PASS_DUAL_STRONG_U66F32", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_STRONG"}},
+            {
+                "rule_hit": "USA_PASS_DUAL_QUALIFIED_U60F35",
+                "trigger": "NEW_PASS",
+                "conditions": {"dual_buy_badge_eq": "BUY_QUALIFIED"},
+            },
+        ],
+    }
+    rows = [{"section": "NEW_PASS", "ticker": "AAA", "dual_buy_badge": "BUY_PREMIUM"}]
+
+    out, missing_field_count = apply_buy_rules(rows, config, buy_section_name="BUYS")
+
+    assert missing_field_count == 0
+    assert len(out) == 1
+    assert out[0]["rule_hit"] == "USA_PASS_DUAL_PREMIUM_U80F20"
+
+
 def test_attach_buy_badges_enriches_matching_buy_rows() -> None:
     conn = sqlite3.connect(":memory:")
     conn.execute(

@@ -196,6 +196,17 @@ def resolve_score_buy_badge(
     return None
 
 
+def _dual_buy_badge_sql_expr(up20_expr: str, fail10_expr: str) -> str:
+    return (
+        "CASE "
+        f"WHEN {up20_expr} >= 0.80 AND {fail10_expr} <= 0.20 THEN 'BUY_PREMIUM' "
+        f"WHEN {up20_expr} >= 0.72 AND {fail10_expr} <= 0.27 THEN 'BUY_ELITE' "
+        f"WHEN {up20_expr} >= 0.66 AND {fail10_expr} <= 0.32 THEN 'BUY_STRONG' "
+        f"WHEN {up20_expr} >= 0.60 AND {fail10_expr} <= 0.35 THEN 'BUY_QUALIFIED' "
+        "ELSE NULL END"
+    )
+
+
 def inspect_schema(conn: sqlite3.Connection) -> Dict[str, bool]:
     has_state_daily = table_exists(conn, "rc_state_daily")
     has_ew_score_daily = table_exists(conn, "rc_ew_score_daily")
@@ -254,6 +265,7 @@ def fetch_new_ew_candidates(
     start_date: str,
     end_date: str,
     schema: Dict[str, bool],
+    dual_score_columns: Tuple[str, str] | None,
 ) -> List[Dict[str, Any]]:
     parts = build_shared_sql_parts(schema)
     buy_price_expr = (
@@ -280,6 +292,12 @@ def fetch_new_ew_candidates(
         else ""
     )
 
+    if schema["has_ew_score_daily"] and dual_score_columns is not None:
+        up20_col, fail10_col = dual_score_columns
+        dual_buy_badge_expr = _dual_buy_badge_sql_expr(f"es.{up20_col}", f"es.{fail10_col}")
+    else:
+        dual_buy_badge_expr = "NULL"
+
     sql = f"""
     SELECT
       'NEW_EW' AS section,
@@ -293,6 +311,7 @@ def fetch_new_ew_candidates(
       {parts['fastpass_level_expr']},
       NULL AS ew_score_rolling,
       {parts['rolling_level_expr']},
+      {dual_buy_badge_expr} AS dual_buy_badge,
       {parts['days_current_expr']},
       {parts['days_stab_expr']},
       {buy_price_expr}
@@ -316,6 +335,7 @@ def fetch_new_pass_candidates(
     start_date: str,
     end_date: str,
     schema: Dict[str, bool],
+    dual_score_columns: Tuple[str, str] | None,
 ) -> List[Dict[str, Any]]:
     parts = build_shared_sql_parts(schema)
     buy_price_expr = (
@@ -328,6 +348,11 @@ def fetch_new_pass_candidates(
         fastpass_level_expr = "fp.ew_level_fastpass AS ew_level_fastpass"
         rolling_score_expr = "roll.ew_score_rolling AS ew_score_rolling"
         rolling_level_expr = "roll.ew_level_rolling AS ew_level_rolling"
+        if dual_score_columns is not None:
+            up20_col, fail10_col = dual_score_columns
+            dual_buy_badge_expr = _dual_buy_badge_sql_expr(f"fp.{up20_col}", f"fp.{fail10_col}")
+        else:
+            dual_buy_badge_expr = "NULL"
         fastpass_join = "LEFT JOIN rc_ew_score_daily fp ON fp.ticker = t.ticker AND fp.date = ep.entry_window_date"
         rolling_join = """
         LEFT JOIN rc_ew_score_daily roll
@@ -346,6 +371,7 @@ def fetch_new_pass_candidates(
         fastpass_level_expr = "NULL AS ew_level_fastpass"
         rolling_score_expr = "NULL AS ew_score_rolling"
         rolling_level_expr = "NULL AS ew_level_rolling"
+        dual_buy_badge_expr = "NULL"
         fastpass_join = ""
         rolling_join = ""
 
@@ -386,6 +412,7 @@ def fetch_new_pass_candidates(
       {fastpass_level_expr},
       {rolling_score_expr},
       {rolling_level_expr},
+      {dual_buy_badge_expr} AS dual_buy_badge,
       {parts['days_current_expr']},
       {parts['days_stab_expr']},
       {buy_price_expr}
@@ -410,6 +437,7 @@ def fetch_new_notrade_candidates(
     start_date: str,
     end_date: str,
     schema: Dict[str, bool],
+    dual_score_columns: Tuple[str, str] | None,
 ) -> List[Dict[str, Any]]:
     parts = build_shared_sql_parts(schema)
     buy_price_expr = (
@@ -422,6 +450,11 @@ def fetch_new_notrade_candidates(
         fastpass_level_expr = "fp.ew_level_fastpass AS ew_level_fastpass"
         rolling_score_expr = "roll.ew_score_rolling AS ew_score_rolling"
         rolling_level_expr = "roll.ew_level_rolling AS ew_level_rolling"
+        if dual_score_columns is not None:
+            up20_col, fail10_col = dual_score_columns
+            dual_buy_badge_expr = _dual_buy_badge_sql_expr(f"fp.{up20_col}", f"fp.{fail10_col}")
+        else:
+            dual_buy_badge_expr = "NULL"
         fastpass_join = "LEFT JOIN rc_ew_score_daily fp ON fp.ticker = t.ticker AND fp.date = ep.entry_window_date"
         rolling_join = """
         LEFT JOIN rc_ew_score_daily roll
@@ -440,6 +473,7 @@ def fetch_new_notrade_candidates(
         fastpass_level_expr = "NULL AS ew_level_fastpass"
         rolling_score_expr = "NULL AS ew_score_rolling"
         rolling_level_expr = "NULL AS ew_level_rolling"
+        dual_buy_badge_expr = "NULL"
         fastpass_join = ""
         rolling_join = ""
 
@@ -480,6 +514,7 @@ def fetch_new_notrade_candidates(
       {fastpass_level_expr},
       {rolling_score_expr},
       {rolling_level_expr},
+      {dual_buy_badge_expr} AS dual_buy_badge,
       {parts['days_current_expr']},
       {parts['days_stab_expr']},
       {buy_price_expr}
@@ -817,9 +852,13 @@ def main() -> None:
         if schema["has_ew_score_daily"] and dual_score_columns is None:
             print("WARNING DUAL_SCORE_COLUMNS_MISSING")
 
-        new_ew_candidates = fetch_new_ew_candidates(conn, args.start_date, args.end_date, schema)
-        new_pass_candidates = fetch_new_pass_candidates(conn, args.start_date, args.end_date, schema)
-        new_notrade_candidates = fetch_new_notrade_candidates(conn, args.start_date, args.end_date, schema)
+        new_ew_candidates = fetch_new_ew_candidates(conn, args.start_date, args.end_date, schema, dual_score_columns)
+        new_pass_candidates = fetch_new_pass_candidates(
+            conn, args.start_date, args.end_date, schema, dual_score_columns
+        )
+        new_notrade_candidates = fetch_new_notrade_candidates(
+            conn, args.start_date, args.end_date, schema, dual_score_columns
+        )
         candidate_rows = sorted(
             new_ew_candidates + new_pass_candidates + new_notrade_candidates,
             key=lambda row: (

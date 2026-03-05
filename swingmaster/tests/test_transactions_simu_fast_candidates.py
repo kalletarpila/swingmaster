@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import sqlite3
 
-from swingmaster.cli.run_transactions_simu_fast import fetch_new_notrade_candidates, inspect_schema
+from swingmaster.cli.run_transactions_simu_fast import (
+    fetch_new_notrade_candidates,
+    fetch_new_pass_candidates,
+    inspect_schema,
+)
 
 
 def test_fetch_new_notrade_candidates_uses_entry_window_to_no_trade_transitions() -> None:
@@ -58,7 +62,7 @@ def test_fetch_new_notrade_candidates_uses_entry_window_to_no_trade_transitions(
     )
 
     schema = inspect_schema(conn)
-    rows = fetch_new_notrade_candidates(conn, "2026-01-20", "2026-01-20", schema)
+    rows = fetch_new_notrade_candidates(conn, "2026-01-20", "2026-01-20", schema, None)
 
     assert len(rows) == 1
     assert rows[0]["section"] == "NEW_NOTRADE"
@@ -66,3 +70,88 @@ def test_fetch_new_notrade_candidates_uses_entry_window_to_no_trade_transitions(
     assert rows[0]["from_state"] == "ENTRY_WINDOW"
     assert rows[0]["to_state"] == "NO_TRADE"
     assert rows[0]["buy_price"] == 12.34
+
+
+def test_fetch_new_pass_candidates_assigns_dual_buy_badge_from_scores() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE rc_transition (
+          ticker TEXT NOT NULL,
+          date TEXT NOT NULL,
+          from_state TEXT,
+          to_state TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE rc_pipeline_episode (
+          ticker TEXT NOT NULL,
+          downtrend_entry_date TEXT NOT NULL,
+          entry_window_date TEXT NOT NULL,
+          entry_window_exit_date TEXT,
+          entry_window_exit_state TEXT,
+          close_at_ew_exit REAL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE rc_ew_score_daily (
+          ticker TEXT NOT NULL,
+          date TEXT NOT NULL,
+          ew_score_fastpass REAL,
+          ew_level_fastpass INTEGER,
+          ew_score_rolling REAL,
+          ew_level_rolling INTEGER,
+          ew_score_up20_meta REAL,
+          ew_score_fail10_hgb REAL
+        )
+        """
+    )
+    fixtures = [
+        ("AAA", 0.85, 0.19, "BUY_PREMIUM"),
+        ("AAB", 0.75, 0.25, "BUY_ELITE"),
+        ("AAC", 0.67, 0.31, "BUY_STRONG"),
+        ("AAD", 0.60, 0.35, "BUY_QUALIFIED"),
+    ]
+    for ticker, up20, fail10, _badge in fixtures:
+        conn.execute(
+            """
+            INSERT INTO rc_transition (ticker, date, from_state, to_state)
+            VALUES (?, '2026-01-20', 'ENTRY_WINDOW', 'PASS')
+            """,
+            (ticker,),
+        )
+        conn.execute(
+            """
+            INSERT INTO rc_pipeline_episode (
+              ticker, downtrend_entry_date, entry_window_date, entry_window_exit_date, entry_window_exit_state, close_at_ew_exit
+            ) VALUES (?, '2026-01-01', '2026-01-10', '2026-01-20', 'PASS', 12.34)
+            """,
+            (ticker,),
+        )
+        conn.execute(
+            """
+            INSERT INTO rc_ew_score_daily (
+              ticker, date, ew_score_fastpass, ew_level_fastpass, ew_score_up20_meta, ew_score_fail10_hgb
+            ) VALUES (?, '2026-01-10', 0.81, 1, ?, ?)
+            """,
+            (ticker, up20, fail10),
+        )
+
+    schema = inspect_schema(conn)
+    rows = fetch_new_pass_candidates(
+        conn,
+        "2026-01-20",
+        "2026-01-20",
+        schema,
+        ("ew_score_up20_meta", "ew_score_fail10_hgb"),
+    )
+
+    by_ticker = {str(row["ticker"]): row for row in rows}
+    assert len(by_ticker) == 4
+    for ticker, _up20, _fail10, expected_badge in fixtures:
+        assert by_ticker[ticker]["section"] == "NEW_PASS"
+        assert by_ticker[ticker]["dual_buy_badge"] == expected_badge

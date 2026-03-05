@@ -909,12 +909,17 @@ Definitions:
 - only rows with full forward horizon were used (`has_full_forward_60d = 1`)
 
 ### 12.3 Temporal split (no random split)
-Primary split used in final model selection:
+Primary historical split used in model selection research:
 - `train`: years `2020-2023`
 - `validation`: year `2024`
 - `test`: year `2025`
 
 Rationale: avoid leakage from random sampling across regimes; preserve chronological evaluation.
+
+Production frozen training window (active dual model):
+- `train`: years `2020-2021` (single frozen fit)
+- operational evaluation window used before activation: `2022-2025`
+- no rolling retrain in daily production flow; model is replaced only by explicit version change
 
 ### 12.4 Feature sets
 Training script: `swingmaster/research/train_episode_up20_baseline.py`
@@ -973,7 +978,7 @@ Named score table used downstream:
   - `score_fail10_60d_close_hgb`
 
 ### 12.8 Final dual-score table and locked thresholds
-Final dual score table (2025 test):
+Historical dual score table (2025 test):
 - `rc_episode_model_test_dual_score_2025_hgb_fail10`
   - `score_up20_meta_v1`
   - `score_fail10_60d_close_hgb`
@@ -988,6 +993,30 @@ Materialized shortlist table (2025 test):
 Materialized yearly shortlist table (2020-2024):
 - `rc_episode_model_dual_2020_2024_hgb_fail10`
 - `rc_episode_model_buys_u060_f035_2020_2024`
+
+Production dual inference table (current):
+- `rc_episode_model_dual_inference_current`
+  - `score_up20_meta_v1`
+  - `score_fail10_60d_close_hgb`
+  - `model_version` default for production CLI:
+    - `DUAL_META_V1_HGB_FAIL10_FROZEN_TRAIN_2020_2021`
+- frozen thresholds used by EW dual level and buy-badge logic:
+  - `score_up20_meta_v1 >= 0.60`
+  - `score_fail10_60d_close_hgb <= 0.35`
+
+Production pipeline (internal-only, no external source DB):
+1. `run_episode_dual_score_production.py` computes frozen-model scores directly from `rc_pipeline_episode`
+   - enriches features with:
+     - `rc_ew_score_daily` fastpass fields
+     - `rc_transactions_simu` buy/badge flags
+     - osakedata-based stock/index context (`full_no_dow`: stock + `^GSPC` + `^NDX`)
+   - writes source tables:
+     - `rc_episode_model_inference_rank_meta_v1`
+     - `rc_episode_model_full_inference_no_dow_scores_hgb_fail10`
+   - writes current dual table:
+     - `rc_episode_model_dual_inference_current`
+2. `run_ew_score.py` upserts dual fields from `rc_episode_model_dual_inference_current` to `rc_ew_score_daily`.
+3. reporting / fast-simu read dual fields from `rc_ew_score_daily`.
 
 ### 12.9 Reproduction command template
 Train (example for `FAIL10` HGB):
@@ -1010,6 +1039,21 @@ python3 swingmaster/research/train_episode_up20_baseline.py \
   --model-type catboost \
   --scores-table rc_episode_model_full_up20_60d_close_scores_catboost \
   --top-k 50 100 200
+```
+
+Populate production dual inference table (default frozen model version):
+```bash
+python3 swingmaster/cli/run_episode_dual_inference.py \
+  --rc-db /path/to/swingmaster_rc_usa_2024_2025.db \
+  --mode upsert
+```
+
+Internal production score generation (recommended):
+```bash
+python3 swingmaster/cli/run_episode_dual_score_production.py \
+  --rc-db /path/to/swingmaster_rc_usa_2024_2025.db \
+  --osakedata-db /path/to/osakedata.db \
+  --mode upsert
 ```
 
 ### 12.10 Operational interpretation

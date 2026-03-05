@@ -13,6 +13,7 @@ DEFAULT_UP20_SOURCE_TABLE = "rc_episode_model_inference_rank_meta_v1"
 DEFAULT_UP20_SOURCE_COLUMN = "score_meta_v1_up20_60d_close"
 DEFAULT_FAIL10_SOURCE_TABLE = "rc_episode_model_full_inference_no_dow_scores_hgb_fail10"
 DEFAULT_FAIL10_SOURCE_COLUMN = "score_pred"
+DEFAULT_MODEL_VERSION = "DUAL_META_V1_HGB_FAIL10_FROZEN_TRAIN_2020_2021"
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -33,7 +34,11 @@ def parse_args() -> argparse.Namespace:
         choices=["upsert", "replace-all", "insert-missing"],
         default="upsert",
     )
-    parser.add_argument("--model-version", required=True, help="Model version label for auditability")
+    parser.add_argument(
+        "--model-version",
+        default=DEFAULT_MODEL_VERSION,
+        help="Model version label for auditability",
+    )
     parser.add_argument("--computed-at", default=None, help="Optional ISO8601 timestamp")
     return parser.parse_args()
 

@@ -45,6 +45,7 @@ from swingmaster.infra.sqlite.db import get_connection
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
 from swingmaster.infra.sqlite.migrator import apply_migrations
 from swingmaster.infra.sqlite.repos.ticker_universe_reader import TickerUniverseReader
+from swingmaster.dual_score.production import compute_and_store_dual_scores_production
 from swingmaster.ew_score.compute import compute_and_store_ew_scores
 from swingmaster.ew_score.repo import RcEwScoreDailyRepo
 
@@ -85,6 +86,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--print-signals", action="store_true", help="Print per-day per-ticker signal keys")
     parser.add_argument("--print-signals-limit", type=int, default=20, help="Max tickers per day for --print-signals")
     parser.add_argument("--report", action="store_true", help="Print episode report after run completes")
+    parser.add_argument(
+        "--dual-score-production",
+        action="store_true",
+        help="Compute frozen dual source/current scores into RC DB before EW-score pass",
+    )
+    parser.add_argument(
+        "--dual-score-mode",
+        choices=["upsert", "replace-all", "insert-missing"],
+        default="upsert",
+        help="Write mode for dual production scoring",
+    )
     parser.add_argument("--ew-score", action="store_true", help="Compute/store EW score daily rows for the processed date range")
     parser.add_argument("--ew-score-rule", default="EW_SCORE_DAY3_V1_FIN", help="EW score model rule_id")
     parser.add_argument("--osakedata-db", default="/home/kalle/projects/rawcandle/data/osakedata.db", help="Osakedata SQLite path for EW score computation")
@@ -1812,6 +1824,27 @@ def maybe_run_ew_score(
     return (dates_processed, total_rows_written)
 
 
+def maybe_run_dual_score_production(
+    rc_conn: sqlite3.Connection,
+    *,
+    enabled: bool,
+    osakedata_db_path: str,
+    mode: str,
+) -> tuple[int, int, int]:
+    if not enabled:
+        return (0, 0, 0)
+    summary = compute_and_store_dual_scores_production(
+        rc_conn,
+        osakedata_db_path=osakedata_db_path,
+        mode=mode,
+    )
+    return (
+        summary.rows_scored,
+        summary.rows_changed_up20_source + summary.rows_changed_fail10_source,
+        summary.rows_changed_dual_current,
+    )
+
+
 def main() -> None:
     args = parse_args()
     effective_require_row_on_date = True
@@ -2065,6 +2098,20 @@ def main() -> None:
         )
         rc_conn.commit()
         print(f"POST_PHASE_SUMMARY {_episode_post_phase_summary(rc_conn)}")
+        dual_rows_scored, dual_rows_changed_sources, dual_rows_changed_current = maybe_run_dual_score_production(
+            rc_conn=rc_conn,
+            enabled=args.dual_score_production,
+            osakedata_db_path=args.md_db,
+            mode=args.dual_score_mode,
+        )
+        if args.dual_score_production:
+            print(
+                "DUAL_SCORE_PRODUCTION: "
+                f"rows_scored={dual_rows_scored} "
+                f"rows_changed_sources={dual_rows_changed_sources} "
+                f"rows_changed_current={dual_rows_changed_current} "
+                f"mode={args.dual_score_mode}"
+            )
         ew_dates_processed, ew_total_rows_written = maybe_run_ew_score(
             rc_conn=rc_conn,
             osakedata_db_path=args.osakedata_db,

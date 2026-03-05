@@ -80,6 +80,83 @@ FASTPASS_V1_SE_BETAS = {
     "entry_quality_B": 0.1382594006923378,
     "entry_quality_LEGACY": -0.6188121475565969,
 }
+DUAL_INFERENCE_TABLE = "rc_episode_model_dual_inference_current"
+DUAL_UP20_THRESHOLD = 0.60
+DUAL_FAIL10_THRESHOLD = 0.35
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _column_exists(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+    if not _table_exists(conn, table_name):
+        return False
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return any(str(row[1]) == column_name for row in rows)
+
+
+def _ensure_dual_inference_source_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rc_episode_model_dual_inference_current (
+          episode_id TEXT PRIMARY KEY,
+          score_up20_meta_v1 REAL NOT NULL,
+          score_fail10_60d_close_hgb REAL NOT NULL,
+          model_version TEXT NOT NULL,
+          computed_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+
+def _upsert_dual_scores_for_episode(
+    rc_conn: sqlite3.Connection,
+    target_repo: RcEwScoreDailyRepo,
+    ticker: str,
+    as_of_date: str,
+    episode_id: str | None,
+) -> None:
+    if episode_id in {None, ""}:
+        return
+    row = rc_conn.execute(
+        f"""
+        SELECT score_up20_meta_v1, score_fail10_60d_close_hgb, model_version, computed_at
+        FROM {DUAL_INFERENCE_TABLE}
+        WHERE episode_id = ?
+        LIMIT 1
+        """,
+        (episode_id,),
+    ).fetchone()
+    if row is None or row[0] is None or row[1] is None:
+        return
+    up20_score = float(row[0])
+    fail10_score = float(row[1])
+    ew_level_dual_buy = 1 if up20_score >= DUAL_UP20_THRESHOLD and fail10_score <= DUAL_FAIL10_THRESHOLD else 0
+    inputs_json_dual = json.dumps(
+        {
+            "computed_at": row[3],
+            "episode_id": episode_id,
+            "model_version": row[2],
+            "source_table": DUAL_INFERENCE_TABLE,
+            "threshold_fail10_lte": DUAL_FAIL10_THRESHOLD,
+            "threshold_up20_gte": DUAL_UP20_THRESHOLD,
+        },
+        sort_keys=True,
+    )
+    target_repo.upsert_dual_row(
+        ticker=ticker,
+        date=as_of_date,
+        ew_score_up20_meta=up20_score,
+        ew_score_fail10_hgb=fail10_score,
+        ew_level_dual_buy=ew_level_dual_buy,
+        inputs_json_dual=inputs_json_dual,
+    )
 
 
 def _sigmoid(x: float) -> float:
@@ -155,6 +232,8 @@ def compute_and_store_ew_scores(
 ) -> int:
     target_repo = repo if repo is not None else RcEwScoreDailyRepo(rc_conn)
     target_repo.ensure_schema()
+    _ensure_dual_inference_source_table(rc_conn)
+    has_episode_id = _column_exists(rc_conn, "rc_pipeline_episode", "episode_id")
 
     ticker_rows = rc_conn.execute(
         """
@@ -177,8 +256,8 @@ def compute_and_store_ew_scores(
     stored = 0
     for ticker in tickers:
         ep_row = rc_conn.execute(
-            """
-            SELECT entry_window_date, entry_window_exit_date
+            f"""
+            SELECT entry_window_date, entry_window_exit_date, {"episode_id" if has_episode_id else "NULL AS episode_id"}
             FROM rc_pipeline_episode
             WHERE ticker = ?
               AND entry_window_date <= ?
@@ -193,6 +272,7 @@ def compute_and_store_ew_scores(
 
         entry_window_date = ep_row[0]
         entry_window_exit_date = ep_row[1]
+        episode_id = str(ep_row[2]) if ep_row[2] is not None else None
         market = _resolve_market_for_ticker(osakedata_conn, ticker, as_of_date)
         routed = False
 
@@ -512,6 +592,13 @@ def compute_and_store_ew_scores(
                             routed = True
 
         if routed:
+            _upsert_dual_scores_for_episode(
+                rc_conn=rc_conn,
+                target_repo=target_repo,
+                ticker=ticker,
+                as_of_date=as_of_date,
+                episode_id=episode_id,
+            )
             continue
 
         model = load_model_config(rule_id)
@@ -577,6 +664,13 @@ def compute_and_store_ew_scores(
             ew_level_day3=ew_level_day3,
             ew_rule=model.rule_id,
             inputs_json=inputs_json,
+        )
+        _upsert_dual_scores_for_episode(
+            rc_conn=rc_conn,
+            target_repo=target_repo,
+            ticker=ticker,
+            as_of_date=as_of_date,
+            episode_id=episode_id,
         )
         stored += 1
 

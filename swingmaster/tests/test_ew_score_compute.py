@@ -448,3 +448,111 @@ def test_router_usa_rolling_stays_off() -> None:
     )
     assert spy.fastpass_calls >= 1
     assert spy.rolling_calls == 0
+
+
+def test_compute_and_store_ew_scores_writes_dual_fields_from_episode_dual_source() -> None:
+    rc_conn = sqlite3.connect(":memory:")
+    os_conn = sqlite3.connect(":memory:")
+    repo = RcEwScoreDailyRepo(rc_conn)
+
+    rc_conn.execute(
+        """
+        CREATE TABLE rc_state_daily (
+          ticker TEXT,
+          date TEXT,
+          state TEXT,
+          state_attrs_json TEXT
+        )
+        """
+    )
+    rc_conn.execute(
+        """
+        CREATE TABLE rc_pipeline_episode (
+          episode_id TEXT,
+          ticker TEXT,
+          entry_window_date TEXT,
+          entry_window_exit_date TEXT
+        )
+        """
+    )
+    rc_conn.execute(
+        """
+        CREATE TABLE rc_episode_model_dual_inference_current (
+          episode_id TEXT PRIMARY KEY,
+          score_up20_meta_v1 REAL NOT NULL,
+          score_fail10_60d_close_hgb REAL NOT NULL,
+          model_version TEXT NOT NULL,
+          computed_at TEXT NOT NULL
+        )
+        """
+    )
+    rc_conn.executemany(
+        "INSERT INTO rc_state_daily (ticker, date, state, state_attrs_json) VALUES (?, ?, ?, ?)",
+        [
+            ("AAA", "2020-01-09", "STABILIZING", None),
+            ("AAA", "2020-01-10", "ENTRY_WINDOW", '{"decline_profile":"UNKNOWN","entry_quality":"A"}'),
+            ("AAA", "2020-01-13", "ENTRY_WINDOW", None),
+        ],
+    )
+    rc_conn.execute(
+        """
+        INSERT INTO rc_pipeline_episode (
+          episode_id, ticker, entry_window_date, entry_window_exit_date
+        ) VALUES (?, ?, ?, ?)
+        """,
+        ("EP1", "AAA", "2020-01-10", None),
+    )
+    rc_conn.execute(
+        """
+        INSERT INTO rc_episode_model_dual_inference_current (
+          episode_id, score_up20_meta_v1, score_fail10_60d_close_hgb, model_version, computed_at
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        ("EP1", 0.75, 0.20, "DUAL_V1", "2026-03-05T12:00:00+00:00"),
+    )
+    rc_conn.commit()
+
+    os_conn.execute(
+        """
+        CREATE TABLE osakedata (
+          osake TEXT,
+          pvm TEXT,
+          open REAL,
+          high REAL,
+          low REAL,
+          close REAL,
+          volume INTEGER,
+          market TEXT
+        )
+        """
+    )
+    os_conn.executemany(
+        """
+        INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("AAA", "2020-01-09", 100.0, 100.0, 100.0, 100.0, 100, "usa"),
+            ("AAA", "2020-01-10", 105.0, 105.0, 105.0, 105.0, 100, "usa"),
+        ],
+    )
+    os_conn.commit()
+
+    n = compute_and_store_ew_scores(
+        rc_conn=rc_conn,
+        osakedata_conn=os_conn,
+        as_of_date="2020-01-13",
+        rule_id="EW_SCORE_FASTPASS_V1_USA_SMALL",
+        repo=repo,
+        print_rows=False,
+    )
+    assert n == 1
+
+    row = repo.get_row("AAA", "2020-01-13")
+    assert row is not None
+    assert row["ew_score_up20_meta"] == pytest.approx(0.75, abs=1e-12)
+    assert row["ew_score_fail10_hgb"] == pytest.approx(0.20, abs=1e-12)
+    assert row["ew_level_dual_buy"] == 1
+    dual_payload = json.loads(row["inputs_json_dual"])
+    assert dual_payload["episode_id"] == "EP1"
+    assert dual_payload["model_version"] == "DUAL_V1"

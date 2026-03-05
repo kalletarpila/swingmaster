@@ -28,6 +28,14 @@ def ensure_rc_ew_score_daily_dual_mode_columns(conn: sqlite3.Connection) -> None
         conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN inputs_json_fastpass TEXT")
     if "inputs_json_rolling" not in cols:
         conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN inputs_json_rolling TEXT")
+    if "ew_score_up20_meta" not in cols:
+        conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN ew_score_up20_meta REAL")
+    if "ew_score_fail10_hgb" not in cols:
+        conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN ew_score_fail10_hgb REAL")
+    if "ew_level_dual_buy" not in cols:
+        conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN ew_level_dual_buy INTEGER")
+    if "inputs_json_dual" not in cols:
+        conn.execute("ALTER TABLE rc_ew_score_daily ADD COLUMN inputs_json_dual TEXT")
     conn.commit()
 
 
@@ -107,8 +115,12 @@ class RcEwScoreDailyRepo:
               ew_level_day3,
               ew_score_fastpass,
               ew_level_fastpass,
+              ew_score_up20_meta,
+              ew_score_fail10_hgb,
+              ew_level_dual_buy,
               ew_rule,
               inputs_json,
+              inputs_json_dual,
               created_at
             FROM rc_ew_score_daily
             WHERE ticker = ? AND date = ?
@@ -120,6 +132,91 @@ class RcEwScoreDailyRepo:
             return None
         columns = [col[0] for col in cur.description or []]
         return dict(zip(columns, row))
+
+    def upsert_dual_row(
+        self,
+        ticker: str,
+        date: str,
+        ew_score_up20_meta: float,
+        ew_score_fail10_hgb: float,
+        ew_level_dual_buy: int,
+        inputs_json_dual: str,
+    ) -> None:
+        existing = self._conn.execute(
+            """
+            SELECT
+              ew_score_day3, ew_level_day3, ew_rule, inputs_json,
+              ew_score_fastpass, ew_level_fastpass, ew_rule_fastpass, inputs_json_fastpass,
+              ew_score_rolling, ew_level_rolling, ew_rule_rolling, inputs_json_rolling
+            FROM rc_ew_score_daily
+            WHERE ticker = ? AND date = ?
+            """,
+            (ticker, date),
+        ).fetchone()
+        ew_score_day3 = float(existing[0]) if existing is not None and existing[0] is not None else 0.0
+        ew_level_day3 = int(existing[1]) if existing is not None and existing[1] is not None else 0
+        legacy_ew_rule = str(existing[2]) if existing is not None and existing[2] is not None else ""
+        legacy_inputs_json = str(existing[3]) if existing is not None and existing[3] is not None else "{}"
+        ew_score_fastpass = float(existing[4]) if existing is not None and existing[4] is not None else None
+        ew_level_fastpass = int(existing[5]) if existing is not None and existing[5] is not None else None
+        ew_rule_fastpass = str(existing[6]) if existing is not None and existing[6] is not None else None
+        inputs_json_fastpass = str(existing[7]) if existing is not None and existing[7] is not None else None
+        ew_score_rolling = float(existing[8]) if existing is not None and existing[8] is not None else None
+        ew_level_rolling = int(existing[9]) if existing is not None and existing[9] is not None else None
+        ew_rule_rolling = str(existing[10]) if existing is not None and existing[10] is not None else None
+        inputs_json_rolling = str(existing[11]) if existing is not None and existing[11] is not None else None
+        self._conn.execute(
+            """
+            INSERT INTO rc_ew_score_daily (
+              ticker,
+              date,
+              ew_score_day3,
+              ew_level_day3,
+              ew_score_fastpass,
+              ew_level_fastpass,
+              ew_rule_fastpass,
+              inputs_json_fastpass,
+              ew_score_rolling,
+              ew_level_rolling,
+              ew_rule_rolling,
+              inputs_json_rolling,
+              ew_score_up20_meta,
+              ew_score_fail10_hgb,
+              ew_level_dual_buy,
+              inputs_json_dual,
+              ew_rule,
+              inputs_json,
+              created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(ticker, date) DO UPDATE SET
+              ew_score_up20_meta = excluded.ew_score_up20_meta,
+              ew_score_fail10_hgb = excluded.ew_score_fail10_hgb,
+              ew_level_dual_buy = excluded.ew_level_dual_buy,
+              inputs_json_dual = excluded.inputs_json_dual
+            """,
+            (
+                ticker,
+                date,
+                ew_score_day3,
+                ew_level_day3,
+                ew_score_fastpass,
+                ew_level_fastpass,
+                ew_rule_fastpass,
+                inputs_json_fastpass,
+                ew_score_rolling,
+                ew_level_rolling,
+                ew_rule_rolling,
+                inputs_json_rolling,
+                ew_score_up20_meta,
+                ew_score_fail10_hgb,
+                ew_level_dual_buy,
+                inputs_json_dual,
+                legacy_ew_rule,
+                legacy_inputs_json,
+            ),
+        )
+        self._conn.commit()
 
     def upsert_fastpass_row(
         self,

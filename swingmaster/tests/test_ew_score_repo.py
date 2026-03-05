@@ -125,6 +125,10 @@ def test_dual_mode_column_migration_is_idempotent() -> None:
     assert "ew_rule_rolling" in cols
     assert "inputs_json_fastpass" in cols
     assert "inputs_json_rolling" in cols
+    assert "ew_score_up20_meta" in cols
+    assert "ew_score_fail10_hgb" in cols
+    assert "ew_level_dual_buy" in cols
+    assert "inputs_json_dual" in cols
 
 
 def test_fastpass_and_rolling_upserts_do_not_overwrite_other_mode_or_legacy() -> None:
@@ -238,3 +242,99 @@ def test_fastpass_and_rolling_upserts_do_not_overwrite_other_mode_or_legacy() ->
     assert after_rolling[7] == 3
     assert after_rolling[8] == "ROLLING_RULE_NEW"
     assert after_rolling[9] == "ROLLING_JSON_NEW"
+
+
+def test_dual_upsert_does_not_overwrite_legacy_fastpass_or_rolling() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE rc_ew_score_daily (
+          ticker TEXT NOT NULL,
+          date TEXT NOT NULL,
+          ew_score_day3 REAL,
+          ew_level_day3 INTEGER,
+          ew_rule TEXT,
+          inputs_json TEXT,
+          ew_score_fastpass REAL,
+          ew_level_fastpass INTEGER,
+          ew_rule_fastpass TEXT,
+          inputs_json_fastpass TEXT,
+          ew_score_rolling REAL,
+          ew_level_rolling INTEGER,
+          ew_rule_rolling TEXT,
+          inputs_json_rolling TEXT,
+          ew_score_up20_meta REAL,
+          ew_score_fail10_hgb REAL,
+          ew_level_dual_buy INTEGER,
+          inputs_json_dual TEXT,
+          created_at TEXT,
+          UNIQUE(ticker, date)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO rc_ew_score_daily (
+          ticker, date, ew_rule, inputs_json,
+          ew_score_fastpass, ew_level_fastpass, ew_rule_fastpass, inputs_json_fastpass,
+          ew_score_rolling, ew_level_rolling, ew_rule_rolling, inputs_json_rolling,
+          ew_score_up20_meta, ew_score_fail10_hgb, ew_level_dual_buy, inputs_json_dual
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "AAA",
+            "2026-02-19",
+            "LEGACY_RULE",
+            "LEGACY_JSON",
+            0.11,
+            0,
+            "FASTPASS_RULE_OLD",
+            "FASTPASS_JSON_OLD",
+            0.22,
+            2,
+            "ROLLING_RULE_OLD",
+            "ROLLING_JSON_OLD",
+            0.20,
+            0.80,
+            0,
+            "DUAL_JSON_OLD",
+        ),
+    )
+    conn.commit()
+
+    repo = RcEwScoreDailyRepo(conn)
+    repo.upsert_dual_row(
+        ticker="AAA",
+        date="2026-02-19",
+        ew_score_up20_meta=0.90,
+        ew_score_fail10_hgb=0.10,
+        ew_level_dual_buy=1,
+        inputs_json_dual="DUAL_JSON_NEW",
+    )
+    row = conn.execute(
+        """
+        SELECT
+          ew_rule, inputs_json,
+          ew_score_fastpass, ew_level_fastpass, ew_rule_fastpass, inputs_json_fastpass,
+          ew_score_rolling, ew_level_rolling, ew_rule_rolling, inputs_json_rolling,
+          ew_score_up20_meta, ew_score_fail10_hgb, ew_level_dual_buy, inputs_json_dual
+        FROM rc_ew_score_daily
+        WHERE ticker = ? AND date = ?
+        """,
+        ("AAA", "2026-02-19"),
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "LEGACY_RULE"
+    assert row[1] == "LEGACY_JSON"
+    assert row[2] == 0.11
+    assert row[3] == 0
+    assert row[4] == "FASTPASS_RULE_OLD"
+    assert row[5] == "FASTPASS_JSON_OLD"
+    assert row[6] == 0.22
+    assert row[7] == 2
+    assert row[8] == "ROLLING_RULE_OLD"
+    assert row[9] == "ROLLING_JSON_OLD"
+    assert row[10] == 0.90
+    assert row[11] == 0.10
+    assert row[12] == 1
+    assert row[13] == "DUAL_JSON_NEW"

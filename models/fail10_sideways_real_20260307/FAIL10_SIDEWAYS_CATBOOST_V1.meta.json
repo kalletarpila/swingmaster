@@ -1,0 +1,22 @@
+{
+  "artifact_path": "/home/kalle/projects/swingmaster/models/fail10_sideways_real_20260307/FAIL10_SIDEWAYS_CATBOOST_V1.cbm",
+  "auc_test": 0.7899999999999999,
+  "auc_valid": 0.510829774252593,
+  "model_id": "FAIL10_SIDEWAYS_CATBOOST_V1",
+  "regime": "SIDEWAYS",
+  "regime_version": "REGIME_USA_MA50_MA200_CLOSE_CRASH2_V1",
+  "target": "FAIL10",
+  "test_years": [
+    2024,
+    2025
+  ],
+  "train_years": [
+    2020,
+    2021,
+    2022
+  ],
+  "trained_at_utc": "2026-03-07T00:00:00+00:00",
+  "valid_years": [
+    2023
+  ]
+}

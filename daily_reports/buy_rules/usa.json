@@ -45,6 +45,16 @@
       }
     },
     {
+      "rule_hit": "BUY_BULL_FAIL10_UP20_V1",
+      "trigger": "NEW_PASS",
+      "conditions": {
+        "regime_eq": "BULL",
+        "fail10_prob_gte": 0.10,
+        "fail10_prob_lte": 0.30,
+        "up20_prob_gte": 0.30
+      }
+    },
+    {
       "rule_hit": "USA_NOTRADE_DUAL_PREMIUM_U80F20",
       "trigger": "NEW_NOTRADE",
       "conditions": {

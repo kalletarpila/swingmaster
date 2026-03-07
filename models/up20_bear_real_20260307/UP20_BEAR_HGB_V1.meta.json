@@ -1,0 +1,22 @@
+{
+  "artifact_path": "/home/kalle/projects/swingmaster/models/up20_bear_real_20260307/UP20_BEAR_HGB_V1.joblib",
+  "auc_test": 0.8005045269196213,
+  "auc_valid": 0.7970602181128497,
+  "model_id": "UP20_BEAR_HGB_V1",
+  "regime": "BEAR",
+  "regime_version": "REGIME_USA_MA50_MA200_CLOSE_CRASH2_V1",
+  "target": "UP20",
+  "test_years": [
+    2024,
+    2025
+  ],
+  "train_years": [
+    2020,
+    2021,
+    2022
+  ],
+  "trained_at_utc": "2026-03-07T00:00:00+00:00",
+  "valid_years": [
+    2023
+  ]
+}

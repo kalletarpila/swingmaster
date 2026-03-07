@@ -1,0 +1,22 @@
+{
+  "auc_test_catboost": 0.8090400165871864,
+  "auc_test_hgb": 0.8005045269196213,
+  "auc_valid_catboost": 0.7804646752015173,
+  "auc_valid_hgb": 0.7970602181128497,
+  "catboost_meta_path": "/home/kalle/projects/swingmaster/models/up20_bear_real_20260307/UP20_BEAR_CATBOOST_V1.meta.json",
+  "comparison_id": "UP20_BEAR_MODEL_COMPARISON_V1",
+  "feature_count": 61,
+  "feature_list_path": "/home/kalle/projects/swingmaster/models/up20_bear_real_20260307/UP20_BEAR_FEATURE_LIST_V1.json",
+  "hgb_meta_path": "/home/kalle/projects/swingmaster/models/up20_bear_real_20260307/UP20_BEAR_HGB_V1.meta.json",
+  "n_test": 705,
+  "n_train": 1478,
+  "n_valid": 130,
+  "pos_rate_test": 0.225531914893617,
+  "pos_rate_train": 0.17253044654939106,
+  "pos_rate_valid": 0.14615384615384616,
+  "regime": "BEAR",
+  "regime_version": "REGIME_USA_MA50_MA200_CLOSE_CRASH2_V1",
+  "selected_production_candidate": "UP20_BEAR_CATBOOST_V1",
+  "target": "UP20",
+  "trained_at_utc": "2026-03-07T00:00:00+00:00"
+}

@@ -1,0 +1,22 @@
+{
+  "artifact_path": "/home/kalle/projects/swingmaster/models/fail10_bear_real_20260307/FAIL10_BEAR_HGB_V1.joblib",
+  "auc_test": 0.6708185632053075,
+  "auc_valid": 0.7008821170809943,
+  "model_id": "FAIL10_BEAR_HGB_V1",
+  "regime": "BEAR",
+  "regime_version": "REGIME_USA_MA50_MA200_CLOSE_CRASH2_V1",
+  "target": "FAIL10",
+  "test_years": [
+    2024,
+    2025
+  ],
+  "train_years": [
+    2020,
+    2021,
+    2022
+  ],
+  "trained_at_utc": "2026-03-07T00:00:00+00:00",
+  "valid_years": [
+    2023
+  ]
+}

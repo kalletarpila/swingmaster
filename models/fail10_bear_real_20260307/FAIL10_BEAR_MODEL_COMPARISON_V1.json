@@ -1,0 +1,22 @@
+{
+  "auc_test_catboost": 0.6754853816384273,
+  "auc_test_hgb": 0.6708185632053075,
+  "auc_valid_catboost": 0.7380379577653035,
+  "auc_valid_hgb": 0.7008821170809943,
+  "catboost_meta_path": "/home/kalle/projects/swingmaster/models/fail10_bear_real_20260307/FAIL10_BEAR_CATBOOST_V1.meta.json",
+  "comparison_id": "FAIL10_BEAR_MODEL_COMPARISON_V1",
+  "feature_count": 61,
+  "feature_list_path": "/home/kalle/projects/swingmaster/models/fail10_bear_real_20260307/FAIL10_BEAR_FEATURE_LIST_V1.json",
+  "hgb_meta_path": "/home/kalle/projects/swingmaster/models/fail10_bear_real_20260307/FAIL10_BEAR_HGB_V1.meta.json",
+  "n_test": 705,
+  "n_train": 1478,
+  "n_valid": 130,
+  "pos_rate_test": 0.550354609929078,
+  "pos_rate_train": 0.628552097428958,
+  "pos_rate_valid": 0.6692307692307692,
+  "regime": "BEAR",
+  "regime_version": "REGIME_USA_MA50_MA200_CLOSE_CRASH2_V1",
+  "selected_production_candidate": "FAIL10_BEAR_CATBOOST_V1",
+  "target": "FAIL10",
+  "trained_at_utc": "2026-03-07T00:00:00+00:00"
+}

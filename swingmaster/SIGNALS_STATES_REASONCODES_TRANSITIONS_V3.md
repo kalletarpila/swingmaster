@@ -9,8 +9,10 @@ This is the unified V3 reference document for:
 
 ## Document update provenance
 - Previous update baseline: commit `4808bc32f7dd96df9be1f16b604d52df52acb01f` (2026-02-19 18:46:56 +0200)
-- Current sync point: commit `4fcca833be75b3d623b67e2a7152a387eed5185f` (2026-03-03 16:41:46 +0200)
-- This revision reflects all program changes in `4808bc3..4fcca83` that affect V3 behavior, runtime integration, scoring outputs, and reporting contracts.
+- Last content update commit for this file: `2f2bb8fabece30ac59859190c516403c03390ee9` (2026-03-05 20:01:57 +0200)
+- Filesystem modified timestamp for this file: `2026-03-05 19:58:28 +0200`
+- Current repository HEAD at time of this sync: `7634345329503e6006fe20465d38cca9623b2055` (2026-03-08)
+- This revision extends the V3 doc with the current BUY-rule contract reality and a precise implementation delta for USA probabilistic PASS rules.
 
 ## Sources (code)
 - `swingmaster/core/signals/enums.py`
@@ -493,11 +495,13 @@ Validation contract (`version = 1`):
 - allowed triggers:
   - `NEW_EW`
   - `NEW_PASS`
+  - `NEW_NOTRADE`
   - `EW_SNAPSHOT`
 - allowed condition keys:
   - `fastpass_score_gte`
   - `fastpass_level_eq`
   - `rolling_end_level_eq`
+  - `dual_buy_badge_eq`
   - `days_in_current_episode_gte`
   - `days_in_current_episode_lte`
   - `days_in_stabilizing_before_ew_gte`
@@ -510,6 +514,7 @@ Field mapping used by the engine:
 - `fastpass_score_gte` -> `ew_score_fastpass`
 - `fastpass_level_eq` -> `ew_level_fastpass`
 - `rolling_end_level_eq` -> `ew_level_rolling`
+- `dual_buy_badge_eq` -> `dual_buy_badge`
 - `days_in_current_episode_*` -> `days_in_current_episode`
 - `days_in_stabilizing_before_ew_*` -> `days_in_stabilizing_before_ew`
 
@@ -532,6 +537,48 @@ Current committed market configs:
   - `USA_PASS_FP80`
   - trigger `NEW_PASS`
   - condition `fastpass_score_gte = 0.80`
+  - `USA_NOTRADE_FP80`
+  - trigger `NEW_NOTRADE`
+  - condition `fastpass_score_gte = 0.80`
+  - `USA_PASS_DUAL_PREMIUM_U80F20`
+  - trigger `NEW_PASS`
+  - condition `dual_buy_badge_eq = BUY_PREMIUM`
+  - `USA_PASS_DUAL_ELITE_U72F27`
+  - trigger `NEW_PASS`
+  - condition `dual_buy_badge_eq = BUY_ELITE`
+  - `USA_PASS_DUAL_STRONG_U66F32`
+  - trigger `NEW_PASS`
+  - condition `dual_buy_badge_eq = BUY_STRONG`
+  - `USA_PASS_DUAL_QUALIFIED_U60F35`
+  - trigger `NEW_PASS`
+  - condition `dual_buy_badge_eq = BUY_QUALIFIED`
+  - `USA_NOTRADE_DUAL_PREMIUM_U80F20`
+  - trigger `NEW_NOTRADE`
+  - condition `dual_buy_badge_eq = BUY_PREMIUM`
+  - `USA_NOTRADE_DUAL_ELITE_U72F27`
+  - trigger `NEW_NOTRADE`
+  - condition `dual_buy_badge_eq = BUY_ELITE`
+  - `USA_NOTRADE_DUAL_STRONG_U66F32`
+  - trigger `NEW_NOTRADE`
+  - condition `dual_buy_badge_eq = BUY_STRONG`
+  - `USA_NOTRADE_DUAL_QUALIFIED_U60F35`
+  - trigger `NEW_NOTRADE`
+  - condition `dual_buy_badge_eq = BUY_QUALIFIED`
+  - `BUY_BULL_FAIL10_UP20_V1`
+  - trigger `NEW_PASS`
+  - intended conditions:
+    - `regime_eq = BULL`
+    - `fail10_prob_gte = 0.10`
+    - `fail10_prob_lte = 0.30`
+    - `up20_prob_gte = 0.30`
+  - `BUY_BULL_PASS_FAIL10_UP20_V2`
+  - trigger `NEW_PASS`
+  - intended conditions:
+    - `regime_eq = BULL`
+    - `entry_window_exit_state_eq = PASS`
+    - `fail10_prob_gte = 0.10`
+    - `fail10_prob_lte = 0.35`
+    - `up20_prob_gte = 0.25`
 
 Current buy-rule files:
 - `daily_reports/buy_rules/fin.json`
@@ -545,6 +592,63 @@ Rule application flow:
 - create `BUYS` row for each match
 - group by `(ticker, event_date)`
 - join multiple rule hits with `;`
+
+### 6.2.1 Current mismatch and exact implementation delta (USA probabilistic PASS rules)
+Current runtime mismatch (as-of HEAD `7634345`):
+- `daily_reports/buy_rules/usa.json` contains new probabilistic keys:
+  - `regime_eq`
+  - `entry_window_exit_state_eq`
+  - `fail10_prob_gte`
+  - `fail10_prob_lte`
+  - `up20_prob_gte`
+- `swingmaster/cli/daily_report.py` validator and field mapping do not support these keys yet.
+- `report_raw` payload does not expose corresponding fields (`regime`, `entry_window_exit_state`, `fail10_prob`, `up20_prob`) for rule evaluation.
+- Result: JSON validation fails on unknown keys before BUY rows are built.
+
+Required implementation changes (normative):
+1. Extend allowed buy-rule condition keys in `swingmaster/cli/daily_report.py`:
+   - add `regime_eq`
+   - add `entry_window_exit_state_eq`
+   - add `fail10_prob_gte`
+   - add `fail10_prob_lte`
+   - add `up20_prob_gte`
+2. Extend `CONDITION_FIELD_MAP` in `daily_report.py`:
+   - `regime_eq` -> `regime`
+   - `entry_window_exit_state_eq` -> `entry_window_exit_state`
+   - `fail10_prob_gte` -> `fail10_prob`
+   - `fail10_prob_lte` -> `fail10_prob`
+   - `up20_prob_gte` -> `up20_prob`
+3. Ensure `report_raw` contains these columns for BUY-rule evaluation:
+   - `regime`
+   - `entry_window_exit_state`
+   - `fail10_prob`
+   - `up20_prob`
+4. SQL template update (`daily_reports/fin_daily_report.sql`):
+   - add the four columns above to every `report_raw` row shape used by `NEW_PASS` / `NEW_NOTRADE` / `EW_SNAPSHOT` / `NEW_EW`.
+   - resolve values via deterministic joins:
+     - `entry_window_exit_state` from `rc_pipeline_episode.entry_window_exit_state`
+     - `regime` from `rc_episode_regime.ew_exit_regime_combined`
+     - `fail10_prob` from `rc_episode_model_score` where `model_id='FAIL10_BULL_HGB_V1'`
+     - `up20_prob` from `rc_episode_model_score` where `model_id='UP20_BULL_HGB_V1'`
+   - join key for episode/model rows must be `episode_id`; if base row is ticker/date keyed, map to episode via `(ticker, entry_window_exit_date=event_date)` first, then join by `episode_id`.
+5. Python row contract update:
+   - include new columns in `OUTPUT_COLUMNS` and `REPORT_RAW_COLUMNS` in `daily_report.py`
+   - include placeholders for the new fields in empty BUY-section fallback row (`build_report_rows_json_mode`)
+6. Validation/docs sync:
+   - update `daily_reports/buy_rules/schema_v1.md`
+   - update `daily_reports/buy_rules/README.md`
+   - keep this V3 document synchronized with the same allowed keys and mappings.
+7. Test coverage (must pass before rollout):
+   - add/extend tests in `swingmaster/tests/test_daily_report_buy_rules.py`:
+     - validator accepts new keys
+     - rules evaluate correctly with numeric `_gte/_lte` and string `_eq`
+     - grouped BUY output contains new rule hits
+     - missing field behavior remains fail-closed (no match, no crash)
+
+Runtime invariants for implementation:
+- Buy rules remain report-layer filters only; no impact on state machine/policy.
+- Condition semantics remain AND-only; no OR/nesting introduced.
+- Unknown condition keys must continue to raise validation errors.
 
 ### 6.3 BUY transaction simulation contract (`rc_transactions_simu`)
 Canonical persisted BUY simulator in current codebase:
@@ -1065,4 +1169,155 @@ python3 swingmaster/cli/run_episode_dual_score_production.py \
 
 ---
 
-This document is the single V3 reference. Update it whenever V3 signal modules, policy modules, or metadata contracts change.
+## 13. Delta Since Previous Doc Update (Code-Verified)
+
+Scope of this delta section:
+- base commit: `2f2bb8fabece30ac59859190c516403c03390ee9`
+- head commit at analysis time: `7634345329503e6006fe20465d38cca9623b2055`
+- covered range: `2f2bb8f..7634345`
+- total diff footprint: `103 files changed, 21252 insertions(+), 500 deletions(-)`
+
+### 13.1 Commit timeline in scope
+- `777480a`: Add market regime daily+episode tables and sync CLI
+- `3024098`: Add UP20 BULL training CLI and CatBoost/HGB comparison flow
+- `4105144`: Add episode exit feature storage, CLI, and migration
+- `efd8bf1`: Add UP20 BULL practical evaluation CLI and metrics report
+- `de9a6b2`: Add UP20 BULL HGB production scoring flow and score table
+- `2fe1449`: Add FAIL10 BULL training/evaluation/scoring flows
+- `93c2a31`: Add UP20 BEAR training/eval/scoring flow and wrapper CLI tests
+- `1ec7289`: Add UP20 BEAR real-run model artifacts
+- `cc4513a`: Add FAIL10 BEAR training/evaluation/scoring flows
+- `15f55cd`: Add FAIL10 BEAR real-run model artifacts
+- `0b63329`: Add BEAR score wrapper and UP20 SIDEWAYS train/eval/score flow
+- `221e365`: Add FAIL10 SIDEWAYS training/eval/scoring flows
+- `61bb0e1`: Add UP20 SIDEWAYS real model artifacts
+- `5f0eb3e`: Add FAIL10 SIDEWAYS real model artifacts
+- `28d99c7`: Add SIDEWAYS model score wrapper CLI
+- `95ce2d5`: Add USA BUY rule for BULL fail10/up20 thresholds
+- `7634345`: Add USA PASS buy rule `BUY_BULL_PASS_FAIL10_UP20_V2`
+
+### 13.2 New database schema contracts
+New migration `009_rc_market_regime_tables.sql`:
+- creates `rc_market_regime_daily`:
+  - composite PK `(trade_date, market, regime_version)`
+  - includes SP500/NDX close, MA50, MA200, per-index state and combined regime
+  - state domain: `BULL|CRASH_ALERT|BEAR|SIDEWAYS` (via CHECK constraints)
+- creates `rc_episode_regime`:
+  - composite PK `(episode_id, regime_version)`
+  - stores regime snapshots at EW entry and EW exit dates
+  - regime/state fields nullable but constrained to valid state domain when present
+
+New migration `010_rc_episode_exit_features.sql`:
+- creates `rc_episode_exit_features` keyed by `episode_id`
+- stores deterministic as-of EW-exit feature vector (`EPISODE_EXIT_FEATURES_V1`)
+- indexed by `as_of_date` and `(ticker, as_of_date)`
+
+New migration `011_rc_episode_model_score.sql`:
+- creates `rc_episode_model_score` keyed by `(episode_id, model_id)`
+- columns include:
+  - identity/context: `ticker`, `entry_window_date`, `entry_window_exit_date`, `as_of_date`
+  - model metadata: `regime_used`, `model_family`, `target_name`, `feature_version`, `regime_version`, `artifact_path`
+  - output metadata: `predicted_probability`, `scored_at`
+
+### 13.3 New production modules and CLI contracts
+Market regime production:
+- module: `swingmaster/regime/production.py`
+- CLI: `swingmaster/cli/run_market_regime_sync.py`
+- default regime version: `REGIME_USA_MA50_MA200_CLOSE_CRASH2_V1`
+- crash confirmation logic parameter: `--crash-confirm-days` (default 2)
+- write modes: `upsert|replace-all|insert-missing`
+
+Episode-exit feature production:
+- module: `swingmaster/episode_exit_features/production.py`
+- CLI: `swingmaster/cli/run_episode_exit_features.py`
+- computes feature row as-of each `entry_window_exit_date`
+- auto-skips episodes lacking exact as-of price row
+- write modes: `upsert|replace-all|insert-missing`
+
+Model scoring wrappers:
+- BULL wrapper: `swingmaster/cli/run_bull_model_scores.py`
+- BEAR wrapper: `swingmaster/cli/run_bear_model_scores.py`
+- SIDEWAYS wrapper: `swingmaster/cli/run_sideways_model_scores.py`
+- all wrappers:
+  - run both UP20 and FAIL10 scorers
+  - apply migrations before scoring
+  - report coverage and optional threshold pass counts
+
+### 13.4 New model families and IDs (code-level)
+BULL:
+- `UP20_BULL_CATBOOST_V1`, `UP20_BULL_HGB_V1`
+- `FAIL10_BULL_CATBOOST_V1`, `FAIL10_BULL_HGB_V1`
+
+BEAR:
+- `UP20_BEAR_CATBOOST_V1`, `UP20_BEAR_HGB_V1`
+- `FAIL10_BEAR_CATBOOST_V1`, `FAIL10_BEAR_HGB_V1`
+
+SIDEWAYS:
+- `UP20_SIDEWAYS_CATBOOST_V1`, `UP20_SIDEWAYS_HGB_V1`
+- `FAIL10_SIDEWAYS_CATBOOST_V1`, `FAIL10_SIDEWAYS_HGB_V1`
+
+Scoring persistence behavior (all regimes):
+- scorers write to `rc_episode_model_score`
+- upsert on `(episode_id, model_id)`
+- regime filter source: `rc_episode_regime.ew_exit_regime_combined`
+- feature source: `rc_episode_exit_features` aligned on `episode_id` and `as_of_date=entry_window_exit_date`
+
+### 13.5 Artifacts added to repository
+Added real-run artifact bundles (2026-03-07):
+- `models/up20_bear_real_20260307/*`
+- `models/fail10_bear_real_20260307/*`
+- `models/up20_sideways_real_20260307/*`
+- `models/fail10_sideways_real_20260307/*`
+
+Observed evaluation recommendations inside committed eval JSONs:
+- `FAIL10_BEAR_MODEL_EVAL_V1.json` -> `FAIL10_BEAR_HGB_V1`
+- `FAIL10_SIDEWAYS_MODEL_EVAL_V1.json` -> `FAIL10_SIDEWAYS_CATBOOST_V1`
+- `UP20_BEAR_MODEL_EVAL_V1.json` -> `UP20_BEAR_HGB_V1`
+- `UP20_SIDEWAYS_MODEL_EVAL_V1.json` -> `UP20_SIDEWAYS_HGB_V1`
+
+### 13.6 Tests added in this range
+New tests were added for:
+- regime migration/production
+- episode-exit feature computation
+- UP20/FAIL10 train/eval/score flows for BULL/BEAR/SIDEWAYS
+- wrapper CLIs for BULL/BEAR/SIDEWAYS combined scoring
+
+Important boundary:
+- no code changes in this range under `swingmaster/core/*` or `swingmaster/app_api/providers/*`.
+- therefore state-machine transition graph and signal provider logic were not directly modified by this commit range.
+
+### 13.7 Verified gaps / inconsistencies (must-fix)
+Gap A: USA buy-rule JSON vs runtime validator mismatch (critical)
+- current `daily_reports/buy_rules/usa.json` includes keys:
+  - `regime_eq`
+  - `entry_window_exit_state_eq`
+  - `fail10_prob_gte`
+  - `fail10_prob_lte`
+  - `up20_prob_gte`
+- current `swingmaster/cli/daily_report.py` validator (`ALLOWED_CONDITION_KEYS`) does not include these keys.
+- direct runtime check result (code-verified):
+  - `load_buy_rules_config("USA")` -> `ValueError: Invalid buy-rules config: unknown condition key regime_eq`
+
+Gap B: buy-rule docs out-of-sync with current usa.json intent
+- `daily_reports/buy_rules/schema_v1.md` and `daily_reports/buy_rules/README.md` still describe older key set and do not define probabilistic model-score keys.
+
+Gap C: report-row field contract missing probabilistic inputs for rule engine
+- current buy-rule field map in `daily_report.py` has no mapping for:
+  - `regime`
+  - `entry_window_exit_state`
+  - `fail10_prob`
+  - `up20_prob`
+- even after validator extension, rule evaluation will require these fields in BUY candidate rows.
+
+### 13.8 Required follow-up implementation order
+1. Extend `daily_report.py` validator + condition field map for the five new USA probabilistic keys.
+2. Extend report SQL/output payload so the rule engine can read:
+   - `regime`
+   - `entry_window_exit_state`
+   - `fail10_prob`
+   - `up20_prob`
+3. Update buy-rule schema docs (`schema_v1.md`, `README.md`) to match runtime contract.
+4. Add tests in `test_daily_report_buy_rules.py` for new keys and field mapping.
+5. Re-run daily-report generation for USA to verify `BUY_BULL_FAIL10_UP20_V1` and `BUY_BULL_PASS_FAIL10_UP20_V2` are executable.
+
+This document is the single V3 reference. Update it whenever V3 signal modules, policy modules, metadata contracts, or report-layer rule contracts change.

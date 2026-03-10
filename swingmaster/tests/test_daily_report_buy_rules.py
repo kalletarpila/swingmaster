@@ -4,7 +4,14 @@ import sqlite3
 
 import pytest
 
-from swingmaster.cli.daily_report import _attach_buy_badges, _format_cell, _format_csv_value, apply_buy_rules, validate_buy_rules_config
+from swingmaster.cli.daily_report import (
+    _attach_buy_badges,
+    _format_cell,
+    _format_csv_value,
+    apply_buy_rules,
+    load_buy_rules_config,
+    validate_buy_rules_config,
+)
 
 
 @pytest.mark.parametrize(
@@ -113,6 +120,134 @@ def test_validate_buy_rules_config_accepts_new_notrade_trigger() -> None:
 
     validated = validate_buy_rules_config(config, "USA")
     assert validated["rules"][0]["trigger"] == "NEW_NOTRADE"
+
+
+def test_validate_buy_rules_config_accepts_probabilistic_keys() -> None:
+    config = {
+        "market": "USA",
+        "version": 1,
+        "rules": [
+            {
+                "rule_hit": "BUY_BULL_PASS_FAIL10_UP20_V2",
+                "trigger": "NEW_PASS",
+                "conditions": {
+                    "regime_eq": "BULL",
+                    "entry_window_exit_state_eq": "PASS",
+                    "fail10_prob_gte": 0.10,
+                    "fail10_prob_lte": 0.35,
+                    "up20_prob_gte": 0.25,
+                },
+            }
+        ],
+    }
+
+    validated = validate_buy_rules_config(config, "USA")
+    assert validated["rules"][0]["rule_hit"] == "BUY_BULL_PASS_FAIL10_UP20_V2"
+
+
+def test_apply_buy_rules_probabilistic_conditions_support_bull_and_bear_rules() -> None:
+    config = {
+        "market": "USA",
+        "version": 1,
+        "rules": [
+            {
+                "rule_hit": "BUY_BULL_PASS_FAIL10_UP20_V2",
+                "trigger": "NEW_PASS",
+                "conditions": {
+                    "regime_eq": "BULL",
+                    "entry_window_exit_state_eq": "PASS",
+                    "fail10_prob_gte": 0.10,
+                    "fail10_prob_lte": 0.35,
+                    "up20_prob_gte": 0.25,
+                },
+            },
+            {
+                "rule_hit": "BUY_BEAR_PASS_UP20_V1",
+                "trigger": "NEW_PASS",
+                "conditions": {
+                    "regime_eq": "BEAR",
+                    "entry_window_exit_state_eq": "PASS",
+                    "up20_prob_gte": 0.10,
+                },
+            },
+        ],
+    }
+    rows = [
+        {
+            "section": "NEW_PASS",
+            "ticker": "AAA",
+            "regime": "BULL",
+            "entry_window_exit_state": "PASS",
+            "fail10_prob": 0.20,
+            "up20_prob": 0.30,
+        },
+        {
+            "section": "NEW_PASS",
+            "ticker": "BBB",
+            "regime": "BEAR",
+            "entry_window_exit_state": "PASS",
+            "fail10_prob": None,
+            "up20_prob": 0.10,
+        },
+        {
+            "section": "NEW_PASS",
+            "ticker": "CCC",
+            "regime": "BULL",
+            "entry_window_exit_state": "PASS",
+            "fail10_prob": 0.40,
+            "up20_prob": 0.60,
+        },
+    ]
+
+    out, missing_field_count = apply_buy_rules(rows, config, buy_section_name="BUYS")
+
+    assert missing_field_count == 0
+    assert sorted((str(row["ticker"]), str(row["rule_hit"])) for row in out) == [
+        ("AAA", "BUY_BULL_PASS_FAIL10_UP20_V2"),
+        ("BBB", "BUY_BEAR_PASS_UP20_V1"),
+    ]
+
+
+def test_apply_buy_rules_probabilistic_missing_field_is_fail_closed() -> None:
+    config = {
+        "market": "USA",
+        "version": 1,
+        "rules": [
+            {
+                "rule_hit": "BUY_BULL_PASS_FAIL10_UP20_V2",
+                "trigger": "NEW_PASS",
+                "conditions": {
+                    "regime_eq": "BULL",
+                    "entry_window_exit_state_eq": "PASS",
+                    "fail10_prob_gte": 0.10,
+                    "fail10_prob_lte": 0.35,
+                    "up20_prob_gte": 0.25,
+                },
+            }
+        ],
+    }
+    rows = [
+        {
+            "section": "NEW_PASS",
+            "ticker": "AAA",
+            "regime": "BULL",
+            "entry_window_exit_state": "PASS",
+            "up20_prob": 0.30,
+        }
+    ]
+
+    out, missing_field_count = apply_buy_rules(rows, config, buy_section_name="BUYS")
+
+    assert out == []
+    assert missing_field_count == 1
+
+
+def test_load_buy_rules_config_usa_accepts_probabilistic_rules() -> None:
+    config = load_buy_rules_config("USA")
+    rule_ids = {str(rule["rule_hit"]) for rule in config["rules"]}
+
+    assert "BUY_BULL_PASS_FAIL10_UP20_V2" in rule_ids
+    assert "BUY_BEAR_PASS_UP20_V1" in rule_ids
 
 
 def test_apply_buy_rules_dual_rules_match_all_eight_rule_names() -> None:

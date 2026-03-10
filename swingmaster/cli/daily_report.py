@@ -33,6 +33,10 @@ OUTPUT_COLUMNS = [
     "ew_level_fastpass",
     "ew_score_rolling",
     "ew_level_rolling",
+    "regime",
+    "entry_window_exit_state",
+    "fail10_prob",
+    "up20_prob",
     "rule_hit",
     "buy_badges",
 ]
@@ -43,6 +47,11 @@ ALLOWED_CONDITION_KEYS = {
     "fastpass_level_eq",
     "rolling_end_level_eq",
     "dual_buy_badge_eq",
+    "regime_eq",
+    "entry_window_exit_state_eq",
+    "fail10_prob_gte",
+    "fail10_prob_lte",
+    "up20_prob_gte",
     "days_in_current_episode_gte",
     "days_in_current_episode_lte",
     "days_in_stabilizing_before_ew_gte",
@@ -53,6 +62,11 @@ CONDITION_FIELD_MAP = {
     "fastpass_level_eq": "ew_level_fastpass",
     "rolling_end_level_eq": "ew_level_rolling",
     "dual_buy_badge_eq": "dual_buy_badge",
+    "regime_eq": "regime",
+    "entry_window_exit_state_eq": "entry_window_exit_state",
+    "fail10_prob_gte": "fail10_prob",
+    "fail10_prob_lte": "fail10_prob",
+    "up20_prob_gte": "up20_prob",
     "days_in_current_episode_gte": "days_in_current_episode",
     "days_in_current_episode_lte": "days_in_current_episode",
     "days_in_stabilizing_before_ew_gte": "days_in_stabilizing_before_ew",
@@ -318,6 +332,10 @@ def build_report_rows_json_mode(
                 "ew_level_fastpass": None,
                 "ew_score_rolling": None,
                 "ew_level_rolling": None,
+                "regime": None,
+                "entry_window_exit_state": None,
+                "fail10_prob": None,
+                "up20_prob": None,
                 "rule_hit": "EMPTY_SECTION",
             }
         ]
@@ -467,6 +485,99 @@ def _ensure_temp_ew_score_table(conn: sqlite3.Connection) -> bool:
     return True
 
 
+def _enrich_probabilistic_rule_fields(conn: sqlite3.Connection, rows: List[Dict[str, Any]]) -> None:
+    for row in rows:
+        row.setdefault("regime", None)
+        row.setdefault("entry_window_exit_state", None)
+        row.setdefault("fail10_prob", None)
+        row.setdefault("up20_prob", None)
+
+    if not rows:
+        return
+    if not _has_table(conn, "rc_pipeline_episode"):
+        return
+    if not _has_table(conn, "rc_episode_regime"):
+        return
+    if not _has_table(conn, "rc_episode_model_score"):
+        return
+    if not _has_column(conn, "rc_pipeline_episode", "episode_id"):
+        return
+    if not _has_column(conn, "rc_pipeline_episode", "entry_window_exit_date"):
+        return
+    if not _has_column(conn, "rc_pipeline_episode", "entry_window_exit_state"):
+        return
+
+    keys = sorted(
+        {
+            (str(row.get("ticker")), str(row.get("event_date")), str(row.get("to_state") or ""))
+            for row in rows
+            if row.get("ticker") not in {None, "", "(none)"}
+            and row.get("event_date") not in {None, ""}
+            and row.get("to_state") in {"PASS", "NO_TRADE"}
+        }
+    )
+    if not keys:
+        return
+
+    values_sql = ",".join("(?, ?, ?)" for _ in keys)
+    params: List[Any] = []
+    for ticker, event_date, expected_exit_state in keys:
+        params.extend([ticker, event_date, expected_exit_state])
+
+    sql = f"""
+    WITH keys(ticker, event_date, expected_exit_state) AS (
+      VALUES {values_sql}
+    )
+    SELECT
+      k.ticker,
+      k.event_date,
+      k.expected_exit_state,
+      reg.ew_exit_regime_combined AS regime,
+      ep.entry_window_exit_state AS entry_window_exit_state,
+      CASE
+        WHEN reg.ew_exit_regime_combined = 'BULL' THEN fail_bull.predicted_probability
+        ELSE NULL
+      END AS fail10_prob,
+      CASE
+        WHEN reg.ew_exit_regime_combined = 'BULL' THEN up_bull.predicted_probability
+        WHEN reg.ew_exit_regime_combined = 'BEAR' THEN up_bear.predicted_probability
+        ELSE NULL
+      END AS up20_prob
+    FROM keys k
+    LEFT JOIN rc_pipeline_episode ep
+      ON ep.rowid = (
+        SELECT MAX(ep2.rowid)
+        FROM rc_pipeline_episode ep2
+        WHERE ep2.ticker = k.ticker
+          AND ep2.entry_window_exit_date = k.event_date
+          AND ep2.entry_window_exit_state = k.expected_exit_state
+      )
+    LEFT JOIN rc_episode_regime reg
+      ON reg.episode_id = ep.episode_id
+    LEFT JOIN rc_episode_model_score fail_bull
+      ON fail_bull.episode_id = ep.episode_id
+     AND fail_bull.model_id = 'FAIL10_BULL_HGB_V1'
+    LEFT JOIN rc_episode_model_score up_bull
+      ON up_bull.episode_id = ep.episode_id
+     AND up_bull.model_id = 'UP20_BULL_HGB_V1'
+    LEFT JOIN rc_episode_model_score up_bear
+      ON up_bear.episode_id = ep.episode_id
+     AND up_bear.model_id = 'UP20_BEAR_HGB_V1'
+    """
+    resolved_rows = conn.execute(sql, params).fetchall()
+    resolved_by_key = {(str(row[0]), str(row[1]), str(row[2])): row for row in resolved_rows}
+
+    for row in rows:
+        key = (str(row.get("ticker")), str(row.get("event_date")), str(row.get("to_state") or ""))
+        resolved = resolved_by_key.get(key)
+        if resolved is None:
+            continue
+        row["regime"] = resolved[3]
+        row["entry_window_exit_state"] = resolved[4]
+        row["fail10_prob"] = resolved[5]
+        row["up20_prob"] = resolved[6]
+
+
 def fetch_report_raw_rows(db_path: Path, config: MarketConfig, as_of_date: str) -> Tuple[List[Dict[str, Any]], bool]:
     os.environ.setdefault("SQLITE_TMPDIR", "/tmp")
     conn = sqlite3.connect(str(db_path))
@@ -484,6 +595,7 @@ def fetch_report_raw_rows(db_path: Path, config: MarketConfig, as_of_date: str) 
             payload = dict(row)
             payload["buy_badges"] = None
             out.append(payload)
+        _enrich_probabilistic_rule_fields(conn, out)
         return out, missing_fastpass_table
     finally:
         conn.close()

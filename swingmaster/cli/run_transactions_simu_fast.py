@@ -211,10 +211,16 @@ def inspect_schema(conn: sqlite3.Connection) -> Dict[str, bool]:
     has_state_daily = table_exists(conn, "rc_state_daily")
     has_ew_score_daily = table_exists(conn, "rc_ew_score_daily")
     has_pipeline_episode = table_exists(conn, "rc_pipeline_episode")
+    has_episode_regime = table_exists(conn, "rc_episode_regime")
+    has_episode_model_score = table_exists(conn, "rc_episode_model_score")
     return {
         "has_state_daily": has_state_daily,
         "has_ew_score_daily": has_ew_score_daily,
         "has_pipeline_episode": has_pipeline_episode,
+        "has_episode_regime": has_episode_regime,
+        "has_episode_model_score": has_episode_model_score,
+        "has_episode_id": column_exists(conn, "rc_pipeline_episode", "episode_id"),
+        "has_model_predicted_probability": column_exists(conn, "rc_episode_model_score", "predicted_probability"),
         "has_days_in_current_episode": column_exists(conn, "rc_state_daily", "days_in_current_episode"),
         "has_days_in_stabilizing_before_ew": column_exists(conn, "rc_state_daily", "days_in_stabilizing_before_ew"),
         "has_state_attrs_json": column_exists(conn, "rc_state_daily", "state_attrs_json"),
@@ -260,6 +266,56 @@ def build_shared_sql_parts(schema: Dict[str, bool]) -> Dict[str, str]:
     }
 
 
+def build_probabilistic_sql_parts(schema: Dict[str, bool], has_episode_join: bool) -> Dict[str, str]:
+    can_join = (
+        has_episode_join
+        and schema["has_episode_regime"]
+        and schema["has_episode_model_score"]
+        and schema["has_episode_id"]
+        and schema["has_model_predicted_probability"]
+    )
+    if not can_join:
+        return {
+            "prob_joins": "",
+            "regime_expr": "NULL AS regime",
+            "entry_window_exit_state_expr": "NULL AS entry_window_exit_state",
+            "fail10_prob_expr": "NULL AS fail10_prob",
+            "up20_prob_expr": "NULL AS up20_prob",
+        }
+    entry_window_exit_state_expr = (
+        "ep.entry_window_exit_state AS entry_window_exit_state"
+        if schema["has_entry_window_exit_state"]
+        else "NULL AS entry_window_exit_state"
+    )
+    return {
+        "prob_joins": """
+        LEFT JOIN rc_episode_regime reg
+          ON reg.episode_id = ep.episode_id
+        LEFT JOIN rc_episode_model_score fail_bull
+          ON fail_bull.episode_id = ep.episode_id
+         AND fail_bull.model_id = 'FAIL10_BULL_HGB_V1'
+        LEFT JOIN rc_episode_model_score up_bull
+          ON up_bull.episode_id = ep.episode_id
+         AND up_bull.model_id = 'UP20_BULL_HGB_V1'
+        LEFT JOIN rc_episode_model_score up_bear
+          ON up_bear.episode_id = ep.episode_id
+         AND up_bear.model_id = 'UP20_BEAR_HGB_V1'
+        """,
+        "regime_expr": "reg.ew_exit_regime_combined AS regime",
+        "entry_window_exit_state_expr": entry_window_exit_state_expr,
+        "fail10_prob_expr": (
+            "CASE WHEN reg.ew_exit_regime_combined = 'BULL' "
+            "THEN fail_bull.predicted_probability ELSE NULL END AS fail10_prob"
+        ),
+        "up20_prob_expr": (
+            "CASE "
+            "WHEN reg.ew_exit_regime_combined = 'BULL' THEN up_bull.predicted_probability "
+            "WHEN reg.ew_exit_regime_combined = 'BEAR' THEN up_bear.predicted_probability "
+            "ELSE NULL END AS up20_prob"
+        ),
+    }
+
+
 def fetch_new_ew_candidates(
     conn: sqlite3.Connection,
     start_date: str,
@@ -291,6 +347,7 @@ def fetch_new_ew_candidates(
         if schema["has_pipeline_episode"]
         else ""
     )
+    prob_parts = build_probabilistic_sql_parts(schema, has_episode_join=schema["has_pipeline_episode"])
 
     if schema["has_ew_score_daily"] and dual_score_columns is not None:
         up20_col, fail10_col = dual_score_columns
@@ -312,12 +369,17 @@ def fetch_new_ew_candidates(
       NULL AS ew_score_rolling,
       {parts['rolling_level_expr']},
       {dual_buy_badge_expr} AS dual_buy_badge,
+      {prob_parts['regime_expr']},
+      {prob_parts['entry_window_exit_state_expr']},
+      {prob_parts['fail10_prob_expr']},
+      {prob_parts['up20_prob_expr']},
       {parts['days_current_expr']},
       {parts['days_stab_expr']},
       {buy_price_expr}
     FROM rc_transition t
     {ew_score_join}
     {episode_join}
+    {prob_parts['prob_joins']}
     {parts['state_daily_join']}
     WHERE t.to_state = 'ENTRY_WINDOW'
       AND t.date >= ?
@@ -398,6 +460,7 @@ def fetch_new_pass_candidates(
         """
     else:
         episode_join = ""
+    prob_parts = build_probabilistic_sql_parts(schema, has_episode_join=bool(episode_join.strip()))
 
     sql = f"""
     SELECT
@@ -413,6 +476,10 @@ def fetch_new_pass_candidates(
       {rolling_score_expr},
       {rolling_level_expr},
       {dual_buy_badge_expr} AS dual_buy_badge,
+      {prob_parts['regime_expr']},
+      {prob_parts['entry_window_exit_state_expr']},
+      {prob_parts['fail10_prob_expr']},
+      {prob_parts['up20_prob_expr']},
       {parts['days_current_expr']},
       {parts['days_stab_expr']},
       {buy_price_expr}
@@ -420,6 +487,7 @@ def fetch_new_pass_candidates(
     {episode_join}
     {fastpass_join}
     {rolling_join}
+    {prob_parts['prob_joins']}
     {parts['state_daily_join']}
     WHERE t.to_state = 'PASS'
       AND t.date >= ?
@@ -500,6 +568,7 @@ def fetch_new_notrade_candidates(
         """
     else:
         episode_join = ""
+    prob_parts = build_probabilistic_sql_parts(schema, has_episode_join=bool(episode_join.strip()))
 
     sql = f"""
     SELECT
@@ -515,6 +584,10 @@ def fetch_new_notrade_candidates(
       {rolling_score_expr},
       {rolling_level_expr},
       {dual_buy_badge_expr} AS dual_buy_badge,
+      {prob_parts['regime_expr']},
+      {prob_parts['entry_window_exit_state_expr']},
+      {prob_parts['fail10_prob_expr']},
+      {prob_parts['up20_prob_expr']},
       {parts['days_current_expr']},
       {parts['days_stab_expr']},
       {buy_price_expr}
@@ -522,6 +595,7 @@ def fetch_new_notrade_candidates(
     {episode_join}
     {fastpass_join}
     {rolling_join}
+    {prob_parts['prob_joins']}
     {parts['state_daily_join']}
     WHERE t.to_state = 'NO_TRADE'
       AND t.from_state = 'ENTRY_WINDOW'

@@ -321,7 +321,7 @@ V3 uses same reason codes as v2:
 
 Persisted as `POLICY:<ReasonCode>`.
 
-## 5. V3 State Attr Metadata Contract
+## 5.downtrend_entry_type
 
 `RuleBasedTransitionPolicyV3Impl` delegates to v2, then updates attrs metadata.
 

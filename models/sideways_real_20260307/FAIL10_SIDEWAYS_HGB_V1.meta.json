@@ -1,0 +1,22 @@
+{
+  "artifact_path": "/home/kalle/projects/swingmaster/models/fail10_sideways_real_20260307/FAIL10_SIDEWAYS_HGB_V1.joblib",
+  "auc_test": 0.742,
+  "auc_valid": 0.4841366687004271,
+  "model_id": "FAIL10_SIDEWAYS_HGB_V1",
+  "regime": "SIDEWAYS",
+  "regime_version": "REGIME_USA_MA50_MA200_CLOSE_CRASH2_V1",
+  "target": "FAIL10",
+  "test_years": [
+    2024,
+    2025
+  ],
+  "train_years": [
+    2020,
+    2021,
+    2022
+  ],
+  "trained_at_utc": "2026-03-07T00:00:00+00:00",
+  "valid_years": [
+    2023
+  ]
+}

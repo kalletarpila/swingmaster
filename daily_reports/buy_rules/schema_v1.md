@@ -9,7 +9,7 @@ Each market rule file is a JSON document with this structure:
   "rules": [
     {
       "rule_hit": "<STRING>",
-      "trigger": "<NEW_EW|NEW_PASS|EW_SNAPSHOT>",
+      "trigger": "<NEW_EW|NEW_PASS|NEW_NOTRADE|EW_SNAPSHOT>",
       "conditions": {
         "<condition_key>": <value>
       }
@@ -37,6 +37,7 @@ Allowed triggers
 
 - `NEW_EW`
 - `NEW_PASS`
+- `NEW_NOTRADE`
 - `EW_SNAPSHOT`
 
 Allowed condition keys
@@ -44,6 +45,12 @@ Allowed condition keys
 - `fastpass_score_gte` (number)
 - `fastpass_level_eq` (integer)
 - `rolling_end_level_eq` (integer)
+- `dual_buy_badge_eq` (string)
+- `regime_eq` (string)
+- `entry_window_exit_state_eq` (string)
+- `fail10_prob_gte` (number)
+- `fail10_prob_lte` (number)
+- `up20_prob_gte` (number)
 - `days_in_current_episode_gte` (integer)
 - `days_in_current_episode_lte` (integer)
 - `days_in_stabilizing_before_ew_gte` (integer)

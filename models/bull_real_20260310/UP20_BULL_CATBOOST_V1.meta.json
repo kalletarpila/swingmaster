@@ -1,0 +1,22 @@
+{
+  "artifact_path": "/home/kalle/projects/swingmaster/models/bull_real_20260310/UP20_BULL_CATBOOST_V1.cbm",
+  "auc_test": 0.7248785357272498,
+  "auc_valid": 0.6839076865344924,
+  "model_id": "UP20_BULL_CATBOOST_V1",
+  "regime": "BULL",
+  "regime_version": "REGIME_USA_MA50_MA200_CLOSE_CRASH2_V1",
+  "target": "UP20",
+  "test_years": [
+    2024,
+    2025
+  ],
+  "train_years": [
+    2020,
+    2021,
+    2022
+  ],
+  "trained_at_utc": "2026-03-10T00:00:00+00:00",
+  "valid_years": [
+    2023
+  ]
+}

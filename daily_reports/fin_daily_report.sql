@@ -32,10 +32,35 @@ CREATE TEMP TABLE report_raw (
   ew_level_fastpass INTEGER,
   ew_score_rolling REAL,
   ew_level_rolling INTEGER,
+  regime TEXT,
+  entry_window_exit_state TEXT,
+  fail10_prob REAL,
+  up20_prob REAL,
   rule_hit TEXT
 );
 
-INSERT INTO report_raw
+INSERT INTO report_raw (
+  section_sort,
+  section,
+  as_of_date,
+  market,
+  ticker,
+  state_prev,
+  state_today,
+  from_state,
+  to_state,
+  event_date,
+  entry_window_date,
+  first_time_in_ew_ever,
+  days_in_stabilizing_before_ew,
+  days_in_current_episode,
+  days_in_ew_trading,
+  ew_score_fastpass,
+  ew_level_fastpass,
+  ew_score_rolling,
+  ew_level_rolling,
+  rule_hit
+)
 WITH RECURSIVE
 params AS (
   SELECT
@@ -1007,6 +1032,10 @@ SELECT
   ew_level_fastpass,
   ew_score_rolling,
   ew_level_rolling,
+  regime,
+  entry_window_exit_state,
+  fail10_prob,
+  up20_prob,
   rule_hit
 FROM report_raw
 ORDER BY section_sort, market, ticker;

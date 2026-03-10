@@ -1,0 +1,22 @@
+{
+  "auc_test_catboost": 0.7248785357272498,
+  "auc_test_hgb": 0.7246663222852037,
+  "auc_valid_catboost": 0.6839076865344924,
+  "auc_valid_hgb": 0.6919578638885662,
+  "catboost_meta_path": "/home/kalle/projects/swingmaster/models/bull_real_20260310/UP20_BULL_CATBOOST_V1.meta.json",
+  "comparison_id": "UP20_BULL_MODEL_COMPARISON_V1",
+  "feature_count": 61,
+  "feature_list_path": "/home/kalle/projects/swingmaster/models/bull_real_20260310/UP20_BULL_FEATURE_LIST_V1.json",
+  "hgb_meta_path": "/home/kalle/projects/swingmaster/models/bull_real_20260310/UP20_BULL_HGB_V1.meta.json",
+  "n_test": 3018,
+  "n_train": 2738,
+  "n_valid": 1510,
+  "pos_rate_test": 0.1954937044400265,
+  "pos_rate_train": 0.18261504747991233,
+  "pos_rate_valid": 0.17947019867549668,
+  "regime": "BULL",
+  "regime_version": "REGIME_USA_MA50_MA200_CLOSE_CRASH2_V1",
+  "selected_production_candidate": "UP20_BULL_CATBOOST_V1",
+  "target": "UP20",
+  "trained_at_utc": "2026-03-10T00:00:00+00:00"
+}

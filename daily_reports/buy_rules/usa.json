@@ -45,16 +45,6 @@
       }
     },
     {
-      "rule_hit": "BUY_BULL_FAIL10_UP20_V1",
-      "trigger": "NEW_PASS",
-      "conditions": {
-        "regime_eq": "BULL",
-        "fail10_prob_gte": 0.10,
-        "fail10_prob_lte": 0.30,
-        "up20_prob_gte": 0.30
-      }
-    },
-    {
       "rule_hit": "BUY_BULL_PASS_FAIL10_UP20_V2",
       "trigger": "NEW_PASS",
       "conditions": {
@@ -63,6 +53,15 @@
         "fail10_prob_gte": 0.10,
         "fail10_prob_lte": 0.35,
         "up20_prob_gte": 0.25
+      }
+    },
+    {
+      "rule_hit": "BUY_BEAR_PASS_UP20_V1",
+      "trigger": "NEW_PASS",
+      "conditions": {
+        "regime_eq": "BEAR",
+        "entry_window_exit_state_eq": "PASS",
+        "up20_prob_gte": 0.10
       }
     },
     {

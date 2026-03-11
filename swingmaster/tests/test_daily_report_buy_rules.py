@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -143,6 +144,82 @@ def test_validate_buy_rules_config_accepts_probabilistic_keys() -> None:
 
     validated = validate_buy_rules_config(config, "USA")
     assert validated["rules"][0]["rule_hit"] == "BUY_BULL_PASS_FAIL10_UP20_V2"
+
+
+def test_validate_buy_rules_config_accepts_enabled_boolean() -> None:
+    config = {
+        "market": "USA",
+        "version": 1,
+        "rules": [
+            {
+                "rule_hit": "USA_PASS_FP80",
+                "trigger": "NEW_PASS",
+                "enabled": False,
+                "conditions": {"fastpass_score_gte": 0.80},
+            }
+        ],
+    }
+
+    validated = validate_buy_rules_config(config, "USA")
+    assert validated["rules"][0]["enabled"] is False
+
+
+def test_validate_buy_rules_config_rejects_non_boolean_enabled() -> None:
+    config = {
+        "market": "USA",
+        "version": 1,
+        "rules": [
+            {
+                "rule_hit": "USA_PASS_FP80",
+                "trigger": "NEW_PASS",
+                "enabled": "yes",
+                "conditions": {"fastpass_score_gte": 0.80},
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="enabled must be a boolean"):
+        validate_buy_rules_config(config, "USA")
+
+
+def test_load_buy_rules_config_filters_disabled_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = tmp_path / "usa.json"
+    config_path.write_text(
+        """
+{
+  "market": "USA",
+  "version": 1,
+  "rules": [
+    {
+      "rule_hit": "RULE_ENABLED_EXPLICIT",
+      "trigger": "NEW_PASS",
+      "enabled": true,
+      "conditions": {"fastpass_score_gte": 0.8}
+    },
+    {
+      "rule_hit": "RULE_DISABLED",
+      "trigger": "NEW_PASS",
+      "enabled": false,
+      "conditions": {"fastpass_score_gte": 0.8}
+    },
+    {
+      "rule_hit": "RULE_ENABLED_DEFAULT",
+      "trigger": "NEW_PASS",
+      "conditions": {"fastpass_score_gte": 0.8}
+    }
+  ]
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("swingmaster.cli.daily_report.BUY_RULES_DIR", tmp_path)
+
+    loaded = load_buy_rules_config("USA")
+    rule_ids = [str(rule["rule_hit"]) for rule in loaded["rules"]]
+
+    assert "RULE_ENABLED_EXPLICIT" in rule_ids
+    assert "RULE_ENABLED_DEFAULT" in rule_ids
+    assert "RULE_DISABLED" not in rule_ids
 
 
 def test_apply_buy_rules_probabilistic_conditions_support_bull_and_bear_rules() -> None:

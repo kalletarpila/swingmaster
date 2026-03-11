@@ -176,8 +176,14 @@ def validate_buy_rules_config(config: Dict[str, Any], requested_market: str) -> 
 
     for rule in config["rules"]:
         rule_keys = set(rule.keys())
-        if rule_keys != {"rule_hit", "trigger", "conditions"}:
-            raise ValueError("Invalid buy-rules config: each rule must have exactly rule_hit, trigger, conditions")
+        required_rule_keys = {"rule_hit", "trigger", "conditions"}
+        optional_rule_keys = {"enabled"}
+        if not required_rule_keys.issubset(rule_keys) or not rule_keys.issubset(required_rule_keys | optional_rule_keys):
+            raise ValueError(
+                "Invalid buy-rules config: each rule must have rule_hit, trigger, conditions and optional enabled"
+            )
+        if "enabled" in rule and not isinstance(rule["enabled"], bool):
+            raise ValueError("Invalid buy-rules config: enabled must be a boolean when present")
         if rule["trigger"] not in ALLOWED_TRIGGERS:
             raise ValueError(f"Invalid buy-rules config: unknown trigger {rule['trigger']}")
         if not isinstance(rule["conditions"], dict):
@@ -194,7 +200,13 @@ def load_buy_rules_config(market: str) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Missing buy-rules file: {path}")
     config = json.loads(path.read_text(encoding="utf-8"))
-    return validate_buy_rules_config(config, market)
+    validated = validate_buy_rules_config(config, market)
+    active_rules = [rule for rule in validated["rules"] if bool(rule.get("enabled", True))]
+    return {
+        "market": validated["market"],
+        "version": validated["version"],
+        "rules": active_rules,
+    }
 
 
 def _compare_condition(row_value: Any, op: str, threshold: Any) -> bool:

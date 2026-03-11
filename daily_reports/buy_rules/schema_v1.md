@@ -10,6 +10,7 @@ Each market rule file is a JSON document with this structure:
     {
       "rule_hit": "<STRING>",
       "trigger": "<NEW_EW|NEW_PASS|NEW_NOTRADE|EW_SNAPSHOT>",
+      "enabled": "<BOOLEAN, OPTIONAL, DEFAULT=true>",
       "conditions": {
         "<condition_key>": <value>
       }
@@ -32,6 +33,11 @@ Field descriptions
   - Base-section selector used by the runner.
 - `conditions`
   - Flat key-value filter map over already-computed report columns.
+- `enabled`
+  - Optional boolean flag.
+  - `true` means rule is active.
+  - `false` means rule is ignored by loaders/runners.
+  - Missing `enabled` is treated as `true`.
 
 Allowed triggers
 
@@ -61,6 +67,7 @@ Validation requirements for the future runner
 - Unknown triggers must be rejected.
 - Unknown condition keys must be rejected.
 - Unknown top-level fields inside a rule must be rejected.
+- `enabled`, when present, must be boolean.
 - Conditions are ANDed together.
 - No OR, no composite rules, and no nested logic are allowed in v1.
 
@@ -74,6 +81,7 @@ Example
     {
       "rule_hit": "SE_ENTRY_FP80",
       "trigger": "NEW_EW",
+      "enabled": true,
       "conditions": {
         "fastpass_score_gte": 0.80
       }

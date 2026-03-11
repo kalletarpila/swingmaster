@@ -39,6 +39,9 @@ Rules semantics
 - No OR logic is supported in v1.
 - No nested logic is supported in v1.
 - Composite rules are intentionally excluded in v1.
+- Each rule may include optional `enabled: true|false`.
+- Missing `enabled` is treated as active (`true`).
+- Disabled rules (`enabled: false`) are ignored by both daily report and fast simulator via shared loader.
 
 Example
 
@@ -50,6 +53,7 @@ Example
     {
       "rule_hit": "FIN_PASS_FP60",
       "trigger": "NEW_PASS",
+      "enabled": true,
       "conditions": {
         "fastpass_score_gte": 0.60
       }

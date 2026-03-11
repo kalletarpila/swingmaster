@@ -23,6 +23,7 @@ Allowed condition keys in v1
 - `fastpass_level_eq`
 - `rolling_end_level_eq`
 - `dual_buy_badge_eq`
+- `dual_badge_present_eq`
 - `regime_eq`
 - `entry_window_exit_state_eq`
 - `fail10_prob_gte`
@@ -43,19 +44,35 @@ Rules semantics
 - Missing `enabled` is treated as active (`true`).
 - Disabled rules (`enabled: false`) are ignored by both daily report and fast simulator via shared loader.
 
+Dual badge bands (optional)
+
+- Config may include top-level `dual_badge_bands`.
+- Each band item must define `badge`, `up20_prob_gte`, `fail10_prob_lte`.
+- Bands are evaluated in order; first match wins.
+- This derives row fields:
+  - `dual_buy_badge` (string or null)
+  - `dual_badge_present` (boolean)
+
 Example
 
 ```json
 {
-  "market": "FIN",
+  "market": "USA",
   "version": 1,
+  "dual_badge_bands": [
+    {
+      "badge": "DUAL_PREMIUM",
+      "up20_prob_gte": 0.80,
+      "fail10_prob_lte": 0.20
+    }
+  ],
   "rules": [
     {
-      "rule_hit": "FIN_PASS_FP60",
+      "rule_hit": "USA_PASS_DUAL",
       "trigger": "NEW_PASS",
       "enabled": true,
       "conditions": {
-        "fastpass_score_gte": 0.60
+        "dual_badge_present_eq": true
       }
     }
   ]

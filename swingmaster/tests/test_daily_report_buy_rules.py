@@ -182,6 +182,39 @@ def test_validate_buy_rules_config_rejects_non_boolean_enabled() -> None:
         validate_buy_rules_config(config, "USA")
 
 
+def test_validate_buy_rules_config_accepts_dual_badge_bands() -> None:
+    config = {
+        "market": "USA",
+        "version": 1,
+        "dual_badge_bands": [
+            {"badge": "DUAL_PREMIUM", "up20_prob_gte": 0.80, "fail10_prob_lte": 0.20},
+            {"badge": "DUAL_ELITE", "up20_prob_gte": 0.72, "fail10_prob_lte": 0.27},
+        ],
+        "rules": [
+            {"rule_hit": "USA_PASS_DUAL", "trigger": "NEW_PASS", "conditions": {"dual_badge_present_eq": True}}
+        ],
+    }
+
+    validated = validate_buy_rules_config(config, "USA")
+    assert len(validated["dual_badge_bands"]) == 2
+
+
+def test_validate_buy_rules_config_rejects_invalid_dual_badge_bands() -> None:
+    config = {
+        "market": "USA",
+        "version": 1,
+        "dual_badge_bands": [
+            {"badge": "UNKNOWN", "up20_prob_gte": 0.80, "fail10_prob_lte": 0.20},
+        ],
+        "rules": [
+            {"rule_hit": "USA_PASS_DUAL", "trigger": "NEW_PASS", "conditions": {"dual_badge_present_eq": True}}
+        ],
+    }
+
+    with pytest.raises(ValueError, match="unknown dual badge"):
+        validate_buy_rules_config(config, "USA")
+
+
 def test_load_buy_rules_config_filters_disabled_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "usa.json"
     config_path.write_text(
@@ -325,91 +358,90 @@ def test_load_buy_rules_config_usa_accepts_probabilistic_rules() -> None:
 
     assert "BUY_BULL_PASS_FAIL10_UP20_V2" in rule_ids
     assert "BUY_BEAR_PASS_UP20_V1" in rule_ids
+    assert "USA_PASS_DUAL" in rule_ids
+    assert "USA_NOTRADE_DUAL" not in rule_ids
 
 
-def test_apply_buy_rules_dual_rules_match_all_eight_rule_names() -> None:
+def test_apply_buy_rules_dual_rules_use_single_rule_hit_and_badge_presence() -> None:
     config = {
         "market": "USA",
         "version": 1,
+        "dual_badge_bands": [
+            {"badge": "DUAL_PREMIUM", "up20_prob_gte": 0.80, "fail10_prob_lte": 0.20},
+            {"badge": "DUAL_ELITE", "up20_prob_gte": 0.72, "fail10_prob_lte": 0.27},
+            {"badge": "DUAL_STRONG", "up20_prob_gte": 0.66, "fail10_prob_lte": 0.32},
+            {"badge": "DUAL_QUALIFIED", "up20_prob_gte": 0.60, "fail10_prob_lte": 0.35},
+        ],
         "rules": [
-            {"rule_hit": "USA_PASS_DUAL_PREMIUM_U80F20", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_PREMIUM"}},
-            {"rule_hit": "USA_PASS_DUAL_ELITE_U72F27", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_ELITE"}},
-            {"rule_hit": "USA_PASS_DUAL_STRONG_U66F32", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_STRONG"}},
-            {
-                "rule_hit": "USA_PASS_DUAL_QUALIFIED_U60F35",
-                "trigger": "NEW_PASS",
-                "conditions": {"dual_buy_badge_eq": "BUY_QUALIFIED"},
-            },
-            {
-                "rule_hit": "USA_NOTRADE_DUAL_PREMIUM_U80F20",
-                "trigger": "NEW_NOTRADE",
-                "conditions": {"dual_buy_badge_eq": "BUY_PREMIUM"},
-            },
-            {
-                "rule_hit": "USA_NOTRADE_DUAL_ELITE_U72F27",
-                "trigger": "NEW_NOTRADE",
-                "conditions": {"dual_buy_badge_eq": "BUY_ELITE"},
-            },
-            {
-                "rule_hit": "USA_NOTRADE_DUAL_STRONG_U66F32",
-                "trigger": "NEW_NOTRADE",
-                "conditions": {"dual_buy_badge_eq": "BUY_STRONG"},
-            },
-            {
-                "rule_hit": "USA_NOTRADE_DUAL_QUALIFIED_U60F35",
-                "trigger": "NEW_NOTRADE",
-                "conditions": {"dual_buy_badge_eq": "BUY_QUALIFIED"},
-            },
+            {"rule_hit": "USA_PASS_DUAL", "trigger": "NEW_PASS", "conditions": {"dual_badge_present_eq": True}},
+            {"rule_hit": "USA_NOTRADE_DUAL", "trigger": "NEW_NOTRADE", "conditions": {"dual_badge_present_eq": True}},
         ],
     }
     rows = [
-        {"section": "NEW_PASS", "ticker": "P1", "dual_buy_badge": "BUY_PREMIUM"},
-        {"section": "NEW_PASS", "ticker": "P2", "dual_buy_badge": "BUY_ELITE"},
-        {"section": "NEW_PASS", "ticker": "P3", "dual_buy_badge": "BUY_STRONG"},
-        {"section": "NEW_PASS", "ticker": "P4", "dual_buy_badge": "BUY_QUALIFIED"},
-        {"section": "NEW_NOTRADE", "ticker": "N1", "dual_buy_badge": "BUY_PREMIUM"},
-        {"section": "NEW_NOTRADE", "ticker": "N2", "dual_buy_badge": "BUY_ELITE"},
-        {"section": "NEW_NOTRADE", "ticker": "N3", "dual_buy_badge": "BUY_STRONG"},
-        {"section": "NEW_NOTRADE", "ticker": "N4", "dual_buy_badge": "BUY_QUALIFIED"},
+        {"section": "NEW_PASS", "ticker": "P1", "up20_prob": 0.90, "fail10_prob": 0.15},
+        {"section": "NEW_PASS", "ticker": "P2", "up20_prob": 0.75, "fail10_prob": 0.25},
+        {"section": "NEW_PASS", "ticker": "P3", "up20_prob": 0.67, "fail10_prob": 0.30},
+        {"section": "NEW_PASS", "ticker": "P4", "up20_prob": 0.61, "fail10_prob": 0.34},
+        {"section": "NEW_NOTRADE", "ticker": "N1", "up20_prob": 0.90, "fail10_prob": 0.15},
+        {"section": "NEW_NOTRADE", "ticker": "N2", "up20_prob": 0.75, "fail10_prob": 0.25},
+        {"section": "NEW_NOTRADE", "ticker": "N3", "up20_prob": 0.67, "fail10_prob": 0.30},
+        {"section": "NEW_NOTRADE", "ticker": "N4", "up20_prob": 0.61, "fail10_prob": 0.34},
     ]
 
     out, missing_field_count = apply_buy_rules(rows, config, buy_section_name="BUYS")
 
     assert missing_field_count == 0
     assert sorted(row["rule_hit"] for row in out) == [
-        "USA_NOTRADE_DUAL_ELITE_U72F27",
-        "USA_NOTRADE_DUAL_PREMIUM_U80F20",
-        "USA_NOTRADE_DUAL_QUALIFIED_U60F35",
-        "USA_NOTRADE_DUAL_STRONG_U66F32",
-        "USA_PASS_DUAL_ELITE_U72F27",
-        "USA_PASS_DUAL_PREMIUM_U80F20",
-        "USA_PASS_DUAL_QUALIFIED_U60F35",
-        "USA_PASS_DUAL_STRONG_U66F32",
+        "USA_NOTRADE_DUAL",
+        "USA_NOTRADE_DUAL",
+        "USA_NOTRADE_DUAL",
+        "USA_NOTRADE_DUAL",
+        "USA_PASS_DUAL",
+        "USA_PASS_DUAL",
+        "USA_PASS_DUAL",
+        "USA_PASS_DUAL",
     ]
 
 
-def test_apply_buy_rules_dual_rules_only_highest_category_matches() -> None:
+def test_apply_buy_rules_dual_badge_assignment_priority_first_match() -> None:
     config = {
         "market": "USA",
         "version": 1,
+        "dual_badge_bands": [
+            {"badge": "DUAL_PREMIUM", "up20_prob_gte": 0.80, "fail10_prob_lte": 0.20},
+            {"badge": "DUAL_ELITE", "up20_prob_gte": 0.72, "fail10_prob_lte": 0.27},
+        ],
         "rules": [
-            {"rule_hit": "USA_PASS_DUAL_PREMIUM_U80F20", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_PREMIUM"}},
-            {"rule_hit": "USA_PASS_DUAL_ELITE_U72F27", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_ELITE"}},
-            {"rule_hit": "USA_PASS_DUAL_STRONG_U66F32", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "BUY_STRONG"}},
-            {
-                "rule_hit": "USA_PASS_DUAL_QUALIFIED_U60F35",
-                "trigger": "NEW_PASS",
-                "conditions": {"dual_buy_badge_eq": "BUY_QUALIFIED"},
-            },
+            {"rule_hit": "USA_PASS_DUAL", "trigger": "NEW_PASS", "conditions": {"dual_buy_badge_eq": "DUAL_PREMIUM"}},
         ],
     }
-    rows = [{"section": "NEW_PASS", "ticker": "AAA", "dual_buy_badge": "BUY_PREMIUM"}]
+    rows = [{"section": "NEW_PASS", "ticker": "AAA", "up20_prob": 0.90, "fail10_prob": 0.10}]
 
     out, missing_field_count = apply_buy_rules(rows, config, buy_section_name="BUYS")
 
     assert missing_field_count == 0
     assert len(out) == 1
-    assert out[0]["rule_hit"] == "USA_PASS_DUAL_PREMIUM_U80F20"
+    assert out[0]["rule_hit"] == "USA_PASS_DUAL"
+    assert out[0]["dual_buy_badge"] == "DUAL_PREMIUM"
+
+
+def test_apply_buy_rules_dual_badge_assignment_fail_closed_missing_prob() -> None:
+    config = {
+        "market": "USA",
+        "version": 1,
+        "dual_badge_bands": [
+            {"badge": "DUAL_PREMIUM", "up20_prob_gte": 0.80, "fail10_prob_lte": 0.20},
+        ],
+        "rules": [
+            {"rule_hit": "USA_PASS_DUAL", "trigger": "NEW_PASS", "conditions": {"dual_badge_present_eq": True}},
+        ],
+    }
+    rows = [{"section": "NEW_PASS", "ticker": "AAA", "up20_prob": 0.90}]
+
+    out, missing_field_count = apply_buy_rules(rows, config, buy_section_name="BUYS")
+
+    assert missing_field_count == 0
+    assert out == []
 
 
 def test_attach_buy_badges_enriches_matching_buy_rows() -> None:

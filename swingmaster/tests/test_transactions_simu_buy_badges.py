@@ -71,20 +71,6 @@ def _create_analysis_findings_table(conn: sqlite3.Connection) -> None:
     )
 
 
-def _create_rc_ew_score_daily_dual_table(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE rc_ew_score_daily (
-          ticker TEXT NOT NULL,
-          date TEXT NOT NULL,
-          ew_score_up20_meta REAL,
-          ew_score_fail10_hgb REAL,
-          PRIMARY KEY (ticker, date)
-        )
-        """
-    )
-
-
 def test_apply_migrations_adds_buy_badges_column_to_rc_transactions_simu() -> None:
     conn = _conn_memory()
     apply_migrations(conn)
@@ -333,38 +319,20 @@ def test_resolve_buy_badges_skips_bull_div_when_pattern_is_outside_20_trading_da
     assert badges == []
 
 
-def test_resolve_buy_badges_includes_buy_score_tiers() -> None:
+def test_resolve_buy_badges_includes_dual_badge_from_row() -> None:
     rc_conn = _conn_memory()
     os_conn = _conn_memory()
     analysis_conn = _conn_memory()
     apply_migrations(rc_conn)
     _create_osakedata_table(os_conn)
     _create_analysis_findings_table(analysis_conn)
-    _create_rc_ew_score_daily_dual_table(rc_conn)
-    _insert_osakedata_rows(
-        os_conn,
-        ticker="AAA",
-        market="omxh",
-        end_date="2026-01-20",
-        close=10.0,
-        volume=1000000,
-        days=20,
-    )
     test_rows = (
-        ("AAA", "2026-01-20", 0.85, 0.19, "BUY_PREMIUM"),
-        ("AAB", "2026-01-20", 0.75, 0.25, "BUY_ELITE"),
-        ("AAC", "2026-01-20", 0.67, 0.31, "BUY_STRONG"),
-        ("AAD", "2026-01-20", 0.60, 0.35, "BUY_QUALIFIED"),
+        ("AAA", "2026-01-20", "DUAL_PREMIUM"),
+        ("AAB", "2026-01-20", "DUAL_ELITE"),
+        ("AAC", "2026-01-20", "DUAL_STRONG"),
+        ("AAD", "2026-01-20", "DUAL_QUALIFIED"),
     )
-    for ticker, trade_date, up20_score, fail10_score, _expected_badge in test_rows:
-        rc_conn.execute(
-            """
-            INSERT INTO rc_ew_score_daily (
-              ticker, date, ew_score_up20_meta, ew_score_fail10_hgb
-            ) VALUES (?, ?, ?, ?)
-            """,
-            (ticker, trade_date, up20_score, fail10_score),
-        )
+    for ticker, trade_date, _expected_badge in test_rows:
         _insert_osakedata_rows(
             os_conn,
             ticker=ticker,
@@ -374,9 +342,8 @@ def test_resolve_buy_badges_includes_buy_score_tiers() -> None:
             volume=1000000,
             days=20,
         )
-    dual_score_columns = ("ew_score_up20_meta", "ew_score_fail10_hgb")
 
-    for ticker, trade_date, _up20_score, _fail10_score, expected_badge in test_rows:
+    for ticker, trade_date, expected_badge in test_rows:
         badges = json.loads(
             run_transactions_simu_fast.resolve_buy_badges(
                 rc_conn,
@@ -386,21 +353,20 @@ def test_resolve_buy_badges_includes_buy_score_tiers() -> None:
                 trade_date,
                 "FIN",
                 False,
-                dual_score_columns,
+                expected_badge,
                 {},
             )
         )
         assert badges == [expected_badge]
 
 
-def test_resolve_buy_badges_score_badge_keeps_deterministic_order() -> None:
+def test_resolve_buy_badges_dual_badge_keeps_deterministic_order() -> None:
     rc_conn = _conn_memory()
     os_conn = _conn_memory()
     analysis_conn = _conn_memory()
     apply_migrations(rc_conn)
     _create_osakedata_table(os_conn)
     _create_analysis_findings_table(analysis_conn)
-    _create_rc_ew_score_daily_dual_table(rc_conn)
     rc_conn.execute(
         """
         INSERT INTO rc_state_daily (
@@ -417,14 +383,6 @@ def test_resolve_buy_badges_score_badge_keeps_deterministic_order() -> None:
             None,
             '{"downtrend_entry_type":"SLOW_STRUCTURAL"}',
         ),
-    )
-    rc_conn.execute(
-        """
-        INSERT INTO rc_ew_score_daily (
-          ticker, date, ew_score_up20_meta, ew_score_fail10_hgb
-        ) VALUES (?, ?, ?, ?)
-        """,
-        ("AAA", "2026-01-20", 0.85, 0.19),
     )
     _insert_osakedata_rows(
         os_conn,
@@ -452,13 +410,46 @@ def test_resolve_buy_badges_score_badge_keeps_deterministic_order() -> None:
             "2026-01-20",
             "FIN",
             True,
-            ("ew_score_up20_meta", "ew_score_fail10_hgb"),
+            "DUAL_PREMIUM",
             {},
         )
     )
     assert badges == [
         "downtrend_entry_type=SLOW_STRUCTURAL",
-        "BUY_PREMIUM",
+        "DUAL_PREMIUM",
         "LOW_VOLUME",
         "BULL_DIV_IN_LAST_20_DAYS",
     ]
+
+
+def test_resolve_buy_badges_prefers_row_dual_badge_when_present() -> None:
+    rc_conn = _conn_memory()
+    os_conn = _conn_memory()
+    analysis_conn = _conn_memory()
+    apply_migrations(rc_conn)
+    _create_osakedata_table(os_conn)
+    _create_analysis_findings_table(analysis_conn)
+    _insert_osakedata_rows(
+        os_conn,
+        ticker="AAA",
+        market="omxh",
+        end_date="2026-01-20",
+        close=10.0,
+        volume=1000000,
+        days=20,
+    )
+
+    badges = json.loads(
+        run_transactions_simu_fast.resolve_buy_badges(
+            rc_conn,
+            os_conn,
+            analysis_conn,
+            "AAA",
+            "2026-01-20",
+            "FIN",
+            False,
+            "DUAL_ELITE",
+            {},
+        )
+    )
+    assert badges == ["DUAL_ELITE"]

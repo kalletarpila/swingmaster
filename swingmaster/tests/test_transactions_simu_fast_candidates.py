@@ -111,10 +111,10 @@ def test_fetch_new_pass_candidates_assigns_dual_buy_badge_from_scores() -> None:
         """
     )
     fixtures = [
-        ("AAA", 0.85, 0.19, "BUY_PREMIUM"),
-        ("AAB", 0.75, 0.25, "BUY_ELITE"),
-        ("AAC", 0.67, 0.31, "BUY_STRONG"),
-        ("AAD", 0.60, 0.35, "BUY_QUALIFIED"),
+        ("AAA", 0.85, 0.19, "DUAL_PREMIUM"),
+        ("AAB", 0.75, 0.25, "DUAL_ELITE"),
+        ("AAC", 0.67, 0.31, "DUAL_STRONG"),
+        ("AAD", 0.60, 0.35, "DUAL_QUALIFIED"),
     ]
     for ticker, up20, fail10, _badge in fixtures:
         conn.execute(

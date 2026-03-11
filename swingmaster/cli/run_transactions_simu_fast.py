@@ -47,12 +47,6 @@ DUAL_FAIL10_SCORE_COLUMN_CANDIDATES = (
     "score_fail10_60d_close_hgb",
     "ew_score_fail10",
 )
-BUY_SCORE_BADGE_TIERS = (
-    ("BUY_PREMIUM", 0.80, 0.20),
-    ("BUY_ELITE", 0.72, 0.27),
-    ("BUY_STRONG", 0.66, 0.32),
-    ("BUY_QUALIFIED", 0.60, 0.35),
-)
 
 
 def parse_args() -> argparse.Namespace:
@@ -161,48 +155,13 @@ def resolve_dual_score_columns(conn: sqlite3.Connection) -> Tuple[str, str] | No
     return up20_column, fail10_column
 
 
-def resolve_score_buy_badge(
-    rc_conn: sqlite3.Connection,
-    ticker: str,
-    buy_date: str,
-    dual_score_columns: Tuple[str, str] | None,
-) -> str | None:
-    if dual_score_columns is None:
-        return None
-    up20_column, fail10_column = dual_score_columns
-    row = rc_conn.execute(
-        f"""
-        SELECT {up20_column}, {fail10_column}
-        FROM rc_ew_score_daily
-        WHERE ticker = ? AND date = ?
-        LIMIT 1
-        """,
-        (ticker, buy_date),
-    ).fetchone()
-    if row is None:
-        return None
-    up20_score_raw = row[0]
-    fail10_score_raw = row[1]
-    if up20_score_raw is None or fail10_score_raw is None:
-        return None
-    try:
-        up20_score = float(up20_score_raw)
-        fail10_score = float(fail10_score_raw)
-    except (TypeError, ValueError):
-        return None
-    for badge_name, up20_threshold, fail10_threshold in BUY_SCORE_BADGE_TIERS:
-        if up20_score >= up20_threshold and fail10_score <= fail10_threshold:
-            return badge_name
-    return None
-
-
 def _dual_buy_badge_sql_expr(up20_expr: str, fail10_expr: str) -> str:
     return (
         "CASE "
-        f"WHEN {up20_expr} >= 0.80 AND {fail10_expr} <= 0.20 THEN 'BUY_PREMIUM' "
-        f"WHEN {up20_expr} >= 0.72 AND {fail10_expr} <= 0.27 THEN 'BUY_ELITE' "
-        f"WHEN {up20_expr} >= 0.66 AND {fail10_expr} <= 0.32 THEN 'BUY_STRONG' "
-        f"WHEN {up20_expr} >= 0.60 AND {fail10_expr} <= 0.35 THEN 'BUY_QUALIFIED' "
+        f"WHEN {up20_expr} >= 0.80 AND {fail10_expr} <= 0.20 THEN 'DUAL_PREMIUM' "
+        f"WHEN {up20_expr} >= 0.72 AND {fail10_expr} <= 0.27 THEN 'DUAL_ELITE' "
+        f"WHEN {up20_expr} >= 0.66 AND {fail10_expr} <= 0.32 THEN 'DUAL_STRONG' "
+        f"WHEN {up20_expr} >= 0.60 AND {fail10_expr} <= 0.35 THEN 'DUAL_QUALIFIED' "
         "ELSE NULL END"
     )
 
@@ -725,7 +684,7 @@ def resolve_buy_badges(
     buy_date: str,
     market: str,
     has_state_attrs_json: bool,
-    dual_score_columns: Tuple[str, str] | None,
+    dual_buy_badge: str | None,
     cache: Dict[Tuple[str, str], str],
 ) -> str:
     key = (ticker, buy_date)
@@ -753,9 +712,9 @@ def resolve_buy_badges(
                     badge_value = payload.get(badge_key)
                     if isinstance(badge_value, str) and badge_value:
                         badges.append(f"{badge_key}={badge_value}")
-    score_badge = resolve_score_buy_badge(rc_conn, ticker, buy_date, dual_score_columns)
-    if score_badge is not None:
-        badges.append(score_badge)
+    row_dual_badge = dual_buy_badge if isinstance(dual_buy_badge, str) and dual_buy_badge else None
+    if row_dual_badge is not None and row_dual_badge not in badges:
+        badges.append(row_dual_badge)
 
     price_rows = os_conn.execute(
         """
@@ -810,7 +769,6 @@ def build_transactions(
     run_id: str,
     created_at: str,
     has_state_attrs_json: bool,
-    dual_score_columns: Tuple[str, str] | None,
 ) -> Tuple[List[Tuple[Any, ...]], int]:
     transactions: List[Tuple[Any, ...]] = []
     skipped_null_price = 0
@@ -830,7 +788,7 @@ def build_transactions(
                 buy_date,
                 market,
                 has_state_attrs_json,
-                dual_score_columns,
+                row.get("dual_buy_badge"),
                 buy_badges_cache,
             )
         )
@@ -973,7 +931,6 @@ def main() -> None:
                     run_id,
                     created_at,
                     schema["has_state_attrs_json"],
-                    dual_score_columns,
                 )
 
         if not table_exists(conn, "rc_transactions_simu"):

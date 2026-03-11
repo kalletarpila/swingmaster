@@ -47,6 +47,7 @@ ALLOWED_CONDITION_KEYS = {
     "fastpass_level_eq",
     "rolling_end_level_eq",
     "dual_buy_badge_eq",
+    "dual_badge_present_eq",
     "regime_eq",
     "entry_window_exit_state_eq",
     "fail10_prob_gte",
@@ -62,6 +63,7 @@ CONDITION_FIELD_MAP = {
     "fastpass_level_eq": "ew_level_fastpass",
     "rolling_end_level_eq": "ew_level_rolling",
     "dual_buy_badge_eq": "dual_buy_badge",
+    "dual_badge_present_eq": "dual_badge_present",
     "regime_eq": "regime",
     "entry_window_exit_state_eq": "entry_window_exit_state",
     "fail10_prob_gte": "fail10_prob",
@@ -72,6 +74,8 @@ CONDITION_FIELD_MAP = {
     "days_in_stabilizing_before_ew_gte": "days_in_stabilizing_before_ew",
     "days_in_stabilizing_before_ew_eq": "days_in_stabilizing_before_ew",
 }
+
+ALLOWED_DUAL_BADGES = {"DUAL_PREMIUM", "DUAL_ELITE", "DUAL_STRONG", "DUAL_QUALIFIED"}
 
 
 @dataclass(frozen=True)
@@ -163,8 +167,14 @@ def infer_market_from_db_path(db_path: str) -> str:
 
 def validate_buy_rules_config(config: Dict[str, Any], requested_market: str) -> Dict[str, Any]:
     top_level_keys = set(config.keys())
-    if top_level_keys != {"market", "version", "rules"}:
-        raise ValueError("Invalid buy-rules config: top-level keys must be exactly market, version, rules")
+    required_top_level_keys = {"market", "version", "rules"}
+    optional_top_level_keys = {"dual_badge_bands"}
+    if not required_top_level_keys.issubset(top_level_keys) or not top_level_keys.issubset(
+        required_top_level_keys | optional_top_level_keys
+    ):
+        raise ValueError(
+            "Invalid buy-rules config: top-level keys must include market, version, rules and optional dual_badge_bands"
+        )
     if config["version"] != 1 or not isinstance(config["version"], int):
         raise ValueError("Invalid buy-rules config: version must be integer 1")
     if config["market"] != requested_market:
@@ -173,6 +183,28 @@ def validate_buy_rules_config(config: Dict[str, Any], requested_market: str) -> 
         )
     if not isinstance(config["rules"], list):
         raise ValueError("Invalid buy-rules config: rules must be a list")
+    if "dual_badge_bands" in config:
+        if not isinstance(config["dual_badge_bands"], list):
+            raise ValueError("Invalid buy-rules config: dual_badge_bands must be a list when present")
+        seen_badges = set()
+        for band in config["dual_badge_bands"]:
+            if not isinstance(band, dict):
+                raise ValueError("Invalid buy-rules config: each dual_badge_bands item must be an object")
+            band_keys = set(band.keys())
+            if band_keys != {"badge", "up20_prob_gte", "fail10_prob_lte"}:
+                raise ValueError(
+                    "Invalid buy-rules config: each dual_badge_bands item must have exactly badge, up20_prob_gte, fail10_prob_lte"
+                )
+            badge = band["badge"]
+            if badge not in ALLOWED_DUAL_BADGES:
+                raise ValueError(f"Invalid buy-rules config: unknown dual badge {badge}")
+            if badge in seen_badges:
+                raise ValueError(f"Invalid buy-rules config: duplicate dual badge {badge}")
+            seen_badges.add(badge)
+            if not isinstance(band["up20_prob_gte"], (int, float)):
+                raise ValueError("Invalid buy-rules config: dual badge up20_prob_gte must be a number")
+            if not isinstance(band["fail10_prob_lte"], (int, float)):
+                raise ValueError("Invalid buy-rules config: dual badge fail10_prob_lte must be a number")
 
     for rule in config["rules"]:
         rule_keys = set(rule.keys())
@@ -205,8 +237,31 @@ def load_buy_rules_config(market: str) -> Dict[str, Any]:
     return {
         "market": validated["market"],
         "version": validated["version"],
+        "dual_badge_bands": validated.get("dual_badge_bands", []),
         "rules": active_rules,
     }
+
+
+def _assign_dual_badge_from_config(row: Dict[str, Any], config: Dict[str, Any]) -> None:
+    row["dual_badge_present"] = False
+    bands = config.get("dual_badge_bands", [])
+    if not isinstance(bands, list) or not bands:
+        row.setdefault("dual_buy_badge", None)
+        return
+
+    up20_prob = row.get("up20_prob")
+    fail10_prob = row.get("fail10_prob")
+    if up20_prob is None or fail10_prob is None:
+        row["dual_buy_badge"] = None
+        return
+
+    for band in bands:
+        if up20_prob >= band["up20_prob_gte"] and fail10_prob <= band["fail10_prob_lte"]:
+            row["dual_buy_badge"] = band["badge"]
+            row["dual_badge_present"] = True
+            return
+
+    row["dual_buy_badge"] = None
 
 
 def _compare_condition(row_value: Any, op: str, threshold: Any) -> bool:
@@ -228,11 +283,16 @@ def apply_buy_rules(
 ) -> Tuple[List[Dict[str, Any]], int]:
     out: List[Dict[str, Any]] = []
     missing_field_count = 0
+    prepared_rows: List[Dict[str, Any]] = []
+    for source_row in base_rows:
+        row = dict(source_row)
+        _assign_dual_badge_from_config(row, config)
+        prepared_rows.append(row)
 
     for rule in config["rules"]:
         trigger = rule["trigger"]
         matched_rows: List[Dict[str, Any]] = []
-        for row in base_rows:
+        for row in prepared_rows:
             if row.get("section") != trigger:
                 continue
             if row.get("ticker") in {None, "", "(none)"}:

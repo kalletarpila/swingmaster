@@ -4,9 +4,12 @@ import csv
 import hashlib
 import io
 import json
+import socket
+import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Callable, Iterable
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
@@ -15,6 +18,13 @@ INGEST_ENGINE_VERSION = "MACRO_RAW_INGEST_V1"
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
 CBOE_EQUITY_PCR_CSV_URL = "https://cdn.cboe.com/data/us/options/market_statistics/daily_market_statistics.csv"
 RAW_TABLE = "rc_macro_source_raw"
+HTTP_TIMEOUT_SECONDS = 30
+HTTP_MAX_ATTEMPTS = 3
+HTTP_RETRY_BACKOFF_SECONDS = (1.0, 2.0)
+HTTP_MIN_INTERVAL_SECONDS = 0.5
+_LAST_HTTP_REQUEST_TS: float | None = None
+_sleep = time.sleep
+_monotonic = time.monotonic
 
 SOURCE_DEFINITIONS = (
     ("BTC_USD_CBBTCUSD", "FRED", "CBBTCUSD"),
@@ -82,30 +92,70 @@ def compute_run_id(date_from: str, date_to: str, mode: str) -> str:
     return f"{INGEST_ENGINE_VERSION}_{date_from.replace('-', '')}_{date_to.replace('-', '')}_{shortsha}"
 
 
+def _is_retryable_http_status(code: int) -> bool:
+    return code == 429 or 500 <= code <= 599
+
+
+def _apply_rate_limit() -> None:
+    global _LAST_HTTP_REQUEST_TS
+    now = _monotonic()
+    if _LAST_HTTP_REQUEST_TS is not None:
+        elapsed = now - _LAST_HTTP_REQUEST_TS
+        wait_s = HTTP_MIN_INTERVAL_SECONDS - elapsed
+        if wait_s > 0:
+            _sleep(wait_s)
+            now = _monotonic()
+    _LAST_HTTP_REQUEST_TS = now
+
+
+def _http_get_bytes(url: str, *, error_context: str) -> bytes:
+    for attempt in range(1, HTTP_MAX_ATTEMPTS + 1):
+        if attempt > 1:
+            _sleep(HTTP_RETRY_BACKOFF_SECONDS[attempt - 2])
+        _apply_rate_limit()
+        try:
+            with urlopen(url, timeout=HTTP_TIMEOUT_SECONDS) as resp:
+                return resp.read()
+        except HTTPError as exc:
+            status = int(exc.code)
+            if _is_retryable_http_status(status):
+                if attempt < HTTP_MAX_ATTEMPTS:
+                    continue
+                raise RuntimeError(f"{error_context}:RETRIES_EXHAUSTED") from exc
+            raise RuntimeError(f"{error_context}:HTTP_{status}") from exc
+        except (URLError, TimeoutError, socket.timeout, OSError) as exc:
+            if attempt < HTTP_MAX_ATTEMPTS:
+                continue
+            raise RuntimeError(f"{error_context}:RETRIES_EXHAUSTED") from exc
+    raise RuntimeError(f"{error_context}:RETRIES_EXHAUSTED")
+
+
 def fetch_fred_series_observations(
     series_id: str,
     *,
     date_from: str,
     date_to: str,
-    fred_api_key: str | None,
+    fred_api_key: str,
 ) -> tuple[dict[str, Any], str]:
     query = {
         "series_id": series_id,
         "observation_start": date_from,
         "observation_end": date_to,
+        "api_key": fred_api_key,
         "file_type": "json",
     }
-    if fred_api_key:
-        query["api_key"] = fred_api_key
     url = f"{FRED_BASE_URL}?{urlencode(query)}"
-    with urlopen(url, timeout=30) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+    payload = json.loads(
+        _http_get_bytes(url, error_context=f"FRED_FETCH_FAILED:{series_id}").decode("utf-8")
+    )
     return payload, url
 
 
 def fetch_cboe_equity_put_call_csv() -> tuple[str, str]:
-    with urlopen(CBOE_EQUITY_PCR_CSV_URL, timeout=30) as resp:
-        text = resp.read().decode("utf-8-sig")
+    text = _http_get_bytes(
+        CBOE_EQUITY_PCR_CSV_URL,
+        error_context="CBOE_FETCH_FAILED:PCR_EQUITY_CBOE",
+    ).decode("utf-8-sig")
     return text, CBOE_EQUITY_PCR_CSV_URL
 
 
@@ -342,7 +392,7 @@ def ingest_macro_raw(
     mode: str,
     computed_at: str | None = None,
     fred_api_key: str | None = None,
-    fred_fetcher: Callable[[str, str, str, str | None], tuple[dict[str, Any], str]] | None = None,
+    fred_fetcher: Callable[[str, str, str, str], tuple[dict[str, Any], str]] | None = None,
     cboe_fetcher: Callable[[], tuple[str, str]] | None = None,
 ) -> MacroIngestSummary:
     date_from = _validate_iso_date(date_from, "DATE_FROM")
@@ -356,14 +406,18 @@ def ingest_macro_raw(
 
     loaded_at_utc = computed_at or _default_loaded_at_utc(date_to)
     run_id = compute_run_id(date_from, date_to, mode)
-    fred_loader = fred_fetcher or (
-        lambda series_id, dfrom, dto, api_key: fetch_fred_series_observations(
-            series_id,
-            date_from=dfrom,
-            date_to=dto,
-            fred_api_key=api_key,
-        )
-    )
+    if fred_fetcher is not None:
+        fred_loader = fred_fetcher
+    else:
+        def fred_loader(series_id: str, dfrom: str, dto: str, api_key: str) -> tuple[dict[str, Any], str]:
+            if not api_key:
+                raise RuntimeError("FRED_API_KEY_MISSING")
+            return fetch_fred_series_observations(
+                series_id,
+                date_from=dfrom,
+                date_to=dto,
+                fred_api_key=api_key,
+            )
     cboe_loader = cboe_fetcher or fetch_cboe_equity_put_call_csv
 
     rows: list[RawObservation] = []

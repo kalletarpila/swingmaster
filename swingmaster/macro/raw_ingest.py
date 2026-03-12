@@ -12,12 +12,18 @@ from datetime import date, datetime
 from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 INGEST_ENGINE_VERSION = "MACRO_RAW_INGEST_V1"
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
 CBOE_EQUITY_PCR_CSV_URL = "https://cdn.cboe.com/data/us/options/market_statistics/daily_market_statistics.csv"
+CBOE_EQUITY_PCR_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "text/csv,application/csv,text/plain,*/*",
+    "Referer": "https://www.cboe.com/us/options/market_statistics/daily/",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 RAW_TABLE = "rc_macro_source_raw"
 HTTP_TIMEOUT_SECONDS = 30
 HTTP_MAX_ATTEMPTS = 3
@@ -109,13 +115,13 @@ def _apply_rate_limit() -> None:
     _LAST_HTTP_REQUEST_TS = now
 
 
-def _http_get_bytes(url: str, *, error_context: str) -> bytes:
+def _http_get_bytes(request_or_url: Any, *, error_context: str) -> bytes:
     for attempt in range(1, HTTP_MAX_ATTEMPTS + 1):
         if attempt > 1:
             _sleep(HTTP_RETRY_BACKOFF_SECONDS[attempt - 2])
         _apply_rate_limit()
         try:
-            with urlopen(url, timeout=HTTP_TIMEOUT_SECONDS) as resp:
+            with urlopen(request_or_url, timeout=HTTP_TIMEOUT_SECONDS) as resp:
                 return resp.read()
         except HTTPError as exc:
             status = int(exc.code)
@@ -181,8 +187,9 @@ def fetch_fred_series_observations(
 
 
 def fetch_cboe_equity_put_call_csv() -> tuple[str, str]:
+    request = Request(CBOE_EQUITY_PCR_CSV_URL, headers=CBOE_EQUITY_PCR_HEADERS)
     text = _http_get_bytes(
-        CBOE_EQUITY_PCR_CSV_URL,
+        request,
         error_context="CBOE_FETCH_FAILED:PCR_EQUITY_CBOE",
     ).decode("utf-8-sig")
     return text, CBOE_EQUITY_PCR_CSV_URL

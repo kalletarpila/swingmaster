@@ -5,6 +5,7 @@ import sys
 import types
 from pathlib import Path
 from urllib.error import URLError
+from urllib.request import Request
 
 from swingmaster.cli import run_macro_ingest
 from swingmaster.infra.sqlite.migrator import apply_migrations
@@ -179,7 +180,7 @@ def test_fred_fetch_uses_fredapi_client_and_returns_observations(monkeypatch) ->
     assert calls["series_id"] == "WALCL"
     assert calls["observation_start"] == "2026-01-01"
     assert calls["observation_end"] == "2026-01-31"
-    assert source_url == "https://api.stlouisfed.org/fred/series/observations?series_id=WALCL"
+    assert source_url == "https://fred.stlouisfed.org/series/WALCL"
     assert payload == {
         "observations": [
             {"date": "2026-01-01", "value": "10.5"},
@@ -247,6 +248,48 @@ def test_cboe_fetch_retries_transient_then_succeeds(monkeypatch) -> None:
     assert "2026-01-01,0.70" in csv_text
     assert calls["n"] == 2
     assert sleep_calls == [1.0]
+
+
+def test_cboe_fetch_uses_csv_url_and_required_headers(monkeypatch) -> None:
+    from swingmaster.macro import raw_ingest
+
+    captured: dict[str, object] = {}
+
+    class _Resp:
+        def read(self) -> bytes:
+            return b"Date,Equity Put/Call Ratio\n2026-01-01,0.70\n"
+
+        def __enter__(self) -> "_Resp":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+            del exc_type, exc, tb
+
+    def _fake_urlopen(req: object, timeout: int):  # type: ignore[no-untyped-def]
+        captured["timeout"] = timeout
+        assert isinstance(req, Request)
+        captured["url"] = req.full_url
+        captured["headers"] = {k.lower(): v for k, v in req.header_items()}
+        return _Resp()
+
+    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: None)
+    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
+
+    csv_text, source_url = raw_ingest.fetch_cboe_equity_put_call_csv()
+    assert source_url.endswith(".csv")
+    assert "daily_market_statistics.csv" in source_url
+    assert csv_text.startswith("Date,Equity Put/Call Ratio")
+    assert captured["url"] == source_url
+    headers = captured["headers"]
+    assert headers["user-agent"] == (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    )
+    assert headers["accept"] == "text/csv,application/csv,text/plain,*/*"
+    assert headers["referer"] == "https://www.cboe.com/us/options/market_statistics/daily/"
+    assert headers["accept-language"] == "en-US,en;q=0.9"
 
 
 def test_fred_fetch_wraps_client_failure_with_context(monkeypatch) -> None:

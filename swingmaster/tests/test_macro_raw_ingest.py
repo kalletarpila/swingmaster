@@ -211,7 +211,7 @@ def test_fred_fetch_raises_when_fredapi_missing(monkeypatch) -> None:
             fred_api_key="abc123",
         )
     except RuntimeError as exc:
-        assert str(exc) == "FREDAPI_REQUIRED_FOR_FRED_INGEST"
+        assert str(exc).startswith("FRED_FETCH_FAILED:WALCL:ImportError:")
     else:
         raise AssertionError("expected missing fredapi error")
 
@@ -248,6 +248,102 @@ def test_cboe_fetch_retries_transient_then_succeeds(monkeypatch) -> None:
     assert "2026-01-01,0.70" in csv_text
     assert calls["n"] == 2
     assert sleep_calls == [1.0]
+
+
+def test_cboe_csv_url_resolution_cli_override_wins(monkeypatch) -> None:
+    from swingmaster.macro import raw_ingest
+
+    captured: dict[str, str] = {}
+
+    class _Resp:
+        def read(self) -> bytes:
+            return b"Date,Equity Put/Call Ratio\n2026-01-01,0.70\n"
+
+        def __enter__(self) -> "_Resp":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+            del exc_type, exc, tb
+
+    def _fake_urlopen(req: object, timeout: int):  # type: ignore[no-untyped-def]
+        del timeout
+        assert isinstance(req, Request)
+        captured["url"] = req.full_url
+        return _Resp()
+
+    monkeypatch.setenv("CBOE_PCR_CSV_URL", "https://env.example/cboe.csv")
+    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: None)
+    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
+
+    _, source_url = raw_ingest.fetch_cboe_equity_put_call_csv(cboe_csv_url="https://cli.example/cboe.csv")
+    assert source_url == "https://cli.example/cboe.csv"
+    assert captured["url"] == "https://cli.example/cboe.csv"
+
+
+def test_cboe_csv_url_resolution_env_when_no_cli_override(monkeypatch) -> None:
+    from swingmaster.macro import raw_ingest
+
+    captured: dict[str, str] = {}
+
+    class _Resp:
+        def read(self) -> bytes:
+            return b"Date,Equity Put/Call Ratio\n2026-01-01,0.70\n"
+
+        def __enter__(self) -> "_Resp":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+            del exc_type, exc, tb
+
+    def _fake_urlopen(req: object, timeout: int):  # type: ignore[no-untyped-def]
+        del timeout
+        assert isinstance(req, Request)
+        captured["url"] = req.full_url
+        return _Resp()
+
+    monkeypatch.setenv("CBOE_PCR_CSV_URL", "https://env.example/cboe.csv")
+    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: None)
+    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
+
+    _, source_url = raw_ingest.fetch_cboe_equity_put_call_csv()
+    assert source_url == "https://env.example/cboe.csv"
+    assert captured["url"] == "https://env.example/cboe.csv"
+
+
+def test_cboe_csv_url_resolution_default_when_no_cli_or_env(monkeypatch) -> None:
+    from swingmaster.macro import raw_ingest
+
+    captured: dict[str, str] = {}
+
+    class _Resp:
+        def read(self) -> bytes:
+            return b"Date,Equity Put/Call Ratio\n2026-01-01,0.70\n"
+
+        def __enter__(self) -> "_Resp":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+            del exc_type, exc, tb
+
+    def _fake_urlopen(req: object, timeout: int):  # type: ignore[no-untyped-def]
+        del timeout
+        assert isinstance(req, Request)
+        captured["url"] = req.full_url
+        return _Resp()
+
+    monkeypatch.delenv("CBOE_PCR_CSV_URL", raising=False)
+    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: None)
+    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
+
+    _, source_url = raw_ingest.fetch_cboe_equity_put_call_csv()
+    assert source_url == raw_ingest.CBOE_EQUITY_PCR_CSV_URL
+    assert captured["url"] == raw_ingest.CBOE_EQUITY_PCR_CSV_URL
 
 
 def test_cboe_fetch_uses_csv_url_and_required_headers(monkeypatch) -> None:
@@ -292,6 +388,30 @@ def test_cboe_fetch_uses_csv_url_and_required_headers(monkeypatch) -> None:
     assert headers["accept-language"] == "en-US,en;q=0.9"
 
 
+def test_cboe_fetch_failure_includes_url_context(monkeypatch) -> None:
+    from swingmaster.macro import raw_ingest
+
+    def _fake_urlopen(req: object, timeout: int):  # type: ignore[no-untyped-def]
+        del req, timeout
+        raise URLError("blocked")
+
+    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: None)
+    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
+
+    override_url = "https://override.example/cboe.csv"
+    try:
+        raw_ingest.fetch_cboe_equity_put_call_csv(cboe_csv_url=override_url)
+    except RuntimeError as exc:
+        msg = str(exc)
+        assert msg.startswith("CBOE_FETCH_FAILED:PCR_EQUITY_CBOE:")
+        assert "RETRIES_EXHAUSTED" in msg
+        assert override_url in msg
+    else:
+        raise AssertionError("expected deterministic CBOE failure context")
+
+
 def test_fred_fetch_wraps_client_failure_with_context(monkeypatch) -> None:
     from swingmaster.macro import raw_ingest
 
@@ -315,7 +435,7 @@ def test_fred_fetch_wraps_client_failure_with_context(monkeypatch) -> None:
             fred_api_key="abc123",
         )
     except RuntimeError as exc:
-        assert str(exc) == "FRED_FETCH_FAILED:WALCL"
+        assert str(exc) == "FRED_FETCH_FAILED:WALCL:ValueError:boom"
     else:
         raise AssertionError("expected wrapped fred failure")
 
@@ -634,6 +754,7 @@ def test_cli_emits_summary_lines(monkeypatch, tmp_path: Path, capsys) -> None:
                 "mode": "upsert",
                 "computed_at": "2026-01-03T00:00:00+00:00",
                 "fred_api_key": None,
+                "cboe_csv_url": None,
             },
         )(),
     )
@@ -642,6 +763,7 @@ def test_cli_emits_summary_lines(monkeypatch, tmp_path: Path, capsys) -> None:
     def _fake_ingest(*args, **kwargs):  # type: ignore[no-untyped-def]
         del args
         seen["fred_api_key"] = kwargs.get("fred_api_key")
+        seen["cboe_csv_url"] = kwargs.get("cboe_csv_url")
         return expected
 
     monkeypatch.setattr(run_macro_ingest, "ingest_macro_raw", _fake_ingest)
@@ -650,6 +772,7 @@ def test_cli_emits_summary_lines(monkeypatch, tmp_path: Path, capsys) -> None:
     run_macro_ingest.main()
     output = capsys.readouterr().out
     assert seen["fred_api_key"] == "env-key"
+    assert seen["cboe_csv_url"] is None
     assert "SUMMARY status=OK" in output
     assert "SUMMARY sources_requested=5" in output
     assert "SUMMARY rows_inserted=10" in output
@@ -674,6 +797,7 @@ def test_cli_prefers_explicit_fred_api_key_over_env(monkeypatch, tmp_path: Path)
                 "mode": "upsert",
                 "computed_at": "2026-01-03T00:00:00+00:00",
                 "fred_api_key": "cli-key",
+                "cboe_csv_url": None,
             },
         )(),
     )
@@ -696,11 +820,59 @@ def test_cli_prefers_explicit_fred_api_key_over_env(monkeypatch, tmp_path: Path)
     def _fake_ingest(*args, **kwargs):  # type: ignore[no-untyped-def]
         del args
         seen["fred_api_key"] = kwargs.get("fred_api_key")
+        seen["cboe_csv_url"] = kwargs.get("cboe_csv_url")
         return expected
 
     monkeypatch.setattr(run_macro_ingest, "ingest_macro_raw", _fake_ingest)
     run_macro_ingest.main()
     assert seen["fred_api_key"] == "cli-key"
+    assert seen["cboe_csv_url"] is None
+
+
+def test_cli_passes_cboe_csv_url_override(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "rc.db"
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        run_macro_ingest,
+        "parse_args",
+        lambda: type(
+            "Args",
+            (),
+            {
+                "db_path": str(db_path),
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-02",
+                "mode": "upsert",
+                "computed_at": "2026-01-03T00:00:00+00:00",
+                "fred_api_key": "cli-key",
+                "cboe_csv_url": "https://cli.example/cboe.csv",
+            },
+        )(),
+    )
+
+    expected = MacroIngestSummary(
+        sources_requested=5,
+        date_from="2026-01-01",
+        date_to="2026-01-02",
+        mode="upsert",
+        rows_inserted=10,
+        rows_updated=0,
+        rows_deleted=0,
+        rows_skipped=0,
+        distinct_sources_loaded=5,
+        run_id="MACRO_RAW_INGEST_V1_20260101_20260102_deadbeef00",
+        summary_status="OK",
+    )
+
+    def _fake_ingest(*args, **kwargs):  # type: ignore[no-untyped-def]
+        del args
+        seen["cboe_csv_url"] = kwargs.get("cboe_csv_url")
+        return expected
+
+    monkeypatch.setattr(run_macro_ingest, "ingest_macro_raw", _fake_ingest)
+    run_macro_ingest.main()
+    assert seen["cboe_csv_url"] == "https://cli.example/cboe.csv"
 
 
 def test_cli_raises_when_fred_key_missing(monkeypatch, tmp_path: Path) -> None:
@@ -719,6 +891,7 @@ def test_cli_raises_when_fred_key_missing(monkeypatch, tmp_path: Path) -> None:
                 "mode": "upsert",
                 "computed_at": "2026-01-03T00:00:00+00:00",
                 "fred_api_key": None,
+                "cboe_csv_url": None,
             },
         )(),
     )

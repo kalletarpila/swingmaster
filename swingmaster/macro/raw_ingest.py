@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import math
+import os
 import socket
 import time
 from dataclasses import dataclass
@@ -137,6 +138,12 @@ def _http_get_bytes(request_or_url: Any, *, error_context: str) -> bytes:
     raise RuntimeError(f"{error_context}:RETRIES_EXHAUSTED")
 
 
+def _format_fred_error(series_id: str, exc: Exception) -> RuntimeError:
+    exc_name = exc.__class__.__name__
+    exc_msg = str(exc) if str(exc) else exc_name
+    return RuntimeError(f"FRED_FETCH_FAILED:{series_id}:{exc_name}:{exc_msg}")
+
+
 def fetch_fred_series_observations(
     series_id: str,
     *,
@@ -147,7 +154,7 @@ def fetch_fred_series_observations(
     try:
         from fredapi import Fred  # type: ignore[import-not-found]
     except Exception as exc:
-        raise RuntimeError("FREDAPI_REQUIRED_FOR_FRED_INGEST") from exc
+        raise _format_fred_error(series_id, exc) from exc
 
     try:
         client = Fred(api_key=fred_api_key)
@@ -157,7 +164,7 @@ def fetch_fred_series_observations(
             observation_end=date_to,
         )
     except Exception as exc:
-        raise RuntimeError(f"FRED_FETCH_FAILED:{series_id}") from exc
+        raise _format_fred_error(series_id, exc) from exc
 
     observations: list[dict[str, str]] = []
     for obs_ts, obs_value in series.items():
@@ -186,13 +193,23 @@ def fetch_fred_series_observations(
     return payload, url
 
 
-def fetch_cboe_equity_put_call_csv() -> tuple[str, str]:
-    request = Request(CBOE_EQUITY_PCR_CSV_URL, headers=CBOE_EQUITY_PCR_HEADERS)
+def _resolve_cboe_csv_url(cboe_csv_url: str | None) -> str:
+    if cboe_csv_url:
+        return cboe_csv_url
+    env_url = os.getenv("CBOE_PCR_CSV_URL")
+    if env_url:
+        return env_url
+    return CBOE_EQUITY_PCR_CSV_URL
+
+
+def fetch_cboe_equity_put_call_csv(*, cboe_csv_url: str | None = None) -> tuple[str, str]:
+    source_url = _resolve_cboe_csv_url(cboe_csv_url)
+    request = Request(source_url, headers=CBOE_EQUITY_PCR_HEADERS)
     text = _http_get_bytes(
         request,
-        error_context="CBOE_FETCH_FAILED:PCR_EQUITY_CBOE",
+        error_context=f"CBOE_FETCH_FAILED:PCR_EQUITY_CBOE:{source_url}",
     ).decode("utf-8-sig")
-    return text, CBOE_EQUITY_PCR_CSV_URL
+    return text, source_url
 
 
 def parse_fred_observations(
@@ -428,6 +445,7 @@ def ingest_macro_raw(
     mode: str,
     computed_at: str | None = None,
     fred_api_key: str | None = None,
+    cboe_csv_url: str | None = None,
     fred_fetcher: Callable[[str, str, str, str], tuple[dict[str, Any], str]] | None = None,
     cboe_fetcher: Callable[[], tuple[str, str]] | None = None,
 ) -> MacroIngestSummary:
@@ -454,7 +472,7 @@ def ingest_macro_raw(
                 date_to=dto,
                 fred_api_key=api_key,
             )
-    cboe_loader = cboe_fetcher or fetch_cboe_equity_put_call_csv
+    cboe_loader = cboe_fetcher or (lambda: fetch_cboe_equity_put_call_csv(cboe_csv_url=cboe_csv_url))
 
     rows: list[RawObservation] = []
     for source_key, vendor, external_series_id in SOURCE_DEFINITIONS:

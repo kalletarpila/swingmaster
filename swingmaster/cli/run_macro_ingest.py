@@ -31,6 +31,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional FRED API key (or set environment variable FRED_API_KEY)",
     )
+    parser.add_argument(
+        "--cboe-csv-url",
+        default=None,
+        help="Optional CBOE CSV URL override (or set environment variable CBOE_PCR_CSV_URL)",
+    )
     return parser.parse_args()
 
 
@@ -54,6 +59,7 @@ def main() -> None:
             mode=args.mode,
             computed_at=args.computed_at,
             fred_api_key=fred_api_key,
+            cboe_csv_url=args.cboe_csv_url,
         )
     except sqlite3.Error as exc:
         _summary(status="ERROR", message=str(exc))

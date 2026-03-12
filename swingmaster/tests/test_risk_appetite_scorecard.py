@@ -482,3 +482,75 @@ def test_compute_reads_only_normalized_table_no_raw_dependency() -> None:
     assert out.summary_status == "OK"
     count = conn.execute("SELECT COUNT(*) FROM rc_risk_appetite_daily").fetchone()
     assert count is not None and int(count[0]) > 0
+
+
+def test_summary_valid_rows_matches_persisted_ok_and_partial_rows() -> None:
+    conn = _new_conn()
+    start, end = _seed_long_normalized(conn, days=260)
+    target = conn.execute("SELECT date(?, '+220 days')", (start,)).fetchone()[0]
+    conn.execute(
+        """
+        UPDATE macro_source_daily
+        SET is_forward_filled=1
+        WHERE as_of_date=? AND source_code='HY_OAS_BAMLH0A0HYM2'
+        """,
+        (target,),
+    )
+    conn.commit()
+
+    out = compute_and_store_risk_appetite_scorecard(conn, date_from=start, date_to=end, mode="upsert")
+    persisted_valid = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM rc_risk_appetite_daily
+        WHERE as_of_date BETWEEN ? AND ?
+          AND risk_score_final IS NOT NULL
+          AND regime_label IS NOT NULL
+          AND data_quality_status IN ('OK', 'PARTIAL_FORWARD_FILL')
+        """,
+        (start, end),
+    ).fetchone()
+    assert persisted_valid is not None
+    assert out.valid_rows_published == int(persisted_valid[0])
+
+
+def test_summary_valid_rows_excludes_missing_and_invalid_and_missing_count_matches() -> None:
+    conn = _new_conn()
+    start, end = _seed_long_normalized(conn, days=260)
+    target = conn.execute("SELECT date(?, '+220 days')", (start,)).fetchone()[0]
+    anchor = conn.execute("SELECT date(?, '+129 days')", (start,)).fetchone()[0]
+    conn.execute(
+        "DELETE FROM macro_source_daily WHERE as_of_date<=? AND source_code='PCR_EQUITY_CBOE'",
+        (target,),
+    )
+    conn.execute(
+        "UPDATE macro_source_daily SET source_value=0 WHERE as_of_date=? AND source_code='FED_WALCL'",
+        (anchor,),
+    )
+    conn.commit()
+
+    out = compute_and_store_risk_appetite_scorecard(conn, date_from=start, date_to=end, mode="upsert")
+    persisted_valid = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM rc_risk_appetite_daily
+        WHERE as_of_date BETWEEN ? AND ?
+          AND risk_score_final IS NOT NULL
+          AND regime_label IS NOT NULL
+          AND data_quality_status IN ('OK', 'PARTIAL_FORWARD_FILL')
+        """,
+        (start, end),
+    ).fetchone()
+    persisted_missing = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM rc_risk_appetite_daily
+        WHERE as_of_date BETWEEN ? AND ?
+          AND data_quality_status='MISSING_COMPONENT'
+        """,
+        (start, end),
+    ).fetchone()
+    assert persisted_valid is not None
+    assert persisted_missing is not None
+    assert out.valid_rows_published == int(persisted_valid[0])
+    assert out.missing_component_rows == int(persisted_missing[0])

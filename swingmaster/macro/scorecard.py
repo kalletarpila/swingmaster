@@ -609,7 +609,13 @@ def compute_and_store_risk_appetite_scorecard(
         date_to=date_to,
         mode=mode,
     )
-    valid_rows_published = sum(1 for row in rows if row.data_quality_status == QUALITY_STATUS_OK)
+    valid_rows_published = sum(
+        1
+        for row in rows
+        if row.risk_score_final is not None
+        and row.regime_label is not None
+        and row.data_quality_status in {QUALITY_STATUS_OK, QUALITY_STATUS_PARTIAL}
+    )
     missing_component_rows = sum(1 for row in rows if row.data_quality_status == QUALITY_STATUS_MISSING)
     return ScorecardSummary(
         date_from=date_from,

@@ -1,0 +1,2 @@
+"""Macro raw-ingestion package."""
+

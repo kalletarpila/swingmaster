@@ -1,0 +1,405 @@
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+from swingmaster.cli import run_macro_ingest
+from swingmaster.infra.sqlite.migrator import apply_migrations
+from swingmaster.macro.raw_ingest import (
+    MacroIngestSummary,
+    SOURCE_DEFINITIONS,
+    ingest_macro_raw,
+    parse_cboe_equity_put_call_csv,
+    parse_fred_observations,
+)
+
+
+def _new_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    apply_migrations(conn)
+    return conn
+
+
+def _fred_payload(series_id: str, value: str = "1.23") -> dict[str, object]:
+    return {
+        "realtime_start": "2026-01-01",
+        "realtime_end": "2026-01-01",
+        "observations": [
+            {"date": "2026-01-01", "value": value, "series_id": series_id},
+            {"date": "2026-01-02", "value": ".", "series_id": series_id},
+        ],
+    }
+
+
+def _fred_fetcher(series_id: str, date_from: str, date_to: str, api_key: str | None):  # type: ignore[no-untyped-def]
+    del date_from
+    del date_to
+    del api_key
+    return _fred_payload(series_id), f"https://fred.test/{series_id}"
+
+
+def _cboe_fetcher() -> tuple[str, str]:
+    csv_text = "\n".join(
+        [
+            "Generated: 2026-01-03",
+            "Date,Total Put/Call Ratio,Equity Put/Call Ratio,Index Put/Call Ratio",
+            "2026-01-01,0.95,0.61,1.34",
+            "2026-01-02,1.01,0.73,1.40",
+            "Footer line",
+        ]
+    )
+    return csv_text, "https://cboe.test/equity.csv"
+
+
+def test_macro_raw_migration_creates_table_and_uniqueness() -> None:
+    conn = _new_conn()
+    cols = {
+        str(row[1]): str(row[2])
+        for row in conn.execute("PRAGMA table_info(rc_macro_source_raw)")
+    }
+    assert cols["source_key"] == "TEXT"
+    assert cols["vendor"] == "TEXT"
+    assert cols["external_series_id"] == "TEXT"
+    assert cols["observation_date"] == "TEXT"
+    assert cols["raw_value"] == "REAL"
+    assert cols["loaded_at_utc"] == "TEXT"
+    assert cols["run_id"] == "TEXT"
+
+    conn.execute(
+        """
+        INSERT INTO rc_macro_source_raw (
+          source_key, vendor, external_series_id, observation_date,
+          raw_value, raw_value_text, source_url, loaded_at_utc, run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "BTC_USD_CBBTCUSD",
+            "FRED",
+            "CBBTCUSD",
+            "2026-01-01",
+            1.0,
+            "1.0",
+            "https://fred.test/CBBTCUSD",
+            "2026-01-03T00:00:00+00:00",
+            "run1",
+        ),
+    )
+    conn.commit()
+
+    try:
+        conn.execute(
+            """
+            INSERT INTO rc_macro_source_raw (
+              source_key, vendor, external_series_id, observation_date,
+              raw_value, raw_value_text, source_url, loaded_at_utc, run_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "BTC_USD_CBBTCUSD",
+                "FRED",
+                "CBBTCUSD",
+                "2026-01-01",
+                2.0,
+                "2.0",
+                "https://fred.test/CBBTCUSD",
+                "2026-01-04T00:00:00+00:00",
+                "run2",
+            ),
+        )
+    except sqlite3.IntegrityError:
+        pass
+    else:
+        raise AssertionError("expected unique constraint on (source_key, observation_date)")
+
+    missing_normalized = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type='table' AND name IN ('macro_source_daily', 'rc_risk_appetite_daily')
+        LIMIT 1
+        """
+    ).fetchone()
+    assert missing_normalized is None
+
+
+def test_parse_fred_observations_is_deterministic() -> None:
+    rows = parse_fred_observations(
+        _fred_payload("CBBTCUSD", value="12345.67"),
+        source_key="BTC_USD_CBBTCUSD",
+        external_series_id="CBBTCUSD",
+        source_url="https://fred.test/CBBTCUSD",
+    )
+    assert len(rows) == 2
+    assert rows[0].observation_date == "2026-01-01"
+    assert rows[0].raw_value == 12345.67
+    assert rows[0].raw_value_text == "12345.67"
+    assert rows[1].observation_date == "2026-01-02"
+    assert rows[1].raw_value is None
+    assert rows[1].raw_value_text == "."
+
+
+def test_parse_cboe_csv_is_deterministic() -> None:
+    csv_text, url = _cboe_fetcher()
+    rows = parse_cboe_equity_put_call_csv(
+        csv_text,
+        source_key="PCR_EQUITY_CBOE",
+        source_url=url,
+    )
+    assert [row.observation_date for row in rows] == ["2026-01-01", "2026-01-02"]
+    assert [row.raw_value for row in rows] == [0.61, 0.73]
+    assert all(row.vendor == "CBOE" for row in rows)
+
+
+def test_ingest_insert_missing_is_idempotent() -> None:
+    conn = _new_conn()
+    first = ingest_macro_raw(
+        conn,
+        date_from="2026-01-01",
+        date_to="2026-01-02",
+        mode="insert-missing",
+        computed_at="2026-01-03T00:00:00+00:00",
+        fred_fetcher=_fred_fetcher,
+        cboe_fetcher=_cboe_fetcher,
+    )
+    assert first.rows_inserted == 10
+    assert first.rows_skipped == 0
+
+    second = ingest_macro_raw(
+        conn,
+        date_from="2026-01-01",
+        date_to="2026-01-02",
+        mode="insert-missing",
+        computed_at="2026-01-03T00:00:00+00:00",
+        fred_fetcher=_fred_fetcher,
+        cboe_fetcher=_cboe_fetcher,
+    )
+    assert second.rows_inserted == 0
+    assert second.rows_updated == 0
+    assert second.rows_skipped == 10
+
+    total = conn.execute("SELECT COUNT(*) FROM rc_macro_source_raw").fetchone()
+    assert total is not None and int(total[0]) == 10
+
+
+def test_ingest_uses_explicit_computed_at_for_loaded_at_utc() -> None:
+    conn = _new_conn()
+    ingest_macro_raw(
+        conn,
+        date_from="2026-01-01",
+        date_to="2026-01-01",
+        mode="upsert",
+        computed_at="2026-01-03T12:34:56+00:00",
+        fred_fetcher=_fred_fetcher,
+        cboe_fetcher=_cboe_fetcher,
+    )
+    row = conn.execute(
+        """
+        SELECT loaded_at_utc
+        FROM rc_macro_source_raw
+        WHERE source_key='BTC_USD_CBBTCUSD' AND observation_date='2026-01-01'
+        """
+    ).fetchone()
+    assert row is not None
+    assert str(row[0]) == "2026-01-03T12:34:56+00:00"
+
+
+def test_ingest_default_loaded_at_utc_is_deterministic_without_computed_at() -> None:
+    conn = _new_conn()
+    first = ingest_macro_raw(
+        conn,
+        date_from="2026-01-01",
+        date_to="2026-01-02",
+        mode="upsert",
+        fred_fetcher=_fred_fetcher,
+        cboe_fetcher=_cboe_fetcher,
+    )
+    assert first.rows_inserted == 10
+    loaded_first = conn.execute(
+        """
+        SELECT DISTINCT loaded_at_utc
+        FROM rc_macro_source_raw
+        ORDER BY loaded_at_utc
+        """
+    ).fetchall()
+    assert loaded_first == [("2026-01-02T00:00:00+00:00",)]
+
+    second = ingest_macro_raw(
+        conn,
+        date_from="2026-01-01",
+        date_to="2026-01-02",
+        mode="upsert",
+        fred_fetcher=_fred_fetcher,
+        cboe_fetcher=_cboe_fetcher,
+    )
+    assert second.rows_updated == 10
+    loaded_second = conn.execute(
+        """
+        SELECT DISTINCT loaded_at_utc
+        FROM rc_macro_source_raw
+        ORDER BY loaded_at_utc
+        """
+    ).fetchall()
+    assert loaded_second == [("2026-01-02T00:00:00+00:00",)]
+
+
+def test_ingest_upsert_updates_existing_rows() -> None:
+    conn = _new_conn()
+    ingest_macro_raw(
+        conn,
+        date_from="2026-01-01",
+        date_to="2026-01-01",
+        mode="upsert",
+        computed_at="2026-01-03T00:00:00+00:00",
+        fred_fetcher=_fred_fetcher,
+        cboe_fetcher=_cboe_fetcher,
+    )
+
+    def _fred_fetcher_changed(series_id: str, date_from: str, date_to: str, api_key: str | None):  # type: ignore[no-untyped-def]
+        del date_from
+        del date_to
+        del api_key
+        return _fred_payload(series_id, value="9.99"), f"https://fred.test/{series_id}"
+
+    out = ingest_macro_raw(
+        conn,
+        date_from="2026-01-01",
+        date_to="2026-01-01",
+        mode="upsert",
+        computed_at="2026-01-04T00:00:00+00:00",
+        fred_fetcher=_fred_fetcher_changed,
+        cboe_fetcher=_cboe_fetcher,
+    )
+    assert out.rows_inserted == 0
+    assert out.rows_updated == len(SOURCE_DEFINITIONS)
+
+    updated = conn.execute(
+        """
+        SELECT raw_value
+        FROM rc_macro_source_raw
+        WHERE source_key='BTC_USD_CBBTCUSD' AND observation_date='2026-01-01'
+        """
+    ).fetchone()
+    assert updated is not None and float(updated[0]) == 9.99
+
+
+def test_ingest_replace_all_is_bounded_to_requested_scope() -> None:
+    conn = _new_conn()
+    ingest_macro_raw(
+        conn,
+        date_from="2026-01-01",
+        date_to="2026-01-02",
+        mode="upsert",
+        computed_at="2026-01-03T00:00:00+00:00",
+        fred_fetcher=_fred_fetcher,
+        cboe_fetcher=_cboe_fetcher,
+    )
+    conn.execute(
+        """
+        INSERT INTO rc_macro_source_raw (
+          source_key, vendor, external_series_id, observation_date,
+          raw_value, raw_value_text, source_url, loaded_at_utc, run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "BTC_USD_CBBTCUSD",
+            "FRED",
+            "CBBTCUSD",
+            "2026-02-01",
+            11.0,
+            "11.0",
+            "https://fred.test/CBBTCUSD",
+            "2026-01-05T00:00:00+00:00",
+            "seed",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO rc_macro_source_raw (
+          source_key, vendor, external_series_id, observation_date,
+          raw_value, raw_value_text, source_url, loaded_at_utc, run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "UNRELATED_SOURCE",
+            "OTHER",
+            "OTHER1",
+            "2026-01-01",
+            7.0,
+            "7.0",
+            "https://other.test/value",
+            "2026-01-05T00:00:00+00:00",
+            "seed",
+        ),
+    )
+    conn.commit()
+
+    out = ingest_macro_raw(
+        conn,
+        date_from="2026-01-01",
+        date_to="2026-01-02",
+        mode="replace-all",
+        computed_at="2026-01-06T00:00:00+00:00",
+        fred_fetcher=_fred_fetcher,
+        cboe_fetcher=_cboe_fetcher,
+    )
+    assert out.rows_deleted == 10
+    assert out.rows_inserted == 10
+    remaining_out_of_range = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM rc_macro_source_raw
+        WHERE source_key='BTC_USD_CBBTCUSD' AND observation_date='2026-02-01'
+        """
+    ).fetchone()
+    assert remaining_out_of_range is not None and int(remaining_out_of_range[0]) == 1
+    remaining_unrelated = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM rc_macro_source_raw
+        WHERE source_key='UNRELATED_SOURCE'
+        """
+    ).fetchone()
+    assert remaining_unrelated is not None and int(remaining_unrelated[0]) == 1
+
+
+def test_cli_emits_summary_lines(monkeypatch, tmp_path: Path, capsys) -> None:
+    db_path = tmp_path / "rc.db"
+    expected = MacroIngestSummary(
+        sources_requested=5,
+        date_from="2026-01-01",
+        date_to="2026-01-02",
+        mode="upsert",
+        rows_inserted=10,
+        rows_updated=0,
+        rows_deleted=0,
+        rows_skipped=0,
+        distinct_sources_loaded=5,
+        run_id="MACRO_RAW_INGEST_V1_20260101_20260102_deadbeef00",
+        summary_status="OK",
+    )
+
+    monkeypatch.setattr(
+        run_macro_ingest,
+        "parse_args",
+        lambda: type(
+            "Args",
+            (),
+            {
+                "db_path": str(db_path),
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-02",
+                "mode": "upsert",
+                "computed_at": "2026-01-03T00:00:00+00:00",
+                "fred_api_key": None,
+            },
+        )(),
+    )
+    monkeypatch.setattr(run_macro_ingest, "ingest_macro_raw", lambda *args, **kwargs: expected)
+
+    run_macro_ingest.main()
+    output = capsys.readouterr().out
+    assert "SUMMARY status=OK" in output
+    assert "SUMMARY sources_requested=5" in output
+    assert "SUMMARY rows_inserted=10" in output
+    assert "SUMMARY distinct_sources_loaded=5" in output
+    assert "SUMMARY summary_status=OK" in output

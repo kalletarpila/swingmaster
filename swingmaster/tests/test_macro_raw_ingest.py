@@ -502,15 +502,59 @@ def test_rate_limit_sleep_is_deterministic_between_consecutive_requests(monkeypa
 
 
 def test_parse_cboe_csv_is_deterministic() -> None:
-    csv_text, url = _cboe_fetcher()
+    csv_text = "\n".join(
+        [
+            "DATE,CALL,PUT,TOTAL,P/C Ratio",
+            "2026-01-01,100,64,164,0.64",
+            "2026-01-02,110,67,177,0.61",
+        ]
+    )
+    url = "https://cboe.test/equity.csv"
     rows = parse_cboe_equity_put_call_csv(
         csv_text,
         source_key="PCR_EQUITY_CBOE",
         source_url=url,
     )
     assert [row.observation_date for row in rows] == ["2026-01-01", "2026-01-02"]
-    assert [row.raw_value for row in rows] == [0.61, 0.73]
+    assert [row.raw_value for row in rows] == [0.64, 0.61]
     assert all(row.vendor == "CBOE" for row in rows)
+
+
+def test_parse_cboe_csv_uses_equity_ratio_column_not_volume_columns() -> None:
+    csv_text = "\n".join(
+        [
+            "Date,Equity Put Volume,Equity Put/Call Ratio,Equity Open Interest",
+            "2026-01-01,916877,0.61,1183999",
+            "2026-01-02,847645,0.73,1296617",
+        ]
+    )
+    rows = parse_cboe_equity_put_call_csv(
+        csv_text,
+        source_key="PCR_EQUITY_CBOE",
+        source_url="https://cboe.test/equity.csv",
+    )
+    assert [row.observation_date for row in rows] == ["2026-01-01", "2026-01-02"]
+    assert [row.raw_value for row in rows] == [0.61, 0.73]
+    assert [row.raw_value_text for row in rows] == ["0.61", "0.73"]
+
+
+def test_parse_cboe_csv_raises_when_ratio_column_missing() -> None:
+    csv_text = "\n".join(
+        [
+            "Date,Equity Put Volume,Equity Open Interest",
+            "2026-01-01,916877,1183999",
+        ]
+    )
+    try:
+        parse_cboe_equity_put_call_csv(
+            csv_text,
+            source_key="PCR_EQUITY_CBOE",
+            source_url="https://cboe.test/equity.csv",
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "CBOE_PARSE_FAILED:PCR_EQUITY_CBOE:ratio_column_not_found"
+    else:
+        raise AssertionError("expected deterministic parse failure when ratio column is missing")
 
 
 def test_ingest_insert_missing_is_idempotent() -> None:

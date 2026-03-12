@@ -275,6 +275,10 @@ def _parse_csv_float(cell: str) -> float | None:
         return None
 
 
+def _normalize_header_label(cell: str) -> str:
+    return "".join(ch for ch in cell.lower() if ch.isalnum())
+
+
 def parse_cboe_equity_put_call_csv(
     csv_text: str,
     *,
@@ -284,15 +288,28 @@ def parse_cboe_equity_put_call_csv(
     reader = csv.reader(io.StringIO(csv_text))
     out: list[RawObservation] = []
     header_idx: int | None = None
+    saw_header = False
+    ratio_aliases = {
+        "equityputcallratio",
+        "equitypcratio",
+        "equitypc",
+        "equitypcr",
+        "pcratio",
+    }
     for row in reader:
         if not row:
             continue
         if header_idx is None:
             lowered = [cell.strip().lower() for cell in row]
             if "date" in lowered:
-                for idx, col in enumerate(lowered):
+                saw_header = True
+                normalized = [_normalize_header_label(cell) for cell in row]
+                for idx, col in enumerate(normalized):
                     if idx == 0:
                         continue
+                    if col in ratio_aliases:
+                        header_idx = idx
+                        break
                     if "equity" in col and "put" in col and "call" in col and "ratio" in col:
                         header_idx = idx
                         break
@@ -300,11 +317,11 @@ def parse_cboe_equity_put_call_csv(
         obs_date = _parse_csv_date(row[0])
         if obs_date is None:
             continue
+        if header_idx is None:
+            continue
         value_text: str | None = None
-        if header_idx is not None and header_idx < len(row):
+        if header_idx < len(row):
             value_text = row[header_idx].strip()
-        elif len(row) > 1:
-            value_text = row[1].strip()
         if value_text in {None, ""}:
             continue
         value_num = _parse_csv_float(value_text)
@@ -321,6 +338,10 @@ def parse_cboe_equity_put_call_csv(
                 source_url=source_url,
             )
         )
+    if header_idx is None:
+        if saw_header:
+            raise RuntimeError("CBOE_PARSE_FAILED:PCR_EQUITY_CBOE:ratio_column_not_found")
+        raise RuntimeError("CBOE_PARSE_FAILED:PCR_EQUITY_CBOE:header_not_found")
     return out
 
 

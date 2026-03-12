@@ -4,13 +4,18 @@ import argparse
 import sqlite3
 from pathlib import Path
 
+from swingmaster import SWINGMASTER_MACRO_DB_PATH
 from swingmaster.infra.sqlite.migrator import apply_migrations
 from swingmaster.macro.normalize import normalize_macro_sources
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Normalize macro raw observations into daily aligned source table")
-    parser.add_argument("--db-path", required=True, help="RC SQLite database path")
+    parser.add_argument(
+        "--db-path",
+        required=True,
+        help=f"Macro SQLite database path (expected: {SWINGMASTER_MACRO_DB_PATH})",
+    )
     parser.add_argument("--start-date", required=True, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end-date", required=True, help="End date (YYYY-MM-DD)")
     parser.add_argument(

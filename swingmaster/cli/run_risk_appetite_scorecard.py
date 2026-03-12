@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sqlite3
 from pathlib import Path
 
 from swingmaster import SWINGMASTER_MACRO_DB_PATH
 from swingmaster.infra.sqlite.migrator import apply_migrations
-from swingmaster.macro.raw_ingest import ingest_macro_raw
+from swingmaster.macro.scorecard import compute_and_store_risk_appetite_scorecard
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Ingest raw macro source observations into macro SQLite")
+    parser = argparse.ArgumentParser(description="Compute and store daily risk appetite scorecard")
     parser.add_argument(
         "--db-path",
         required=True,
@@ -23,14 +22,9 @@ def parse_args() -> argparse.Namespace:
         "--mode",
         choices=["upsert", "replace-all", "insert-missing"],
         default="upsert",
-        help="Write mode for raw macro table",
+        help="Write mode for risk appetite score table",
     )
     parser.add_argument("--computed-at", default=None, help="Optional ISO8601 timestamp")
-    parser.add_argument(
-        "--fred-api-key",
-        default=None,
-        help="Optional FRED API key (or set environment variable FRED_API_KEY)",
-    )
     return parser.parse_args()
 
 
@@ -41,19 +35,15 @@ def _summary(**items: object) -> None:
 
 def main() -> None:
     args = parse_args()
-    fred_api_key = args.fred_api_key or os.getenv("FRED_API_KEY")
-    if not fred_api_key:
-        raise RuntimeError("FRED_API_KEY_MISSING")
     conn = sqlite3.connect(str(Path(args.db_path)))
     try:
         apply_migrations(conn)
-        summary = ingest_macro_raw(
+        summary = compute_and_store_risk_appetite_scorecard(
             conn,
             date_from=args.start_date,
             date_to=args.end_date,
             mode=args.mode,
             computed_at=args.computed_at,
-            fred_api_key=fred_api_key,
         )
     except sqlite3.Error as exc:
         _summary(status="ERROR", message=str(exc))
@@ -68,16 +58,16 @@ def main() -> None:
         conn.close()
 
     _summary(status=summary.summary_status)
-    _summary(sources_requested=summary.sources_requested)
     _summary(date_from=summary.date_from)
     _summary(date_to=summary.date_to)
     _summary(mode=summary.mode)
-    _summary(rows_inserted=summary.rows_inserted)
-    _summary(rows_updated=summary.rows_updated)
-    _summary(rows_deleted=summary.rows_deleted)
-    _summary(rows_skipped=summary.rows_skipped)
-    _summary(distinct_sources_loaded=summary.distinct_sources_loaded)
-    _summary(run_id=summary.run_id)
+    _summary(normalized_rows_scanned=summary.normalized_rows_scanned)
+    _summary(score_rows_inserted=summary.score_rows_inserted)
+    _summary(score_rows_updated=summary.score_rows_updated)
+    _summary(score_rows_deleted=summary.score_rows_deleted)
+    _summary(score_rows_skipped=summary.score_rows_skipped)
+    _summary(valid_rows_published=summary.valid_rows_published)
+    _summary(missing_component_rows=summary.missing_component_rows)
     _summary(summary_status=summary.summary_status)
 
 

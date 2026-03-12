@@ -64,6 +64,7 @@ def test_macro_source_daily_migration_creates_table_and_pk() -> None:
     assert cols["source_code"] == "TEXT"
     assert cols["source_value"] == "REAL"
     assert cols["source_value_raw_text"] == "TEXT"
+    assert cols["is_forward_filled"] == "INTEGER"
     assert cols["source_frequency"] == "TEXT"
     assert cols["published_at_utc"] == "TEXT"
     assert cols["retrieved_at_utc"] == "TEXT"
@@ -269,6 +270,34 @@ def test_normalization_writes_expected_aligned_values() -> None:
     ]
 
 
+def test_normalization_sets_is_forward_filled_same_day_vs_carried() -> None:
+    conn = _new_conn()
+    _seed_fixture_raw(conn)
+    normalize_macro_sources(
+        conn,
+        date_from="2026-01-03",
+        date_to="2026-01-03",
+        mode="upsert",
+        computed_at="2026-01-05T00:00:00+00:00",
+    )
+    btc = conn.execute(
+        """
+        SELECT is_forward_filled
+        FROM macro_source_daily
+        WHERE as_of_date='2026-01-03' AND source_code='BTC_USD_CBBTCUSD'
+        """
+    ).fetchone()
+    walcl = conn.execute(
+        """
+        SELECT is_forward_filled
+        FROM macro_source_daily
+        WHERE as_of_date='2026-01-03' AND source_code='FED_WALCL'
+        """
+    ).fetchone()
+    assert btc is not None and int(btc[0]) == 0
+    assert walcl is not None and int(walcl[0]) == 1
+
+
 def test_normalization_insert_missing_is_deterministic() -> None:
     conn = _new_conn()
     _seed_fixture_raw(conn)
@@ -423,12 +452,14 @@ def test_phase2_does_not_create_score_tables() -> None:
         date_to="2026-01-03",
         mode="upsert",
     )
-    missing = conn.execute(
+    score_table_exists = conn.execute(
         """
         SELECT 1
         FROM sqlite_master
-        WHERE type='table' AND name IN ('rc_risk_appetite_daily')
+        WHERE type='table' AND name='rc_risk_appetite_daily'
         LIMIT 1
         """
     ).fetchone()
-    assert missing is None
+    assert score_table_exists is not None
+    score_count = conn.execute("SELECT COUNT(*) FROM rc_risk_appetite_daily").fetchone()
+    assert score_count is not None and int(score_count[0]) == 0

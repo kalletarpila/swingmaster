@@ -40,6 +40,7 @@ class NormalizedRow:
     source_code: str
     source_value: float
     source_value_raw_text: str | None
+    is_forward_filled: int
     source_frequency: str
     published_at_utc: str
     retrieved_at_utc: str
@@ -183,6 +184,7 @@ def _build_normalized_rows(
                     source_code=source_code,
                     source_value=float(latest["raw_value"]),
                     source_value_raw_text=latest["raw_value_text"],
+                    is_forward_filled=1 if str(latest["observation_date"]) < as_of else 0,
                     source_frequency=SOURCE_FREQUENCY[source_code],
                     published_at_utc=str(latest["loaded_at_utc"]),
                     retrieved_at_utc=retrieved_at_utc,
@@ -238,6 +240,7 @@ def _write_normalized_rows(
             row.source_code,
             row.source_value,
             row.source_value_raw_text,
+            row.is_forward_filled,
             row.source_frequency,
             row.published_at_utc,
             row.retrieved_at_utc,
@@ -250,8 +253,8 @@ def _write_normalized_rows(
                 f"""
                 INSERT OR IGNORE INTO {NORMALIZED_TABLE} (
                   as_of_date, source_code, source_value, source_value_raw_text,
-                  source_frequency, published_at_utc, retrieved_at_utc, revision_tag, run_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  is_forward_filled, source_frequency, published_at_utc, retrieved_at_utc, revision_tag, run_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 payload,
             )
@@ -265,11 +268,12 @@ def _write_normalized_rows(
             f"""
             INSERT INTO {NORMALIZED_TABLE} (
               as_of_date, source_code, source_value, source_value_raw_text,
-              source_frequency, published_at_utc, retrieved_at_utc, revision_tag, run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              is_forward_filled, source_frequency, published_at_utc, retrieved_at_utc, revision_tag, run_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(as_of_date, source_code) DO UPDATE SET
               source_value=excluded.source_value,
               source_value_raw_text=excluded.source_value_raw_text,
+              is_forward_filled=excluded.is_forward_filled,
               source_frequency=excluded.source_frequency,
               published_at_utc=excluded.published_at_utc,
               retrieved_at_utc=excluded.retrieved_at_utc,

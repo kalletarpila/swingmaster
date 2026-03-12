@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 import socket
 import time
 from dataclasses import dataclass
@@ -137,17 +138,45 @@ def fetch_fred_series_observations(
     date_to: str,
     fred_api_key: str,
 ) -> tuple[dict[str, Any], str]:
-    query = {
-        "series_id": series_id,
-        "observation_start": date_from,
-        "observation_end": date_to,
-        "api_key": fred_api_key,
-        "file_type": "json",
-    }
-    url = f"{FRED_BASE_URL}?{urlencode(query)}"
-    payload = json.loads(
-        _http_get_bytes(url, error_context=f"FRED_FETCH_FAILED:{series_id}").decode("utf-8")
-    )
+    try:
+        from fredapi import Fred  # type: ignore[import-not-found]
+    except Exception as exc:
+        raise RuntimeError("FREDAPI_REQUIRED_FOR_FRED_INGEST") from exc
+
+    try:
+        client = Fred(api_key=fred_api_key)
+        series = client.get_series(
+            series_id,
+            observation_start=date_from,
+            observation_end=date_to,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"FRED_FETCH_FAILED:{series_id}") from exc
+
+    observations: list[dict[str, str]] = []
+    for obs_ts, obs_value in series.items():
+        if hasattr(obs_ts, "date"):
+            obs_date = obs_ts.date().isoformat()
+        else:
+            obs_date = str(obs_ts)
+        value_text = "."
+        if obs_value is not None:
+            try:
+                as_float = float(obs_value)
+                if not math.isnan(as_float):
+                    value_text = str(obs_value)
+            except (TypeError, ValueError):
+                value_text = str(obs_value)
+
+        observations.append(
+            {
+                "date": obs_date,
+                "value": value_text,
+            }
+        )
+
+    url = f"https://fred.stlouisfed.org/series/{series_id}"
+    payload: dict[str, Any] = {"observations": observations}
     return payload, url
 
 

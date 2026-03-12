@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
+import types
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, urlparse
+from urllib.error import URLError
 
 from swingmaster.cli import run_macro_ingest
 from swingmaster.infra.sqlite.migrator import apply_migrations
@@ -142,95 +143,64 @@ def test_parse_fred_observations_is_deterministic() -> None:
     assert rows[1].raw_value_text == "."
 
 
-def test_fetch_fred_series_observations_includes_required_query_params(monkeypatch) -> None:
+def test_fred_fetch_uses_fredapi_client_and_returns_observations(monkeypatch) -> None:
     from swingmaster.macro import raw_ingest
 
-    captured_url: dict[str, str] = {}
+    calls: dict[str, object] = {}
 
-    class _Resp:
-        def read(self) -> bytes:
-            return b'{"observations":[]}'
+    class _FakeSeries:
+        def items(self):  # type: ignore[no-untyped-def]
+            return [
+                ("2026-01-01", 10.5),
+                ("2026-01-02", float("nan")),
+            ]
 
-        def __enter__(self) -> "_Resp":
-            return self
+    class _FakeFred:
+        def __init__(self, *, api_key: str) -> None:
+            calls["api_key"] = api_key
 
-        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
-            del exc_type, exc, tb
+        def get_series(self, series_id: str, *, observation_start: str, observation_end: str):  # type: ignore[no-untyped-def]
+            calls["series_id"] = series_id
+            calls["observation_start"] = observation_start
+            calls["observation_end"] = observation_end
+            return _FakeSeries()
 
-    def _fake_urlopen(url: str, timeout: int) -> _Resp:
-        del timeout
-        captured_url["url"] = url
-        return _Resp()
+    fake_module = types.ModuleType("fredapi")
+    setattr(fake_module, "Fred", _FakeFred)
+    monkeypatch.setitem(sys.modules, "fredapi", fake_module)
 
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    raw_ingest.fetch_fred_series_observations(
+    payload, source_url = raw_ingest.fetch_fred_series_observations(
         "WALCL",
         date_from="2026-01-01",
         date_to="2026-01-31",
         fred_api_key="abc123",
     )
-    parsed = parse_qs(urlparse(captured_url["url"]).query)
-    assert parsed["series_id"] == ["WALCL"]
-    assert parsed["observation_start"] == ["2026-01-01"]
-    assert parsed["observation_end"] == ["2026-01-31"]
-    assert parsed["api_key"] == ["abc123"]
-    assert parsed["file_type"] == ["json"]
+    assert calls["api_key"] == "abc123"
+    assert calls["series_id"] == "WALCL"
+    assert calls["observation_start"] == "2026-01-01"
+    assert calls["observation_end"] == "2026-01-31"
+    assert source_url == "https://api.stlouisfed.org/fred/series/observations?series_id=WALCL"
+    assert payload == {
+        "observations": [
+            {"date": "2026-01-01", "value": "10.5"},
+            {"date": "2026-01-02", "value": "."},
+        ]
+    }
 
 
-def test_fred_fetch_retries_transient_then_succeeds(monkeypatch) -> None:
+def test_fred_fetch_raises_when_fredapi_missing(monkeypatch) -> None:
     from swingmaster.macro import raw_ingest
 
-    calls = {"n": 0}
-    sleep_calls: list[float] = []
+    monkeypatch.delitem(sys.modules, "fredapi", raising=False)
+    import builtins
+    real_import = builtins.__import__
 
-    class _Resp:
-        def read(self) -> bytes:
-            return b'{"observations":[]}'
+    def _fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if name == "fredapi":
+            raise ImportError("missing")
+        return real_import(name, *args, **kwargs)
 
-        def __enter__(self) -> "_Resp":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
-            del exc_type, exc, tb
-
-    def _fake_urlopen(url: str, timeout: int):  # type: ignore[no-untyped-def]
-        del url, timeout
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise URLError("temporary")
-        return _Resp()
-
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: sleep_calls.append(float(s)))
-    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
-
-    payload, _ = raw_ingest.fetch_fred_series_observations(
-        "WALCL",
-        date_from="2026-01-01",
-        date_to="2026-01-31",
-        fred_api_key="abc123",
-    )
-    assert payload == {"observations": []}
-    assert calls["n"] == 2
-    assert sleep_calls == [1.0]
-
-
-def test_fred_fetch_does_not_retry_on_http_401(monkeypatch) -> None:
-    from swingmaster.macro import raw_ingest
-
-    calls = {"n": 0}
-    sleep_calls: list[float] = []
-
-    def _fake_urlopen(url: str, timeout: int):  # type: ignore[no-untyped-def]
-        del timeout
-        calls["n"] += 1
-        raise HTTPError(url=url, code=401, msg="unauthorized", hdrs=None, fp=None)
-
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: sleep_calls.append(float(s)))
-    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
 
     try:
         raw_ingest.fetch_fred_series_observations(
@@ -240,11 +210,9 @@ def test_fred_fetch_does_not_retry_on_http_401(monkeypatch) -> None:
             fred_api_key="abc123",
         )
     except RuntimeError as exc:
-        assert str(exc) == "FRED_FETCH_FAILED:WALCL:HTTP_401"
+        assert str(exc) == "FREDAPI_REQUIRED_FOR_FRED_INGEST"
     else:
-        raise AssertionError("expected HTTP_401 failure")
-    assert calls["n"] == 1
-    assert sleep_calls == []
+        raise AssertionError("expected missing fredapi error")
 
 
 def test_cboe_fetch_retries_transient_then_succeeds(monkeypatch) -> None:
@@ -281,21 +249,20 @@ def test_cboe_fetch_retries_transient_then_succeeds(monkeypatch) -> None:
     assert sleep_calls == [1.0]
 
 
-def test_fred_fetch_retry_exhaustion_raises_deterministic_error(monkeypatch) -> None:
+def test_fred_fetch_wraps_client_failure_with_context(monkeypatch) -> None:
     from swingmaster.macro import raw_ingest
 
-    calls = {"n": 0}
-    sleep_calls: list[float] = []
+    class _FakeFred:
+        def __init__(self, *, api_key: str) -> None:
+            del api_key
 
-    def _fake_urlopen(url: str, timeout: int):  # type: ignore[no-untyped-def]
-        del url, timeout
-        calls["n"] += 1
-        raise URLError("temporary")
+        def get_series(self, series_id: str, *, observation_start: str, observation_end: str):  # type: ignore[no-untyped-def]
+            del series_id, observation_start, observation_end
+            raise ValueError("boom")
 
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: sleep_calls.append(float(s)))
-    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
+    fake_module = types.ModuleType("fredapi")
+    setattr(fake_module, "Fred", _FakeFred)
+    monkeypatch.setitem(sys.modules, "fredapi", fake_module)
 
     try:
         raw_ingest.fetch_fred_series_observations(
@@ -305,11 +272,9 @@ def test_fred_fetch_retry_exhaustion_raises_deterministic_error(monkeypatch) -> 
             fred_api_key="abc123",
         )
     except RuntimeError as exc:
-        assert str(exc) == "FRED_FETCH_FAILED:WALCL:RETRIES_EXHAUSTED"
+        assert str(exc) == "FRED_FETCH_FAILED:WALCL"
     else:
-        raise AssertionError("expected retry exhaustion")
-    assert calls["n"] == 3
-    assert sleep_calls == [1.0, 2.0]
+        raise AssertionError("expected wrapped fred failure")
 
 
 def test_timeout_constant_is_passed_to_http_calls(monkeypatch) -> None:
@@ -337,14 +302,8 @@ def test_timeout_constant_is_passed_to_http_calls(monkeypatch) -> None:
     monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
     monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
 
-    raw_ingest.fetch_fred_series_observations(
-        "WALCL",
-        date_from="2026-01-01",
-        date_to="2026-01-31",
-        fred_api_key="abc123",
-    )
     raw_ingest.fetch_cboe_equity_put_call_csv()
-    assert timeouts == [raw_ingest.HTTP_TIMEOUT_SECONDS, raw_ingest.HTTP_TIMEOUT_SECONDS]
+    assert timeouts == [raw_ingest.HTTP_TIMEOUT_SECONDS]
 
 
 def test_rate_limit_sleep_is_deterministic_between_consecutive_requests(monkeypatch) -> None:
@@ -373,18 +332,8 @@ def test_rate_limit_sleep_is_deterministic_between_consecutive_requests(monkeypa
     monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.5)
     monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
 
-    raw_ingest.fetch_fred_series_observations(
-        "WALCL",
-        date_from="2026-01-01",
-        date_to="2026-01-31",
-        fred_api_key="abc123",
-    )
-    raw_ingest.fetch_fred_series_observations(
-        "WALCL",
-        date_from="2026-01-01",
-        date_to="2026-01-31",
-        fred_api_key="abc123",
-    )
+    raw_ingest.fetch_cboe_equity_put_call_csv()
+    raw_ingest.fetch_cboe_equity_put_call_csv()
     assert len(sleep_calls) == 1
     assert abs(sleep_calls[0] - 0.3) < 1e-9
 
@@ -663,6 +612,52 @@ def test_cli_emits_summary_lines(monkeypatch, tmp_path: Path, capsys) -> None:
     assert "SUMMARY rows_inserted=10" in output
     assert "SUMMARY distinct_sources_loaded=5" in output
     assert "SUMMARY summary_status=OK" in output
+
+
+def test_cli_prefers_explicit_fred_api_key_over_env(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "rc.db"
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        run_macro_ingest,
+        "parse_args",
+        lambda: type(
+            "Args",
+            (),
+            {
+                "db_path": str(db_path),
+                "start_date": "2026-01-01",
+                "end_date": "2026-01-02",
+                "mode": "upsert",
+                "computed_at": "2026-01-03T00:00:00+00:00",
+                "fred_api_key": "cli-key",
+            },
+        )(),
+    )
+    monkeypatch.setenv("FRED_API_KEY", "env-key")
+
+    expected = MacroIngestSummary(
+        sources_requested=5,
+        date_from="2026-01-01",
+        date_to="2026-01-02",
+        mode="upsert",
+        rows_inserted=10,
+        rows_updated=0,
+        rows_deleted=0,
+        rows_skipped=0,
+        distinct_sources_loaded=5,
+        run_id="MACRO_RAW_INGEST_V1_20260101_20260102_deadbeef00",
+        summary_status="OK",
+    )
+
+    def _fake_ingest(*args, **kwargs):  # type: ignore[no-untyped-def]
+        del args
+        seen["fred_api_key"] = kwargs.get("fred_api_key")
+        return expected
+
+    monkeypatch.setattr(run_macro_ingest, "ingest_macro_raw", _fake_ingest)
+    run_macro_ingest.main()
+    assert seen["fred_api_key"] == "cli-key"
 
 
 def test_cli_raises_when_fred_key_missing(monkeypatch, tmp_path: Path) -> None:

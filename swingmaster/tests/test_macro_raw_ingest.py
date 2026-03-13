@@ -342,7 +342,6 @@ def test_cboe_csv_url_resolution_default_when_no_cli_or_env(monkeypatch) -> None
     monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
 
     _, source_url = raw_ingest.fetch_cboe_equity_put_call_csv()
-    assert source_url == "https://cdn.cboe.com/data/us/options/market_statistics/daily_market_statistics.csv"
     assert source_url == raw_ingest.CBOE_EQUITY_PCR_CSV_URL
     assert captured["url"] == raw_ingest.CBOE_EQUITY_PCR_CSV_URL
 
@@ -539,29 +538,11 @@ def test_parse_cboe_csv_uses_equity_ratio_column_not_volume_columns() -> None:
     assert [row.raw_value_text for row in rows] == ["0.61", "0.73"]
 
 
-def test_parse_cboe_csv_computes_ratio_from_equity_volumes_when_ratio_column_missing() -> None:
-    csv_text = "\n".join(
-        [
-            "Date,Equity Call Volume,Equity Put Volume,Index Call Volume,Index Put Volume",
-            "2026-01-01,1000,650,400,500",
-            "2026-01-02,1100,770,420,490",
-        ]
-    )
-    rows = parse_cboe_equity_put_call_csv(
-        csv_text,
-        source_key="PCR_EQUITY_CBOE",
-        source_url="https://cboe.test/daily_market_statistics.csv",
-    )
-    assert [row.observation_date for row in rows] == ["2026-01-01", "2026-01-02"]
-    assert [row.raw_value for row in rows] == [0.65, 0.7]
-    assert [row.raw_value_text for row in rows] == ["0.65", "0.7"]
-
-
 def test_parse_cboe_csv_raises_when_ratio_column_missing() -> None:
     csv_text = "\n".join(
         [
-            "Date,Total Call Volume,Total Put Volume,Index Call Volume,Index Put Volume",
-            "2026-01-01,1000,650,400,500",
+            "Date,Equity Put Volume,Equity Open Interest",
+            "2026-01-01,916877,1183999",
         ]
     )
     try:

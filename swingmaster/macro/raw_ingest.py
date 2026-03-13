@@ -287,29 +287,19 @@ def parse_cboe_equity_put_call_csv(
 ) -> list[RawObservation]:
     reader = csv.reader(io.StringIO(csv_text))
     out: list[RawObservation] = []
-    ratio_idx: int | None = None
-    equity_call_volume_idx: int | None = None
-    equity_put_volume_idx: int | None = None
+    header_idx: int | None = None
     saw_header = False
     ratio_aliases = {
         "equityputcallratio",
         "equitypcratio",
         "equitypc",
         "equitypcr",
-        "putcallratio",
-        "putcall",
         "pcratio",
-    }
-    equity_call_volume_aliases = {
-        "equitycallvolume",
-    }
-    equity_put_volume_aliases = {
-        "equityputvolume",
     }
     for row in reader:
         if not row:
             continue
-        if ratio_idx is None and (equity_call_volume_idx is None or equity_put_volume_idx is None):
+        if header_idx is None:
             lowered = [cell.strip().lower() for cell in row]
             if "date" in lowered:
                 saw_header = True
@@ -317,39 +307,25 @@ def parse_cboe_equity_put_call_csv(
                 for idx, col in enumerate(normalized):
                     if idx == 0:
                         continue
-                    if ratio_idx is None:
-                        if col in ratio_aliases:
-                            ratio_idx = idx
-                        elif "equity" in col and "put" in col and "call" in col and "ratio" in col:
-                            ratio_idx = idx
-                    if equity_call_volume_idx is None and col in equity_call_volume_aliases:
-                        equity_call_volume_idx = idx
-                    if equity_put_volume_idx is None and col in equity_put_volume_aliases:
-                        equity_put_volume_idx = idx
+                    if col in ratio_aliases:
+                        header_idx = idx
+                        break
+                    if "equity" in col and "put" in col and "call" in col and "ratio" in col:
+                        header_idx = idx
+                        break
                 continue
         obs_date = _parse_csv_date(row[0])
         if obs_date is None:
             continue
-        value_num: float | None = None
+        if header_idx is None:
+            continue
         value_text: str | None = None
-        if ratio_idx is not None:
-            if ratio_idx < len(row):
-                value_text = row[ratio_idx].strip()
-            if value_text in {None, ""}:
-                continue
-            value_num = _parse_csv_float(value_text)
-            if value_num is None:
-                continue
-        elif equity_call_volume_idx is not None and equity_put_volume_idx is not None:
-            if equity_call_volume_idx >= len(row) or equity_put_volume_idx >= len(row):
-                continue
-            call_value = _parse_csv_float(row[equity_call_volume_idx])
-            put_value = _parse_csv_float(row[equity_put_volume_idx])
-            if call_value in {None, 0.0} or put_value is None:
-                continue
-            value_num = put_value / call_value
-            value_text = format(value_num, ".12g")
-        else:
+        if header_idx < len(row):
+            value_text = row[header_idx].strip()
+        if value_text in {None, ""}:
+            continue
+        value_num = _parse_csv_float(value_text)
+        if value_num is None:
             continue
         out.append(
             RawObservation(
@@ -362,7 +338,7 @@ def parse_cboe_equity_put_call_csv(
                 source_url=source_url,
             )
         )
-    if ratio_idx is None and (equity_call_volume_idx is None or equity_put_volume_idx is None):
+    if header_idx is None:
         if saw_header:
             raise RuntimeError("CBOE_PARSE_FAILED:PCR_EQUITY_CBOE:ratio_column_not_found")
         raise RuntimeError("CBOE_PARSE_FAILED:PCR_EQUITY_CBOE:header_not_found")

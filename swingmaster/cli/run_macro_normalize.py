@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from swingmaster import SWINGMASTER_MACRO_DB_PATH
-from swingmaster.infra.sqlite.migrator import apply_migrations
+from swingmaster.infra.sqlite.migrator import apply_macro_migrations
 from swingmaster.macro.normalize import normalize_macro_sources
 
 
@@ -37,7 +37,7 @@ def main() -> None:
     args = parse_args()
     conn = sqlite3.connect(str(Path(args.db_path)))
     try:
-        apply_migrations(conn)
+        apply_macro_migrations(conn)
         summary = normalize_macro_sources(
             conn,
             date_from=args.start_date,

@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from swingmaster import SWINGMASTER_MACRO_DB_PATH
-from swingmaster.infra.sqlite.migrator import apply_migrations
+from swingmaster.infra.sqlite.migrator import apply_macro_migrations
 from swingmaster.macro.raw_ingest import ingest_macro_raw
 
 
@@ -51,7 +51,7 @@ def main() -> None:
         raise RuntimeError("FRED_API_KEY_MISSING")
     conn = sqlite3.connect(str(Path(args.db_path)))
     try:
-        apply_migrations(conn)
+        apply_macro_migrations(conn)
         summary = ingest_macro_raw(
             conn,
             date_from=args.start_date,

@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from swingmaster import SWINGMASTER_MACRO_DB_PATH
-from swingmaster.infra.sqlite.migrator import apply_migrations
+from swingmaster.infra.sqlite.migrator import apply_macro_migrations
 from swingmaster.macro.scorecard import compute_and_store_risk_appetite_scorecard
 
 
@@ -37,7 +37,7 @@ def main() -> None:
     args = parse_args()
     conn = sqlite3.connect(str(Path(args.db_path)))
     try:
-        apply_migrations(conn)
+        apply_macro_migrations(conn)
         summary = compute_and_store_risk_appetite_scorecard(
             conn,
             date_from=args.start_date,

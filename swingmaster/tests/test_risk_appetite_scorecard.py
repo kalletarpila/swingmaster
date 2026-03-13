@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from swingmaster.cli import run_risk_appetite_scorecard
-from swingmaster.infra.sqlite.migrator import apply_migrations
+from swingmaster.infra.sqlite.migrator import apply_macro_migrations
 from swingmaster.macro.scorecard import (
     ScorecardSummary,
     _bucket_bitcoin,
@@ -23,7 +23,7 @@ from swingmaster.macro.scorecard import (
 
 def _new_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
-    apply_migrations(conn)
+    apply_macro_migrations(conn)
     return conn
 
 
@@ -97,6 +97,15 @@ def test_migration_creates_rc_risk_appetite_daily() -> None:
     assert cols["data_quality_status"] == "TEXT"
     pk_cols = [str(row[1]) for row in conn.execute("PRAGMA table_info(rc_risk_appetite_daily)") if int(row[5]) == 1]
     assert pk_cols == ["as_of_date"]
+    rc_state_table_exists = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type='table' AND name='rc_state_daily'
+        LIMIT 1
+        """
+    ).fetchone()
+    assert rc_state_table_exists is None
 
 
 @pytest.mark.parametrize(

@@ -4,13 +4,13 @@ import sqlite3
 from pathlib import Path
 
 from swingmaster.cli import run_macro_normalize
-from swingmaster.infra.sqlite.migrator import apply_migrations
+from swingmaster.infra.sqlite.migrator import apply_macro_migrations
 from swingmaster.macro.normalize import MacroNormalizeSummary, normalize_macro_sources
 
 
 def _new_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
-    apply_migrations(conn)
+    apply_macro_migrations(conn)
     return conn
 
 
@@ -77,6 +77,15 @@ def test_macro_source_daily_migration_creates_table_and_pk() -> None:
         if int(row[5]) > 0
     }
     assert pk_cols == {1: "as_of_date", 2: "source_code"}
+    rc_state_table_exists = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type='table' AND name='rc_state_daily'
+        LIMIT 1
+        """
+    ).fetchone()
+    assert rc_state_table_exists is None
 
 
 def test_normalization_reads_only_from_raw_table() -> None:

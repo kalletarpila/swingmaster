@@ -8,7 +8,7 @@ from urllib.error import URLError
 from urllib.request import Request
 
 from swingmaster.cli import run_macro_ingest
-from swingmaster.infra.sqlite.migrator import apply_migrations
+from swingmaster.infra.sqlite.migrator import apply_macro_migrations
 from swingmaster.macro.raw_ingest import (
     MacroIngestSummary,
     SOURCE_DEFINITIONS,
@@ -20,7 +20,7 @@ from swingmaster.macro.raw_ingest import (
 
 def _new_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
-    apply_migrations(conn)
+    apply_macro_migrations(conn)
     return conn
 
 
@@ -126,6 +126,15 @@ def test_macro_raw_migration_creates_table_and_uniqueness() -> None:
     assert score_table_exists is not None
     score_count = conn.execute("SELECT COUNT(*) FROM rc_risk_appetite_daily").fetchone()
     assert score_count is not None and int(score_count[0]) == 0
+    rc_state_table_exists = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type='table' AND name='rc_state_daily'
+        LIMIT 1
+        """
+    ).fetchone()
+    assert rc_state_table_exists is None
 
 
 def test_parse_fred_observations_is_deterministic() -> None:

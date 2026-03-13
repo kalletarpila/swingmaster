@@ -10,21 +10,16 @@ import socket
 import time
 from dataclasses import dataclass
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
 
 INGEST_ENGINE_VERSION = "MACRO_RAW_INGEST_V1"
 FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
-CBOE_EQUITY_PCR_CSV_URL = "https://cdn.cboe.com/data/us/options/market_statistics/daily_market_statistics.csv"
-CBOE_EQUITY_PCR_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "text/csv,application/csv,text/plain,*/*",
-    "Referer": "https://www.cboe.com/us/options/market_statistics/daily/",
-    "Accept-Language": "en-US,en;q=0.9",
-}
+CBOE_LOCAL_PCR_DIR = Path("/home/kalle/projects/swingmaster/cboe")
 RAW_TABLE = "rc_macro_source_raw"
 HTTP_TIMEOUT_SECONDS = 30
 HTTP_MAX_ATTEMPTS = 3
@@ -40,7 +35,14 @@ SOURCE_DEFINITIONS = (
     ("FED_WALCL", "FRED", "WALCL"),
     ("USD_BROAD_DTWEXBGS", "FRED", "DTWEXBGS"),
     ("PCR_EQUITY_CBOE", "CBOE", "EQUITY_PUT_CALL_RATIO"),
+    ("PCR_TOTAL_CBOE", "CBOE", "TOTAL_PUT_CALL_RATIO"),
+    ("PCR_INDEX_CBOE", "CBOE", "INDEX_PUT_CALL_RATIO"),
 )
+CBOE_SERIES_COLUMNS = {
+    "PCR_EQUITY_CBOE": ("EQUITY_PUT_CALL_RATIO", "equity_put_call_ratio"),
+    "PCR_TOTAL_CBOE": ("TOTAL_PUT_CALL_RATIO", "total_put_call_ratio"),
+    "PCR_INDEX_CBOE": ("INDEX_PUT_CALL_RATIO", "index_put_call_ratio"),
+}
 
 
 @dataclass(frozen=True)
@@ -193,23 +195,27 @@ def fetch_fred_series_observations(
     return payload, url
 
 
-def _resolve_cboe_csv_url(cboe_csv_url: str | None) -> str:
+def _resolve_cboe_csv_path(cboe_csv_url: str | None) -> Path:
     if cboe_csv_url:
-        return cboe_csv_url
-    env_url = os.getenv("CBOE_PCR_CSV_URL")
-    if env_url:
-        return env_url
-    return CBOE_EQUITY_PCR_CSV_URL
+        return Path(cboe_csv_url)
+    env_path = os.getenv("CBOE_PCR_CSV_URL")
+    if env_path:
+        return Path(env_path)
+    return CBOE_LOCAL_PCR_DIR
 
 
-def fetch_cboe_equity_put_call_csv(*, cboe_csv_url: str | None = None) -> tuple[str, str]:
-    source_url = _resolve_cboe_csv_url(cboe_csv_url)
-    request = Request(source_url, headers=CBOE_EQUITY_PCR_HEADERS)
-    text = _http_get_bytes(
-        request,
-        error_context=f"CBOE_FETCH_FAILED:PCR_EQUITY_CBOE:{source_url}",
-    ).decode("utf-8-sig")
-    return text, source_url
+def _load_cboe_csv_paths(cboe_csv_url: str | None = None) -> list[Path]:
+    base_path = _resolve_cboe_csv_path(cboe_csv_url)
+    if not base_path.exists():
+        raise RuntimeError(f"CBOE_FETCH_FAILED:PCR_EQUITY_CBOE:PATH_NOT_FOUND:{base_path}")
+    if base_path.is_file():
+        if base_path.suffix.lower() != ".csv":
+            raise RuntimeError(f"CBOE_FETCH_FAILED:PCR_EQUITY_CBOE:NOT_A_CSV_FILE:{base_path}")
+        return [base_path]
+    csv_paths = sorted(path for path in base_path.glob("*.csv") if path.is_file())
+    if not csv_paths:
+        raise RuntimeError(f"CBOE_FETCH_FAILED:PCR_EQUITY_CBOE:NO_CSV_FILES:{base_path}")
+    return csv_paths
 
 
 def parse_fred_observations(
@@ -279,70 +285,70 @@ def _normalize_header_label(cell: str) -> str:
     return "".join(ch for ch in cell.lower() if ch.isalnum())
 
 
-def parse_cboe_equity_put_call_csv(
+def parse_cboe_local_put_call_csv(
     csv_text: str,
     *,
-    source_key: str,
     source_url: str,
 ) -> list[RawObservation]:
-    reader = csv.reader(io.StringIO(csv_text))
-    out: list[RawObservation] = []
-    header_idx: int | None = None
-    saw_header = False
-    ratio_aliases = {
-        "equityputcallratio",
-        "equitypcratio",
-        "equitypc",
-        "equitypcr",
-        "pcratio",
-    }
+    reader = csv.DictReader(io.StringIO(csv_text))
+    if reader.fieldnames is None:
+        raise RuntimeError("CBOE_FETCH_FAILED:PCR_EQUITY_CBOE:HEADER_NOT_FOUND")
+
+    normalized_fields = {_normalize_header_label(field): field for field in reader.fieldnames}
+    date_field = normalized_fields.get("date")
+    if date_field is None:
+        raise RuntimeError("CBOE_FETCH_FAILED:PCR_EQUITY_CBOE:MISSING_COLUMN:date")
+
+    resolved_fields: dict[str, str] = {}
+    for source_key, (_, column_name) in CBOE_SERIES_COLUMNS.items():
+        normalized = _normalize_header_label(column_name)
+        actual = normalized_fields.get(normalized)
+        if actual is None:
+            raise RuntimeError(f"CBOE_FETCH_FAILED:{source_key}:MISSING_COLUMN:{column_name}")
+        resolved_fields[source_key] = actual
+    status_field = normalized_fields.get("status")
+
+    observations: list[RawObservation] = []
     for row in reader:
-        if not row:
-            continue
-        if header_idx is None:
-            lowered = [cell.strip().lower() for cell in row]
-            if "date" in lowered:
-                saw_header = True
-                normalized = [_normalize_header_label(cell) for cell in row]
-                for idx, col in enumerate(normalized):
-                    if idx == 0:
-                        continue
-                    if col in ratio_aliases:
-                        header_idx = idx
-                        break
-                    if "equity" in col and "put" in col and "call" in col and "ratio" in col:
-                        header_idx = idx
-                        break
-                continue
-        obs_date = _parse_csv_date(row[0])
+        obs_date = _parse_csv_date(row.get(date_field, ""))
         if obs_date is None:
             continue
-        if header_idx is None:
-            continue
-        value_text: str | None = None
-        if header_idx < len(row):
-            value_text = row[header_idx].strip()
-        if value_text in {None, ""}:
-            continue
-        value_num = _parse_csv_float(value_text)
-        if value_num is None:
-            continue
-        out.append(
-            RawObservation(
-                source_key=source_key,
-                vendor="CBOE",
-                external_series_id="EQUITY_PUT_CALL_RATIO",
-                observation_date=obs_date,
-                raw_value=value_num,
-                raw_value_text=value_text,
-                source_url=source_url,
+        if status_field is not None:
+            status_value = (row.get(status_field) or "").strip().lower()
+            if status_value and status_value != "ok":
+                continue
+        for source_key, (external_series_id, _) in CBOE_SERIES_COLUMNS.items():
+            value_text = (row.get(resolved_fields[source_key]) or "").strip()
+            if value_text == "":
+                continue
+            value_num = _parse_csv_float(value_text)
+            if value_num is None:
+                continue
+            observations.append(
+                RawObservation(
+                    source_key=source_key,
+                    vendor="CBOE",
+                    external_series_id=external_series_id,
+                    observation_date=obs_date,
+                    raw_value=value_num,
+                    raw_value_text=value_text,
+                    source_url=source_url,
+                )
             )
-        )
-    if header_idx is None:
-        if saw_header:
-            raise RuntimeError("CBOE_PARSE_FAILED:PCR_EQUITY_CBOE:ratio_column_not_found")
-        raise RuntimeError("CBOE_PARSE_FAILED:PCR_EQUITY_CBOE:header_not_found")
-    return out
+    return observations
+
+
+def fetch_cboe_put_call_observations(*, cboe_csv_url: str | None = None) -> list[RawObservation]:
+    deduped: dict[tuple[str, str], RawObservation] = {}
+    for csv_path in _load_cboe_csv_paths(cboe_csv_url):
+        try:
+            csv_text = csv_path.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            raise RuntimeError(f"CBOE_FETCH_FAILED:PCR_EQUITY_CBOE:READ_FAILED:{csv_path}") from exc
+        parsed = parse_cboe_local_put_call_csv(csv_text, source_url=str(csv_path))
+        for row in parsed:
+            deduped[(row.source_key, row.observation_date)] = row
+    return sorted(deduped.values(), key=lambda row: (row.source_key, row.observation_date))
 
 
 def _table_exists(conn: Any, table_name: str) -> bool:
@@ -468,7 +474,7 @@ def ingest_macro_raw(
     fred_api_key: str | None = None,
     cboe_csv_url: str | None = None,
     fred_fetcher: Callable[[str, str, str, str], tuple[dict[str, Any], str]] | None = None,
-    cboe_fetcher: Callable[[], tuple[str, str]] | None = None,
+    cboe_fetcher: Callable[[], list[RawObservation]] | None = None,
 ) -> MacroIngestSummary:
     date_from = _validate_iso_date(date_from, "DATE_FROM")
     date_to = _validate_iso_date(date_to, "DATE_TO")
@@ -493,9 +499,10 @@ def ingest_macro_raw(
                 date_to=dto,
                 fred_api_key=api_key,
             )
-    cboe_loader = cboe_fetcher or (lambda: fetch_cboe_equity_put_call_csv(cboe_csv_url=cboe_csv_url))
+    cboe_loader = cboe_fetcher or (lambda: fetch_cboe_put_call_observations(cboe_csv_url=cboe_csv_url))
 
     rows: list[RawObservation] = []
+    cboe_rows_by_source: dict[str, list[RawObservation]] | None = None
     for source_key, vendor, external_series_id in SOURCE_DEFINITIONS:
         if vendor == "FRED":
             payload, url = fred_loader(external_series_id, date_from, date_to, fred_api_key)
@@ -506,12 +513,11 @@ def ingest_macro_raw(
                 source_url=url,
             )
         elif vendor == "CBOE":
-            csv_text, url = cboe_loader()
-            parsed = parse_cboe_equity_put_call_csv(
-                csv_text,
-                source_key=source_key,
-                source_url=url,
-            )
+            if cboe_rows_by_source is None:
+                cboe_rows_by_source = {}
+                for row in cboe_loader():
+                    cboe_rows_by_source.setdefault(row.source_key, []).append(row)
+            parsed = cboe_rows_by_source.get(source_key, [])
         else:
             continue
         for item in parsed:

@@ -4,16 +4,15 @@ import sqlite3
 import sys
 import types
 from pathlib import Path
-from urllib.error import URLError
-from urllib.request import Request
 
 from swingmaster.cli import run_macro_ingest
 from swingmaster.infra.sqlite.migrator import apply_macro_migrations
 from swingmaster.macro.raw_ingest import (
     MacroIngestSummary,
+    RawObservation,
     SOURCE_DEFINITIONS,
     ingest_macro_raw,
-    parse_cboe_equity_put_call_csv,
+    parse_cboe_local_put_call_csv,
     parse_fred_observations,
 )
 
@@ -42,17 +41,15 @@ def _fred_fetcher(series_id: str, date_from: str, date_to: str, api_key: str):  
     return _fred_payload(series_id), f"https://fred.test/{series_id}"
 
 
-def _cboe_fetcher() -> tuple[str, str]:
+def _cboe_fetcher() -> list[RawObservation]:
     csv_text = "\n".join(
         [
-            "Generated: 2026-01-03",
-            "Date,Total Put/Call Ratio,Equity Put/Call Ratio,Index Put/Call Ratio",
-            "2026-01-01,0.95,0.61,1.34",
-            "2026-01-02,1.01,0.73,1.40",
-            "Footer line",
+            "date,total_put_call_ratio,index_put_call_ratio,equity_put_call_ratio,status,fetched_at_utc",
+            "2026-01-01,0.95,1.34,0.61,ok,2026-03-13T00:00:00Z",
+            "2026-01-02,1.01,1.40,0.73,ok,2026-03-13T00:00:00Z",
         ]
     )
-    return csv_text, "https://cboe.test/equity.csv"
+    return parse_cboe_local_put_call_csv(csv_text, source_url="/tmp/cboe.csv")
 
 
 def test_macro_raw_migration_creates_table_and_uniqueness() -> None:
@@ -225,200 +222,54 @@ def test_fred_fetch_raises_when_fredapi_missing(monkeypatch) -> None:
         raise AssertionError("expected missing fredapi error")
 
 
-def test_cboe_fetch_retries_transient_then_succeeds(monkeypatch) -> None:
+def test_cboe_fetch_reads_local_csv_files_and_maps_all_series(monkeypatch, tmp_path: Path) -> None:
     from swingmaster.macro import raw_ingest
 
-    calls = {"n": 0}
-    sleep_calls: list[float] = []
-
-    class _Resp:
-        def read(self) -> bytes:
-            return b"Date,Equity Put/Call Ratio\n2026-01-01,0.70\n"
-
-        def __enter__(self) -> "_Resp":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
-            del exc_type, exc, tb
-
-    def _fake_urlopen(url: str, timeout: int):  # type: ignore[no-untyped-def]
-        del url, timeout
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise URLError("temporary")
-        return _Resp()
-
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: sleep_calls.append(float(s)))
-    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
-
-    csv_text, _ = raw_ingest.fetch_cboe_equity_put_call_csv()
-    assert "2026-01-01,0.70" in csv_text
-    assert calls["n"] == 2
-    assert sleep_calls == [1.0]
-
-
-def test_cboe_csv_url_resolution_cli_override_wins(monkeypatch) -> None:
-    from swingmaster.macro import raw_ingest
-
-    captured: dict[str, str] = {}
-
-    class _Resp:
-        def read(self) -> bytes:
-            return b"Date,Equity Put/Call Ratio\n2026-01-01,0.70\n"
-
-        def __enter__(self) -> "_Resp":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
-            del exc_type, exc, tb
-
-    def _fake_urlopen(req: object, timeout: int):  # type: ignore[no-untyped-def]
-        del timeout
-        assert isinstance(req, Request)
-        captured["url"] = req.full_url
-        return _Resp()
-
-    monkeypatch.setenv("CBOE_PCR_CSV_URL", "https://env.example/cboe.csv")
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: None)
-    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
-
-    _, source_url = raw_ingest.fetch_cboe_equity_put_call_csv(cboe_csv_url="https://cli.example/cboe.csv")
-    assert source_url == "https://cli.example/cboe.csv"
-    assert captured["url"] == "https://cli.example/cboe.csv"
-
-
-def test_cboe_csv_url_resolution_env_when_no_cli_override(monkeypatch) -> None:
-    from swingmaster.macro import raw_ingest
-
-    captured: dict[str, str] = {}
-
-    class _Resp:
-        def read(self) -> bytes:
-            return b"Date,Equity Put/Call Ratio\n2026-01-01,0.70\n"
-
-        def __enter__(self) -> "_Resp":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
-            del exc_type, exc, tb
-
-    def _fake_urlopen(req: object, timeout: int):  # type: ignore[no-untyped-def]
-        del timeout
-        assert isinstance(req, Request)
-        captured["url"] = req.full_url
-        return _Resp()
-
-    monkeypatch.setenv("CBOE_PCR_CSV_URL", "https://env.example/cboe.csv")
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: None)
-    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
-
-    _, source_url = raw_ingest.fetch_cboe_equity_put_call_csv()
-    assert source_url == "https://env.example/cboe.csv"
-    assert captured["url"] == "https://env.example/cboe.csv"
-
-
-def test_cboe_csv_url_resolution_default_when_no_cli_or_env(monkeypatch) -> None:
-    from swingmaster.macro import raw_ingest
-
-    captured: dict[str, str] = {}
-
-    class _Resp:
-        def read(self) -> bytes:
-            return b"Date,Equity Put/Call Ratio\n2026-01-01,0.70\n"
-
-        def __enter__(self) -> "_Resp":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
-            del exc_type, exc, tb
-
-    def _fake_urlopen(req: object, timeout: int):  # type: ignore[no-untyped-def]
-        del timeout
-        assert isinstance(req, Request)
-        captured["url"] = req.full_url
-        return _Resp()
-
-    monkeypatch.delenv("CBOE_PCR_CSV_URL", raising=False)
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: None)
-    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
-
-    _, source_url = raw_ingest.fetch_cboe_equity_put_call_csv()
-    assert source_url == raw_ingest.CBOE_EQUITY_PCR_CSV_URL
-    assert captured["url"] == raw_ingest.CBOE_EQUITY_PCR_CSV_URL
-
-
-def test_cboe_fetch_uses_csv_url_and_required_headers(monkeypatch) -> None:
-    from swingmaster.macro import raw_ingest
-
-    captured: dict[str, object] = {}
-
-    class _Resp:
-        def read(self) -> bytes:
-            return b"Date,Equity Put/Call Ratio\n2026-01-01,0.70\n"
-
-        def __enter__(self) -> "_Resp":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
-            del exc_type, exc, tb
-
-    def _fake_urlopen(req: object, timeout: int):  # type: ignore[no-untyped-def]
-        captured["timeout"] = timeout
-        assert isinstance(req, Request)
-        captured["url"] = req.full_url
-        captured["headers"] = {k.lower(): v for k, v in req.header_items()}
-        return _Resp()
-
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: None)
-    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
-
-    csv_text, source_url = raw_ingest.fetch_cboe_equity_put_call_csv()
-    assert source_url.endswith(".csv")
-    assert "daily_market_statistics.csv" in source_url
-    assert csv_text.startswith("Date,Equity Put/Call Ratio")
-    assert captured["url"] == source_url
-    headers = captured["headers"]
-    assert headers["user-agent"] == (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    first = tmp_path / "cboe_pcr_2026-01-01_2026-01-02_20260313T010000Z.csv"
+    first.write_text(
+        "\n".join(
+            [
+                "date,total_put_call_ratio,index_put_call_ratio,equity_put_call_ratio,status,fetched_at_utc",
+                "2026-01-01,0.95,1.34,0.61,ok,2026-03-13T01:00:00Z",
+                "2026-01-02,0.80,1.20,0.55,http_403,2026-03-13T01:00:00Z",
+            ]
+        ),
+        encoding="utf-8",
     )
-    assert headers["accept"] == "text/csv,application/csv,text/plain,*/*"
-    assert headers["referer"] == "https://www.cboe.com/us/options/market_statistics/daily/"
-    assert headers["accept-language"] == "en-US,en;q=0.9"
+    second = tmp_path / "cboe_pcr_2026-01-01_2026-01-02_20260313T020000Z.csv"
+    second.write_text(
+        "\n".join(
+            [
+                "date,total_put_call_ratio,index_put_call_ratio,equity_put_call_ratio,status,fetched_at_utc",
+                "2026-01-02,1.01,1.40,0.73,ok,2026-03-13T02:00:00Z",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(raw_ingest, "CBOE_LOCAL_PCR_DIR", tmp_path)
+    rows = raw_ingest.fetch_cboe_put_call_observations()
+    assert {(row.source_key, row.observation_date, row.raw_value_text) for row in rows} == {
+        ("PCR_EQUITY_CBOE", "2026-01-01", "0.61"),
+        ("PCR_EQUITY_CBOE", "2026-01-02", "0.73"),
+        ("PCR_TOTAL_CBOE", "2026-01-01", "0.95"),
+        ("PCR_TOTAL_CBOE", "2026-01-02", "1.01"),
+        ("PCR_INDEX_CBOE", "2026-01-01", "1.34"),
+        ("PCR_INDEX_CBOE", "2026-01-02", "1.40"),
+    }
+    assert all(str(tmp_path) in row.source_url for row in rows)
 
 
-def test_cboe_fetch_failure_includes_url_context(monkeypatch) -> None:
+def test_cboe_fetch_failure_is_deterministic_when_local_dir_missing(tmp_path: Path) -> None:
     from swingmaster.macro import raw_ingest
 
-    def _fake_urlopen(req: object, timeout: int):  # type: ignore[no-untyped-def]
-        del req, timeout
-        raise URLError("blocked")
-
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: None)
-    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
-
-    override_url = "https://override.example/cboe.csv"
+    missing = tmp_path / "missing-dir"
     try:
-        raw_ingest.fetch_cboe_equity_put_call_csv(cboe_csv_url=override_url)
+        raw_ingest.fetch_cboe_put_call_observations(cboe_csv_url=str(missing))
     except RuntimeError as exc:
-        msg = str(exc)
-        assert msg.startswith("CBOE_FETCH_FAILED:PCR_EQUITY_CBOE:")
-        assert "RETRIES_EXHAUSTED" in msg
-        assert override_url in msg
+        assert str(exc) == f"CBOE_FETCH_FAILED:PCR_EQUITY_CBOE:PATH_NOT_FOUND:{missing}"
     else:
-        raise AssertionError("expected deterministic CBOE failure context")
+        raise AssertionError("expected deterministic missing-path failure")
 
 
 def test_fred_fetch_wraps_client_failure_with_context(monkeypatch) -> None:
@@ -448,122 +299,96 @@ def test_fred_fetch_wraps_client_failure_with_context(monkeypatch) -> None:
     else:
         raise AssertionError("expected wrapped fred failure")
 
-
-def test_timeout_constant_is_passed_to_http_calls(monkeypatch) -> None:
-    from swingmaster.macro import raw_ingest
-
-    timeouts: list[int] = []
-
-    class _Resp:
-        def read(self) -> bytes:
-            return b'{"observations":[]}'
-
-        def __enter__(self) -> "_Resp":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
-            del exc_type, exc, tb
-
-    def _fake_urlopen(url: str, timeout: int):  # type: ignore[no-untyped-def]
-        del url
-        timeouts.append(int(timeout))
-        return _Resp()
-
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: None)
-    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
-
-    raw_ingest.fetch_cboe_equity_put_call_csv()
-    assert timeouts == [raw_ingest.HTTP_TIMEOUT_SECONDS]
-
-
-def test_rate_limit_sleep_is_deterministic_between_consecutive_requests(monkeypatch) -> None:
-    from swingmaster.macro import raw_ingest
-
-    monotonic_values = iter([100.0, 100.2, 100.2])
-    sleep_calls: list[float] = []
-
-    class _Resp:
-        def read(self) -> bytes:
-            return b'{"observations":[]}'
-
-        def __enter__(self) -> "_Resp":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
-            del exc_type, exc, tb
-
-    def _fake_urlopen(url: str, timeout: int):  # type: ignore[no-untyped-def]
-        del url, timeout
-        return _Resp()
-
-    monkeypatch.setattr(raw_ingest, "urlopen", _fake_urlopen)
-    monkeypatch.setattr(raw_ingest, "_sleep", lambda s: sleep_calls.append(float(s)))
-    monkeypatch.setattr(raw_ingest, "_monotonic", lambda: float(next(monotonic_values)))
-    monkeypatch.setattr(raw_ingest, "HTTP_MIN_INTERVAL_SECONDS", 0.5)
-    monkeypatch.setattr(raw_ingest, "_LAST_HTTP_REQUEST_TS", None)
-
-    raw_ingest.fetch_cboe_equity_put_call_csv()
-    raw_ingest.fetch_cboe_equity_put_call_csv()
-    assert len(sleep_calls) == 1
-    assert abs(sleep_calls[0] - 0.3) < 1e-9
-
-
-def test_parse_cboe_csv_is_deterministic() -> None:
+def test_parse_cboe_local_csv_is_deterministic() -> None:
     csv_text = "\n".join(
         [
-            "DATE,CALL,PUT,TOTAL,P/C Ratio",
-            "2026-01-01,100,64,164,0.64",
-            "2026-01-02,110,67,177,0.61",
+            "date,total_put_call_ratio,index_put_call_ratio,equity_put_call_ratio,status,fetched_at_utc",
+            "2026-01-01,0.90,1.10,0.64,ok,2026-03-13T00:00:00Z",
+            "2026-01-02,0.95,1.20,0.61,ok,2026-03-13T00:00:00Z",
         ]
     )
-    url = "https://cboe.test/equity.csv"
-    rows = parse_cboe_equity_put_call_csv(
+    rows = parse_cboe_local_put_call_csv(
         csv_text,
-        source_key="PCR_EQUITY_CBOE",
-        source_url=url,
+        source_url="/tmp/cboe.csv",
     )
-    assert [row.observation_date for row in rows] == ["2026-01-01", "2026-01-02"]
-    assert [row.raw_value for row in rows] == [0.64, 0.61]
-    assert all(row.vendor == "CBOE" for row in rows)
+    assert [row.source_key for row in rows] == [
+        "PCR_EQUITY_CBOE",
+        "PCR_TOTAL_CBOE",
+        "PCR_INDEX_CBOE",
+        "PCR_EQUITY_CBOE",
+        "PCR_TOTAL_CBOE",
+        "PCR_INDEX_CBOE",
+    ]
+    assert [row.observation_date for row in rows] == [
+        "2026-01-01",
+        "2026-01-01",
+        "2026-01-01",
+        "2026-01-02",
+        "2026-01-02",
+        "2026-01-02",
+    ]
+    assert [row.raw_value_text for row in rows] == ["0.64", "0.90", "1.10", "0.61", "0.95", "1.20"]
 
 
-def test_parse_cboe_csv_uses_equity_ratio_column_not_volume_columns() -> None:
+def test_parse_cboe_local_csv_preserves_equity_source_key_for_downstream() -> None:
     csv_text = "\n".join(
         [
-            "Date,Equity Put Volume,Equity Put/Call Ratio,Equity Open Interest",
-            "2026-01-01,916877,0.61,1183999",
-            "2026-01-02,847645,0.73,1296617",
+            "date,total_put_call_ratio,index_put_call_ratio,equity_put_call_ratio,status,fetched_at_utc",
+            "2026-01-01,0.95,1.10,0.61,ok,2026-03-13T00:00:00Z",
         ]
     )
-    rows = parse_cboe_equity_put_call_csv(
+    rows = parse_cboe_local_put_call_csv(
         csv_text,
-        source_key="PCR_EQUITY_CBOE",
-        source_url="https://cboe.test/equity.csv",
+        source_url="/tmp/cboe.csv",
     )
-    assert [row.observation_date for row in rows] == ["2026-01-01", "2026-01-02"]
-    assert [row.raw_value for row in rows] == [0.61, 0.73]
-    assert [row.raw_value_text for row in rows] == ["0.61", "0.73"]
+    equity_rows = [row for row in rows if row.source_key == "PCR_EQUITY_CBOE"]
+    assert len(equity_rows) == 1
+    assert equity_rows[0].external_series_id == "EQUITY_PUT_CALL_RATIO"
+    assert equity_rows[0].raw_value == 0.61
 
 
-def test_parse_cboe_csv_raises_when_ratio_column_missing() -> None:
+def test_parse_cboe_local_csv_raises_when_required_column_missing() -> None:
     csv_text = "\n".join(
         [
-            "Date,Equity Put Volume,Equity Open Interest",
-            "2026-01-01,916877,1183999",
+            "date,total_put_call_ratio,equity_put_call_ratio,status,fetched_at_utc",
+            "2026-01-01,0.95,0.61,ok,2026-03-13T00:00:00Z",
         ]
     )
     try:
-        parse_cboe_equity_put_call_csv(
+        parse_cboe_local_put_call_csv(
             csv_text,
-            source_key="PCR_EQUITY_CBOE",
-            source_url="https://cboe.test/equity.csv",
+            source_url="/tmp/cboe.csv",
         )
     except RuntimeError as exc:
-        assert str(exc) == "CBOE_PARSE_FAILED:PCR_EQUITY_CBOE:ratio_column_not_found"
+        assert str(exc) == "CBOE_FETCH_FAILED:PCR_INDEX_CBOE:MISSING_COLUMN:index_put_call_ratio"
     else:
-        raise AssertionError("expected deterministic parse failure when ratio column is missing")
+        raise AssertionError("expected deterministic parse failure when a required column is missing")
+
+
+def test_ingest_persists_all_three_cboe_raw_series() -> None:
+    conn = _new_conn()
+    ingest_macro_raw(
+        conn,
+        date_from="2026-01-01",
+        date_to="2026-01-01",
+        mode="upsert",
+        computed_at="2026-01-03T00:00:00+00:00",
+        fred_fetcher=_fred_fetcher,
+        cboe_fetcher=_cboe_fetcher,
+    )
+    rows = conn.execute(
+        """
+        SELECT source_key, external_series_id, raw_value_text
+        FROM rc_macro_source_raw
+        WHERE observation_date='2026-01-01' AND vendor='CBOE'
+        ORDER BY source_key
+        """
+    ).fetchall()
+    assert rows == [
+        ("PCR_EQUITY_CBOE", "EQUITY_PUT_CALL_RATIO", "0.61"),
+        ("PCR_INDEX_CBOE", "INDEX_PUT_CALL_RATIO", "1.34"),
+        ("PCR_TOTAL_CBOE", "TOTAL_PUT_CALL_RATIO", "0.95"),
+    ]
 
 
 def test_ingest_insert_missing_is_idempotent() -> None:
@@ -577,7 +402,7 @@ def test_ingest_insert_missing_is_idempotent() -> None:
         fred_fetcher=_fred_fetcher,
         cboe_fetcher=_cboe_fetcher,
     )
-    assert first.rows_inserted == 10
+    assert first.rows_inserted == 14
     assert first.rows_skipped == 0
 
     second = ingest_macro_raw(
@@ -591,10 +416,10 @@ def test_ingest_insert_missing_is_idempotent() -> None:
     )
     assert second.rows_inserted == 0
     assert second.rows_updated == 0
-    assert second.rows_skipped == 10
+    assert second.rows_skipped == 14
 
     total = conn.execute("SELECT COUNT(*) FROM rc_macro_source_raw").fetchone()
-    assert total is not None and int(total[0]) == 10
+    assert total is not None and int(total[0]) == 14
 
 
 def test_ingest_uses_explicit_computed_at_for_loaded_at_utc() -> None:
@@ -629,7 +454,7 @@ def test_ingest_default_loaded_at_utc_is_deterministic_without_computed_at() -> 
         fred_fetcher=_fred_fetcher,
         cboe_fetcher=_cboe_fetcher,
     )
-    assert first.rows_inserted == 10
+    assert first.rows_inserted == 14
     loaded_first = conn.execute(
         """
         SELECT DISTINCT loaded_at_utc
@@ -647,7 +472,7 @@ def test_ingest_default_loaded_at_utc_is_deterministic_without_computed_at() -> 
         fred_fetcher=_fred_fetcher,
         cboe_fetcher=_cboe_fetcher,
     )
-    assert second.rows_updated == 10
+    assert second.rows_updated == 14
     loaded_second = conn.execute(
         """
         SELECT DISTINCT loaded_at_utc
@@ -758,8 +583,8 @@ def test_ingest_replace_all_is_bounded_to_requested_scope() -> None:
         fred_fetcher=_fred_fetcher,
         cboe_fetcher=_cboe_fetcher,
     )
-    assert out.rows_deleted == 10
-    assert out.rows_inserted == 10
+    assert out.rows_deleted == 14
+    assert out.rows_inserted == 14
     remaining_out_of_range = conn.execute(
         """
         SELECT COUNT(*)
@@ -781,15 +606,15 @@ def test_ingest_replace_all_is_bounded_to_requested_scope() -> None:
 def test_cli_emits_summary_lines(monkeypatch, tmp_path: Path, capsys) -> None:
     db_path = tmp_path / "rc.db"
     expected = MacroIngestSummary(
-        sources_requested=5,
+        sources_requested=7,
         date_from="2026-01-01",
         date_to="2026-01-02",
         mode="upsert",
-        rows_inserted=10,
+        rows_inserted=14,
         rows_updated=0,
         rows_deleted=0,
         rows_skipped=0,
-        distinct_sources_loaded=5,
+        distinct_sources_loaded=7,
         run_id="MACRO_RAW_INGEST_V1_20260101_20260102_deadbeef00",
         summary_status="OK",
     )
@@ -827,9 +652,9 @@ def test_cli_emits_summary_lines(monkeypatch, tmp_path: Path, capsys) -> None:
     assert seen["fred_api_key"] == "env-key"
     assert seen["cboe_csv_url"] is None
     assert "SUMMARY status=OK" in output
-    assert "SUMMARY sources_requested=5" in output
-    assert "SUMMARY rows_inserted=10" in output
-    assert "SUMMARY distinct_sources_loaded=5" in output
+    assert "SUMMARY sources_requested=7" in output
+    assert "SUMMARY rows_inserted=14" in output
+    assert "SUMMARY distinct_sources_loaded=7" in output
     assert "SUMMARY summary_status=OK" in output
 
 
@@ -857,15 +682,15 @@ def test_cli_prefers_explicit_fred_api_key_over_env(monkeypatch, tmp_path: Path)
     monkeypatch.setenv("FRED_API_KEY", "env-key")
 
     expected = MacroIngestSummary(
-        sources_requested=5,
+        sources_requested=7,
         date_from="2026-01-01",
         date_to="2026-01-02",
         mode="upsert",
-        rows_inserted=10,
+        rows_inserted=14,
         rows_updated=0,
         rows_deleted=0,
         rows_skipped=0,
-        distinct_sources_loaded=5,
+        distinct_sources_loaded=7,
         run_id="MACRO_RAW_INGEST_V1_20260101_20260102_deadbeef00",
         summary_status="OK",
     )
@@ -884,6 +709,7 @@ def test_cli_prefers_explicit_fred_api_key_over_env(monkeypatch, tmp_path: Path)
 
 def test_cli_passes_cboe_csv_url_override(monkeypatch, tmp_path: Path) -> None:
     db_path = tmp_path / "rc.db"
+    cboe_dir = tmp_path / "cboe"
     seen: dict[str, object] = {}
 
     monkeypatch.setattr(
@@ -899,21 +725,21 @@ def test_cli_passes_cboe_csv_url_override(monkeypatch, tmp_path: Path) -> None:
                 "mode": "upsert",
                 "computed_at": "2026-01-03T00:00:00+00:00",
                 "fred_api_key": "cli-key",
-                "cboe_csv_url": "https://cli.example/cboe.csv",
+                "cboe_csv_url": str(cboe_dir),
             },
         )(),
     )
 
     expected = MacroIngestSummary(
-        sources_requested=5,
+        sources_requested=7,
         date_from="2026-01-01",
         date_to="2026-01-02",
         mode="upsert",
-        rows_inserted=10,
+        rows_inserted=14,
         rows_updated=0,
         rows_deleted=0,
         rows_skipped=0,
-        distinct_sources_loaded=5,
+        distinct_sources_loaded=7,
         run_id="MACRO_RAW_INGEST_V1_20260101_20260102_deadbeef00",
         summary_status="OK",
     )
@@ -925,7 +751,7 @@ def test_cli_passes_cboe_csv_url_override(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.setattr(run_macro_ingest, "ingest_macro_raw", _fake_ingest)
     run_macro_ingest.main()
-    assert seen["cboe_csv_url"] == "https://cli.example/cboe.csv"
+    assert seen["cboe_csv_url"] == str(cboe_dir)
 
 
 def test_cli_raises_when_fred_key_missing(monkeypatch, tmp_path: Path) -> None:

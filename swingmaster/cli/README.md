@@ -6,3 +6,4 @@ Command-line tools for audits, universe runs, and summaries.
 - `run_range_universe.py`: range-based universe execution.
 - `run_daily_universe.py`: single-day universe execution.
 - `chain_summary.py`: run summary reports.
+- `run_cboe_pcr_fetch.py`: fetch CBOE daily put/call ratios to a timestamped CSV in the repo `cboe/` directory by default, with a configurable delay between requests.

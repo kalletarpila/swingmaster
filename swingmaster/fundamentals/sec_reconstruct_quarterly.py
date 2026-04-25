@@ -80,6 +80,7 @@ WEIGHTED_AVERAGE_SHARE_TAGS = {
     "WeightedAverageNumberOfDilutedSharesOutstanding",
     "WeightedAverageNumberOfSharesOutstandingBasic",
 }
+SHARE_TAGS = set(FIELD_TAG_PRIORITY["Ordinary Shares Number"])
 
 
 def load_sec_fact_rows(conn: sqlite3.Connection, ticker: str) -> list[sqlite3.Row]:
@@ -165,10 +166,11 @@ def reconstruct_quarterly_rows(
         row["flow_group_rows"] = flow_groups.get((row["tag"], str(row["currency"]), row["fy"]), [])
 
     selected_snapshot_facts = _select_best_snapshot_facts(parsed_rows)
+    selected_share_facts = _select_best_share_period_facts(parsed_rows)
     selected_flow_facts = _select_best_flow_facts(parsed_rows)
     reconstructed = []
     reconstructed.extend(_reconstruct_flow_fields(selected_flow_facts, ticker, run_id, retrieved_at_utc))
-    reconstructed.extend(_reconstruct_snapshot_fields(selected_snapshot_facts, ticker, run_id, retrieved_at_utc))
+    reconstructed.extend(_reconstruct_snapshot_fields(selected_snapshot_facts, selected_share_facts, ticker, run_id, retrieved_at_utc))
     reconstructed.extend(_reconstruct_total_debt(selected_snapshot_facts, ticker, run_id, retrieved_at_utc))
     if not reconstructed:
         raise RuntimeError(f"SEC_QUARTERLY_ROWS_NOT_RECONSTRUCTED:{ticker.upper()}")
@@ -183,8 +185,19 @@ def _select_best_snapshot_facts(parsed_rows: list[dict[str, Any]]) -> dict[tuple
     for row in parsed_rows:
         if row["tag"] not in SNAPSHOT_TAG_TO_FIELD:
             continue
+        if row["tag"] in SHARE_TAGS:
+            continue
         grouped[(row["tag"], row["currency"], row["fy"], row["fp"])].append(row)
     return {key: _pick_best_snapshot_fact(rows) for key, rows in grouped.items()}
+
+
+def _select_best_share_period_facts(parsed_rows: list[dict[str, Any]]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in parsed_rows:
+        if row["tag"] not in SHARE_TAGS:
+            continue
+        grouped[(row["period_end_date"], row["tag"], row["currency"])].append(row)
+    return {key: _pick_best_share_period_fact(rows) for key, rows in grouped.items()}
 
 
 def _select_best_flow_facts(
@@ -204,6 +217,12 @@ def _pick_best_fact(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _pick_best_snapshot_fact(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if rows and rows[0]["tag"] in WEIGHTED_AVERAGE_SHARE_TAGS:
+        return sorted(rows, key=_weighted_share_snapshot_priority_key)[0]
+    return _pick_best_fact(rows)
+
+
+def _pick_best_share_period_fact(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if rows and rows[0]["tag"] in WEIGHTED_AVERAGE_SHARE_TAGS:
         return sorted(rows, key=_weighted_share_snapshot_priority_key)[0]
     return _pick_best_fact(rows)
@@ -550,12 +569,13 @@ def _quarter_value(quarter_values: dict[str, dict[str, Any]], fp: str) -> float 
 
 def _reconstruct_snapshot_fields(
     selected_facts: dict[tuple[str, str, str, str], dict[str, Any]],
+    selected_share_facts: dict[tuple[str, str, str], dict[str, Any]],
     ticker: str,
     run_id: str,
     retrieved_at_utc: str,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    snapshot_fields = ("Cash And Cash Equivalents", "Ordinary Shares Number")
+    snapshot_fields = ("Cash And Cash Equivalents",)
     for field_name in snapshot_fields:
         tag_priority = FIELD_TAG_PRIORITY[field_name]
         available_units = sorted({key[1] for key in selected_facts if key[0] in tag_priority})
@@ -569,6 +589,28 @@ def _reconstruct_snapshot_fields(
                 value = _row_value(fact)
                 if fact is not None and value is not None:
                     rows.append(_build_output_row(ticker, field_name, fact["period_end_date"], value, unit, run_id, retrieved_at_utc))
+    rows.extend(_reconstruct_shares_by_period(selected_share_facts, ticker, run_id, retrieved_at_utc))
+    return rows
+
+
+def _reconstruct_shares_by_period(
+    selected_share_facts: dict[tuple[str, str, str], dict[str, Any]],
+    ticker: str,
+    run_id: str,
+    retrieved_at_utc: str,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    period_end_dates = sorted({key[0] for key in selected_share_facts})
+    tag_priority = FIELD_TAG_PRIORITY["Ordinary Shares Number"]
+    for period_end_date in period_end_dates:
+        available_units = sorted({key[2] for key in selected_share_facts if key[0] == period_end_date and key[1] in tag_priority})
+        if not available_units:
+            continue
+        unit = _select_unit("Ordinary Shares Number", available_units)
+        fact = _pick_share_period_fact(selected_share_facts, tag_priority, period_end_date, unit)
+        value = _row_value(fact)
+        if fact is not None and value is not None:
+            rows.append(_build_output_row(ticker, "Ordinary Shares Number", period_end_date, value, unit, run_id, retrieved_at_utc))
     return rows
 
 
@@ -623,6 +665,19 @@ def _pick_specific_fact(
     fp: str,
 ) -> dict[str, Any] | None:
     return selected_facts.get((tag, unit, fy, fp))
+
+
+def _pick_share_period_fact(
+    selected_share_facts: dict[tuple[str, str, str], dict[str, Any]],
+    tag_priority: list[str],
+    period_end_date: str,
+    unit: str,
+) -> dict[str, Any] | None:
+    for tag in tag_priority:
+        fact = selected_share_facts.get((period_end_date, tag, unit))
+        if fact is not None and _row_value(fact) is not None:
+            return fact
+    return None
 
 
 def _row_value(fact: dict[str, Any] | None) -> float | None:

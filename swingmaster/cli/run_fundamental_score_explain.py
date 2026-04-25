@@ -33,6 +33,12 @@ RAW_FACTOR_ROWS = (
 )
 
 
+class ExplainRows(list[sqlite3.Row]):
+    def __init__(self, rows: list[sqlite3.Row], history_rows: list[sqlite3.Row]) -> None:
+        super().__init__(rows)
+        self.history_rows = history_rows
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Explain FUND_SCORE_RULE_V1_1 score breakdown for TTM rows")
     parser.add_argument("--db", required=True, help="SQLite database path")
@@ -51,16 +57,17 @@ def _summary(**items: object) -> None:
 
 
 def load_rows_for_explain(conn: sqlite3.Connection, ticker: str, limit: int | None) -> list[sqlite3.Row]:
-    rows = load_ttm_rows(conn, ticker)
-    if limit is not None:
-        rows = rows[-limit:]
-    return rows
+    history_rows = load_ttm_rows(conn, ticker)
+    rows = history_rows[-limit:] if limit is not None else history_rows
+    return ExplainRows(rows, history_rows)
 
 
 def build_explain_rows(
     rows: list[sqlite3.Row],
     history_rows: list[sqlite3.Row] | None = None,
 ) -> list[dict[str, Any]]:
+    if history_rows is None and isinstance(rows, ExplainRows):
+        history_rows = rows.history_rows
     history_by_key = {
         (str(row["ticker"]), str(row["as_of_date"])): row
         for row in (history_rows if history_rows is not None else rows)
@@ -169,9 +176,8 @@ def main() -> None:
     args = parse_args()
     db_path = resolve_db_path(args.db)
     with sqlite3.connect(str(db_path)) as conn:
-        full_history_rows = load_ttm_rows(conn, args.ticker)
-        rows = full_history_rows[-args.limit:] if args.limit is not None else full_history_rows
-        explain_rows = build_explain_rows(rows, full_history_rows)
+        rows = load_rows_for_explain(conn, args.ticker, args.limit)
+        explain_rows = build_explain_rows(rows)
 
     print(format_explain_output(args.ticker, explain_rows))
     first_as_of_date = explain_rows[0]["as_of_date"] if explain_rows else "NULL"

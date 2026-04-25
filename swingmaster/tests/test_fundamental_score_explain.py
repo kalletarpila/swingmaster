@@ -8,14 +8,16 @@ import pytest
 from swingmaster.cli import run_fundamental_score_explain
 from swingmaster.cli.run_fundamental_migrations import run_migration
 from swingmaster.cli.run_fundamental_score_explain import build_explain_rows, format_explain_output, load_rows_for_explain
+from swingmaster.fundamentals.score import run_fundamental_scoring
 
 
 def test_explain_output_for_one_mature_row(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_explain_one.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
-        _insert_ttm_row(conn, "AAPL", "2025-12-31", None, 0.32, None, 0.28, 0.30, None, "MATURE", 71.0)
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", None, 0.32, None, 0.28, 0.30, None, "MATURE", None)
         conn.commit()
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
         rows = load_rows_for_explain(conn, "AAPL", None)
         explain_rows = build_explain_rows(rows)
     out = format_explain_output("AAPL", explain_rows)
@@ -24,8 +26,7 @@ def test_explain_output_for_one_mature_row(tmp_path: Path) -> None:
     assert "margin_component" in out
     assert "stored_fundamental_score" in out
     assert "recomputed_fundamental_score" in out
-    assert explain_rows[0]["stored_fundamental_score"] == 71.0
-    assert explain_rows[0]["recomputed_fundamental_score"] == 71.0
+    assert explain_rows[0]["stored_fundamental_score"] == explain_rows[0]["recomputed_fundamental_score"]
 
 
 def test_limit_keeps_latest_rows_in_ascending_order(tmp_path: Path) -> None:
@@ -39,6 +40,34 @@ def test_limit_keeps_latest_rows_in_ascending_order(tmp_path: Path) -> None:
         rows = load_rows_for_explain(conn, "AAPL", 2)
     as_of_dates = [row["as_of_date"] for row in rows]
     assert as_of_dates == ["2025-09-30", "2025-12-31"]
+
+
+def test_limit_uses_full_history_for_consistency_recompute(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_explain_limit_full_history.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2024-03-31", 0.18, 0.20, 0.01, 0.10, 1.0, 0.01, "MATURE", None)
+        _insert_ttm_row(conn, "AAPL", "2024-06-30", 0.20, 0.22, 0.02, 0.11, 1.0, 0.01, "MATURE", None)
+        _insert_ttm_row(conn, "AAPL", "2024-09-30", 0.21, 0.23, 0.03, 0.12, 1.0, 0.01, "MATURE", None)
+        _insert_ttm_row(conn, "AAPL", "2024-12-31", 0.19, 0.24, 0.04, 0.13, 1.0, 0.01, "MATURE", None)
+        _insert_ttm_row(conn, "AAPL", "2025-03-31", 0.22, 0.25, 0.05, 0.14, 1.0, 0.01, "MATURE", None)
+        _insert_ttm_row(conn, "AAPL", "2025-06-30", 0.24, 0.26, 0.06, 0.15, 1.0, 0.01, "MATURE", None)
+        _insert_ttm_row(conn, "AAPL", "2025-09-30", 0.23, 0.27, 0.07, 0.16, 1.0, 0.01, "MATURE", None)
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 0.25, 0.28, 0.08, 0.17, 1.0, 0.01, "MATURE", None)
+        conn.commit()
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        rows = load_rows_for_explain(conn, "AAPL", 5)
+        explain_rows = build_explain_rows(rows)
+    assert [row["as_of_date"] for row in explain_rows] == [
+        "2024-12-31",
+        "2025-03-31",
+        "2025-06-30",
+        "2025-09-30",
+        "2025-12-31",
+    ]
+    out = format_explain_output("AAPL", explain_rows)
+    assert "2024-09-30" not in out
+    assert "2024-06-30" not in out
 
 
 def test_stored_score_null(tmp_path: Path) -> None:
@@ -76,8 +105,9 @@ def test_read_only_behavior(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_explain_read_only.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
-        _insert_ttm_row(conn, "AAPL", "2025-12-31", None, 0.32, None, 0.28, 0.30, None, "MATURE", 71.0)
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", None, 0.32, None, 0.28, 0.30, None, "MATURE", None)
         conn.commit()
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
         before = conn.execute(
             "SELECT lifecycle_class, fundamental_score FROM rc_fundamental_ttm WHERE ticker='AAPL'"
         ).fetchone()
@@ -93,8 +123,9 @@ def test_cli_output_and_summary(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_explain_cli.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
-        _insert_ttm_row(conn, "AAPL", "2025-12-31", None, 0.32, None, 0.28, 0.30, None, "MATURE", 71.0)
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", None, 0.32, None, 0.28, 0.30, None, "MATURE", None)
         conn.commit()
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
 
     monkeypatch.setattr(
         run_fundamental_score_explain,

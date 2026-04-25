@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections import defaultdict
+from datetime import date
 from typing import Any
 
 
@@ -69,6 +70,8 @@ DEBT_GROUPS = [
     ["LongTermDebtCurrent", "LongTermDebtNoncurrent"],
 ]
 SUPPORTED_FP = {"Q1", "Q2", "Q3", "FY"}
+QUARTERLY_DURATION_MIN_DAYS = 70
+QUARTERLY_DURATION_MAX_DAYS = 110
 
 
 def load_sec_fact_rows(conn: sqlite3.Connection, ticker: str) -> list[sqlite3.Row]:
@@ -141,15 +144,17 @@ def reconstruct_quarterly_rows(
                 "period_end_date": str(row["period_end_date"]),
                 "field_value": row["field_value"],
                 "currency": row["currency"],
+                "encoded_field_name": str(row["field_name"]),
                 **parsed,
             }
         )
 
-    selected_facts = _select_best_facts(parsed_rows)
+    selected_snapshot_facts = _select_best_snapshot_facts(parsed_rows)
+    selected_flow_facts = _select_best_flow_facts(parsed_rows)
     reconstructed = []
-    reconstructed.extend(_reconstruct_flow_fields(selected_facts, ticker, run_id, retrieved_at_utc))
-    reconstructed.extend(_reconstruct_snapshot_fields(selected_facts, ticker, run_id, retrieved_at_utc))
-    reconstructed.extend(_reconstruct_total_debt(selected_facts, ticker, run_id, retrieved_at_utc))
+    reconstructed.extend(_reconstruct_flow_fields(selected_flow_facts, ticker, run_id, retrieved_at_utc))
+    reconstructed.extend(_reconstruct_snapshot_fields(selected_snapshot_facts, ticker, run_id, retrieved_at_utc))
+    reconstructed.extend(_reconstruct_total_debt(selected_snapshot_facts, ticker, run_id, retrieved_at_utc))
     if not reconstructed:
         raise RuntimeError(f"SEC_QUARTERLY_ROWS_NOT_RECONSTRUCTED:{ticker.upper()}")
     return sorted(
@@ -158,84 +163,251 @@ def reconstruct_quarterly_rows(
     )
 
 
-def _select_best_facts(parsed_rows: list[dict[str, Any]]) -> dict[tuple[str, str, str, str], dict[str, Any]]:
+def _select_best_snapshot_facts(parsed_rows: list[dict[str, Any]]) -> dict[tuple[str, str, str, str], dict[str, Any]]:
     grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in parsed_rows:
+        if row["tag"] not in SNAPSHOT_TAG_TO_FIELD:
+            continue
         grouped[(row["tag"], row["currency"], row["fy"], row["fp"])].append(row)
-    selected: dict[tuple[str, str, str, str], dict[str, Any]] = {}
-    for key, rows in grouped.items():
-        selected[key] = sorted(rows, key=_fact_priority_key, reverse=True)[0]
-    return selected
+    return {key: _pick_best_fact(rows) for key, rows in grouped.items()}
+
+
+def _select_best_flow_facts(
+    parsed_rows: list[dict[str, Any]],
+) -> dict[tuple[str, str, str, str, str], dict[str, Any]]:
+    grouped: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in parsed_rows:
+        if row["tag"] not in FLOW_TAG_TO_FIELD:
+            continue
+        duration_type = _classify_flow_duration_type(row)
+        grouped[(row["tag"], row["currency"], row["fy"], row["fp"], duration_type)].append(row)
+    return {key: _pick_best_fact(rows) for key, rows in grouped.items()}
+
+
+def _pick_best_fact(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return sorted(rows, key=_fact_priority_key)[0]
 
 
 def _fact_priority_key(row: dict[str, Any]) -> tuple[Any, ...]:
     return (
-        1 if row["frame"] != "NULL" else 0,
-        row["filed"],
-        row["start"],
-        row["period_end_date"],
-        float(row["field_value"]) if row["field_value"] is not None else float("-inf"),
-        "".join(chr(255 - ord(ch)) for ch in str(row["tag"])) if False else "",
+        0 if row["frame"] != "NULL" else 1,
+        _sort_desc_text(row["filed"]),
+        _sort_desc_text(row["start"]),
+        _sort_desc_text(row["period_end_date"]),
+        _sort_desc_number(_row_value(row)),
+        row["encoded_field_name"],
     )
 
 
-def _field_name_tiebreak(row: dict[str, Any]) -> str:
-    return (
-        f"{row['tag']}|form={row['form']}|unit={row['unit']}|fy={row['fy']}|fp={row['fp']}"
-        f"|frame={row['frame']}|start={row['start']}|filed={row['filed']}"
-    )
+def _sort_desc_text(value: str | None) -> tuple[int, str]:
+    if value in (None, "NULL"):
+        return (1, "")
+    return (0, "".join(chr(255 - ord(ch)) for ch in str(value)))
 
 
-def _fact_priority_key(row: dict[str, Any]) -> tuple[Any, ...]:
-    return (
-        1 if row["frame"] != "NULL" else 0,
-        row["filed"],
-        row["start"],
-        row["period_end_date"],
-        float(row["field_value"]) if row["field_value"] is not None else float("-inf"),
-        tuple(-ord(char) for char in _field_name_tiebreak(row)),
-    )
+def _sort_desc_number(value: float | None) -> tuple[int, float]:
+    if value is None:
+        return (1, 0.0)
+    return (0, -float(value))
+
+
+def _classify_flow_duration_type(row: dict[str, Any]) -> str:
+    start_date = _parse_iso_date(row["start"])
+    end_date = _parse_iso_date(row["period_end_date"])
+    if start_date is None or end_date is None:
+        return "unknown_duration"
+    duration_days = (end_date - start_date).days
+    if QUARTERLY_DURATION_MIN_DAYS <= duration_days <= QUARTERLY_DURATION_MAX_DAYS:
+        return "quarterly_fact"
+    if row["fp"] == "FY":
+        return "annual_fact"
+    if duration_days > QUARTERLY_DURATION_MAX_DAYS:
+        return "ytd_fact"
+    return "unknown_duration"
+
+
+def _parse_iso_date(value: str | None) -> date | None:
+    if value in (None, "NULL"):
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
 
 
 def _reconstruct_flow_fields(
-    selected_facts: dict[tuple[str, str, str, str], dict[str, Any]],
+    selected_flow_facts: dict[tuple[str, str, str, str, str], dict[str, Any]],
     ticker: str,
     run_id: str,
     retrieved_at_utc: str,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for field_name, tag_priority in FIELD_TAG_PRIORITY.items():
-        if field_name not in ("Total Revenue", "Gross Profit", "Operating Income", "Net Income", "Operating Cash Flow", "Capital Expenditure"):
-            continue
+    flow_fields = (
+        "Total Revenue",
+        "Gross Profit",
+        "Operating Income",
+        "Net Income",
+        "Operating Cash Flow",
+        "Capital Expenditure",
+    )
+    for field_name in flow_fields:
+        tag_priority = FIELD_TAG_PRIORITY[field_name]
         available_units = sorted(
             {
                 key[1]
-                for key in selected_facts
+                for key in selected_flow_facts
                 if key[0] in tag_priority
             }
         )
         if not available_units:
             continue
         unit = _select_unit(field_name, available_units)
-        fiscal_years = sorted({key[2] for key in selected_facts if key[0] in tag_priority and key[1] == unit})
+        fiscal_years = sorted({key[2] for key in selected_flow_facts if key[0] in tag_priority and key[1] == unit})
         for fy in fiscal_years:
-            series = {fp: _pick_tag_fact(selected_facts, tag_priority, unit, fy, fp) for fp in SUPPORTED_FP}
-            q1 = _row_value(series["Q1"])
-            q2_ytd = _row_value(series["Q2"])
-            q3_ytd = _row_value(series["Q3"])
-            fy_ytd = _row_value(series["FY"])
-            if series["Q1"] is not None and q1 is not None:
-                rows.append(_build_output_row(ticker, field_name, series["Q1"]["period_end_date"], q1, unit, run_id, retrieved_at_utc))
-            if series["Q2"] is not None and q1 is not None and q2_ytd is not None:
-                rows.append(_build_output_row(ticker, field_name, series["Q2"]["period_end_date"], q2_ytd - q1, unit, run_id, retrieved_at_utc))
-            if series["Q3"] is not None and q2_ytd is not None and q3_ytd is not None:
-                rows.append(_build_output_row(ticker, field_name, series["Q3"]["period_end_date"], q3_ytd - q2_ytd, unit, run_id, retrieved_at_utc))
-            if all(series[fp] is not None for fp in ("Q1", "Q2", "Q3", "FY")) and None not in (q1, q2_ytd, q3_ytd, fy_ytd):
-                q2 = q2_ytd - q1
-                q3 = q3_ytd - q2_ytd
-                q4 = fy_ytd - q1 - q2 - q3
-                rows.append(_build_output_row(ticker, field_name, series["FY"]["period_end_date"], q4, unit, run_id, retrieved_at_utc))
+            quarter_rows = _build_flow_rows_for_field(
+                selected_flow_facts=selected_flow_facts,
+                tag_priority=tag_priority,
+                unit=unit,
+                fy=fy,
+                ticker=ticker,
+                field_name=field_name,
+                run_id=run_id,
+                retrieved_at_utc=retrieved_at_utc,
+            )
+            rows.extend(quarter_rows)
     return rows
+
+
+def _build_flow_rows_for_field(
+    selected_flow_facts: dict[tuple[str, str, str, str, str], dict[str, Any]],
+    tag_priority: list[str],
+    unit: str,
+    fy: str,
+    ticker: str,
+    field_name: str,
+    run_id: str,
+    retrieved_at_utc: str,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    quarter_order = ("Q1", "Q2", "Q3", "FY")
+    quarter_values_by_tag = {
+        tag: _build_quarter_values_for_tag(selected_flow_facts, tag, unit, fy)
+        for tag in tag_priority
+    }
+    for fp in quarter_order:
+        selected = None
+        for tag in tag_priority:
+            selected = quarter_values_by_tag[tag].get(fp)
+            if selected is not None:
+                break
+        if selected is None:
+            continue
+        rows.append(
+            _build_output_row(
+                ticker=ticker,
+                field_name=field_name,
+                period_end_date=selected["period_end_date"],
+                value=selected["field_value"],
+                currency=unit,
+                run_id=run_id,
+                retrieved_at_utc=retrieved_at_utc,
+            )
+        )
+    return rows
+
+
+def _build_quarter_values_for_tag(
+    selected_flow_facts: dict[tuple[str, str, str, str, str], dict[str, Any]],
+    tag: str,
+    unit: str,
+    fy: str,
+) -> dict[str, dict[str, Any]]:
+    quarterly_q1 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q1", "quarterly_fact")
+    quarterly_q2 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q2", "quarterly_fact")
+    quarterly_q3 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q3", "quarterly_fact")
+    quarterly_fy = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "FY", "quarterly_fact")
+
+    ytd_q1 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q1", "ytd_fact")
+    ytd_q2 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q2", "ytd_fact")
+    ytd_q3 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q3", "ytd_fact")
+    annual_fy = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "FY", "annual_fact")
+
+    quarter_values: dict[str, dict[str, Any]] = {}
+
+    if quarterly_q1 is not None and _row_value(quarterly_q1) is not None:
+        quarter_values["Q1"] = {
+            "period_end_date": quarterly_q1["period_end_date"],
+            "field_value": _row_value(quarterly_q1),
+        }
+    elif ytd_q1 is not None and _row_value(ytd_q1) is not None:
+        quarter_values["Q1"] = {
+            "period_end_date": ytd_q1["period_end_date"],
+            "field_value": _row_value(ytd_q1),
+        }
+
+    if quarterly_q2 is not None and _row_value(quarterly_q2) is not None:
+        quarter_values["Q2"] = {
+            "period_end_date": quarterly_q2["period_end_date"],
+            "field_value": _row_value(quarterly_q2),
+        }
+    elif ytd_q2 is not None:
+        q2_ytd = _row_value(ytd_q2)
+        q1_baseline = _row_value(ytd_q1) if ytd_q1 is not None else _quarter_value(quarter_values, "Q1")
+        if q2_ytd is not None and q1_baseline is not None:
+            quarter_values["Q2"] = {
+                "period_end_date": ytd_q2["period_end_date"],
+                "field_value": q2_ytd - q1_baseline,
+            }
+
+    if quarterly_q3 is not None and _row_value(quarterly_q3) is not None:
+        quarter_values["Q3"] = {
+            "period_end_date": quarterly_q3["period_end_date"],
+            "field_value": _row_value(quarterly_q3),
+        }
+    elif ytd_q3 is not None and ytd_q2 is not None:
+        q3_ytd = _row_value(ytd_q3)
+        q2_ytd = _row_value(ytd_q2)
+        if q3_ytd is not None and q2_ytd is not None:
+            quarter_values["Q3"] = {
+                "period_end_date": ytd_q3["period_end_date"],
+                "field_value": q3_ytd - q2_ytd,
+            }
+
+    if quarterly_fy is not None and _row_value(quarterly_fy) is not None:
+        quarter_values["FY"] = {
+            "period_end_date": quarterly_fy["period_end_date"],
+            "field_value": _row_value(quarterly_fy),
+        }
+    elif annual_fy is not None and _row_value(annual_fy) is not None:
+        q1 = _quarter_value(quarter_values, "Q1")
+        q2 = _quarter_value(quarter_values, "Q2")
+        q3 = _quarter_value(quarter_values, "Q3")
+        fy_value = _row_value(annual_fy)
+        if None not in (q1, q2, q3, fy_value):
+            quarter_values["FY"] = {
+                "period_end_date": annual_fy["period_end_date"],
+                "field_value": fy_value - q1 - q2 - q3,
+            }
+
+    return quarter_values
+
+
+def _pick_flow_fact(
+    selected_flow_facts: dict[tuple[str, str, str, str, str], dict[str, Any]],
+    tag: str,
+    unit: str,
+    fy: str,
+    fp: str,
+    duration_type: str,
+) -> dict[str, Any] | None:
+    return selected_flow_facts.get((tag, unit, fy, fp, duration_type))
+
+
+def _quarter_value(quarter_values: dict[str, dict[str, Any]], fp: str) -> float | None:
+    quarter_value = quarter_values.get(fp)
+    if quarter_value is None:
+        return None
+    return float(quarter_value["field_value"])
 
 
 def _reconstruct_snapshot_fields(

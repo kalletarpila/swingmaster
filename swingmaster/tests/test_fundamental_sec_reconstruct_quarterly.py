@@ -516,6 +516,211 @@ def test_weighted_average_diluted_shares_fallback(tmp_path: Path) -> None:
     ]
 
 
+def test_weighted_average_shares_prefers_split_adjusted_later_filing(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_shares_split_adjusted.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "balance",
+            "2024-07-28",
+            "WeightedAverageNumberOfDilutedSharesOutstanding",
+            2_489_000_000.0,
+            "shares",
+            "2024",
+            "Q2",
+            frame="NULL",
+            filed="2024-08-28",
+        )
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "balance",
+            "2024-07-28",
+            "WeightedAverageNumberOfDilutedSharesOutstanding",
+            24_890_000_000.0,
+            "shares",
+            "2024",
+            "Q2",
+            frame="CY2024Q1",
+            filed="2025-08-27",
+        )
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    shares_rows = [row for row in rows if row["field_name"] == "Ordinary Shares Number"]
+    assert [(row["period_end_date"], row["field_value"]) for row in shares_rows] == [
+        ("2024-07-28", 24_890_000_000.0),
+    ]
+
+
+def test_weighted_average_shares_prefers_latest_filed_date(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_shares_latest_filed.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "balance",
+            "2024-07-28",
+            "WeightedAverageNumberOfDilutedSharesOutstanding",
+            90.0,
+            "shares",
+            "2024",
+            "Q2",
+            frame="CY2024Q2",
+            filed="2024-08-28",
+        )
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "balance",
+            "2024-07-28",
+            "WeightedAverageNumberOfDilutedSharesOutstanding",
+            95.0,
+            "shares",
+            "2024",
+            "Q2",
+            frame="CY2024Q2",
+            filed="2025-08-27",
+        )
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    shares_rows = [row for row in rows if row["field_name"] == "Ordinary Shares Number"]
+    assert [(row["period_end_date"], row["field_value"]) for row in shares_rows] == [
+        ("2024-07-28", 95.0),
+    ]
+
+
+def test_weighted_average_shares_prefers_lexicographically_largest_frame(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_shares_frame_priority.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "balance",
+            "2024-07-28",
+            "WeightedAverageNumberOfDilutedSharesOutstanding",
+            90.0,
+            "shares",
+            "2024",
+            "Q2",
+            frame="CY2024Q1",
+            filed="2025-08-27",
+        )
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "balance",
+            "2024-07-28",
+            "WeightedAverageNumberOfDilutedSharesOutstanding",
+            95.0,
+            "shares",
+            "2024",
+            "Q2",
+            frame="CY2024Q2",
+            filed="2025-08-27",
+        )
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    shares_rows = [row for row in rows if row["field_name"] == "Ordinary Shares Number"]
+    assert [(row["period_end_date"], row["field_value"]) for row in shares_rows] == [
+        ("2024-07-28", 95.0),
+    ]
+
+
+def test_weighted_average_shares_prefers_largest_value_after_other_ties(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_shares_value_priority.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "balance",
+            "2024-07-28",
+            "WeightedAverageNumberOfDilutedSharesOutstanding",
+            90.0,
+            "shares",
+            "2024",
+            "Q2",
+            frame="CY2024Q2",
+            filed="2025-08-27",
+            start="2024-04-01",
+        )
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "balance",
+            "2024-07-28",
+            "WeightedAverageNumberOfDilutedSharesOutstanding",
+            95.0,
+            "shares",
+            "2024",
+            "Q2",
+            frame="CY2024Q2",
+            filed="2025-08-27",
+            start="2024-04-02",
+        )
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    shares_rows = [row for row in rows if row["field_name"] == "Ordinary Shares Number"]
+    assert [(row["period_end_date"], row["field_value"]) for row in shares_rows] == [
+        ("2024-07-28", 95.0),
+    ]
+
+
+def test_entity_common_stock_shares_outstanding_ignores_weighted_average_tie_breakers(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_shares_entity_still_wins.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-07-28", "EntityCommonStockSharesOutstanding", 100.0, "shares", "2024", "Q2")
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "balance",
+            "2024-07-28",
+            "WeightedAverageNumberOfDilutedSharesOutstanding",
+            24_890_000_000.0,
+            "shares",
+            "2024",
+            "Q2",
+            frame="CY2024Q2",
+            filed="2025-08-27",
+        )
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    shares_rows = [row for row in rows if row["field_name"] == "Ordinary Shares Number"]
+    assert [(row["period_end_date"], row["field_value"]) for row in shares_rows] == [
+        ("2024-07-28", 100.0),
+    ]
+
+
 def test_basic_shares_final_fallback(tmp_path: Path) -> None:
     db_path = tmp_path / "sec_reconstruct_shares_basic_fallback.db"
     run_migration(db_path)

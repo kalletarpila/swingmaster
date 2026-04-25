@@ -76,6 +76,10 @@ DEBT_GROUPS = [
 SUPPORTED_FP = {"Q1", "Q2", "Q3", "FY"}
 QUARTERLY_DURATION_MIN_DAYS = 70
 QUARTERLY_DURATION_MAX_DAYS = 110
+WEIGHTED_AVERAGE_SHARE_TAGS = {
+    "WeightedAverageNumberOfDilutedSharesOutstanding",
+    "WeightedAverageNumberOfSharesOutstandingBasic",
+}
 
 
 def load_sec_fact_rows(conn: sqlite3.Connection, ticker: str) -> list[sqlite3.Row]:
@@ -180,7 +184,7 @@ def _select_best_snapshot_facts(parsed_rows: list[dict[str, Any]]) -> dict[tuple
         if row["tag"] not in SNAPSHOT_TAG_TO_FIELD:
             continue
         grouped[(row["tag"], row["currency"], row["fy"], row["fp"])].append(row)
-    return {key: _pick_best_fact(rows) for key, rows in grouped.items()}
+    return {key: _pick_best_snapshot_fact(rows) for key, rows in grouped.items()}
 
 
 def _select_best_flow_facts(
@@ -197,6 +201,12 @@ def _select_best_flow_facts(
 
 def _pick_best_fact(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return sorted(rows, key=_fact_priority_key)[0]
+
+
+def _pick_best_snapshot_fact(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if rows and rows[0]["tag"] in WEIGHTED_AVERAGE_SHARE_TAGS:
+        return sorted(rows, key=_weighted_share_snapshot_priority_key)[0]
+    return _pick_best_fact(rows)
 
 
 def _pick_best_flow_fact(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -221,6 +231,16 @@ def _flow_fact_priority_key(row: dict[str, Any]) -> tuple[Any, ...]:
         _sort_desc_text(row["filed"]),
         _sort_desc_text(row["start"]),
         _sort_desc_text(row["period_end_date"]),
+        _sort_desc_number(_row_value(row)),
+        row["encoded_field_name"],
+    )
+
+
+def _weighted_share_snapshot_priority_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        0 if row["frame"] != "NULL" else 1,
+        _sort_desc_text(row["filed"]),
+        _sort_desc_text(row["frame"]),
         _sort_desc_number(_row_value(row)),
         row["encoded_field_name"],
     )

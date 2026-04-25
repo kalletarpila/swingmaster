@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from statistics import mean
+from typing import Any, Mapping
 
 
 FUND_SCORE_RULE_V1 = "FUND_SCORE_RULE_V1"
@@ -60,16 +61,38 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
 
 
 def calculate_fundamental_score(row: sqlite3.Row) -> float:
+    return explain_score_components(row)["fundamental_score_recomputed"]
+
+
+def explain_score_components(row: Mapping[str, Any]) -> dict[str, float]:
+    growth_component = float(_growth_component(row["revenue_growth_ttm_yoy"]))
+    margin_component = float(_margin_component(row["ebit_margin_ttm"]))
+    margin_trend_component = float(_margin_trend_component(row["ebit_margin_trend_4q"]))
+    fcf_component = float(_fcf_component(row["fcf_margin_ttm"]))
+    leverage_component = float(_leverage_component(row["net_debt_to_ebitda"]))
+    dilution_component = float(_dilution_component(row["share_dilution_yoy"]))
+    lifecycle_component = float(_lifecycle_component(row["lifecycle_class"]))
     score_raw = (
-        _growth_component(row["revenue_growth_ttm_yoy"])
-        + _margin_component(row["ebit_margin_ttm"])
-        + _margin_trend_component(row["ebit_margin_trend_4q"])
-        + _fcf_component(row["fcf_margin_ttm"])
-        + _leverage_component(row["net_debt_to_ebitda"])
-        + _dilution_component(row["share_dilution_yoy"])
-        + _lifecycle_component(row["lifecycle_class"])
+        growth_component
+        + margin_component
+        + margin_trend_component
+        + fcf_component
+        + leverage_component
+        + dilution_component
+        + lifecycle_component
     )
-    return float(min(100, max(0, score_raw)))
+    fundamental_score_recomputed = float(min(100, max(0, score_raw)))
+    return {
+        "growth_component": growth_component,
+        "margin_component": margin_component,
+        "margin_trend_component": margin_trend_component,
+        "fcf_component": fcf_component,
+        "leverage_component": leverage_component,
+        "dilution_component": dilution_component,
+        "lifecycle_component": lifecycle_component,
+        "score_raw": float(score_raw),
+        "fundamental_score_recomputed": fundamental_score_recomputed,
+    }
 
 
 def _growth_component(value: float | None) -> int:

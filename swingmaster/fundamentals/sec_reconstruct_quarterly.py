@@ -214,7 +214,15 @@ def _sort_desc_number(value: float | None) -> tuple[int, float]:
 def _classify_flow_duration_type(row: dict[str, Any]) -> str:
     start_date = _parse_iso_date(row["start"])
     end_date = _parse_iso_date(row["period_end_date"])
-    if start_date is None or end_date is None:
+    if end_date is None:
+        return "unknown_duration"
+    if (
+        row["form"] == "10-Q"
+        and row["fp"] in ("Q1", "Q2", "Q3")
+        and row["start"] == "NULL"
+    ):
+        return "quarterly_fact"
+    if start_date is None:
         return "unknown_duration"
     duration_days = (end_date - start_date).days
     if QUARTERLY_DURATION_MIN_DAYS <= duration_days <= QUARTERLY_DURATION_MAX_DAYS:

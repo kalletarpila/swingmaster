@@ -32,6 +32,74 @@ def test_quarterly_facts_preferred_over_ytd_facts(tmp_path: Path) -> None:
     ]
 
 
+def test_q1_start_null_fallback(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_q1_start_null.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "income", "2024-04-28", "Revenues", 100.0, "USD", "2024", "Q1", form="10-Q", start="NULL")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    revenues = [row for row in rows if row["field_name"] == "Total Revenue"]
+    assert [(row["period_end_date"], row["field_value"]) for row in revenues] == [
+        ("2024-04-28", 100.0),
+    ]
+
+
+def test_q2_start_null_fallback(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_q2_start_null.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "income", "2024-07-28", "Revenues", 150.0, "USD", "2024", "Q2", form="10-Q", start="NULL")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    revenues = [row for row in rows if row["field_name"] == "Total Revenue"]
+    assert [(row["period_end_date"], row["field_value"]) for row in revenues] == [
+        ("2024-07-28", 150.0),
+    ]
+
+
+def test_form_10k_start_null_does_not_fallback(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_10k_start_null.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "income", "2024-07-28", "Revenues", 150.0, "USD", "2024", "Q2", form="10-K", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-07-28", "CashAndCashEquivalentsAtCarryingValue", 10.0, "USD", "2024", "Q2")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    assert [row for row in rows if row["field_name"] == "Total Revenue"] == []
+
+
+def test_fp_fy_start_null_does_not_fallback(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_fy_start_null.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "income", "2024-12-31", "Revenues", 700.0, "USD", "2024", "FY", form="10-K", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-12-31", "CashAndCashEquivalentsAtCarryingValue", 10.0, "USD", "2024", "FY")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    assert [row for row in rows if row["field_name"] == "Total Revenue"] == []
+
+
 def test_ytd_fallback_when_quarterly_fact_missing(tmp_path: Path) -> None:
     db_path = tmp_path / "sec_reconstruct_ytd_fallback.db"
     run_migration(db_path)
@@ -205,6 +273,35 @@ def test_snapshot_values_copied(tmp_path: Path) -> None:
         ("2025-06-30", 20.0),
         ("2025-09-30", 30.0),
         ("2025-12-31", 40.0),
+    ]
+
+
+def test_snapshot_tags_unaffected_with_start_null(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_snapshot_start_null.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "balance",
+            "2024-07-28",
+            "CashAndCashEquivalentsAtCarryingValue",
+            123.0,
+            "USD",
+            "2024",
+            "Q2",
+            start="NULL",
+        )
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    cash_rows = [row for row in rows if row["field_name"] == "Cash And Cash Equivalents"]
+    assert [(row["period_end_date"], row["field_value"]) for row in cash_rows] == [
+        ("2024-07-28", 123.0),
     ]
 
 

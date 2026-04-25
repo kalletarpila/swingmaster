@@ -181,11 +181,15 @@ def _select_best_flow_facts(
             continue
         duration_type = _classify_flow_duration_type(row)
         grouped[(row["tag"], row["currency"], row["fy"], row["fp"], duration_type)].append(row)
-    return {key: _pick_best_fact(rows) for key, rows in grouped.items()}
+    return {key: _pick_best_flow_fact(rows) for key, rows in grouped.items()}
 
 
 def _pick_best_fact(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return sorted(rows, key=_fact_priority_key)[0]
+
+
+def _pick_best_flow_fact(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return sorted(rows, key=_flow_fact_priority_key)[0]
 
 
 def _fact_priority_key(row: dict[str, Any]) -> tuple[Any, ...]:
@@ -197,6 +201,25 @@ def _fact_priority_key(row: dict[str, Any]) -> tuple[Any, ...]:
         _sort_desc_number(_row_value(row)),
         row["encoded_field_name"],
     )
+
+
+def _flow_fact_priority_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        _duration_sort_key(row),
+        0 if row["frame"] != "NULL" else 1,
+        _sort_desc_text(row["filed"]),
+        _sort_desc_text(row["start"]),
+        _sort_desc_text(row["period_end_date"]),
+        _sort_desc_number(_row_value(row)),
+        row["encoded_field_name"],
+    )
+
+
+def _duration_sort_key(row: dict[str, Any]) -> tuple[int, int]:
+    duration_days = _duration_days(row)
+    if duration_days is None:
+        return (1, 0)
+    return (0, duration_days)
 
 
 def _sort_desc_text(value: str | None) -> tuple[int, str]:
@@ -241,6 +264,14 @@ def _parse_iso_date(value: str | None) -> date | None:
         return date.fromisoformat(str(value))
     except ValueError:
         return None
+
+
+def _duration_days(row: dict[str, Any]) -> int | None:
+    start_date = _parse_iso_date(row["start"])
+    end_date = _parse_iso_date(row["period_end_date"])
+    if start_date is None or end_date is None:
+        return None
+    return (end_date - start_date).days
 
 
 def _reconstruct_flow_fields(

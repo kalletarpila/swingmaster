@@ -55,6 +55,17 @@ def test_score_distressed_clamps_at_zero(tmp_path: Path) -> None:
         assert score == 0.0
 
 
+def test_extreme_share_dilution_is_treated_as_none_for_scoring(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_extreme_dilution.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", None, 0.32, None, 0.28, 0.30, 2.78, "MATURE")
+        conn.commit()
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        score = conn.execute("SELECT fundamental_score FROM rc_fundamental_ttm").fetchone()[0]
+        assert score == 64.0
+
+
 def test_score_max_score_case(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_max.db"
     run_migration(db_path)

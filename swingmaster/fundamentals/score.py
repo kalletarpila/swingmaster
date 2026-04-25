@@ -174,6 +174,8 @@ def _leverage_component(value: float | None) -> int:
 
 
 def _dilution_component(value: float | None) -> int:
+    if value is not None and abs(value) > 0.50:
+        value = None
     if value is None:
         return 5
     if value <= -0.02:

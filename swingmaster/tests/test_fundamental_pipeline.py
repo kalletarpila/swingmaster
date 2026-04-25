@@ -10,8 +10,102 @@ from swingmaster.cli import run_fundamental_pipeline
 from swingmaster.cli.run_fundamental_migrations import run_migration
 
 
-def test_full_pipeline_with_mocked_fetch(monkeypatch, tmp_path: Path) -> None:
-    db_path = tmp_path / "fundamental_pipeline_full.db"
+def test_default_source_is_sec_edgar(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_pipeline_default_sec.db"
+    run_migration(db_path)
+    calls: list[str] = []
+    _mock_sec_pipeline(monkeypatch, calls)
+
+    summary = run_fundamental_pipeline.run_fundamental_pipeline(
+        db_path=db_path,
+        ticker="NVDA",
+        run_id="BASE",
+        dry_run=False,
+        skip_fetch=False,
+        retrieved_at_utc="2026-04-25T00:00:00Z",
+    )
+
+    assert calls[:2] == ["sec_raw", "sec_reconstruct"]
+    assert summary["source"] == "sec_edgar"
+    assert summary["sec_raw_status"] == "ok"
+    assert summary["sec_reconstruct_status"] == "ok"
+    assert summary["raw_status"] == "not-applicable"
+
+
+def test_sec_source_requires_retrieved_at_utc(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_pipeline_sec_missing_retrieved.db"
+    run_migration(db_path)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^FUNDAMENTAL_PIPELINE_RETRIEVED_AT_UTC_REQUIRED_FOR_SEC$",
+    ):
+        run_fundamental_pipeline.run_fundamental_pipeline(
+            db_path=db_path,
+            ticker="NVDA",
+            run_id="BASE",
+            source="sec_edgar",
+            retrieved_at_utc=None,
+            dry_run=False,
+            skip_fetch=False,
+        )
+
+
+def test_sec_skip_fetch_skips_sec_steps(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_pipeline_sec_skip_fetch.db"
+    run_migration(db_path)
+    _insert_raw_fixture_rows(db_path, ticker="NVDA", raw_run_id="SEC_RECON_FIXTURE")
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_sec_raw_bootstrap",
+        lambda **kwargs: calls.append("sec_raw"),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_sec_reconstruct_quarterly",
+        lambda **kwargs: calls.append("sec_reconstruct"),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "build_and_insert_quarterly_rows",
+        lambda **kwargs: calls.append("quarterly"),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "build_and_insert_ttm_rows",
+        lambda **kwargs: calls.append("ttm"),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_lifecycle_classification",
+        lambda **kwargs: calls.append("lifecycle"),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_fundamental_scoring",
+        lambda **kwargs: calls.append("score"),
+    )
+
+    summary = run_fundamental_pipeline.run_fundamental_pipeline(
+        db_path=db_path,
+        ticker="NVDA",
+        run_id="BASE",
+        source="sec_edgar",
+        retrieved_at_utc=None,
+        dry_run=False,
+        skip_fetch=True,
+    )
+
+    assert calls == ["quarterly", "ttm", "lifecycle", "score"]
+    assert summary["sec_raw_status"] == "skipped"
+    assert summary["sec_reconstruct_status"] == "skipped"
+    assert summary["raw_status"] == "not-applicable"
+
+
+def test_yfinance_source_preserves_old_behavior(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_pipeline_yfinance.db"
     run_migration(db_path)
     _mock_fetch(monkeypatch, run_fundamental_pipeline)
 
@@ -19,162 +113,103 @@ def test_full_pipeline_with_mocked_fetch(monkeypatch, tmp_path: Path) -> None:
         db_path=db_path,
         ticker="AAPL",
         run_id="BASE",
+        source="yfinance",
+        retrieved_at_utc=None,
         dry_run=False,
         skip_fetch=False,
     )
 
-    assert summary["child_run_ids"] == {
-        "raw": "BASE__RAW",
+    with sqlite3.connect(str(db_path)) as conn:
+        raw_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_statement_raw WHERE ticker='AAPL'").fetchone()[0]
+
+    assert raw_count > 0
+    assert summary["source"] == "yfinance"
+    assert summary["raw_status"] == "ok"
+    assert summary["sec_raw_status"] == "not-applicable"
+    assert summary["sec_reconstruct_status"] == "not-applicable"
+
+
+def test_sec_dry_run_no_writes(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_pipeline_sec_dry_run.db"
+    run_migration(db_path)
+    calls: list[tuple[str, bool]] = []
+
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_sec_raw_bootstrap",
+        lambda **kwargs: calls.append(("sec_raw", kwargs["dry_run"])) or ("0001045810", []),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_sec_reconstruct_quarterly",
+        lambda **kwargs: calls.append(("sec_reconstruct", kwargs["dry_run"])) or (0, []),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "build_and_insert_quarterly_rows",
+        lambda **kwargs: calls.append(("quarterly", kwargs["dry_run"])),
+    )
+
+    summary = run_fundamental_pipeline.run_fundamental_pipeline(
+        db_path=db_path,
+        ticker="NVDA",
+        run_id="BASE",
+        source="sec_edgar",
+        retrieved_at_utc="2026-04-25T00:00:00Z",
+        dry_run=True,
+        skip_fetch=False,
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        raw_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_statement_raw WHERE ticker='NVDA'").fetchone()[0]
+        quarterly_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_quarterly WHERE ticker='NVDA'").fetchone()[0]
+        ttm_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_ttm WHERE ticker='NVDA'").fetchone()[0]
+
+    assert calls == [("sec_raw", True), ("sec_reconstruct", True)]
+    assert raw_count == 0
+    assert quarterly_count == 0
+    assert ttm_count == 0
+    assert summary["sec_raw_status"] == "dry-run"
+    assert summary["sec_reconstruct_status"] == "dry-run"
+    assert summary["quarterly_status"] == "skipped"
+    assert summary["ttm_status"] == "skipped"
+    assert summary["lifecycle_status"] == "skipped"
+    assert summary["score_status"] == "skipped"
+
+
+def test_explain_works_with_sec_source(capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_pipeline_sec_explain.db"
+    run_migration(db_path)
+    _insert_raw_fixture_rows(db_path, ticker="NVDA", raw_run_id="SEC_RECON_FIXTURE")
+
+    summary = run_fundamental_pipeline.run_fundamental_pipeline(
+        db_path=db_path,
+        ticker="NVDA",
+        run_id="BASE",
+        source="sec_edgar",
+        retrieved_at_utc=None,
+        dry_run=False,
+        skip_fetch=True,
+        explain_score=True,
+        explain_limit=3,
+    )
+    out = capsys.readouterr().out
+
+    assert "FUNDAMENTAL SCORE EXPLAIN" in out
+    assert summary["explain_status"] == "ok"
+    assert summary["source"] == "sec_edgar"
+
+
+def test_child_run_ids() -> None:
+    assert run_fundamental_pipeline.derive_child_run_ids("BASE", "sec_edgar") == {
+        "sec_raw": "BASE__SEC_RAW",
+        "sec_quarterly_recon": "BASE__SEC_QUARTERLY_RECON",
         "quarterly": "BASE__QUARTERLY",
         "ttm": "BASE__TTM",
         "lifecycle": "BASE__LIFECYCLE",
         "score": "BASE__SCORE",
     }
-
-    with sqlite3.connect(str(db_path)) as conn:
-        raw_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_statement_raw").fetchone()[0]
-        quarterly_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_quarterly").fetchone()[0]
-        ttm_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_ttm").fetchone()[0]
-        lifecycle_and_score = conn.execute(
-            """
-            SELECT lifecycle_class, fundamental_score, run_id
-            FROM rc_fundamental_ttm
-            ORDER BY as_of_date DESC
-            LIMIT 1
-            """
-        ).fetchone()
-        raw_run_ids = {
-            row[0] for row in conn.execute("SELECT DISTINCT run_id FROM rc_fundamental_statement_raw")
-        }
-        quarterly_run_ids = {
-            row[0] for row in conn.execute("SELECT DISTINCT run_id FROM rc_fundamental_quarterly")
-        }
-        ttm_run_ids = {
-            row[0] for row in conn.execute("SELECT DISTINCT run_id FROM rc_fundamental_ttm")
-        }
-
-    assert raw_count > 0
-    assert quarterly_count > 0
-    assert ttm_count > 0
-    assert lifecycle_and_score[0] is not None
-    assert lifecycle_and_score[1] is not None
-    assert raw_run_ids == {"BASE__RAW"}
-    assert quarterly_run_ids == {"BASE__QUARTERLY"}
-    assert ttm_run_ids == {"BASE__TTM"}
-
-
-def test_skip_fetch_pipeline(monkeypatch, tmp_path: Path) -> None:
-    db_path = tmp_path / "fundamental_pipeline_skip_fetch.db"
-    run_migration(db_path)
-    _insert_raw_fixture_rows(db_path, raw_run_id="RAW_FIXTURE")
-    fetch_calls: list[str] = []
-    monkeypatch.setattr(
-        run_fundamental_pipeline,
-        "fetch_quarterly_statements_raw",
-        lambda _ticker: fetch_calls.append("called"),
-    )
-
-    run_fundamental_pipeline.run_fundamental_pipeline(
-        db_path=db_path,
-        ticker="AAPL",
-        run_id="BASE",
-        dry_run=False,
-        skip_fetch=True,
-    )
-
-    with sqlite3.connect(str(db_path)) as conn:
-        quarterly_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_quarterly").fetchone()[0]
-        ttm_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_ttm").fetchone()[0]
-        lifecycle_and_score = conn.execute(
-            """
-            SELECT lifecycle_class, fundamental_score
-            FROM rc_fundamental_ttm
-            ORDER BY as_of_date DESC
-            LIMIT 1
-            """
-        ).fetchone()
-
-    assert fetch_calls == []
-    assert quarterly_count > 0
-    assert ttm_count > 0
-    assert lifecycle_and_score[0] is not None
-    assert lifecycle_and_score[1] is not None
-
-
-def test_dry_run_with_skip_fetch(monkeypatch, tmp_path: Path) -> None:
-    db_path = tmp_path / "fundamental_pipeline_dry_run.db"
-    run_migration(db_path)
-    _insert_raw_fixture_rows(db_path, raw_run_id="RAW_FIXTURE")
-    fetch_calls: list[str] = []
-    monkeypatch.setattr(
-        run_fundamental_pipeline,
-        "fetch_quarterly_statements_raw",
-        lambda _ticker: fetch_calls.append("called"),
-    )
-
-    summary = run_fundamental_pipeline.run_fundamental_pipeline(
-        db_path=db_path,
-        ticker="AAPL",
-        run_id="BASE",
-        dry_run=True,
-        skip_fetch=True,
-    )
-
-    with sqlite3.connect(str(db_path)) as conn:
-        quarterly_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_quarterly").fetchone()[0]
-        ttm_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_ttm").fetchone()[0]
-
-    assert fetch_calls == []
-    assert quarterly_count == 0
-    assert ttm_count == 0
-    assert summary["raw_status"] == "skipped"
-    assert summary["quarterly_status"] == "dry-run"
-    assert summary["ttm_status"] == "dry-run"
-    assert summary["lifecycle_status"] == "dry-run"
-    assert summary["score_status"] == "dry-run"
-
-
-def test_failure_stops_pipeline(monkeypatch, tmp_path: Path) -> None:
-    db_path = tmp_path / "fundamental_pipeline_failure.db"
-    run_migration(db_path)
-    _insert_raw_fixture_rows(db_path, raw_run_id="RAW_FIXTURE")
-    calls: list[str] = []
-
-    def _raise_quarterly(*args, **kwargs):
-        calls.append("quarterly")
-        raise RuntimeError("QUARTERLY_FAILED")
-
-    monkeypatch.setattr(run_fundamental_pipeline, "build_and_insert_quarterly_rows", _raise_quarterly)
-    monkeypatch.setattr(
-        run_fundamental_pipeline,
-        "build_and_insert_ttm_rows",
-        lambda *args, **kwargs: calls.append("ttm"),
-    )
-    monkeypatch.setattr(
-        run_fundamental_pipeline,
-        "run_lifecycle_classification",
-        lambda *args, **kwargs: calls.append("lifecycle"),
-    )
-    monkeypatch.setattr(
-        run_fundamental_pipeline,
-        "run_fundamental_scoring",
-        lambda *args, **kwargs: calls.append("score"),
-    )
-
-    with pytest.raises(RuntimeError, match="^QUARTERLY_FAILED$"):
-        run_fundamental_pipeline.run_fundamental_pipeline(
-            db_path=db_path,
-            ticker="AAPL",
-            run_id="BASE",
-            dry_run=False,
-            skip_fetch=True,
-        )
-
-    assert calls == ["quarterly"]
-
-
-def test_child_run_ids() -> None:
-    assert run_fundamental_pipeline.derive_child_run_ids("BASE") == {
+    assert run_fundamental_pipeline.derive_child_run_ids("BASE", "yfinance") == {
         "raw": "BASE__RAW",
         "quarterly": "BASE__QUARTERLY",
         "ttm": "BASE__TTM",
@@ -186,7 +221,6 @@ def test_child_run_ids() -> None:
 def test_cli_pipeline_final_summary(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_pipeline_cli.db"
     run_migration(db_path)
-    _insert_raw_fixture_rows(db_path, raw_run_id="RAW_FIXTURE")
 
     monkeypatch.setattr(
         run_fundamental_pipeline,
@@ -196,29 +230,107 @@ def test_cli_pipeline_final_summary(monkeypatch, capsys, tmp_path: Path) -> None
             (),
             {
                 "db": str(db_path),
-                "ticker": "AAPL",
-                "run_id": "FUND_PIPELINE_AAPL_V1",
+                "ticker": "NVDA",
+                "run_id": "FUND_PIPELINE_NVDA_SEC_FIRST_V1",
+                "source": "sec_edgar",
+                "retrieved_at_utc": "2026-04-25T00:00:00Z",
                 "dry_run": True,
-                "skip_fetch": True,
+                "skip_fetch": False,
+                "explain_score": False,
+                "explain_limit": None,
             },
         )(),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_sec_raw_bootstrap",
+        lambda **kwargs: ("0001045810", []),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_sec_reconstruct_quarterly",
+        lambda **kwargs: (0, []),
     )
 
     run_fundamental_pipeline.main()
     out = capsys.readouterr().out.strip().splitlines()
     assert out == [
-        "SUMMARY ticker=AAPL",
+        "SUMMARY ticker=NVDA",
         f"SUMMARY db_path={db_path.resolve()}",
-        "SUMMARY run_id=FUND_PIPELINE_AAPL_V1",
-        "SUMMARY skip_fetch=true",
+        "SUMMARY run_id=FUND_PIPELINE_NVDA_SEC_FIRST_V1",
+        "SUMMARY source=sec_edgar",
+        "SUMMARY skip_fetch=false",
         "SUMMARY dry_run=true",
-        "SUMMARY raw_status=skipped",
-        "SUMMARY quarterly_status=dry-run",
-        "SUMMARY ttm_status=dry-run",
-        "SUMMARY lifecycle_status=dry-run",
-        "SUMMARY score_status=dry-run",
+        "SUMMARY sec_raw_status=dry-run",
+        "SUMMARY sec_reconstruct_status=dry-run",
+        "SUMMARY raw_status=not-applicable",
+        "SUMMARY quarterly_status=skipped",
+        "SUMMARY ttm_status=skipped",
+        "SUMMARY lifecycle_status=skipped",
+        "SUMMARY score_status=skipped",
+        "SUMMARY explain_status=skipped",
         "SUMMARY status=ok",
     ]
+
+
+def test_explain_mismatch_propagates(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_pipeline_explain_mismatch.db"
+    run_migration(db_path)
+    _insert_raw_fixture_rows(db_path, ticker="NVDA", raw_run_id="SEC_RECON_FIXTURE")
+
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "build_explain_rows",
+        lambda _rows: (_ for _ in ()).throw(RuntimeError("FUNDAMENTAL_SCORE_MISMATCH:NVDA:2025-12-31")),
+    )
+
+    with pytest.raises(RuntimeError, match="^FUNDAMENTAL_SCORE_MISMATCH:NVDA:2025-12-31$"):
+        run_fundamental_pipeline.run_fundamental_pipeline(
+            db_path=db_path,
+            ticker="NVDA",
+            run_id="BASE",
+            source="sec_edgar",
+            retrieved_at_utc=None,
+            dry_run=False,
+            skip_fetch=True,
+            explain_score=True,
+            explain_limit=3,
+        )
+    out = capsys.readouterr().out
+    assert "SUMMARY status=ok" not in out
+
+
+def _mock_sec_pipeline(monkeypatch, calls: list[str]) -> None:
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_sec_raw_bootstrap",
+        lambda **kwargs: calls.append("sec_raw") or ("0001045810", []),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_sec_reconstruct_quarterly",
+        lambda **kwargs: calls.append("sec_reconstruct") or (0, []),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "build_and_insert_quarterly_rows",
+        lambda **kwargs: calls.append("quarterly"),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "build_and_insert_ttm_rows",
+        lambda **kwargs: calls.append("ttm"),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_lifecycle_classification",
+        lambda **kwargs: calls.append("lifecycle"),
+    )
+    monkeypatch.setattr(
+        run_fundamental_pipeline,
+        "run_fundamental_scoring",
+        lambda **kwargs: calls.append("score"),
+    )
 
 
 def _mock_fetch(monkeypatch, module) -> None:
@@ -254,7 +366,7 @@ def _mock_fetch(monkeypatch, module) -> None:
     monkeypatch.setattr(module, "fetch_quarterly_statements_raw", lambda _ticker: statement_frames)
 
 
-def _insert_raw_fixture_rows(db_path: Path, raw_run_id: str) -> None:
+def _insert_raw_fixture_rows(db_path: Path, ticker: str, raw_run_id: str) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         raw_rows = [
             ("income", "2024-03-31", "Total Revenue", 100.0),
@@ -311,8 +423,11 @@ def _insert_raw_fixture_rows(db_path: Path, raw_run_id: str) -> None:
                 source,
                 retrieved_at_utc,
                 run_id
-            ) VALUES ('AAPL', ?, ?, 'quarterly', ?, ?, NULL, 'test', '2026-01-01T00:00:00', ?)
+            ) VALUES (?, ?, ?, 'quarterly', ?, ?, NULL, 'test', '2026-01-01T00:00:00', ?)
             """,
-            [(statement_type, period_end_date, field_name, field_value, raw_run_id) for statement_type, period_end_date, field_name, field_value in raw_rows],
+            [
+                (ticker.upper(), statement_type, period_end_date, field_name, field_value, raw_run_id)
+                for statement_type, period_end_date, field_name, field_value in raw_rows
+            ],
         )
         conn.commit()

@@ -149,6 +149,13 @@ def reconstruct_quarterly_rows(
             }
         )
 
+    flow_groups: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in parsed_rows:
+        if row["tag"] in FLOW_TAG_TO_FIELD:
+            flow_groups[(row["tag"], str(row["currency"]), row["fy"])].append(row)
+    for row in parsed_rows:
+        row["flow_group_rows"] = flow_groups.get((row["tag"], str(row["currency"]), row["fy"]), [])
+
     selected_snapshot_facts = _select_best_snapshot_facts(parsed_rows)
     selected_flow_facts = _select_best_flow_facts(parsed_rows)
     reconstructed = []
@@ -174,13 +181,13 @@ def _select_best_snapshot_facts(parsed_rows: list[dict[str, Any]]) -> dict[tuple
 
 def _select_best_flow_facts(
     parsed_rows: list[dict[str, Any]],
-) -> dict[tuple[str, str, str, str, str], dict[str, Any]]:
-    grouped: dict[tuple[str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
+) -> dict[tuple[str, str, str, str, str, str], dict[str, Any]]:
+    grouped: dict[tuple[str, str, str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in parsed_rows:
         if row["tag"] not in FLOW_TAG_TO_FIELD:
             continue
         duration_type = _classify_flow_duration_type(row)
-        grouped[(row["tag"], row["currency"], row["fy"], row["fp"], duration_type)].append(row)
+        grouped[(row["tag"], row["currency"], row["fy"], row["fp"], row["period_end_date"], duration_type)].append(row)
     return {key: _pick_best_flow_fact(rows) for key, rows in grouped.items()}
 
 
@@ -275,7 +282,7 @@ def _duration_days(row: dict[str, Any]) -> int | None:
 
 
 def _reconstruct_flow_fields(
-    selected_flow_facts: dict[tuple[str, str, str, str, str], dict[str, Any]],
+    selected_flow_facts: dict[tuple[str, str, str, str, str, str], dict[str, Any]],
     ticker: str,
     run_id: str,
     retrieved_at_utc: str,
@@ -293,35 +300,45 @@ def _reconstruct_flow_fields(
         tag_priority = FIELD_TAG_PRIORITY[field_name]
         available_units = sorted(
             {
-                key[1]
-                for key in selected_flow_facts
-                if key[0] in tag_priority
+                row["currency"]
+                for row in selected_flow_facts.values()
+                if row["tag"] in tag_priority
             }
         )
         if not available_units:
             continue
         unit = _select_unit(field_name, available_units)
-        fiscal_years = sorted({key[2] for key in selected_flow_facts if key[0] in tag_priority and key[1] == unit})
+        fiscal_years = sorted(
+            {
+                row["fy"]
+                for row in selected_flow_facts.values()
+                if row["tag"] in tag_priority and row["currency"] == unit
+            }
+        )
         for fy in fiscal_years:
-            quarter_rows = _build_flow_rows_for_field(
-                selected_flow_facts=selected_flow_facts,
-                tag_priority=tag_priority,
-                unit=unit,
-                fy=fy,
-                ticker=ticker,
-                field_name=field_name,
-                run_id=run_id,
-                retrieved_at_utc=retrieved_at_utc,
-            )
-            rows.extend(quarter_rows)
+            chain_keys = _build_flow_chain_keys(selected_flow_facts, tag_priority, unit, fy)
+            for chain_key in chain_keys:
+                quarter_rows = _build_flow_rows_for_field(
+                    selected_flow_facts=selected_flow_facts,
+                    tag_priority=tag_priority,
+                    unit=unit,
+                    fy=fy,
+                    chain_key=chain_key,
+                    ticker=ticker,
+                    field_name=field_name,
+                    run_id=run_id,
+                    retrieved_at_utc=retrieved_at_utc,
+                )
+                rows.extend(quarter_rows)
     return rows
 
 
 def _build_flow_rows_for_field(
-    selected_flow_facts: dict[tuple[str, str, str, str, str], dict[str, Any]],
+    selected_flow_facts: dict[tuple[str, str, str, str, str, str], dict[str, Any]],
     tag_priority: list[str],
     unit: str,
     fy: str,
+    chain_key: str,
     ticker: str,
     field_name: str,
     run_id: str,
@@ -330,7 +347,7 @@ def _build_flow_rows_for_field(
     rows: list[dict[str, Any]] = []
     quarter_order = ("Q1", "Q2", "Q3", "FY")
     quarter_values_by_tag = {
-        tag: _build_quarter_values_for_tag(selected_flow_facts, tag, unit, fy)
+        tag: _build_quarter_values_for_tag(selected_flow_facts, tag, unit, fy, chain_key)
         for tag in tag_priority
     }
     for fp in quarter_order:
@@ -355,21 +372,36 @@ def _build_flow_rows_for_field(
     return rows
 
 
+def _build_flow_chain_keys(
+    selected_flow_facts: dict[tuple[str, str, str, str, str, str], dict[str, Any]],
+    tag_priority: list[str],
+    unit: str,
+    fy: str,
+) -> list[str]:
+    chain_keys = {
+        row["period_end_date"]
+        for row in selected_flow_facts.values()
+        if row["tag"] in tag_priority and row["currency"] == unit and row["fy"] == fy and row["fp"] == "FY"
+    }
+    return sorted(chain_keys)
+
+
 def _build_quarter_values_for_tag(
-    selected_flow_facts: dict[tuple[str, str, str, str, str], dict[str, Any]],
+    selected_flow_facts: dict[tuple[str, str, str, str, str, str], dict[str, Any]],
     tag: str,
     unit: str,
     fy: str,
+    chain_key: str,
 ) -> dict[str, dict[str, Any]]:
-    quarterly_q1 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q1", "quarterly_fact")
-    quarterly_q2 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q2", "quarterly_fact")
-    quarterly_q3 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q3", "quarterly_fact")
-    quarterly_fy = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "FY", "quarterly_fact")
+    quarterly_q1 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q1", "quarterly_fact", chain_key)
+    quarterly_q2 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q2", "quarterly_fact", chain_key)
+    quarterly_q3 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q3", "quarterly_fact", chain_key)
+    quarterly_fy = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "FY", "quarterly_fact", chain_key)
 
-    ytd_q1 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q1", "ytd_fact")
-    ytd_q2 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q2", "ytd_fact")
-    ytd_q3 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q3", "ytd_fact")
-    annual_fy = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "FY", "annual_fact")
+    ytd_q1 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q1", "ytd_fact", chain_key)
+    ytd_q2 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q2", "ytd_fact", chain_key)
+    ytd_q3 = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "Q3", "ytd_fact", chain_key)
+    annual_fy = _pick_flow_fact(selected_flow_facts, tag, unit, fy, "FY", "annual_fact", chain_key)
 
     quarter_values: dict[str, dict[str, Any]] = {}
 
@@ -432,14 +464,57 @@ def _build_quarter_values_for_tag(
 
 
 def _pick_flow_fact(
-    selected_flow_facts: dict[tuple[str, str, str, str, str], dict[str, Any]],
+    selected_flow_facts: dict[tuple[str, str, str, str, str, str], dict[str, Any]],
     tag: str,
     unit: str,
     fy: str,
     fp: str,
     duration_type: str,
+    chain_key: str,
 ) -> dict[str, Any] | None:
-    return selected_flow_facts.get((tag, unit, fy, fp, duration_type))
+    candidates = [
+        row
+        for row in selected_flow_facts.values()
+        if row["tag"] == tag
+        and row["currency"] == unit
+        and row["fy"] == fy
+        and row["fp"] == fp
+        and _classify_flow_duration_type(row) == duration_type
+        and _row_assigned_to_flow_chain(row, chain_key)
+    ]
+    if not candidates:
+        return None
+    return _pick_best_flow_fact(candidates)
+
+
+def _row_assigned_to_flow_chain(row: dict[str, Any], chain_key: str) -> bool:
+    if row["fp"] == "FY":
+        return row["period_end_date"] == chain_key
+    if row["fp"] not in ("Q1", "Q2", "Q3"):
+        return False
+    row_end_date = _parse_iso_date(row["period_end_date"])
+    chain_end_date = _parse_iso_date(chain_key)
+    if row_end_date is None or chain_end_date is None or row_end_date >= chain_end_date:
+        return False
+    return _assigned_chain_key_for_row(row) == chain_key
+
+
+def _assigned_chain_key_for_row(row: dict[str, Any]) -> str | None:
+    row_end_date = _parse_iso_date(row["period_end_date"])
+    if row_end_date is None:
+        return None
+    flow_group_fy_dates = sorted(
+        {
+            candidate["period_end_date"]
+            for candidate in row["flow_group_rows"]
+            if candidate["fp"] == "FY"
+        }
+    )
+    for fy_period_end_date in flow_group_fy_dates:
+        fy_end_date = _parse_iso_date(fy_period_end_date)
+        if fy_end_date is not None and fy_end_date > row_end_date:
+            return fy_period_end_date
+    return None
 
 
 def _quarter_value(quarter_values: dict[str, dict[str, Any]], fp: str) -> float | None:

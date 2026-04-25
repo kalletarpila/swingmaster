@@ -18,6 +18,7 @@ def test_quarterly_facts_preferred_over_ytd_facts(tmp_path: Path) -> None:
         _insert_sec_fact(conn, "NVDA", "income", "2025-04-27", "Revenues", 100.0, "USD", "2025", "Q1", start="2025-01-27")
         _insert_sec_fact(conn, "NVDA", "income", "2025-07-27", "Revenues", 250.0, "USD", "2025", "Q2", start="2025-01-27")
         _insert_sec_fact(conn, "NVDA", "income", "2025-07-27", "Revenues", 150.0, "USD", "2025", "Q2", frame="CY2025Q2", start="2025-04-28")
+        _insert_sec_fact(conn, "NVDA", "income", "2026-01-25", "Revenues", 400.0, "USD", "2025", "FY", form="10-K", start="2025-01-27")
         conn.commit()
         rows = reconstruct_quarterly_rows(
             run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
@@ -37,6 +38,7 @@ def test_q1_start_null_fallback(tmp_path: Path) -> None:
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         _insert_sec_fact(conn, "NVDA", "income", "2024-04-28", "Revenues", 100.0, "USD", "2024", "Q1", form="10-Q", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "income", "2025-01-26", "Revenues", 400.0, "USD", "2024", "FY", form="10-K", start="2024-01-29")
         conn.commit()
         rows = reconstruct_quarterly_rows(
             run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
@@ -55,6 +57,7 @@ def test_q2_start_null_fallback(tmp_path: Path) -> None:
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         _insert_sec_fact(conn, "NVDA", "income", "2024-07-28", "Revenues", 150.0, "USD", "2024", "Q2", form="10-Q", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "income", "2025-01-26", "Revenues", 400.0, "USD", "2024", "FY", form="10-K", start="2024-01-29")
         conn.commit()
         rows = reconstruct_quarterly_rows(
             run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
@@ -190,6 +193,7 @@ def test_q3_quarterly_duration_preferred_over_q3_ytd(tmp_path: Path) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         _insert_sec_fact(conn, "NVDA", "income", "2025-10-27", "Revenues", 91166000000.0, "USD", "2025", "Q3", start="2024-01-29")
         _insert_sec_fact(conn, "NVDA", "income", "2025-10-27", "Revenues", 35082000000.0, "USD", "2025", "Q3", start="2025-07-29")
+        _insert_sec_fact(conn, "NVDA", "income", "2026-01-25", "Revenues", 159000000000.0, "USD", "2025", "FY", form="10-K", start="2025-01-27")
         conn.commit()
         rows = reconstruct_quarterly_rows(
             run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
@@ -203,12 +207,69 @@ def test_q3_quarterly_duration_preferred_over_q3_ytd(tmp_path: Path) -> None:
     ]
 
 
+def test_flow_reconstruction_builds_two_separate_fiscal_chains(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_two_chains.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "income", "2023-04-30", "Revenues", 10.0, "USD", "2025", "Q1", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "income", "2023-07-30", "Revenues", 30.0, "USD", "2025", "Q2", start="2023-01-30")
+        _insert_sec_fact(conn, "NVDA", "income", "2023-10-29", "Revenues", 60.0, "USD", "2025", "Q3", start="2023-01-30")
+        _insert_sec_fact(conn, "NVDA", "income", "2024-01-28", "Revenues", 100.0, "USD", "2025", "FY", form="10-K", start="2023-01-30")
+        _insert_sec_fact(conn, "NVDA", "income", "2024-04-28", "Revenues", 20.0, "USD", "2025", "Q1", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "income", "2024-07-28", "Revenues", 50.0, "USD", "2025", "Q2", start="2024-01-29")
+        _insert_sec_fact(conn, "NVDA", "income", "2024-10-27", "Revenues", 90.0, "USD", "2025", "Q3", start="2024-01-29")
+        _insert_sec_fact(conn, "NVDA", "income", "2025-01-26", "Revenues", 140.0, "USD", "2025", "FY", form="10-K", start="2024-01-29")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    revenues = [row for row in rows if row["field_name"] == "Total Revenue"]
+    assert [(row["period_end_date"], row["field_value"]) for row in revenues] == [
+        ("2023-04-30", 10.0),
+        ("2023-07-30", 20.0),
+        ("2023-10-29", 30.0),
+        ("2024-01-28", 40.0),
+        ("2024-04-28", 20.0),
+        ("2024-07-28", 30.0),
+        ("2024-10-27", 40.0),
+        ("2025-01-26", 50.0),
+    ]
+
+
+def test_comparative_chain_does_not_overwrite_current_chain(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_chain_no_overwrite.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "income", "2023-04-30", "Revenues", 10.0, "USD", "2025", "Q1", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "income", "2023-07-30", "Revenues", 20.0, "USD", "2025", "Q2", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "income", "2023-10-29", "Revenues", 30.0, "USD", "2025", "Q3", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "income", "2024-01-28", "Revenues", 100.0, "USD", "2025", "FY", form="10-K", start="2023-01-30")
+        _insert_sec_fact(conn, "NVDA", "income", "2024-04-28", "Revenues", 200.0, "USD", "2025", "Q1", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "income", "2024-07-28", "Revenues", 300.0, "USD", "2025", "Q2", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "income", "2024-10-27", "Revenues", 400.0, "USD", "2025", "Q3", start="NULL")
+        _insert_sec_fact(conn, "NVDA", "income", "2025-01-26", "Revenues", 1000.0, "USD", "2025", "FY", form="10-K", start="2024-01-29")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    revenues = {row["period_end_date"]: row["field_value"] for row in rows if row["field_name"] == "Total Revenue"}
+    assert revenues["2024-07-28"] == 300.0
+    assert revenues["2025-01-26"] == 100.0
+
+
 def test_highest_value_must_not_override_shortest_duration(tmp_path: Path) -> None:
     db_path = tmp_path / "sec_reconstruct_shortest_duration_preferred.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         _insert_sec_fact(conn, "NVDA", "income", "2025-07-27", "Revenues", 1000.0, "USD", "2025", "Q2", frame="CY2025Q2_LONG", start="2025-01-01")
         _insert_sec_fact(conn, "NVDA", "income", "2025-07-27", "Revenues", 100.0, "USD", "2025", "Q2", frame="CY2025Q2_SHORT", start="2025-04-28")
+        _insert_sec_fact(conn, "NVDA", "income", "2026-01-25", "Revenues", 400.0, "USD", "2025", "FY", form="10-K", start="2025-01-27")
         conn.commit()
         rows = reconstruct_quarterly_rows(
             run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
@@ -318,6 +379,19 @@ def test_cashflow_quarterly_duration_preferred_over_ytd(tmp_path: Path) -> None:
             "Q2",
             start="2025-04-28",
         )
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "cashflow",
+            "2026-01-25",
+            "NetCashProvidedByUsedInOperatingActivities",
+            700.0,
+            "USD",
+            "2025",
+            "FY",
+            form="10-K",
+            start="2025-01-27",
+        )
         conn.commit()
         rows = reconstruct_quarterly_rows(
             run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
@@ -390,6 +464,7 @@ def test_capex_sign(tmp_path: Path) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         _insert_sec_fact(conn, "NVDA", "cashflow", "2025-04-27", "PaymentsToAcquirePropertyPlantAndEquipment", 10.0, "USD", "2025", "Q1", start="2025-01-27")
         _insert_sec_fact(conn, "NVDA", "cashflow", "2025-07-27", "PaymentsToAcquirePropertyPlantAndEquipment", 30.0, "USD", "2025", "Q2", start="2025-01-27")
+        _insert_sec_fact(conn, "NVDA", "cashflow", "2026-01-25", "PaymentsToAcquirePropertyPlantAndEquipment", 60.0, "USD", "2025", "FY", form="10-K", start="2025-01-27")
         conn.commit()
         rows = reconstruct_quarterly_rows(
             run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
@@ -410,6 +485,7 @@ def test_duplicate_fact_selection(tmp_path: Path) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         _insert_sec_fact(conn, "NVDA", "income", "2025-04-27", "Revenues", 100.0, "USD", "2025", "Q1", frame="NULL", filed="2025-04-01", start="2025-01-27")
         _insert_sec_fact(conn, "NVDA", "income", "2025-04-27", "Revenues", 120.0, "USD", "2025", "Q1", frame="CY2025Q1", filed="2025-04-30", start="2025-01-27")
+        _insert_sec_fact(conn, "NVDA", "income", "2026-01-25", "Revenues", 400.0, "USD", "2025", "FY", form="10-K", start="2025-01-27")
         conn.commit()
         rows = reconstruct_quarterly_rows(
             run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
@@ -438,6 +514,7 @@ def test_revenue_tag_priority(tmp_path: Path) -> None:
             "Q1",
             start="2025-01-27",
         )
+        _insert_sec_fact(conn, "NVDA", "income", "2026-01-25", "Revenues", 400.0, "USD", "2025", "FY", form="10-K", start="2025-01-27")
         conn.commit()
         rows = reconstruct_quarterly_rows(
             run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),

@@ -71,6 +71,82 @@ def test_q2_start_null_fallback(tmp_path: Path) -> None:
     ]
 
 
+def test_incomplete_fiscal_year_q1_reconstructs_without_fy(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_incomplete_fy_q1.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "MSFT", "income", "2025-09-30", "RevenueFromContractWithCustomerExcludingAssessedTax", 77673000000.0, "USD", "2026", "Q1", frame="CY2025Q3", start="2025-07-01")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "MSFT"),
+            "MSFT",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    revenues = [row for row in rows if row["field_name"] == "Total Revenue"]
+    assert [(row["period_end_date"], row["field_value"]) for row in revenues] == [
+        ("2025-09-30", 77673000000.0),
+    ]
+
+
+def test_incomplete_fiscal_year_q2_quarterly_duration_reconstructs_without_fy(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_incomplete_fy_q2_quarterly.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "MSFT", "income", "2025-09-30", "RevenueFromContractWithCustomerExcludingAssessedTax", 77673000000.0, "USD", "2026", "Q1", frame="CY2025Q3", start="2025-07-01")
+        _insert_sec_fact(conn, "MSFT", "income", "2025-12-31", "RevenueFromContractWithCustomerExcludingAssessedTax", 81273000000.0, "USD", "2026", "Q2", frame="CY2025Q4", start="2025-10-01")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "MSFT"),
+            "MSFT",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    revenues = [row for row in rows if row["field_name"] == "Total Revenue"]
+    assert [(row["period_end_date"], row["field_value"]) for row in revenues] == [
+        ("2025-09-30", 77673000000.0),
+        ("2025-12-31", 81273000000.0),
+    ]
+
+
+def test_incomplete_fiscal_year_q2_ytd_fallback_works_without_fy(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_incomplete_fy_q2_ytd.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "MSFT", "income", "2025-09-30", "RevenueFromContractWithCustomerExcludingAssessedTax", 77673000000.0, "USD", "2026", "Q1", frame="CY2025Q3", start="2025-07-01")
+        _insert_sec_fact(conn, "MSFT", "income", "2025-12-31", "RevenueFromContractWithCustomerExcludingAssessedTax", 158946000000.0, "USD", "2026", "Q2", frame="NULL", start="2025-07-01")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "MSFT"),
+            "MSFT",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    revenues = [row for row in rows if row["field_name"] == "Total Revenue"]
+    assert [(row["period_end_date"], row["field_value"]) for row in revenues] == [
+        ("2025-09-30", 77673000000.0),
+        ("2025-12-31", 81273000000.0),
+    ]
+
+
+def test_q4_is_not_reconstructed_without_fy(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_incomplete_fy_no_q4.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "MSFT", "income", "2025-09-30", "RevenueFromContractWithCustomerExcludingAssessedTax", 77673000000.0, "USD", "2026", "Q1", frame="CY2025Q3", start="2025-07-01")
+        _insert_sec_fact(conn, "MSFT", "income", "2025-12-31", "RevenueFromContractWithCustomerExcludingAssessedTax", 81273000000.0, "USD", "2026", "Q2", frame="CY2025Q4", start="2025-10-01")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "MSFT"),
+            "MSFT",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    revenues = [row for row in rows if row["field_name"] == "Total Revenue"]
+    assert all(row["period_end_date"] != "2026-03-31" for row in revenues)
+    assert all(row["period_end_date"] != "2026-06-30" for row in revenues)
+
+
 def test_form_10k_start_null_does_not_fallback(tmp_path: Path) -> None:
     db_path = tmp_path / "sec_reconstruct_10k_start_null.db"
     run_migration(db_path)

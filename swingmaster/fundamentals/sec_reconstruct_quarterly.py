@@ -81,6 +81,7 @@ WEIGHTED_AVERAGE_SHARE_TAGS = {
     "WeightedAverageNumberOfSharesOutstandingBasic",
 }
 SHARE_TAGS = set(FIELD_TAG_PRIORITY["Ordinary Shares Number"])
+ORPHAN_CURRENT_YEAR_CHAIN_KEY = "__ORPHAN_CURRENT_YEAR__"
 
 
 def load_sec_fact_rows(conn: sqlite3.Connection, ticker: str) -> list[sqlite3.Row]:
@@ -426,7 +427,18 @@ def _build_flow_chain_keys(
         for row in selected_flow_facts.values()
         if row["tag"] in tag_priority and row["currency"] == unit and row["fy"] == fy and row["fp"] == "FY"
     }
-    return sorted(chain_keys)
+    orphan_rows_exist = any(
+        row["tag"] in tag_priority
+        and row["currency"] == unit
+        and row["fy"] == fy
+        and row["fp"] in ("Q1", "Q2", "Q3")
+        and _assigned_chain_key_for_row(row) is None
+        for row in selected_flow_facts.values()
+    )
+    ordered_chain_keys = sorted(chain_keys)
+    if orphan_rows_exist:
+        ordered_chain_keys.append(ORPHAN_CURRENT_YEAR_CHAIN_KEY)
+    return ordered_chain_keys
 
 
 def _build_quarter_values_for_tag(
@@ -531,6 +543,8 @@ def _pick_flow_fact(
 
 
 def _row_assigned_to_flow_chain(row: dict[str, Any], chain_key: str) -> bool:
+    if chain_key == ORPHAN_CURRENT_YEAR_CHAIN_KEY:
+        return row["fp"] in ("Q1", "Q2", "Q3") and _assigned_chain_key_for_row(row) is None
     if row["fp"] == "FY":
         return row["period_end_date"] == chain_key
     if row["fp"] not in ("Q1", "Q2", "Q3"):

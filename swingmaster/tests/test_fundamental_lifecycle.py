@@ -11,8 +11,8 @@ from swingmaster.cli.run_fundamental_migrations import run_migration
 from swingmaster.fundamentals.lifecycle import run_lifecycle_classification
 
 
-def test_lifecycle_mature_with_null_revenue_growth(tmp_path: Path) -> None:
-    db_path = tmp_path / "fundamental_lifecycle_mature.db"
+def test_lifecycle_transition_classification(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_lifecycle_transition.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         _insert_ttm_row(
@@ -21,9 +21,9 @@ def test_lifecycle_mature_with_null_revenue_growth(tmp_path: Path) -> None:
             as_of_date="2025-12-31",
             revenue_ttm=1000.0,
             revenue_growth_ttm_yoy=None,
-            ebit_margin_ttm=0.30,
-            ebit_margin_trend_4q=0.01,
-            fcf_margin_ttm=0.20,
+            ebit_margin_ttm=0.06,
+            ebit_margin_trend_4q=None,
+            fcf_margin_ttm=0.07,
         )
         conn.commit()
         rows_classified, _ = run_lifecycle_classification(conn, "AAPL", dry_run=False)
@@ -31,7 +31,7 @@ def test_lifecycle_mature_with_null_revenue_growth(tmp_path: Path) -> None:
         lifecycle_class = conn.execute(
             "SELECT lifecycle_class FROM rc_fundamental_ttm WHERE ticker='AAPL'"
         ).fetchone()[0]
-        assert lifecycle_class == "MATURE"
+        assert lifecycle_class == "TRANSITION"
 
 
 def test_lifecycle_distressed(tmp_path: Path) -> None:
@@ -56,44 +56,55 @@ def test_lifecycle_startup(tmp_path: Path) -> None:
         assert lifecycle_class == "STARTUP"
 
 
-def test_lifecycle_growth(tmp_path: Path) -> None:
-    db_path = tmp_path / "fundamental_lifecycle_growth.db"
+def test_lifecycle_mature_still_preferred_over_transition(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_lifecycle_mature.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
-        _insert_ttm_row(conn, "AAPL", "2025-12-31", 1000.0, 0.25, 0.05, None, 0.01)
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 1000.0, None, 0.18, None, 0.06)
         conn.commit()
         run_lifecycle_classification(conn, "AAPL", dry_run=False)
         lifecycle_class = conn.execute("SELECT lifecycle_class FROM rc_fundamental_ttm").fetchone()[0]
-        assert lifecycle_class == "GROWTH"
+        assert lifecycle_class == "MATURE"
 
 
-def test_lifecycle_scaling(tmp_path: Path) -> None:
-    db_path = tmp_path / "fundamental_lifecycle_scaling.db"
-    run_migration(db_path)
-    with sqlite3.connect(str(db_path)) as conn:
-        _insert_ttm_row(conn, "AAPL", "2025-12-31", 1000.0, 0.15, 0.05, 0.02, 0.02)
-        conn.commit()
-        run_lifecycle_classification(conn, "AAPL", dry_run=False)
-        lifecycle_class = conn.execute("SELECT lifecycle_class FROM rc_fundamental_ttm").fetchone()[0]
-        assert lifecycle_class == "SCALING"
-
-
-def test_lifecycle_declining(tmp_path: Path) -> None:
+def test_lifecycle_declining_overrides_transition(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_lifecycle_declining.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
-        _insert_ttm_row(conn, "AAPL", "2025-12-31", 1000.0, -0.10, 0.10, 0.0, 0.03)
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 1000.0, -0.10, 0.07, None, 0.05)
         conn.commit()
         run_lifecycle_classification(conn, "AAPL", dry_run=False)
         lifecycle_class = conn.execute("SELECT lifecycle_class FROM rc_fundamental_ttm").fetchone()[0]
         assert lifecycle_class == "DECLINING"
 
 
-def test_lifecycle_unclassified_missing_data(tmp_path: Path) -> None:
+def test_lifecycle_scaling_still_works(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_lifecycle_scaling.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 1000.0, 0.12, 0.02, 0.04, 0.02)
+        conn.commit()
+        run_lifecycle_classification(conn, "AAPL", dry_run=False)
+        lifecycle_class = conn.execute("SELECT lifecycle_class FROM rc_fundamental_ttm").fetchone()[0]
+        assert lifecycle_class == "SCALING"
+
+
+def test_lifecycle_distressed_unchanged(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_lifecycle_distressed.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 1000.0, None, -0.25, None, -0.30)
+        conn.commit()
+        run_lifecycle_classification(conn, "AAPL", dry_run=False)
+        lifecycle_class = conn.execute("SELECT lifecycle_class FROM rc_fundamental_ttm").fetchone()[0]
+        assert lifecycle_class == "DISTRESSED"
+
+
+def test_lifecycle_fallback_still_unclassified(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_lifecycle_unclassified.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
-        _insert_ttm_row(conn, "AAPL", "2025-12-31", None, None, 0.10, None, 0.01)
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 1000.0, None, None, None, None)
         conn.commit()
         run_lifecycle_classification(conn, "AAPL", dry_run=False)
         lifecycle_class = conn.execute("SELECT lifecycle_class FROM rc_fundamental_ttm").fetchone()[0]
@@ -109,6 +120,7 @@ def test_lifecycle_dry_run_does_not_update_db(tmp_path: Path) -> None:
         rows_classified, class_counts = run_lifecycle_classification(conn, "AAPL", dry_run=True)
         assert rows_classified == 1
         assert class_counts["MATURE"] == 1
+        assert class_counts["TRANSITION"] == 0
         lifecycle_class = conn.execute("SELECT lifecycle_class FROM rc_fundamental_ttm").fetchone()[0]
         assert lifecycle_class is None
 
@@ -157,13 +169,14 @@ def test_cli_lifecycle_summary_all(monkeypatch, capsys, tmp_path: Path) -> None:
     lifecycle_main()
     out = capsys.readouterr().out.strip().splitlines()
     assert out == [
-        "SUMMARY rule_id=FUND_LIFECYCLE_RULE_V1",
+        "SUMMARY rule_id=FUND_LIFECYCLE_RULE_V2",
         "SUMMARY ticker=ALL",
         "SUMMARY rows_classified=1",
         "SUMMARY class_STARTUP=0",
         "SUMMARY class_GROWTH=0",
         "SUMMARY class_SCALING=0",
         "SUMMARY class_MATURE=1",
+        "SUMMARY class_TRANSITION=0",
         "SUMMARY class_DECLINING=0",
         "SUMMARY class_DISTRESSED=0",
         "SUMMARY class_UNCLASSIFIED=0",

@@ -177,7 +177,7 @@ def test_build_ttm_null_handling_ignores_partial_nulls(tmp_path: Path) -> None:
             )
             """
         ).fetchone()
-        assert row == (220.0, 70.0, None, None, None)
+        assert row == (220.0, 70.0, None, 2.142857142857143, None)
 
 
 def test_build_ttm_is_idempotent(tmp_path: Path) -> None:
@@ -199,6 +199,116 @@ def test_build_ttm_is_idempotent(tmp_path: Path) -> None:
 
         row_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_ttm").fetchone()[0]
         assert row_count == 1
+
+
+def test_net_debt_to_ebitda_falls_back_to_ebit_when_ebitda_missing(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ttm_net_debt_ebit_fallback.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        for row in [
+            ("2024-03-31", 100.0, 12.5, None, 20.0, 10.0, 100.0, 300.0, 1000.0),
+            ("2024-06-30", 100.0, 12.5, None, 20.0, 10.0, 100.0, 300.0, 1000.0),
+            ("2024-09-30", 100.0, 12.5, None, 20.0, 10.0, 100.0, 300.0, 1000.0),
+            ("2024-12-31", 100.0, 12.5, None, 20.0, 10.0, 100.0, 300.0, 1000.0),
+        ]:
+            _insert_quarterly_row(conn, "AAPL", row, "Q_RUN_V1")
+        conn.commit()
+
+        build_and_insert_ttm_rows(conn=conn, ticker="AAPL", run_id="FUND_BUILD_TTM_AAPL_V1", dry_run=False)
+
+        value = conn.execute(
+            "SELECT net_debt_to_ebitda FROM rc_fundamental_ttm WHERE ticker='AAPL' AND as_of_date='2024-12-31'"
+        ).fetchone()[0]
+        assert value == 4.0
+
+
+def test_net_debt_to_ebitda_prefers_ebitda_when_available(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ttm_net_debt_ebitda_primary.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        for row in [
+            ("2024-03-31", 100.0, 20.0, 25.0, 20.0, 10.0, 200.0, 500.0, 1000.0),
+            ("2024-06-30", 100.0, 20.0, 25.0, 20.0, 10.0, 200.0, 500.0, 1000.0),
+            ("2024-09-30", 100.0, 20.0, 25.0, 20.0, 10.0, 200.0, 500.0, 1000.0),
+            ("2024-12-31", 100.0, 20.0, 25.0, 20.0, 10.0, 200.0, 500.0, 1000.0),
+        ]:
+            _insert_quarterly_row(conn, "AAPL", row, "Q_RUN_V1")
+        conn.commit()
+
+        build_and_insert_ttm_rows(conn=conn, ticker="AAPL", run_id="FUND_BUILD_TTM_AAPL_V1", dry_run=False)
+
+        value = conn.execute(
+            "SELECT net_debt_to_ebitda FROM rc_fundamental_ttm WHERE ticker='AAPL' AND as_of_date='2024-12-31'"
+        ).fetchone()[0]
+        assert value == 3.0
+
+
+def test_net_debt_to_ebitda_is_null_when_ebitda_and_ebit_missing(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ttm_net_debt_no_denominator.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        for row in [
+            ("2024-03-31", 100.0, None, None, 20.0, 10.0, 200.0, 500.0, 1000.0),
+            ("2024-06-30", 100.0, None, None, 20.0, 10.0, 200.0, 500.0, 1000.0),
+            ("2024-09-30", 100.0, None, None, 20.0, 10.0, 200.0, 500.0, 1000.0),
+            ("2024-12-31", 100.0, None, None, 20.0, 10.0, 200.0, 500.0, 1000.0),
+        ]:
+            _insert_quarterly_row(conn, "AAPL", row, "Q_RUN_V1")
+        conn.commit()
+
+        build_and_insert_ttm_rows(conn=conn, ticker="AAPL", run_id="FUND_BUILD_TTM_AAPL_V1", dry_run=False)
+
+        value = conn.execute(
+            "SELECT net_debt_to_ebitda FROM rc_fundamental_ttm WHERE ticker='AAPL' AND as_of_date='2024-12-31'"
+        ).fetchone()[0]
+        assert value is None
+
+
+def test_net_debt_to_ebitda_is_null_when_ebit_fallback_denominator_is_zero(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ttm_net_debt_zero_ebit.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        for row in [
+            ("2024-03-31", 100.0, 0.0, None, 20.0, 10.0, 200.0, 500.0, 1000.0),
+            ("2024-06-30", 100.0, 0.0, None, 20.0, 10.0, 200.0, 500.0, 1000.0),
+            ("2024-09-30", 100.0, 0.0, None, 20.0, 10.0, 200.0, 500.0, 1000.0),
+            ("2024-12-31", 100.0, 0.0, None, 20.0, 10.0, 200.0, 500.0, 1000.0),
+        ]:
+            _insert_quarterly_row(conn, "AAPL", row, "Q_RUN_V1")
+        conn.commit()
+
+        build_and_insert_ttm_rows(conn=conn, ticker="AAPL", run_id="FUND_BUILD_TTM_AAPL_V1", dry_run=False)
+
+        value = conn.execute(
+            "SELECT net_debt_to_ebitda FROM rc_fundamental_ttm WHERE ticker='AAPL' AND as_of_date='2024-12-31'"
+        ).fetchone()[0]
+        assert value is None
+
+
+def test_net_debt_to_ebitda_handles_negative_net_debt_with_ebit_fallback(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ttm_negative_net_debt_fallback.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        for row in [
+            ("2024-03-31", 100.0, 25.0, None, 20.0, 10.0, 600.0, 200.0, 1000.0),
+            ("2024-06-30", 100.0, 25.0, None, 20.0, 10.0, 600.0, 200.0, 1000.0),
+            ("2024-09-30", 100.0, 25.0, None, 20.0, 10.0, 600.0, 200.0, 1000.0),
+            ("2024-12-31", 100.0, 25.0, None, 20.0, 10.0, 600.0, 200.0, 1000.0),
+        ]:
+            _insert_quarterly_row(conn, "AAPL", row, "Q_RUN_V1")
+        conn.commit()
+
+        build_and_insert_ttm_rows(conn=conn, ticker="AAPL", run_id="FUND_BUILD_TTM_AAPL_V1", dry_run=False)
+
+        value = conn.execute(
+            "SELECT net_debt_to_ebitda FROM rc_fundamental_ttm WHERE ticker='AAPL' AND as_of_date='2024-12-31'"
+        ).fetchone()[0]
+        assert value == -4.0
 
 
 def test_cli_build_ttm_dry_run_summary(monkeypatch, capsys, tmp_path: Path) -> None:

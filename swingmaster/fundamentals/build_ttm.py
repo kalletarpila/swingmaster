@@ -75,7 +75,7 @@ def build_ttm_rows(quarterly_rows: list[sqlite3.Row], run_id: str) -> list[dict[
         previous_gross_margin_ttm = _safe_divide(previous_gross_profit_ttm, previous_revenue_ttm)
 
         net_debt = _calculate_net_debt(current_row["total_debt"], current_row["cash"])
-        net_debt_to_ebitda = _safe_divide(net_debt, ebitda_ttm)
+        net_debt_to_ebitda = _calculate_net_debt_to_ebitda(net_debt, ebitda_ttm, ebit_ttm)
         share_dilution_yoy = _calculate_share_dilution(quarterly_rows, index)
 
         latest_period_end_date = str(current_row["period_end_date"])
@@ -137,6 +137,17 @@ def _calculate_net_debt(total_debt: float | None, cash: float | None) -> float |
     if total_debt is None or cash is None:
         return None
     return float(total_debt - cash)
+
+
+def _calculate_net_debt_to_ebitda(
+    net_debt: float | None,
+    ebitda_ttm: float | None,
+    ebit_ttm: float | None,
+) -> float | None:
+    primary_value = _safe_divide(net_debt, ebitda_ttm)
+    if primary_value is not None:
+        return primary_value
+    return _safe_divide(net_debt, ebit_ttm)
 
 
 def _calculate_share_dilution(quarterly_rows: list[sqlite3.Row], index: int) -> float | None:

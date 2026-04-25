@@ -19,13 +19,16 @@ def _get_yfinance_module() -> Any:
 
 
 def fetch_quarterly_statements_raw(ticker: str) -> dict[str, pd.DataFrame]:
-    yf = _get_yfinance_module()
-    yf_ticker = yf.Ticker(ticker)
-    statements = {
-        "income": yf_ticker.quarterly_income_stmt,
-        "balance": yf_ticker.quarterly_balance_sheet,
-        "cashflow": yf_ticker.quarterly_cashflow,
-    }
+    try:
+        yf = _get_yfinance_module()
+        yf_ticker = yf.Ticker(ticker)
+        statements = {
+            "income": yf_ticker.quarterly_income_stmt,
+            "balance": yf_ticker.quarterly_balance_sheet,
+            "cashflow": yf_ticker.quarterly_cashflow,
+        }
+    except Exception as exc:
+        raise RuntimeError(f"FUNDAMENTAL_FETCH_FAILED:{ticker}:{type(exc).__name__}:{exc}") from exc
     return {statement_type: _normalize_statement_frame(dataframe) for statement_type, dataframe in statements.items()}
 
 

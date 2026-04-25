@@ -25,6 +25,8 @@ SNAPSHOT_TAG_TO_FIELD = {
     "LongTermDebtAndFinanceLeaseObligationsCurrent": "Total Debt",
     "LongTermDebtAndFinanceLeaseObligationsNoncurrent": "Total Debt",
     "EntityCommonStockSharesOutstanding": "Ordinary Shares Number",
+    "CommonStocksIncludingAdditionalPaidInCapitalSharesOutstanding": "Ordinary Shares Number",
+    "CommonStockSharesOutstanding": "Ordinary Shares Number",
     "WeightedAverageNumberOfDilutedSharesOutstanding": "Ordinary Shares Number",
     "WeightedAverageNumberOfSharesOutstandingBasic": "Ordinary Shares Number",
 }
@@ -58,6 +60,8 @@ FIELD_TAG_PRIORITY = {
     ],
     "Ordinary Shares Number": [
         "EntityCommonStockSharesOutstanding",
+        "CommonStocksIncludingAdditionalPaidInCapitalSharesOutstanding",
+        "CommonStockSharesOutstanding",
         "WeightedAverageNumberOfDilutedSharesOutstanding",
         "WeightedAverageNumberOfSharesOutstandingBasic",
     ],

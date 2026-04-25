@@ -458,6 +458,131 @@ def test_snapshot_tags_unaffected_with_start_null(tmp_path: Path) -> None:
     ]
 
 
+def test_entity_common_stock_shares_outstanding_preferred(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_shares_entity_preferred.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-07-28", "EntityCommonStockSharesOutstanding", 100.0, "shares", "2024", "Q2")
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-07-28", "WeightedAverageNumberOfDilutedSharesOutstanding", 90.0, "shares", "2024", "Q2")
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-07-28", "WeightedAverageNumberOfSharesOutstandingBasic", 80.0, "shares", "2024", "Q2")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    shares_rows = [row for row in rows if row["field_name"] == "Ordinary Shares Number"]
+    assert [(row["period_end_date"], row["field_value"]) for row in shares_rows] == [
+        ("2024-07-28", 100.0),
+    ]
+
+
+def test_common_stock_shares_outstanding_fallback(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_shares_common_stock_fallback.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-07-28", "CommonStockSharesOutstanding", 95.0, "shares", "2024", "Q2")
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-07-28", "WeightedAverageNumberOfDilutedSharesOutstanding", 90.0, "shares", "2024", "Q2")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    shares_rows = [row for row in rows if row["field_name"] == "Ordinary Shares Number"]
+    assert [(row["period_end_date"], row["field_value"]) for row in shares_rows] == [
+        ("2024-07-28", 95.0),
+    ]
+
+
+def test_weighted_average_diluted_shares_fallback(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_shares_diluted_fallback.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-07-28", "WeightedAverageNumberOfDilutedSharesOutstanding", 90.0, "shares", "2024", "Q2")
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-07-28", "WeightedAverageNumberOfSharesOutstandingBasic", 80.0, "shares", "2024", "Q2")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    shares_rows = [row for row in rows if row["field_name"] == "Ordinary Shares Number"]
+    assert [(row["period_end_date"], row["field_value"]) for row in shares_rows] == [
+        ("2024-07-28", 90.0),
+    ]
+
+
+def test_basic_shares_final_fallback(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_shares_basic_fallback.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-07-28", "WeightedAverageNumberOfSharesOutstandingBasic", 80.0, "shares", "2024", "Q2")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    shares_rows = [row for row in rows if row["field_name"] == "Ordinary Shares Number"]
+    assert [(row["period_end_date"], row["field_value"]) for row in shares_rows] == [
+        ("2024-07-28", 80.0),
+    ]
+
+
+def test_shares_are_not_flow_reconstructed(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_shares_not_flow.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(
+            conn,
+            "NVDA",
+            "balance",
+            "2024-07-28",
+            "CommonStockSharesOutstanding",
+            95.0,
+            "shares",
+            "2024",
+            "Q2",
+            start="2024-01-01",
+        )
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    shares_rows = [row for row in rows if row["field_name"] == "Ordinary Shares Number"]
+    assert [(row["period_end_date"], row["field_value"]) for row in shares_rows] == [
+        ("2024-07-28", 95.0),
+    ]
+
+
+def test_share_fallback_improves_historical_coverage(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_reconstruct_shares_historical_coverage.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_sec_fact(conn, "NVDA", "balance", "2024-07-28", "CommonStockSharesOutstanding", 95.0, "shares", "2024", "Q2")
+        _insert_sec_fact(conn, "NVDA", "balance", "2025-04-27", "EntityCommonStockSharesOutstanding", 100.0, "shares", "2025", "Q1")
+        conn.commit()
+        rows = reconstruct_quarterly_rows(
+            run_fundamental_sec_reconstruct_quarterly.load_sec_fact_rows(conn, "NVDA"),
+            "NVDA",
+            "RUN1",
+            "2026-04-25T00:00:00Z",
+        )
+    shares_rows = [row for row in rows if row["field_name"] == "Ordinary Shares Number"]
+    assert [(row["period_end_date"], row["field_value"]) for row in shares_rows] == [
+        ("2024-07-28", 95.0),
+        ("2025-04-27", 100.0),
+    ]
+
+
 def test_capex_sign(tmp_path: Path) -> None:
     db_path = tmp_path / "sec_reconstruct_capex.db"
     run_migration(db_path)

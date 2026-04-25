@@ -8,7 +8,7 @@ import pytest
 from swingmaster.cli import run_fundamental_score
 from swingmaster.cli.run_fundamental_score import main as score_main
 from swingmaster.cli.run_fundamental_migrations import run_migration
-from swingmaster.fundamentals.score import run_fundamental_scoring
+from swingmaster.fundamentals.score import compute_consistency_component, run_fundamental_scoring
 
 
 def test_score_mature_high_quality(tmp_path: Path) -> None:
@@ -30,7 +30,7 @@ def test_score_mature_high_quality(tmp_path: Path) -> None:
         conn.commit()
         run_fundamental_scoring(conn, "AAPL", dry_run=False)
         score = conn.execute("SELECT fundamental_score FROM rc_fundamental_ttm").fetchone()[0]
-        assert score == 71.0
+        assert score == 64.0
 
 
 def test_score_startup(tmp_path: Path) -> None:
@@ -41,7 +41,7 @@ def test_score_startup(tmp_path: Path) -> None:
         conn.commit()
         run_fundamental_scoring(conn, "AAPL", dry_run=False)
         score = conn.execute("SELECT fundamental_score FROM rc_fundamental_ttm").fetchone()[0]
-        assert score == 33.0
+        assert score == 28.0
 
 
 def test_score_distressed_clamps_at_zero(tmp_path: Path) -> None:
@@ -59,10 +59,15 @@ def test_score_max_score_case(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_max.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-03-31", 0.40, 0.30, 0.05, 0.25, -0.10, -0.03, "MATURE")
+        _insert_ttm_row(conn, "AAPL", "2025-06-30", 0.40, 0.30, 0.05, 0.25, -0.10, -0.03, "MATURE")
+        _insert_ttm_row(conn, "AAPL", "2025-09-30", 0.40, 0.30, 0.05, 0.25, -0.10, -0.03, "MATURE")
         _insert_ttm_row(conn, "AAPL", "2025-12-31", 0.40, 0.30, 0.05, 0.25, -0.10, -0.03, "MATURE")
         conn.commit()
         run_fundamental_scoring(conn, "AAPL", dry_run=False)
-        score = conn.execute("SELECT fundamental_score FROM rc_fundamental_ttm").fetchone()[0]
+        score = conn.execute(
+            "SELECT fundamental_score FROM rc_fundamental_ttm WHERE ticker='AAPL' AND as_of_date='2025-12-31'"
+        ).fetchone()[0]
         assert score == 100.0
 
 
@@ -74,9 +79,9 @@ def test_score_dry_run_does_not_update_db(tmp_path: Path) -> None:
         conn.commit()
         rows_scored, min_score, max_score, avg_score = run_fundamental_scoring(conn, "AAPL", dry_run=True)
         assert rows_scored == 1
-        assert min_score == 71.0
-        assert max_score == 71.0
-        assert avg_score == 71.0
+        assert min_score == 64.0
+        assert max_score == 64.0
+        assert avg_score == 64.0
         score = conn.execute("SELECT fundamental_score FROM rc_fundamental_ttm").fetchone()[0]
         assert score is None
 
@@ -101,7 +106,7 @@ def test_score_is_idempotent(tmp_path: Path) -> None:
         run_fundamental_scoring(conn, "AAPL", dry_run=False)
         run_fundamental_scoring(conn, "AAPL", dry_run=False)
         row = conn.execute("SELECT COUNT(*), fundamental_score FROM rc_fundamental_ttm").fetchone()
-        assert row == (1, 71.0)
+        assert row == (1, 64.0)
 
 
 def test_score_all_tickers_mode(tmp_path: Path) -> None:
@@ -113,9 +118,9 @@ def test_score_all_tickers_mode(tmp_path: Path) -> None:
         conn.commit()
         rows_scored, min_score, max_score, avg_score = run_fundamental_scoring(conn, None, dry_run=False)
         assert rows_scored == 2
-        assert min_score is not None
-        assert max_score is not None
-        assert avg_score is not None
+        assert min_score == 45.0
+        assert max_score == 64.0
+        assert avg_score == 54.5
         row_count = conn.execute(
             "SELECT COUNT(*) FROM rc_fundamental_ttm WHERE fundamental_score IS NOT NULL"
         ).fetchone()[0]
@@ -156,16 +161,54 @@ def test_cli_score_summary_all(monkeypatch, capsys, tmp_path: Path) -> None:
     score_main()
     out = capsys.readouterr().out.strip().splitlines()
     assert out == [
-        "SUMMARY rule_id=FUND_SCORE_RULE_V1",
+        "SUMMARY rule_id=FUND_SCORE_RULE_V1_1",
         "SUMMARY ticker=ALL",
         "SUMMARY rows_scored=2",
-        "SUMMARY min_score=50.0",
-        "SUMMARY max_score=71.0",
-        "SUMMARY avg_score=60.5",
+        "SUMMARY min_score=45.0",
+        "SUMMARY max_score=64.0",
+        "SUMMARY avg_score=54.5",
         f"SUMMARY db_path={db_path.resolve()}",
         "SUMMARY run_id=FUND_SCORE_USA_V1",
         "SUMMARY status=dry-run",
     ]
+
+
+def test_consistency_component_stable_dataset() -> None:
+    history = [
+        _history_row("2025-03-31", 0.20, 0.30, 0.25),
+        _history_row("2025-06-30", 0.20, 0.30, 0.25),
+        _history_row("2025-09-30", 0.20, 0.30, 0.25),
+        _history_row("2025-12-31", 0.20, 0.30, 0.25),
+    ]
+    assert compute_consistency_component(history) == 10
+
+
+def test_consistency_component_moderate_variance_dataset() -> None:
+    history = [
+        _history_row("2025-03-31", 0.20, 0.20, 0.20),
+        _history_row("2025-06-30", 0.22, 0.22, 0.22),
+        _history_row("2025-09-30", 0.24, 0.24, 0.24),
+        _history_row("2025-12-31", 0.28, 0.28, 0.28),
+    ]
+    assert compute_consistency_component(history) == 6
+
+
+def test_consistency_component_high_variance_dataset() -> None:
+    history = [
+        _history_row("2025-03-31", 0.10, 0.10, 0.10),
+        _history_row("2025-06-30", 0.30, 0.30, 0.30),
+        _history_row("2025-09-30", 0.05, 0.05, 0.05),
+        _history_row("2025-12-31", 0.40, 0.40, 0.40),
+    ]
+    assert compute_consistency_component(history) == 0
+
+
+def test_consistency_component_insufficient_observations() -> None:
+    history = [
+        _history_row("2025-09-30", 0.20, 0.30, 0.25),
+        _history_row("2025-12-31", 0.22, 0.31, 0.26),
+    ]
+    assert compute_consistency_component(history) == 0
 
 
 def _insert_ttm_row(
@@ -217,3 +260,18 @@ def _insert_ttm_row(
             lifecycle_class,
         ),
     )
+
+
+def _history_row(
+    as_of_date: str,
+    revenue_growth_ttm_yoy: float | None,
+    ebit_margin_ttm: float | None,
+    fcf_margin_ttm: float | None,
+) -> dict[str, float | str | None]:
+    return {
+        "ticker": "AAPL",
+        "as_of_date": as_of_date,
+        "revenue_growth_ttm_yoy": revenue_growth_ttm_yoy,
+        "ebit_margin_ttm": ebit_margin_ttm,
+        "fcf_margin_ttm": fcf_margin_ttm,
+    }

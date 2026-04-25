@@ -4,7 +4,7 @@ import argparse
 import sqlite3
 from pathlib import Path
 
-from swingmaster.fundamentals.score import FUND_SCORE_RULE_V1, run_fundamental_scoring
+from swingmaster.fundamentals.score import FUND_SCORE_RULE_V1_1, run_fundamental_scoring
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,7 +35,7 @@ def main() -> None:
             dry_run=args.dry_run,
         )
 
-    _summary(rule_id=FUND_SCORE_RULE_V1)
+    _summary(rule_id=FUND_SCORE_RULE_V1_1)
     _summary(ticker=args.ticker if args.ticker is not None else "ALL")
     _summary(rows_scored=rows_scored)
     _summary(min_score=min_score if min_score is not None else "NULL")

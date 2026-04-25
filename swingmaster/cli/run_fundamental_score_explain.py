@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from swingmaster.fundamentals.score import FUND_SCORE_RULE_V1, explain_score_components, load_ttm_rows
+from swingmaster.fundamentals.score import FUND_SCORE_RULE_V1_1, explain_score_components, load_ttm_rows
 
 
 COMPONENT_ROWS = (
@@ -16,6 +16,7 @@ COMPONENT_ROWS = (
     "leverage_component",
     "dilution_component",
     "lifecycle_component",
+    "consistency_component",
     "score_raw",
     "stored_fundamental_score",
     "recomputed_fundamental_score",
@@ -33,7 +34,7 @@ RAW_FACTOR_ROWS = (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Explain FUND_SCORE_RULE_V1 score breakdown for TTM rows")
+    parser = argparse.ArgumentParser(description="Explain FUND_SCORE_RULE_V1_1 score breakdown for TTM rows")
     parser.add_argument("--db", required=True, help="SQLite database path")
     parser.add_argument("--ticker", required=True, help="Ticker symbol")
     parser.add_argument("--limit", type=int, default=None, help="Optional latest N rows to include")
@@ -56,10 +57,30 @@ def load_rows_for_explain(conn: sqlite3.Connection, ticker: str, limit: int | No
     return rows
 
 
-def build_explain_rows(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+def build_explain_rows(
+    rows: list[sqlite3.Row],
+    history_rows: list[sqlite3.Row] | None = None,
+) -> list[dict[str, Any]]:
+    history_by_key = {
+        (str(row["ticker"]), str(row["as_of_date"])): row
+        for row in (history_rows if history_rows is not None else rows)
+    }
+    rows_by_ticker: dict[str, list[sqlite3.Row]] = {}
+    for history_row in sorted(
+        history_by_key.values(),
+        key=lambda row: (str(row["ticker"]), str(row["as_of_date"])),
+    ):
+        rows_by_ticker.setdefault(str(history_row["ticker"]), []).append(history_row)
+
     explain_rows: list[dict[str, Any]] = []
     for row in rows:
-        breakdown = explain_score_components(row)
+        ticker = str(row["ticker"])
+        ticker_history = [
+            history_row
+            for history_row in rows_by_ticker.get(ticker, [])
+            if str(history_row["as_of_date"]) <= str(row["as_of_date"])
+        ]
+        breakdown = explain_score_components(row, ticker_history)
         stored_score = row["fundamental_score"]
         recomputed_score = breakdown["fundamental_score_recomputed"]
         if stored_score is not None and abs(float(stored_score) - recomputed_score) > 0.000001:
@@ -88,7 +109,7 @@ def format_explain_output(ticker: str, explain_rows: list[dict[str, Any]]) -> st
     lines = [
         "FUNDAMENTAL SCORE EXPLAIN",
         f"ticker={ticker}",
-        f"rule_id={FUND_SCORE_RULE_V1}",
+        f"rule_id={FUND_SCORE_RULE_V1_1}",
         "",
         "SCORE COMPONENTS",
         _format_table(COMPONENT_ROWS, as_of_dates, explain_rows, component_mode=True),
@@ -148,13 +169,14 @@ def main() -> None:
     args = parse_args()
     db_path = resolve_db_path(args.db)
     with sqlite3.connect(str(db_path)) as conn:
-        rows = load_rows_for_explain(conn, args.ticker, args.limit)
-        explain_rows = build_explain_rows(rows)
+        full_history_rows = load_ttm_rows(conn, args.ticker)
+        rows = full_history_rows[-args.limit:] if args.limit is not None else full_history_rows
+        explain_rows = build_explain_rows(rows, full_history_rows)
 
     print(format_explain_output(args.ticker, explain_rows))
     first_as_of_date = explain_rows[0]["as_of_date"] if explain_rows else "NULL"
     last_as_of_date = explain_rows[-1]["as_of_date"] if explain_rows else "NULL"
-    _summary(rule_id=FUND_SCORE_RULE_V1)
+    _summary(rule_id=FUND_SCORE_RULE_V1_1)
     _summary(ticker=args.ticker)
     _summary(rows_explained=len(explain_rows))
     _summary(first_as_of_date=first_as_of_date)

@@ -8,6 +8,7 @@ from typing import Any, Iterable
 
 
 FUND_SCORE_PERCENTILE_V2_PRE = "FUND_SCORE_PERCENTILE_V2_PRE"
+FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE = "FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE"
 SECTOR_MIN_SIZE = 50
 INDUSTRY_MIN_SIZE = 20
 MIN_UNIVERSE_SIZE = 500
@@ -36,6 +37,88 @@ FACTOR_COLUMNS = {
     "dilution": "share_dilution_yoy",
 }
 HIGHER_IS_BETTER_FACTORS = {"growth", "margin", "margin_trend", "fcf", "consistency"}
+LIFECYCLE_FACTOR_MULTIPLIERS = {
+    "SCALING": {
+        "growth": 1.15,
+        "margin": 0.95,
+        "margin_trend": 1.20,
+        "fcf": 1.05,
+        "consistency": 1.10,
+        "leverage": 1.00,
+        "dilution": 1.00,
+        "adjustment": 0.0,
+    },
+    "MATURE": {
+        "growth": 0.90,
+        "margin": 1.15,
+        "margin_trend": 1.00,
+        "fcf": 1.20,
+        "consistency": 1.15,
+        "leverage": 1.05,
+        "dilution": 1.05,
+        "adjustment": 0.0,
+    },
+    "GROWTH": {
+        "growth": 1.15,
+        "margin": 1.00,
+        "margin_trend": 1.10,
+        "fcf": 1.00,
+        "consistency": 1.10,
+        "leverage": 1.00,
+        "dilution": 1.00,
+        "adjustment": 0.0,
+    },
+    "TRANSITION": {
+        "growth": 1.05,
+        "margin": 1.00,
+        "margin_trend": 1.30,
+        "fcf": 1.00,
+        "consistency": 1.15,
+        "leverage": 1.00,
+        "dilution": 1.00,
+        "adjustment": 0.0,
+    },
+    "STARTUP": {
+        "growth": 1.25,
+        "margin": 0.70,
+        "margin_trend": 1.00,
+        "fcf": 0.70,
+        "consistency": 1.15,
+        "leverage": 0.90,
+        "dilution": 1.00,
+        "adjustment": 0.0,
+    },
+    "DECLINING": {
+        "growth": 0.75,
+        "margin": 0.90,
+        "margin_trend": 0.75,
+        "fcf": 1.00,
+        "consistency": 0.85,
+        "leverage": 1.05,
+        "dilution": 1.05,
+        "adjustment": -3.0,
+    },
+    "DISTRESSED": {
+        "growth": 0.70,
+        "margin": 0.75,
+        "margin_trend": 0.70,
+        "fcf": 1.10,
+        "consistency": 0.85,
+        "leverage": 1.15,
+        "dilution": 1.10,
+        "adjustment": -4.0,
+    },
+    "UNCLASSIFIED": {
+        "growth": 1.00,
+        "margin": 1.00,
+        "margin_trend": 1.00,
+        "fcf": 1.00,
+        "consistency": 1.00,
+        "leverage": 1.00,
+        "dilution": 1.00,
+        "adjustment": 0.0,
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -50,6 +133,7 @@ class PercentileSnapshotRow:
     share_dilution_yoy: float | None
     consistency_component_lifecycle: float | None
     fundamental_score_lifecycle: float
+    lifecycle_class: str | None
     sector: str | None
     industry: str | None
 
@@ -81,7 +165,8 @@ def load_latest_percentile_snapshot(
                 t.net_debt_to_ebitda,
                 t.share_dilution_yoy,
                 t.consistency_component_lifecycle,
-                t.fundamental_score_lifecycle
+                t.fundamental_score_lifecycle,
+                t.lifecycle_class
             FROM rc_fundamental_ttm t
             JOIN (
                 SELECT ticker, MAX(as_of_date) AS as_of_date
@@ -115,6 +200,7 @@ def load_latest_percentile_snapshot(
                 share_dilution_yoy=_coerce_optional_float(row["share_dilution_yoy"]),
                 consistency_component_lifecycle=_coerce_optional_float(row["consistency_component_lifecycle"]),
                 fundamental_score_lifecycle=float(row["fundamental_score_lifecycle"]),
+                lifecycle_class=str(row["lifecycle_class"]) if row["lifecycle_class"] is not None else None,
                 sector=metadata["sector"] if metadata is not None else None,
                 industry=metadata["industry"] if metadata is not None else None,
             )
@@ -221,6 +307,26 @@ def build_percentile_rows(
                 "industry": row_result["fundamental_score_percentile_industry"],
             }
         )
+        row_result["fundamental_score_percentile_global_lifecycle_weighted"] = compute_lifecycle_weighted_percentile_score(
+            global_factor_scores,
+            snapshot_row.lifecycle_class,
+        )
+        row_result["fundamental_score_percentile_sector_lifecycle_weighted"] = compute_lifecycle_weighted_percentile_score(
+            sector_factor_scores,
+            snapshot_row.lifecycle_class,
+        )
+        row_result["fundamental_score_percentile_industry_lifecycle_weighted"] = compute_lifecycle_weighted_percentile_score(
+            industry_factor_scores,
+            snapshot_row.lifecycle_class,
+        )
+        row_result["fundamental_score_percentile_blended_lifecycle_weighted"] = compute_blended_percentile_score(
+            {
+                "global": row_result["fundamental_score_percentile_global_lifecycle_weighted"],
+                "sector": row_result["fundamental_score_percentile_sector_lifecycle_weighted"],
+                "industry": row_result["fundamental_score_percentile_industry_lifecycle_weighted"],
+            }
+        )
+        row_result["percentile_lifecycle_weight_rule"] = FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE
         percentile_rows.append(row_result)
     return percentile_rows
 
@@ -251,6 +357,36 @@ def compute_blended_percentile_score(level_scores: dict[str, float | None]) -> f
     total_weight = sum(BLENDED_WEIGHTS[level_name] for level_name, _score in available)
     weighted_sum = sum(BLENDED_WEIGHTS[level_name] * float(score) for level_name, score in available)
     return weighted_sum / total_weight
+
+
+def compute_lifecycle_weighted_percentile_score(
+    factor_percentiles: dict[str, float | None],
+    lifecycle_class: str | None,
+) -> float | None:
+    profile = LIFECYCLE_FACTOR_MULTIPLIERS.get(
+        lifecycle_class if lifecycle_class is not None else "UNCLASSIFIED",
+        LIFECYCLE_FACTOR_MULTIPLIERS["UNCLASSIFIED"],
+    )
+    available = [
+        (factor_name, percentile)
+        for factor_name, percentile in factor_percentiles.items()
+        if percentile is not None
+    ]
+    if len(available) < MIN_AVAILABLE_FACTORS:
+        return None
+    effective_weights = {
+        factor_name: FACTOR_WEIGHTS[factor_name] * float(profile[factor_name])
+        for factor_name, _percentile in available
+    }
+    total_weight = sum(effective_weights.values())
+    if total_weight == 0:
+        return None
+    weighted_sum = sum(
+        effective_weights[factor_name] * float(percentile)
+        for factor_name, percentile in available
+    )
+    score = (weighted_sum / total_weight) + float(profile["adjustment"])
+    return float(min(100.0, max(0.0, score)))
 
 
 def write_percentile_rows(conn: sqlite3.Connection, rows: Iterable[dict[str, Any]]) -> int:
@@ -293,6 +429,11 @@ def write_percentile_rows(conn: sqlite3.Connection, rows: Iterable[dict[str, Any
             fundamental_score_percentile_sector,
             fundamental_score_percentile_industry,
             fundamental_score_percentile_blended,
+            fundamental_score_percentile_global_lifecycle_weighted,
+            fundamental_score_percentile_sector_lifecycle_weighted,
+            fundamental_score_percentile_industry_lifecycle_weighted,
+            fundamental_score_percentile_blended_lifecycle_weighted,
+            percentile_lifecycle_weight_rule,
             created_at_utc
         ) VALUES (
             :ticker,
@@ -330,6 +471,11 @@ def write_percentile_rows(conn: sqlite3.Connection, rows: Iterable[dict[str, Any
             :fundamental_score_percentile_sector,
             :fundamental_score_percentile_industry,
             :fundamental_score_percentile_blended,
+            :fundamental_score_percentile_global_lifecycle_weighted,
+            :fundamental_score_percentile_sector_lifecycle_weighted,
+            :fundamental_score_percentile_industry_lifecycle_weighted,
+            :fundamental_score_percentile_blended_lifecycle_weighted,
+            :percentile_lifecycle_weight_rule,
             :created_at_utc
         )
         """,
@@ -374,6 +520,8 @@ def run_fundamental_score_percentile(
         "universe_size": len(snapshot_rows),
         "rows_computed": len(percentile_rows),
         "rows_written": rows_written,
+        "lifecycle_weighted_rows_computed": len(percentile_rows),
+        "lifecycle_weighted_rows_written": rows_written,
         "sector_count": len({row.sector for row in snapshot_rows if row.sector is not None}),
         "industry_count": len({row.industry for row in snapshot_rows if row.industry is not None}),
     }

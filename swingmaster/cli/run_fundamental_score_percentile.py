@@ -60,6 +60,8 @@ def main() -> None:
     _summary(universe_size=summary["universe_size"])
     _summary(rows_computed=summary["rows_computed"])
     _summary(rows_written=summary["rows_written"])
+    _summary(lifecycle_weighted_rows_computed=summary["lifecycle_weighted_rows_computed"])
+    _summary(lifecycle_weighted_rows_written=summary["lifecycle_weighted_rows_written"])
     _summary(sector_count=summary["sector_count"])
     _summary(industry_count=summary["industry_count"])
     _summary(dry_run=str(args.dry_run).lower())

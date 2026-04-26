@@ -35,6 +35,13 @@ TTM_COMPONENT_COLUMNS = (
     ("lifecycle_component_lifecycle", "REAL"),
     ("consistency_component_lifecycle", "REAL"),
 )
+PERCENTILE_LIFECYCLE_COLUMNS = (
+    ("fundamental_score_percentile_global_lifecycle_weighted", "REAL"),
+    ("fundamental_score_percentile_sector_lifecycle_weighted", "REAL"),
+    ("fundamental_score_percentile_industry_lifecycle_weighted", "REAL"),
+    ("fundamental_score_percentile_blended_lifecycle_weighted", "REAL"),
+    ("percentile_lifecycle_weight_rule", "TEXT"),
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -60,6 +67,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
     sql_text = migration_file.read_text(encoding="utf-8")
     conn.executescript(sql_text)
     ensure_ttm_component_columns(conn)
+    ensure_percentile_lifecycle_columns(conn)
     conn.commit()
 
 
@@ -76,6 +84,22 @@ def ensure_ttm_component_columns(conn: sqlite3.Connection) -> None:
         if column_name in existing_columns:
             continue
         conn.execute(f"ALTER TABLE rc_fundamental_ttm ADD COLUMN {column_name} {column_type}")
+        existing_columns.add(column_name)
+
+
+def ensure_percentile_lifecycle_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_score_percentile)
+            """
+        )
+    }
+    for column_name, column_type in PERCENTILE_LIFECYCLE_COLUMNS:
+        if column_name in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE rc_fundamental_score_percentile ADD COLUMN {column_name} {column_type}")
         existing_columns.add(column_name)
 
 
@@ -118,6 +142,20 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
     ]
     if missing_ttm_columns:
         raise RuntimeError(f"FUNDAMENTAL_TTM_COLUMNS_MISSING:{','.join(missing_ttm_columns)}")
+
+    percentile_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_score_percentile)
+            """
+        )
+    }
+    missing_percentile_columns = [
+        column_name for column_name, _column_type in PERCENTILE_LIFECYCLE_COLUMNS if column_name not in percentile_columns
+    ]
+    if missing_percentile_columns:
+        raise RuntimeError(f"FUNDAMENTAL_PERCENTILE_COLUMNS_MISSING:{','.join(missing_percentile_columns)}")
 
     return len(REQUIRED_TABLES)
 

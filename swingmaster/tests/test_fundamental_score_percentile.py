@@ -10,8 +10,10 @@ from swingmaster.cli.run_fundamental_migrations import run_migration
 from swingmaster.cli.run_fundamental_score_percentile import main as percentile_main
 from swingmaster.fundamentals.score_percentile import (
     FUND_SCORE_PERCENTILE_V2_PRE,
+    FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE,
     build_percentile_rows,
     compute_blended_percentile_score,
+    compute_lifecycle_weighted_percentile_score,
     compute_percentiles,
     compute_weighted_percentile_score,
     load_latest_percentile_snapshot,
@@ -186,6 +188,182 @@ def test_blended_score_renormalizes_missing_levels() -> None:
     assert blended == pytest.approx(expected)
 
 
+def test_lifecycle_multiplier_applied_correctly() -> None:
+    score = compute_lifecycle_weighted_percentile_score(
+        {
+            "growth": 100.0,
+            "margin": 50.0,
+            "margin_trend": 25.0,
+            "fcf": 80.0,
+            "consistency": 60.0,
+            "leverage": 40.0,
+            "dilution": 20.0,
+        },
+        "SCALING",
+    )
+    expected = (
+        100.0 * (0.20 * 1.15)
+        + 50.0 * (0.15 * 0.95)
+        + 25.0 * (0.10 * 1.20)
+        + 80.0 * (0.20 * 1.05)
+        + 60.0 * (0.20 * 1.10)
+        + 40.0 * (0.075 * 1.00)
+        + 20.0 * (0.075 * 1.00)
+    ) / (
+        (0.20 * 1.15)
+        + (0.15 * 0.95)
+        + (0.10 * 1.20)
+        + (0.20 * 1.05)
+        + (0.20 * 1.10)
+        + (0.075 * 1.00)
+        + (0.075 * 1.00)
+    )
+    assert score == pytest.approx(expected)
+
+
+def test_declining_adjustment_applied() -> None:
+    score = compute_lifecycle_weighted_percentile_score(
+        {
+            "growth": 50.0,
+            "margin": 50.0,
+            "margin_trend": 50.0,
+            "fcf": 50.0,
+            "consistency": 50.0,
+            "leverage": 50.0,
+            "dilution": 50.0,
+        },
+        "DECLINING",
+    )
+    assert score == pytest.approx(47.0)
+
+
+def test_distressed_adjustment_applied() -> None:
+    score = compute_lifecycle_weighted_percentile_score(
+        {
+            "growth": 50.0,
+            "margin": 50.0,
+            "margin_trend": 50.0,
+            "fcf": 50.0,
+            "consistency": 50.0,
+            "leverage": 50.0,
+            "dilution": 50.0,
+        },
+        "DISTRESSED",
+    )
+    assert score == pytest.approx(46.0)
+
+
+def test_unclassified_lifecycle_weighted_score_is_unchanged() -> None:
+    baseline = compute_weighted_percentile_score(
+        {
+            "growth": 70.0,
+            "margin": 60.0,
+            "margin_trend": 50.0,
+            "fcf": 40.0,
+            "consistency": 30.0,
+            "leverage": 20.0,
+            "dilution": 10.0,
+        }
+    )
+    lifecycle_weighted = compute_lifecycle_weighted_percentile_score(
+        {
+            "growth": 70.0,
+            "margin": 60.0,
+            "margin_trend": 50.0,
+            "fcf": 40.0,
+            "consistency": 30.0,
+            "leverage": 20.0,
+            "dilution": 10.0,
+        },
+        "UNCLASSIFIED",
+    )
+    assert lifecycle_weighted == baseline
+
+
+def test_lifecycle_weighted_score_clamps_to_range() -> None:
+    high_score = compute_lifecycle_weighted_percentile_score(
+        {
+            "growth": 100.0,
+            "margin": 100.0,
+            "margin_trend": 100.0,
+            "fcf": 100.0,
+            "consistency": 100.0,
+            "leverage": 100.0,
+            "dilution": 100.0,
+        },
+        "SCALING",
+    )
+    low_score = compute_lifecycle_weighted_percentile_score(
+        {
+            "growth": 0.0,
+            "margin": 0.0,
+            "margin_trend": 0.0,
+            "fcf": 0.0,
+            "consistency": 0.0,
+            "leverage": 0.0,
+            "dilution": 0.0,
+        },
+        "DISTRESSED",
+    )
+    assert high_score == 100.0
+    assert low_score == 0.0
+
+
+def test_missing_component_renormalization_works_for_lifecycle_weighted_score() -> None:
+    score = compute_lifecycle_weighted_percentile_score(
+        {
+            "growth": 100.0,
+            "margin": None,
+            "margin_trend": 50.0,
+            "fcf": 0.0,
+            "consistency": 100.0,
+            "leverage": None,
+            "dilution": 50.0,
+        },
+        "GROWTH",
+    )
+    expected = (
+        100.0 * (0.20 * 1.15)
+        + 50.0 * (0.10 * 1.10)
+        + 0.0 * (0.20 * 1.00)
+        + 100.0 * (0.20 * 1.10)
+        + 50.0 * (0.075 * 1.00)
+    ) / (
+        (0.20 * 1.15)
+        + (0.10 * 1.10)
+        + (0.20 * 1.00)
+        + (0.20 * 1.10)
+        + (0.075 * 1.00)
+    )
+    assert score == pytest.approx(expected)
+
+
+def test_blended_lifecycle_weighted_score_is_computed_correctly() -> None:
+    rows = [
+        _snapshot_row("AAA", "2025-12-31", lifecycle_class="MATURE", sector="Tech", industry="Software"),
+    ] * 60
+    percentile_rows = build_percentile_rows(
+        snapshot_rows=rows,
+        target_date="2025-12-31",
+        rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+        run_id="RUN1",
+        created_at_utc="2026-04-25T00:00:00Z",
+    )
+    row = percentile_rows[0]
+    assert row["percentile_lifecycle_weight_rule"] == FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE
+    assert row["fundamental_score_percentile_global_lifecycle_weighted"] is not None
+    assert row["fundamental_score_percentile_sector_lifecycle_weighted"] is not None
+    assert row["fundamental_score_percentile_industry_lifecycle_weighted"] is not None
+    expected_blended = compute_blended_percentile_score(
+        {
+            "global": row["fundamental_score_percentile_global_lifecycle_weighted"],
+            "sector": row["fundamental_score_percentile_sector_lifecycle_weighted"],
+            "industry": row["fundamental_score_percentile_industry_lifecycle_weighted"],
+        }
+    )
+    assert row["fundamental_score_percentile_blended_lifecycle_weighted"] == pytest.approx(expected_blended)
+
+
 def test_dry_run_writes_no_rows(tmp_path: Path) -> None:
     fundamentals_db_path = tmp_path / "fundamentals_dry_run.db"
     osakedata_db_path = tmp_path / "osakedata_dry_run.db"
@@ -209,6 +387,8 @@ def test_dry_run_writes_no_rows(tmp_path: Path) -> None:
         ).fetchone()[0]
         assert summary["rows_computed"] == 500
         assert summary["rows_written"] == 0
+        assert summary["lifecycle_weighted_rows_computed"] == 500
+        assert summary["lifecycle_weighted_rows_written"] == 0
         assert row_count == 0
 
 
@@ -252,6 +432,8 @@ def test_cli_writes_expected_rows_and_summary_status_ok(monkeypatch, capsys, tmp
         "SUMMARY universe_size=500",
         "SUMMARY rows_computed=500",
         "SUMMARY rows_written=500",
+        "SUMMARY lifecycle_weighted_rows_computed=500",
+        "SUMMARY lifecycle_weighted_rows_written=500",
         "SUMMARY sector_count=1",
         "SUMMARY industry_count=1",
         "SUMMARY dry_run=false",
@@ -370,6 +552,7 @@ def _snapshot_row(
     dilution: float | None = 1.0,
     consistency: float | None = 1.0,
     lifecycle_score: float = 70.0,
+    lifecycle_class: str | None = "UNCLASSIFIED",
     sector: str | None = None,
     industry: str | None = None,
 ):
@@ -386,6 +569,7 @@ def _snapshot_row(
         share_dilution_yoy=dilution,
         consistency_component_lifecycle=consistency,
         fundamental_score_lifecycle=lifecycle_score,
+        lifecycle_class=lifecycle_class,
         sector=sector,
         industry=industry,
     )

@@ -156,6 +156,11 @@ CREATE TABLE IF NOT EXISTS rc_fundamental_score_percentile (
     fundamental_score_percentile_sector REAL,
     fundamental_score_percentile_industry REAL,
     fundamental_score_percentile_blended REAL,
+    fundamental_score_percentile_global_lifecycle_weighted REAL,
+    fundamental_score_percentile_sector_lifecycle_weighted REAL,
+    fundamental_score_percentile_industry_lifecycle_weighted REAL,
+    fundamental_score_percentile_blended_lifecycle_weighted REAL,
+    percentile_lifecycle_weight_rule TEXT,
 
     created_at_utc TEXT NOT NULL,
 

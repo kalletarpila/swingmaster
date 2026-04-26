@@ -11,6 +11,7 @@ REQUIRED_TABLES = (
     "rc_fundamental_statement_raw",
     "rc_fundamental_quarterly",
     "rc_fundamental_ttm",
+    "rc_fundamental_score_percentile",
 )
 SCHEMA_VERSION = 1
 TTM_COMPONENT_COLUMNS = (

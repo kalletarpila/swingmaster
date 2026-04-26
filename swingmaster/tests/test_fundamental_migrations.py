@@ -200,3 +200,18 @@ def test_run_migration_creates_latest_ttm_view_with_component_columns(tmp_path: 
             ("AAPL", "2025-06-28", 72.0, 5.0, 4.0),
             ("MSFT", "2025-06-30", 75.0, 15.0, 4.0),
         ]
+
+
+def test_run_migration_creates_percentile_score_table(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_percentile_table.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        table_row = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table' AND name='rc_fundamental_score_percentile'
+            """
+        ).fetchone()
+        assert table_row == ("rc_fundamental_score_percentile",)

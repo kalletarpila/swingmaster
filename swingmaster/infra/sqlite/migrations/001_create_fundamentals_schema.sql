@@ -111,6 +111,69 @@ ON rc_fundamental_ttm(ticker);
 CREATE INDEX IF NOT EXISTS idx_fundamental_ttm_as_of_date
 ON rc_fundamental_ttm(as_of_date);
 
+CREATE TABLE IF NOT EXISTS rc_fundamental_score_percentile (
+    ticker TEXT NOT NULL,
+    as_of_date TEXT NOT NULL,
+    target_date TEXT NOT NULL,
+    sector TEXT,
+    industry TEXT,
+    rule_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+
+    universe_size INTEGER NOT NULL,
+    sector_size INTEGER,
+    industry_size INTEGER,
+
+    growth_pct_global REAL,
+    growth_pct_sector REAL,
+    growth_pct_industry REAL,
+
+    margin_pct_global REAL,
+    margin_pct_sector REAL,
+    margin_pct_industry REAL,
+
+    margin_trend_pct_global REAL,
+    margin_trend_pct_sector REAL,
+    margin_trend_pct_industry REAL,
+
+    fcf_pct_global REAL,
+    fcf_pct_sector REAL,
+    fcf_pct_industry REAL,
+
+    leverage_pct_global REAL,
+    leverage_pct_sector REAL,
+    leverage_pct_industry REAL,
+
+    dilution_pct_global REAL,
+    dilution_pct_sector REAL,
+    dilution_pct_industry REAL,
+
+    consistency_pct_global REAL,
+    consistency_pct_sector REAL,
+    consistency_pct_industry REAL,
+
+    fundamental_score_percentile_global REAL,
+    fundamental_score_percentile_sector REAL,
+    fundamental_score_percentile_industry REAL,
+    fundamental_score_percentile_blended REAL,
+
+    created_at_utc TEXT NOT NULL,
+
+    PRIMARY KEY (ticker, target_date, rule_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rc_fund_score_pct_target
+ON rc_fundamental_score_percentile(target_date);
+
+CREATE INDEX IF NOT EXISTS idx_rc_fund_score_pct_rule_run
+ON rc_fundamental_score_percentile(rule_id, run_id);
+
+CREATE INDEX IF NOT EXISTS idx_rc_fund_score_pct_sector
+ON rc_fundamental_score_percentile(target_date, sector);
+
+CREATE INDEX IF NOT EXISTS idx_rc_fund_score_pct_industry
+ON rc_fundamental_score_percentile(target_date, industry);
+
 CREATE VIEW IF NOT EXISTS rc_fundamental_latest AS
 SELECT t.*
 FROM rc_fundamental_ttm t

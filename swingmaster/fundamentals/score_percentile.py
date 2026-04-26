@@ -70,12 +70,12 @@ LIFECYCLE_FACTOR_MULTIPLIERS = {
     },
     "TRANSITION": {
         "growth": 1.05,
-        "margin": 1.00,
-        "margin_trend": 1.30,
-        "fcf": 1.00,
-        "consistency": 1.15,
+        "margin": 1.05,
+        "margin_trend": 1.10,
+        "fcf": 1.15,
+        "consistency": 1.20,
         "leverage": 1.00,
-        "dilution": 1.00,
+        "dilution": 1.05,
         "adjustment": 0.0,
     },
     "STARTUP": {

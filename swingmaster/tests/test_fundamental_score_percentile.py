@@ -221,6 +221,39 @@ def test_lifecycle_multiplier_applied_correctly() -> None:
     assert score == pytest.approx(expected)
 
 
+def test_transition_lifecycle_multiplier_applied_correctly() -> None:
+    score = compute_lifecycle_weighted_percentile_score(
+        {
+            "growth": 100.0,
+            "margin": 50.0,
+            "margin_trend": 25.0,
+            "fcf": 80.0,
+            "consistency": 60.0,
+            "leverage": 40.0,
+            "dilution": 20.0,
+        },
+        "TRANSITION",
+    )
+    expected = (
+        100.0 * (0.20 * 1.05)
+        + 50.0 * (0.15 * 1.05)
+        + 25.0 * (0.10 * 1.10)
+        + 80.0 * (0.20 * 1.15)
+        + 60.0 * (0.20 * 1.20)
+        + 40.0 * (0.075 * 1.00)
+        + 20.0 * (0.075 * 1.05)
+    ) / (
+        (0.20 * 1.05)
+        + (0.15 * 1.05)
+        + (0.10 * 1.10)
+        + (0.20 * 1.15)
+        + (0.20 * 1.20)
+        + (0.075 * 1.00)
+        + (0.075 * 1.05)
+    )
+    assert score == pytest.approx(expected)
+
+
 def test_declining_adjustment_applied() -> None:
     score = compute_lifecycle_weighted_percentile_score(
         {

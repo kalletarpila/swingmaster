@@ -139,6 +139,15 @@ def compute_lifecycle_score_components(
         lifecycle_component_lifecycle = baseline_components["lifecycle_component"] * 1.00
         consistency_component_lifecycle = baseline_components["consistency_component"] * 1.20
         distressed_penalty = 4.0
+    elif row["lifecycle_class"] == "TRANSITION":
+        growth_component_lifecycle = baseline_components["growth_component"] * 1.15
+        margin_component_lifecycle = baseline_components["margin_component"] * 1.05
+        margin_trend_component_lifecycle = baseline_components["margin_trend_component"] * 1.35
+        fcf_component_lifecycle = baseline_components["fcf_component"] * 1.00
+        leverage_component_lifecycle = baseline_components["leverage_component"] * 1.00
+        dilution_component_lifecycle = baseline_components["dilution_component"] * 1.00
+        lifecycle_component_lifecycle = baseline_components["lifecycle_component"] * 1.00
+        consistency_component_lifecycle = baseline_components["consistency_component"] * 1.20
     else:
         growth_component_lifecycle = baseline_components["growth_component"]
         margin_component_lifecycle = baseline_components["margin_component"]

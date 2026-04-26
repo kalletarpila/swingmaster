@@ -364,6 +364,44 @@ def test_distressed_additive_penalty(tmp_path: Path) -> None:
         assert row[7] == "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE"
 
 
+def test_transition_lifecycle_weighting(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_lifecycle_transition_weighting.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-03-31", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "TRANSITION")
+        _insert_ttm_row(conn, "AAPL", "2025-06-30", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "TRANSITION")
+        _insert_ttm_row(conn, "AAPL", "2025-09-30", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "TRANSITION")
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "TRANSITION")
+        conn.commit()
+
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        row = conn.execute(
+            """
+            SELECT
+                fundamental_score,
+                fundamental_score_lifecycle,
+                growth_component,
+                growth_component_lifecycle,
+                margin_trend_component,
+                margin_trend_component_lifecycle,
+                consistency_component,
+                consistency_component_lifecycle,
+                score_rule_lifecycle
+            FROM rc_fundamental_ttm
+            WHERE ticker='AAPL' AND as_of_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row[0] == 73.0
+        assert row[1] == pytest.approx(80.9)
+        assert row[2] == 12.0
+        assert row[3] == pytest.approx(13.8)
+        assert row[4] == 10.0
+        assert row[5] == pytest.approx(13.5)
+        assert row[6] == 10.0
+        assert row[7] == pytest.approx(12.0)
+        assert row[8] == "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE"
+
+
 def test_score_startup(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_startup.db"
     run_migration(db_path)

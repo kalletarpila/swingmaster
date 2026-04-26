@@ -57,17 +57,32 @@ def run_bootstrap_raw(db_path: Path, ticker: str, run_id: str, dry_run: bool) ->
 def main() -> None:
     args = parse_args()
     db_path = resolve_db_path(args.db)
-    statements_loaded, rows_written = run_bootstrap_raw(
-        db_path=db_path,
-        ticker=args.ticker,
-        run_id=args.run_id,
-        dry_run=args.dry_run,
-    )
+    statements = fetch_quarterly_statements_raw(args.ticker)
+    validate_non_empty_statements(statements)
+    income_periods = len(statements["income"].columns)
+    balance_periods = len(statements["balance"].columns)
+    cashflow_periods = len(statements["cashflow"].columns)
+    statements_loaded = len(SUPPORTED_STATEMENT_TYPES)
+    rows_written = sum(count_statement_rows(statements[statement_type]) for statement_type in SUPPORTED_STATEMENT_TYPES)
+    if not args.dry_run:
+        with sqlite3.connect(str(db_path)) as conn:
+            for statement_type in SUPPORTED_STATEMENT_TYPES:
+                insert_raw_statement_rows(
+                    conn=conn,
+                    ticker=args.ticker,
+                    statement_type=statement_type,
+                    dataframe=statements[statement_type],
+                    run_id=args.run_id,
+                )
+            conn.commit()
     _summary(ticker=args.ticker)
     _summary(statements_loaded=statements_loaded)
     _summary(rows_written=rows_written)
     _summary(db_path=str(db_path))
     _summary(run_id=args.run_id)
+    _summary(income_periods=income_periods)
+    _summary(balance_periods=balance_periods)
+    _summary(cashflow_periods=cashflow_periods)
     _summary(status="dry-run" if args.dry_run else "ok")
 
 

@@ -242,6 +242,46 @@ def test_lifecycle_score_differs_from_baseline_when_lifecycle_is_scaling(tmp_pat
         )
 
 
+def test_startup_lifecycle_weighting(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_lifecycle_startup_weighting.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-03-31", 0.30, 0.01, 0.02, 0.01, 3.0, 0.01, "STARTUP")
+        _insert_ttm_row(conn, "AAPL", "2025-06-30", 0.30, 0.01, 0.02, 0.01, 3.0, 0.01, "STARTUP")
+        _insert_ttm_row(conn, "AAPL", "2025-09-30", 0.30, 0.01, 0.02, 0.01, 3.0, 0.01, "STARTUP")
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 0.30, 0.01, 0.02, 0.01, 3.0, 0.01, "STARTUP")
+        conn.commit()
+
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        row = conn.execute(
+            """
+            SELECT
+                fundamental_score,
+                fundamental_score_lifecycle,
+                growth_component,
+                growth_component_lifecycle,
+                margin_component,
+                margin_component_lifecycle,
+                consistency_component,
+                consistency_component_lifecycle,
+                score_rule_lifecycle
+            FROM rc_fundamental_ttm
+            WHERE ticker='AAPL' AND as_of_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row[0] == 47.0
+        assert row[1] == pytest.approx(49.1)
+        assert row[2:] == (
+            15.0,
+            21.0,
+            4.0,
+            2.4,
+            10.0,
+            11.5,
+            "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE",
+        )
+
+
 def test_score_startup(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_startup.db"
     run_migration(db_path)

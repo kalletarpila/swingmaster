@@ -282,6 +282,52 @@ def test_startup_lifecycle_weighting(tmp_path: Path) -> None:
         )
 
 
+def test_distressed_lifecycle_weighting(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_lifecycle_distressed_weighting.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-03-31", 0.30, 0.16, 0.02, 0.10, 1.0, 0.01, "DISTRESSED")
+        _insert_ttm_row(conn, "AAPL", "2025-06-30", 0.30, 0.16, 0.02, 0.10, 1.0, 0.01, "DISTRESSED")
+        _insert_ttm_row(conn, "AAPL", "2025-09-30", 0.30, 0.16, 0.02, 0.10, 1.0, 0.01, "DISTRESSED")
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 0.30, 0.16, 0.02, 0.10, 1.0, 0.01, "DISTRESSED")
+        conn.commit()
+
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        row = conn.execute(
+            """
+            SELECT
+                fundamental_score,
+                fundamental_score_lifecycle,
+                growth_component,
+                growth_component_lifecycle,
+                margin_component,
+                margin_component_lifecycle,
+                leverage_component,
+                leverage_component_lifecycle,
+                fcf_component,
+                fcf_component_lifecycle,
+                consistency_component,
+                consistency_component_lifecycle,
+                score_rule_lifecycle
+            FROM rc_fundamental_ttm
+            WHERE ticker='AAPL' AND as_of_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row[0] == 66.0
+        assert row[1] == pytest.approx(64.5)
+        assert row[2] == 15.0
+        assert row[3] == pytest.approx(10.5)
+        assert row[4] == 12.0
+        assert row[5] == pytest.approx(7.2)
+        assert row[6] == 12.0
+        assert row[7] == pytest.approx(16.8)
+        assert row[8] == 12.0
+        assert row[9] == pytest.approx(15.0)
+        assert row[10] == 10.0
+        assert row[11] == pytest.approx(12.0)
+        assert row[12] == "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE"
+
+
 def test_score_startup(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_startup.db"
     run_migration(db_path)

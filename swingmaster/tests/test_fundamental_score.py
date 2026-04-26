@@ -402,6 +402,76 @@ def test_transition_lifecycle_weighting(tmp_path: Path) -> None:
         assert row[8] == "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE"
 
 
+def test_declining_lifecycle_weighting_and_penalty(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_lifecycle_declining_weighting.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-03-31", 0.30, 0.16, 0.02, 0.10, 1.0, 0.01, "DECLINING")
+        _insert_ttm_row(conn, "AAPL", "2025-06-30", 0.30, 0.16, 0.02, 0.10, 1.0, 0.01, "DECLINING")
+        _insert_ttm_row(conn, "AAPL", "2025-09-30", 0.30, 0.16, 0.02, 0.10, 1.0, 0.01, "DECLINING")
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 0.30, 0.16, 0.02, 0.10, 1.0, 0.01, "DECLINING")
+        conn.commit()
+
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        row = conn.execute(
+            """
+            SELECT
+                fundamental_score,
+                fundamental_score_lifecycle,
+                growth_component_lifecycle,
+                margin_trend_component_lifecycle,
+                consistency_component_lifecycle,
+                score_rule_lifecycle
+            FROM rc_fundamental_ttm
+            WHERE ticker='AAPL' AND as_of_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row[0] == 71.0
+        assert row[1] == pytest.approx(57.65)
+        assert row[2] == pytest.approx(9.75)
+        assert row[3] == pytest.approx(7.0)
+        assert row[4] == pytest.approx(8.0)
+        assert row[5] == "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE"
+
+
+def test_growth_lifecycle_weighting(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_lifecycle_growth_weighting.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-03-31", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "GROWTH")
+        _insert_ttm_row(conn, "AAPL", "2025-06-30", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "GROWTH")
+        _insert_ttm_row(conn, "AAPL", "2025-09-30", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "GROWTH")
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "GROWTH")
+        conn.commit()
+
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        row = conn.execute(
+            """
+            SELECT
+                fundamental_score,
+                fundamental_score_lifecycle,
+                growth_component,
+                growth_component_lifecycle,
+                margin_component,
+                margin_component_lifecycle,
+                consistency_component,
+                consistency_component_lifecycle,
+                score_rule_lifecycle
+            FROM rc_fundamental_ttm
+            WHERE ticker='AAPL' AND as_of_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row[0] == 75.0
+        assert row[1] == pytest.approx(78.8)
+        assert row[2] == 12.0
+        assert row[3] == pytest.approx(13.2)
+        assert row[4] == 12.0
+        assert row[5] == pytest.approx(12.6)
+        assert row[6] == 10.0
+        assert row[7] == pytest.approx(11.0)
+        assert row[8] == "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE"
+
+
 def test_score_startup(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_startup.db"
     run_migration(db_path)

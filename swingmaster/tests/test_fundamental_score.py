@@ -127,14 +127,14 @@ def test_score_writes_all_component_columns_and_rule(tmp_path: Path) -> None:
             10.0,
             "FUND_SCORE_RULE_V1_1",
             100.0,
+            14.25,
+            16.5,
             15.0,
-            15.0,
-            15.0,
-            15.0,
-            15.0,
-            10.0,
+            17.25,
+            15.75,
+            11.0,
             5.0,
-            10.0,
+            11.5,
             "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE",
         )
 
@@ -170,7 +170,7 @@ def test_component_column_sum_equals_fundamental_score(tmp_path: Path) -> None:
         assert row == (76.0, 76.0, "FUND_SCORE_RULE_V1_1")
 
 
-def test_lifecycle_score_equals_baseline_when_lifecycle_is_not_scaling(tmp_path: Path) -> None:
+def test_lifecycle_score_changes_for_mature_overlay(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_lifecycle_same.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
@@ -195,7 +195,13 @@ def test_lifecycle_score_equals_baseline_when_lifecycle_is_not_scaling(tmp_path:
             WHERE ticker='AAPL' AND as_of_date='2025-12-31'
             """
         ).fetchone()
-        assert row == (79.0, 79.0, 12.0, 12.0, 6.0, 6.0, "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE")
+        assert row[0] == 79.0
+        assert row[1] == pytest.approx(83.4)
+        assert row[2] == 12.0
+        assert row[3] == pytest.approx(11.4)
+        assert row[4] == 6.0
+        assert row[5] == pytest.approx(6.9)
+        assert row[6] == "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE"
 
 
 def test_lifecycle_score_differs_from_baseline_when_lifecycle_is_scaling(tmp_path: Path) -> None:
@@ -470,6 +476,52 @@ def test_growth_lifecycle_weighting(tmp_path: Path) -> None:
         assert row[6] == 10.0
         assert row[7] == pytest.approx(11.0)
         assert row[8] == "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE"
+
+
+def test_mature_lifecycle_weighting(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_lifecycle_mature_weighting.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-03-31", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "MATURE")
+        _insert_ttm_row(conn, "AAPL", "2025-06-30", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "MATURE")
+        _insert_ttm_row(conn, "AAPL", "2025-09-30", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "MATURE")
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 0.20, 0.16, 0.02, 0.10, 1.0, 0.01, "MATURE")
+        conn.commit()
+
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        row = conn.execute(
+            """
+            SELECT
+                fundamental_score,
+                fundamental_score_lifecycle,
+                growth_component,
+                growth_component_lifecycle,
+                margin_component,
+                margin_component_lifecycle,
+                fcf_component,
+                fcf_component_lifecycle,
+                dilution_component,
+                dilution_component_lifecycle,
+                consistency_component,
+                consistency_component_lifecycle,
+                score_rule_lifecycle
+            FROM rc_fundamental_ttm
+            WHERE ticker='AAPL' AND as_of_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row[0] == 78.0
+        assert row[1] == pytest.approx(83.0)
+        assert row[2] == 12.0
+        assert row[3] == pytest.approx(11.4)
+        assert row[4] == 12.0
+        assert row[5] == pytest.approx(13.2)
+        assert row[6] == 12.0
+        assert row[7] == pytest.approx(13.8)
+        assert row[8] == 5.0
+        assert row[9] == pytest.approx(5.5)
+        assert row[10] == 10.0
+        assert row[11] == pytest.approx(11.5)
+        assert row[12] == "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE"
 
 
 def test_score_startup(tmp_path: Path) -> None:

@@ -81,6 +81,25 @@ CREATE TABLE IF NOT EXISTS rc_fundamental_ttm (
     net_debt_to_ebitda REAL,
     share_dilution_yoy REAL,
     lifecycle_class TEXT,
+    growth_component REAL,
+    margin_component REAL,
+    margin_trend_component REAL,
+    fcf_component REAL,
+    leverage_component REAL,
+    dilution_component REAL,
+    lifecycle_component REAL,
+    consistency_component REAL,
+    score_rule TEXT,
+    fundamental_score_lifecycle REAL,
+    score_rule_lifecycle TEXT,
+    growth_component_lifecycle REAL,
+    margin_component_lifecycle REAL,
+    margin_trend_component_lifecycle REAL,
+    fcf_component_lifecycle REAL,
+    leverage_component_lifecycle REAL,
+    dilution_component_lifecycle REAL,
+    lifecycle_component_lifecycle REAL,
+    consistency_component_lifecycle REAL,
     fundamental_score REAL,
     run_id TEXT NOT NULL,
     PRIMARY KEY (ticker, as_of_date)
@@ -91,6 +110,17 @@ ON rc_fundamental_ttm(ticker);
 
 CREATE INDEX IF NOT EXISTS idx_fundamental_ttm_as_of_date
 ON rc_fundamental_ttm(as_of_date);
+
+CREATE VIEW IF NOT EXISTS rc_fundamental_latest AS
+SELECT t.*
+FROM rc_fundamental_ttm t
+JOIN (
+    SELECT ticker, MAX(as_of_date) AS as_of_date
+    FROM rc_fundamental_ttm
+    GROUP BY ticker
+) latest
+  ON t.ticker = latest.ticker
+ AND t.as_of_date = latest.as_of_date;
 
 INSERT INTO rc_fundamental_schema_version (version, applied_at_utc)
 SELECT 1, CURRENT_TIMESTAMP

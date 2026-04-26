@@ -13,6 +13,27 @@ REQUIRED_TABLES = (
     "rc_fundamental_ttm",
 )
 SCHEMA_VERSION = 1
+TTM_COMPONENT_COLUMNS = (
+    ("growth_component", "REAL"),
+    ("margin_component", "REAL"),
+    ("margin_trend_component", "REAL"),
+    ("fcf_component", "REAL"),
+    ("leverage_component", "REAL"),
+    ("dilution_component", "REAL"),
+    ("lifecycle_component", "REAL"),
+    ("consistency_component", "REAL"),
+    ("score_rule", "TEXT"),
+    ("fundamental_score_lifecycle", "REAL"),
+    ("score_rule_lifecycle", "TEXT"),
+    ("growth_component_lifecycle", "REAL"),
+    ("margin_component_lifecycle", "REAL"),
+    ("margin_trend_component_lifecycle", "REAL"),
+    ("fcf_component_lifecycle", "REAL"),
+    ("leverage_component_lifecycle", "REAL"),
+    ("dilution_component_lifecycle", "REAL"),
+    ("lifecycle_component_lifecycle", "REAL"),
+    ("consistency_component_lifecycle", "REAL"),
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,7 +58,24 @@ def resolve_db_path(db_arg: str) -> Path:
 def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) -> None:
     sql_text = migration_file.read_text(encoding="utf-8")
     conn.executescript(sql_text)
+    ensure_ttm_component_columns(conn)
     conn.commit()
+
+
+def ensure_ttm_component_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_ttm)
+            """
+        )
+    }
+    for column_name, column_type in TTM_COMPONENT_COLUMNS:
+        if column_name in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE rc_fundamental_ttm ADD COLUMN {column_name} {column_type}")
+        existing_columns.add(column_name)
 
 
 def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
@@ -65,6 +103,20 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
     ).fetchone()
     if version_row is None:
         raise RuntimeError(f"FUNDAMENTAL_SCHEMA_VERSION_MISSING:{SCHEMA_VERSION}")
+
+    ttm_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_ttm)
+            """
+        )
+    }
+    missing_ttm_columns = [
+        column_name for column_name, _column_type in TTM_COMPONENT_COLUMNS if column_name not in ttm_columns
+    ]
+    if missing_ttm_columns:
+        raise RuntimeError(f"FUNDAMENTAL_TTM_COLUMNS_MISSING:{','.join(missing_ttm_columns)}")
 
     return len(REQUIRED_TABLES)
 

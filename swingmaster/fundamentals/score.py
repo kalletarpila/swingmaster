@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 FUND_SCORE_RULE_V1_1 = "FUND_SCORE_RULE_V1_1"
 FUND_SCORE_RULE_V1 = FUND_SCORE_RULE_V1_1
+FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE = "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE"
 
 
 def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.Row]:
@@ -102,6 +103,54 @@ def explain_score_components(
         "consistency_component": consistency_component,
         "score_raw": float(score_raw),
         "fundamental_score_recomputed": fundamental_score_recomputed,
+    }
+
+
+def compute_lifecycle_score_components(
+    row: Mapping[str, Any],
+    baseline_components: Mapping[str, float],
+) -> dict[str, float | str]:
+    if row["lifecycle_class"] == "SCALING":
+        growth_component_lifecycle = baseline_components["growth_component"] * 1.25
+        margin_component_lifecycle = baseline_components["margin_component"] * 0.90
+        margin_trend_component_lifecycle = baseline_components["margin_trend_component"] * 1.25
+        fcf_component_lifecycle = baseline_components["fcf_component"] * 0.90
+        leverage_component_lifecycle = baseline_components["leverage_component"]
+        dilution_component_lifecycle = baseline_components["dilution_component"]
+        lifecycle_component_lifecycle = baseline_components["lifecycle_component"]
+        consistency_component_lifecycle = baseline_components["consistency_component"] * 1.25
+    else:
+        growth_component_lifecycle = baseline_components["growth_component"]
+        margin_component_lifecycle = baseline_components["margin_component"]
+        margin_trend_component_lifecycle = baseline_components["margin_trend_component"]
+        fcf_component_lifecycle = baseline_components["fcf_component"]
+        leverage_component_lifecycle = baseline_components["leverage_component"]
+        dilution_component_lifecycle = baseline_components["dilution_component"]
+        lifecycle_component_lifecycle = baseline_components["lifecycle_component"]
+        consistency_component_lifecycle = baseline_components["consistency_component"]
+
+    score_raw_lifecycle = (
+        growth_component_lifecycle
+        + margin_component_lifecycle
+        + margin_trend_component_lifecycle
+        + fcf_component_lifecycle
+        + leverage_component_lifecycle
+        + dilution_component_lifecycle
+        + lifecycle_component_lifecycle
+        + consistency_component_lifecycle
+    )
+    fundamental_score_lifecycle = float(min(100, max(0, score_raw_lifecycle)))
+    return {
+        "growth_component_lifecycle": float(growth_component_lifecycle),
+        "margin_component_lifecycle": float(margin_component_lifecycle),
+        "margin_trend_component_lifecycle": float(margin_trend_component_lifecycle),
+        "fcf_component_lifecycle": float(fcf_component_lifecycle),
+        "leverage_component_lifecycle": float(leverage_component_lifecycle),
+        "dilution_component_lifecycle": float(dilution_component_lifecycle),
+        "lifecycle_component_lifecycle": float(lifecycle_component_lifecycle),
+        "consistency_component_lifecycle": float(consistency_component_lifecycle),
+        "fundamental_score_lifecycle": fundamental_score_lifecycle,
+        "score_rule_lifecycle": FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE,
     }
 
 
@@ -262,20 +311,66 @@ def update_scores(
     rows: list[sqlite3.Row],
     dry_run: bool,
 ) -> tuple[int, float | None, float | None, float | None]:
-    score_updates: list[tuple[float, str, str]] = []
+    score_updates: list[
+        tuple[
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            str,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            str,
+            str,
+            str,
+        ]
+    ] = []
     history_by_ticker: dict[str, list[sqlite3.Row]] = {}
     for row in rows:
         ticker = str(row["ticker"])
         ticker_history = history_by_ticker.setdefault(ticker, [])
         ticker_history.append(row)
+        explained_components = explain_score_components(row, ticker_history)
+        lifecycle_components = compute_lifecycle_score_components(row, explained_components)
         score_updates.append(
             (
-                calculate_fundamental_score(row, ticker_history),
+                explained_components["fundamental_score_recomputed"],
+                explained_components["growth_component"],
+                explained_components["margin_component"],
+                explained_components["margin_trend_component"],
+                explained_components["fcf_component"],
+                explained_components["leverage_component"],
+                explained_components["dilution_component"],
+                explained_components["lifecycle_component"],
+                explained_components["consistency_component"],
+                FUND_SCORE_RULE_V1_1,
+                lifecycle_components["fundamental_score_lifecycle"],
+                lifecycle_components["growth_component_lifecycle"],
+                lifecycle_components["margin_component_lifecycle"],
+                lifecycle_components["margin_trend_component_lifecycle"],
+                lifecycle_components["fcf_component_lifecycle"],
+                lifecycle_components["leverage_component_lifecycle"],
+                lifecycle_components["dilution_component_lifecycle"],
+                lifecycle_components["lifecycle_component_lifecycle"],
+                lifecycle_components["consistency_component_lifecycle"],
+                str(lifecycle_components["score_rule_lifecycle"]),
                 ticker,
                 str(row["as_of_date"]),
             )
         )
-    scores = [score for score, _, _ in score_updates]
+    scores = [score for score, *_rest in score_updates]
     min_score = min(scores) if scores else None
     max_score = max(scores) if scores else None
     avg_score = round(mean(scores), 4) if scores else None
@@ -284,7 +379,26 @@ def update_scores(
         conn.executemany(
             """
             UPDATE rc_fundamental_ttm
-            SET fundamental_score = ?
+            SET fundamental_score = ?,
+                growth_component = ?,
+                margin_component = ?,
+                margin_trend_component = ?,
+                fcf_component = ?,
+                leverage_component = ?,
+                dilution_component = ?,
+                lifecycle_component = ?,
+                consistency_component = ?,
+                score_rule = ?,
+                fundamental_score_lifecycle = ?,
+                growth_component_lifecycle = ?,
+                margin_component_lifecycle = ?,
+                margin_trend_component_lifecycle = ?,
+                fcf_component_lifecycle = ?,
+                leverage_component_lifecycle = ?,
+                dilution_component_lifecycle = ?,
+                lifecycle_component_lifecycle = ?,
+                consistency_component_lifecycle = ?,
+                score_rule_lifecycle = ?
             WHERE ticker = ? AND as_of_date = ?
             """,
             score_updates,

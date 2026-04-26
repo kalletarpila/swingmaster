@@ -33,6 +33,215 @@ def test_score_mature_high_quality(tmp_path: Path) -> None:
         assert score == 64.0
 
 
+def test_score_writes_all_component_columns_and_rule(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_components.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(
+            conn,
+            ticker="AAPL",
+            as_of_date="2025-03-31",
+            revenue_growth_ttm_yoy=0.40,
+            ebit_margin_ttm=0.30,
+            ebit_margin_trend_4q=0.05,
+            fcf_margin_ttm=0.25,
+            net_debt_to_ebitda=-0.10,
+            share_dilution_yoy=-0.03,
+            lifecycle_class="MATURE",
+        )
+        _insert_ttm_row(
+            conn,
+            ticker="AAPL",
+            as_of_date="2025-06-30",
+            revenue_growth_ttm_yoy=0.40,
+            ebit_margin_ttm=0.30,
+            ebit_margin_trend_4q=0.05,
+            fcf_margin_ttm=0.25,
+            net_debt_to_ebitda=-0.10,
+            share_dilution_yoy=-0.03,
+            lifecycle_class="MATURE",
+        )
+        _insert_ttm_row(
+            conn,
+            ticker="AAPL",
+            as_of_date="2025-09-30",
+            revenue_growth_ttm_yoy=0.40,
+            ebit_margin_ttm=0.30,
+            ebit_margin_trend_4q=0.05,
+            fcf_margin_ttm=0.25,
+            net_debt_to_ebitda=-0.10,
+            share_dilution_yoy=-0.03,
+            lifecycle_class="MATURE",
+        )
+        _insert_ttm_row(
+            conn,
+            ticker="AAPL",
+            as_of_date="2025-12-31",
+            revenue_growth_ttm_yoy=0.40,
+            ebit_margin_ttm=0.30,
+            ebit_margin_trend_4q=0.05,
+            fcf_margin_ttm=0.25,
+            net_debt_to_ebitda=-0.10,
+            share_dilution_yoy=-0.03,
+            lifecycle_class="MATURE",
+        )
+        conn.commit()
+
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        row = conn.execute(
+            """
+            SELECT
+                fundamental_score,
+                growth_component,
+                margin_component,
+                margin_trend_component,
+                fcf_component,
+                leverage_component,
+                dilution_component,
+                lifecycle_component,
+                consistency_component,
+                score_rule,
+                fundamental_score_lifecycle,
+                growth_component_lifecycle,
+                margin_component_lifecycle,
+                margin_trend_component_lifecycle,
+                fcf_component_lifecycle,
+                leverage_component_lifecycle,
+                dilution_component_lifecycle,
+                lifecycle_component_lifecycle,
+                consistency_component_lifecycle,
+                score_rule_lifecycle
+            FROM rc_fundamental_ttm
+            WHERE ticker='AAPL' AND as_of_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row == (
+            100.0,
+            15.0,
+            15.0,
+            15.0,
+            15.0,
+            15.0,
+            10.0,
+            5.0,
+            10.0,
+            "FUND_SCORE_RULE_V1_1",
+            100.0,
+            15.0,
+            15.0,
+            15.0,
+            15.0,
+            15.0,
+            10.0,
+            5.0,
+            10.0,
+            "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE",
+        )
+
+
+def test_component_column_sum_equals_fundamental_score(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_component_sum.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-03-31", 0.20, 0.20, 0.02, 0.10, 1.0, 0.01, "GROWTH")
+        _insert_ttm_row(conn, "AAPL", "2025-06-30", 0.22, 0.21, 0.02, 0.11, 1.0, 0.01, "GROWTH")
+        _insert_ttm_row(conn, "AAPL", "2025-09-30", 0.24, 0.22, 0.03, 0.12, 1.0, 0.01, "GROWTH")
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 0.28, 0.24, 0.05, 0.14, 1.0, 0.01, "GROWTH")
+        conn.commit()
+
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        row = conn.execute(
+            """
+            SELECT
+                fundamental_score,
+                growth_component
+                + margin_component
+                + margin_trend_component
+                + fcf_component
+                + leverage_component
+                + dilution_component
+                + lifecycle_component
+                + consistency_component,
+                score_rule
+            FROM rc_fundamental_ttm
+            WHERE ticker='AAPL' AND as_of_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row == (76.0, 76.0, "FUND_SCORE_RULE_V1_1")
+
+
+def test_lifecycle_score_equals_baseline_when_lifecycle_is_not_scaling(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_lifecycle_same.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-03-31", 0.20, 0.20, 0.02, 0.10, 1.0, 0.01, "MATURE")
+        _insert_ttm_row(conn, "AAPL", "2025-06-30", 0.22, 0.21, 0.02, 0.11, 1.0, 0.01, "MATURE")
+        _insert_ttm_row(conn, "AAPL", "2025-09-30", 0.24, 0.22, 0.03, 0.12, 1.0, 0.01, "MATURE")
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 0.28, 0.24, 0.05, 0.14, 1.0, 0.01, "MATURE")
+        conn.commit()
+
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        row = conn.execute(
+            """
+            SELECT
+                fundamental_score,
+                fundamental_score_lifecycle,
+                growth_component,
+                growth_component_lifecycle,
+                consistency_component,
+                consistency_component_lifecycle,
+                score_rule_lifecycle
+            FROM rc_fundamental_ttm
+            WHERE ticker='AAPL' AND as_of_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row == (79.0, 79.0, 12.0, 12.0, 6.0, 6.0, "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE")
+
+
+def test_lifecycle_score_differs_from_baseline_when_lifecycle_is_scaling(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_lifecycle_scaling.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-03-31", 0.20, 0.20, 0.02, 0.10, 1.0, 0.01, "SCALING")
+        _insert_ttm_row(conn, "AAPL", "2025-06-30", 0.22, 0.21, 0.02, 0.11, 1.0, 0.01, "SCALING")
+        _insert_ttm_row(conn, "AAPL", "2025-09-30", 0.24, 0.22, 0.03, 0.12, 1.0, 0.01, "SCALING")
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 0.28, 0.24, 0.05, 0.14, 1.0, 0.01, "SCALING")
+        conn.commit()
+
+        run_fundamental_scoring(conn, "AAPL", dry_run=False)
+        row = conn.execute(
+            """
+            SELECT
+                fundamental_score,
+                fundamental_score_lifecycle,
+                growth_component_lifecycle,
+                margin_component_lifecycle,
+                margin_trend_component_lifecycle,
+                fcf_component_lifecycle,
+                leverage_component_lifecycle,
+                dilution_component_lifecycle,
+                lifecycle_component_lifecycle,
+                consistency_component_lifecycle,
+                score_rule_lifecycle
+            FROM rc_fundamental_ttm
+            WHERE ticker='AAPL' AND as_of_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row == (
+            78.0,
+            83.85,
+            15.0,
+            10.8,
+            18.75,
+            10.8,
+            12.0,
+            5.0,
+            4.0,
+            7.5,
+            "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE",
+        )
+
+
 def test_score_startup(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_startup.db"
     run_migration(db_path)
@@ -62,8 +271,15 @@ def test_extreme_share_dilution_is_treated_as_none_for_scoring(tmp_path: Path) -
         _insert_ttm_row(conn, "AAPL", "2025-12-31", None, 0.32, None, 0.28, 0.30, 2.78, "MATURE")
         conn.commit()
         run_fundamental_scoring(conn, "AAPL", dry_run=False)
-        score = conn.execute("SELECT fundamental_score FROM rc_fundamental_ttm").fetchone()[0]
+        score, dilution_component, raw_share_dilution_yoy = conn.execute(
+            """
+            SELECT fundamental_score, dilution_component, share_dilution_yoy
+            FROM rc_fundamental_ttm
+            """
+        ).fetchone()
         assert score == 64.0
+        assert dilution_component == 5.0
+        assert raw_share_dilution_yoy == 2.78
 
 
 def test_score_max_score_case(tmp_path: Path) -> None:

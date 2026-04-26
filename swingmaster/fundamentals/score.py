@@ -110,6 +110,7 @@ def compute_lifecycle_score_components(
     row: Mapping[str, Any],
     baseline_components: Mapping[str, float],
 ) -> dict[str, float | str]:
+    distressed_penalty = 0.0
     if row["lifecycle_class"] == "SCALING":
         growth_component_lifecycle = baseline_components["growth_component"] * 1.25
         margin_component_lifecycle = baseline_components["margin_component"] * 0.90
@@ -137,6 +138,7 @@ def compute_lifecycle_score_components(
         dilution_component_lifecycle = baseline_components["dilution_component"] * 1.10
         lifecycle_component_lifecycle = baseline_components["lifecycle_component"] * 1.00
         consistency_component_lifecycle = baseline_components["consistency_component"] * 1.20
+        distressed_penalty = 4.0
     else:
         growth_component_lifecycle = baseline_components["growth_component"]
         margin_component_lifecycle = baseline_components["margin_component"]
@@ -157,6 +159,7 @@ def compute_lifecycle_score_components(
         + lifecycle_component_lifecycle
         + consistency_component_lifecycle
     )
+    score_raw_lifecycle -= distressed_penalty
     fundamental_score_lifecycle = float(min(100, max(0, score_raw_lifecycle)))
     return {
         "growth_component_lifecycle": float(growth_component_lifecycle),

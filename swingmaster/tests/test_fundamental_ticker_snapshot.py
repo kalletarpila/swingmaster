@@ -174,6 +174,7 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
     assert "revenue_growth_ttm_yoy;0.50;0.60;0.70;0.80" in output
     assert "fundamental_score_percentile_blended;80.10;80.20;80.30;80.40" in output
     assert "fundamental_score_percentile_blended_lifecycle_weighted;80.60;80.70;80.80;80.90" in output
+    assert "percentile_rank_bucket;Top 20%;Top 20%;Top 20%;Top 20%" in output
     assert "percentile_lifecycle_delta;0.50;0.50;0.50;0.50" in output
     assert "growth_pct_global;90.00;90.00;90.00;90.00" in output
     assert "revenue;1000.00;1100.00;1200.00;1300.00" in output
@@ -181,11 +182,11 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
     assert "fcf_margin_trend_delta_4q;;;;0.03" in output
     assert "shares_outstanding_delta_4q;;;;1.50" in output
     assert "net_debt_to_ebitda_delta_4q;;;;-1.20" in output
-    assert "sector_rank_position;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2 (Technology)" in output
-    assert "industry_rank_position;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2 (Electrical Equipment)" in output
     assert "percentile_delta_4q;;;;0.80" in output
     assert "score_delta_4q;;;;0.20" in output
     assert "lifecycle_transition_4q;;;;SCALING to SCALING" in output
+    assert "sector_rank_position;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2 (Technology)" in output
+    assert "industry_rank_position;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2 (Electrical Equipment)" in output
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,
@@ -211,6 +212,7 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
     cli_csv_content = cli_csv_path.read_text(encoding="utf-8")
     assert "fundamental_score_v1;73,00;71,00;67,00;74,00" in cli_csv_content
     assert "growth_component (max 15p);15,00;15,00;15,00;15,00" in cli_csv_content
+    assert "percentile_rank_bucket;Top 20%;Top 20%;Top 20%;Top 20%" in cli_csv_content
     assert "percentile_delta_4q;;;;0,80" in cli_csv_content
 
 

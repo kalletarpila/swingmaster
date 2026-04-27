@@ -48,6 +48,7 @@ SECTIONED_METRICS: tuple[str | None, ...] = (
     "fundamental_score_percentile_industry",
     "fundamental_score_percentile_blended",
     "fundamental_score_percentile_blended_lifecycle_weighted",
+    "percentile_rank_bucket",
     "percentile_lifecycle_delta",
     None,
     "growth_pct_global",
@@ -69,12 +70,12 @@ SECTIONED_METRICS: tuple[str | None, ...] = (
     "shares_outstanding_delta_4q",
     "net_debt_to_ebitda_delta_4q",
     None,
-    "sector_rank_position",
-    "industry_rank_position",
-    None,
     "percentile_delta_4q",
     "score_delta_4q",
     "lifecycle_transition_4q",
+    None,
+    "sector_rank_position",
+    "industry_rank_position",
 )
 DISPLAY_LABELS = {
     "growth_component": "growth_component (max 15p)",
@@ -278,6 +279,29 @@ def _delta_formatted(current_value: object, previous_value: object) -> str:
     return f"{current - previous:.2f}"
 
 
+def _percentile_rank_bucket(value: object) -> str:
+    score = _coerce_optional_float(value)
+    if score is None:
+        return ""
+    if score >= 90:
+        return "Top 10%"
+    if score >= 80:
+        return "Top 20%"
+    if score >= 70:
+        return "Top 30%"
+    if score >= 60:
+        return "Top 40%"
+    if score >= 50:
+        return "Above median"
+    if score >= 40:
+        return "Neutral"
+    if score >= 30:
+        return "Weak"
+    if score >= 20:
+        return "Very weak"
+    return "Bottom bucket"
+
+
 def build_snapshot_matrix(
     conn: sqlite3.Connection,
     ticker: str,
@@ -360,6 +384,9 @@ def build_snapshot_matrix(
                 "fundamental_score_percentile_industry": _format_optional_float(_coerce_optional_float(stored_row["fundamental_score_percentile_industry"] if stored_row is not None else None)),
                 "fundamental_score_percentile_blended": _format_optional_float(_coerce_optional_float(stored_row["fundamental_score_percentile_blended"] if stored_row is not None else None)),
                 "fundamental_score_percentile_blended_lifecycle_weighted": _format_optional_float(_coerce_optional_float(stored_row["fundamental_score_percentile_blended_lifecycle_weighted"] if stored_row is not None else None)),
+                "percentile_rank_bucket": _percentile_rank_bucket(
+                    stored_row["fundamental_score_percentile_blended_lifecycle_weighted"] if stored_row is not None else None
+                ),
                 "percentile_lifecycle_delta": percentile_delta,
                 "growth_pct_global": _format_optional_float(_coerce_optional_float(stored_row["growth_pct_global"] if stored_row is not None else None)),
                 "margin_pct_global": _format_optional_float(_coerce_optional_float(stored_row["margin_pct_global"] if stored_row is not None else None)),

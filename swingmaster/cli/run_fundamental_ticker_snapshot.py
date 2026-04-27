@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import sqlite3
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 from swingmaster.fundamentals.score_percentile import FUND_SCORE_PERCENTILE_V2_PRE, compute_percentiles
@@ -40,6 +42,7 @@ METRIC_ORDER = (
     "sector_rank_position",
     "industry_rank_position",
 )
+CSV_OUTPUT_DIR = Path("/home/kalle/projects/swingmaster/ticker_fundamentals")
 
 
 def parse_args() -> argparse.Namespace:
@@ -79,7 +82,7 @@ def _format_optional_float(value: float | None) -> str:
 def _format_rank_position(rank: int | None, size: int | None) -> str:
     if rank is None or size is None:
         return ""
-    return f"{rank}/{size}"
+    return f"Sijalla {rank}/{size}"
 
 
 def load_latest_quarter_rows(
@@ -334,10 +337,36 @@ def format_snapshot_matrix(matrix_rows: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def resolve_output_date() -> str:
+    return datetime.now().astimezone().date().isoformat()
+
+
+def _format_csv_value(value: str) -> str:
+    if value and value.replace(".", "", 1).replace("-", "", 1).isdigit() and value.count(".") == 1:
+        return value.replace(".", ",")
+    return value
+
+
+def write_snapshot_csv(
+    matrix_rows: list[dict[str, str]],
+    ticker: str,
+    output_date: str,
+) -> Path:
+    CSV_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}.csv"
+    with output_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, delimiter=";")
+        for metric in METRIC_ORDER:
+            row_values = [_format_csv_value(row[metric]) for row in matrix_rows]
+            writer.writerow([metric, *row_values])
+    return output_path
+
+
 def main() -> None:
     args = parse_args()
     db_path = resolve_db_path(args.db)
     ticker = args.ticker.upper()
+    output_date = resolve_output_date()
 
     with sqlite3.connect(str(db_path)) as conn:
         matrix_rows = build_snapshot_matrix(
@@ -348,6 +377,7 @@ def main() -> None:
             percentile_target_date=args.percentile_target_date,
         )
 
+    write_snapshot_csv(matrix_rows, ticker, output_date)
     print(format_snapshot_matrix(matrix_rows))
 
 

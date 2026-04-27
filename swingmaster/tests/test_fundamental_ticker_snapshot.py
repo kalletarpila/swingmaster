@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 from swingmaster.cli import run_fundamental_ticker_snapshot
 from swingmaster.cli.run_fundamental_migrations import run_migration
 from swingmaster.cli.run_fundamental_ticker_snapshot import (
+    CSV_OUTPUT_DIR,
     FUND_SCORE_PERCENTILE_V2_PRE,
     build_snapshot_matrix,
     format_snapshot_matrix,
     main as ticker_snapshot_main,
+    write_snapshot_csv,
 )
 
 
@@ -150,27 +153,34 @@ def test_build_snapshot_matrix_and_cli_output(monkeypatch, capsys, tmp_path: Pat
     assert "leverage_pct|100.00|100.00|100.00|100.00" in output
     assert "score_pct_blended_v2_pre|80.10|80.20|80.30|80.40" in output
     assert "score_pct_blended_v2_lifecycle_weighted|80.60|80.70|80.80|80.90" in output
-    assert "sector_rank_position|1/2|1/2|1/2|1/2 (Technology)" in output
-    assert "industry_rank_position|1/2|1/2|1/2|1/2 (Electrical Equipment)" in output
+    assert "sector_rank_position|Sijalla 1/2|Sijalla 1/2|Sijalla 1/2|Sijalla 1/2 (Technology)" in output
+    assert "industry_rank_position|Sijalla 1/2|Sijalla 1/2|Sijalla 1/2|Sijalla 1/2 (Electrical Equipment)" in output
+
+    csv_path = write_snapshot_csv(matrix_rows, "VRT", "2026-04-27")
+    csv_content = csv_path.read_text(encoding="utf-8")
+    assert "fundamental_score_v1;73,00;71,00;67,00;74,00" in csv_content
+    assert "industry_rank_position;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2 (Electrical Equipment)" in csv_content
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,
         "parse_args",
-        lambda: type(
-            "Args",
-            (),
-            {
-                "db": str(db_path),
-                "ticker": "VRT",
-                "quarters": 4,
-                "rule_id": FUND_SCORE_PERCENTILE_V2_PRE,
-                "percentile_target_date": None,
-            },
-        )(),
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=4,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+        ),
     )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
     ticker_snapshot_main()
     cli_output = capsys.readouterr().out.strip()
     assert cli_output == output
+    cli_csv_path = tmp_path / "ticker_fundamentals" / "VRT_2026-04-27.csv"
+    assert cli_csv_path.exists()
+    cli_csv_content = cli_csv_path.read_text(encoding="utf-8")
+    assert "score_pct_blended_v2_pre;80,10;80,20;80,30;80,40" in cli_csv_content
 
 
 def _insert_ttm_row(

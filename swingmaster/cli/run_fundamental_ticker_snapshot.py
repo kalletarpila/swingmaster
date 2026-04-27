@@ -362,6 +362,22 @@ def write_snapshot_csv(
     return output_path
 
 
+def ensure_snapshot_csv_written(
+    matrix_rows: list[dict[str, str]],
+    ticker: str,
+    output_date: str,
+) -> Path:
+    output_path = write_snapshot_csv(matrix_rows, ticker, output_date)
+    if output_path.exists() and output_path.stat().st_size > 0:
+        return output_path
+
+    output_path = write_snapshot_csv(matrix_rows, ticker, output_date)
+    if output_path.exists() and output_path.stat().st_size > 0:
+        return output_path
+
+    raise RuntimeError(f"FUNDAMENTAL_TICKER_SNAPSHOT_CSV_NOT_WRITTEN:{output_path}")
+
+
 def main() -> None:
     args = parse_args()
     db_path = resolve_db_path(args.db)
@@ -377,7 +393,7 @@ def main() -> None:
             percentile_target_date=args.percentile_target_date,
         )
 
-    write_snapshot_csv(matrix_rows, ticker, output_date)
+    ensure_snapshot_csv_written(matrix_rows, ticker, output_date)
     print(format_snapshot_matrix(matrix_rows))
 
 

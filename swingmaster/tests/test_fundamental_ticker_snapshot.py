@@ -7,9 +7,9 @@ from types import SimpleNamespace
 from swingmaster.cli import run_fundamental_ticker_snapshot
 from swingmaster.cli.run_fundamental_migrations import run_migration
 from swingmaster.cli.run_fundamental_ticker_snapshot import (
-    CSV_OUTPUT_DIR,
     FUND_SCORE_PERCENTILE_V2_PRE,
     build_snapshot_matrix,
+    ensure_snapshot_csv_written,
     format_snapshot_matrix,
     main as ticker_snapshot_main,
     write_snapshot_csv,
@@ -160,6 +160,9 @@ def test_build_snapshot_matrix_and_cli_output(monkeypatch, capsys, tmp_path: Pat
     csv_content = csv_path.read_text(encoding="utf-8")
     assert "fundamental_score_v1;73,00;71,00;67,00;74,00" in csv_content
     assert "industry_rank_position;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2 (Electrical Equipment)" in csv_content
+    ensured_csv_path = ensure_snapshot_csv_written(matrix_rows, "VRT", "2026-04-27")
+    assert ensured_csv_path.exists()
+    assert ensured_csv_path.stat().st_size > 0
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,

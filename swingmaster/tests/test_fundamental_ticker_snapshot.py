@@ -10,7 +10,6 @@ from swingmaster.cli.run_fundamental_ticker_snapshot import (
     build_snapshot_matrix,
     format_snapshot_matrix,
     main as ticker_snapshot_main,
-    resolve_percentile_target_date,
 )
 
 
@@ -96,58 +95,63 @@ def test_build_snapshot_matrix_and_cli_output(monkeypatch, capsys, tmp_path: Pat
                 dilution=dilution,
             )
 
-        _insert_percentile_row(
-            conn,
-            ticker="VRT",
-            as_of_date="2026-03-31",
-            target_date="2026-04-25",
-            sector="Technology",
-            industry="Electrical Equipment",
-            blended=80.75,
-            blended_lifecycle=80.69,
-            sector_size=2,
-            industry_size=2,
-            global_score=79.77,
-            sector_score=83.37,
-            industry_score=78.67,
-            global_lifecycle=79.86,
-            sector_lifecycle=83.54,
-            industry_lifecycle=78.04,
-        )
-        _insert_percentile_row(
-            conn,
-            ticker="PEER",
-            as_of_date="2026-03-31",
-            target_date="2026-04-25",
-            sector="Technology",
-            industry="Electrical Equipment",
-            blended=70.00,
-            blended_lifecycle=70.00,
-            sector_size=2,
-            industry_size=2,
-            global_score=70.00,
-            sector_score=70.00,
-            industry_score=70.00,
-            global_lifecycle=70.00,
-            sector_lifecycle=70.00,
-            industry_lifecycle=70.00,
-        )
+        for target_date, score in (
+            ("2025-06-30", 80.10),
+            ("2025-09-30", 80.20),
+            ("2025-12-31", 80.30),
+            ("2026-03-31", 80.40),
+        ):
+            _insert_percentile_row(
+                conn,
+                ticker="VRT",
+                as_of_date=target_date,
+                target_date=target_date,
+                sector="Technology",
+                industry="Electrical Equipment",
+                blended=score,
+                blended_lifecycle=score + 0.5,
+                sector_size=2,
+                industry_size=2,
+                global_score=score - 1.0,
+                sector_score=score + 1.0,
+                industry_score=score - 2.0,
+                global_lifecycle=score - 0.5,
+                sector_lifecycle=score + 1.5,
+                industry_lifecycle=score - 1.5,
+            )
+            _insert_percentile_row(
+                conn,
+                ticker="PEER",
+                as_of_date=target_date,
+                target_date=target_date,
+                sector="Technology",
+                industry="Electrical Equipment",
+                blended=70.00,
+                blended_lifecycle=70.00,
+                sector_size=2,
+                industry_size=2,
+                global_score=70.00,
+                sector_score=70.00,
+                industry_score=70.00,
+                global_lifecycle=70.00,
+                sector_lifecycle=70.00,
+                industry_lifecycle=70.00,
+            )
         conn.commit()
 
-        target_date = resolve_percentile_target_date(conn, FUND_SCORE_PERCENTILE_V2_PRE, None)
-        matrix_rows = build_snapshot_matrix(conn, "VRT", 4, FUND_SCORE_PERCENTILE_V2_PRE, target_date)
+        matrix_rows = build_snapshot_matrix(conn, "VRT", 4, FUND_SCORE_PERCENTILE_V2_PRE, None)
         output = format_snapshot_matrix(matrix_rows)
 
-    assert target_date == "2026-04-25"
+    assert "ticker|VRT|VRT|VRT|VRT" in output
     assert "quarter|2025-06-30|2025-09-30|2025-12-31|2026-03-31" in output
     assert "fundamental_score_v1|73.00|71.00|67.00|74.00" in output
     assert "fundamental_score_v2_lifecycle|77.60|75.10|71.10|77.80" in output
     assert "growth_pct|100.00|100.00|100.00|100.00" in output
     assert "leverage_pct|100.00|100.00|100.00|100.00" in output
-    assert "score_pct_blended_v2_pre||||80.75" in output
-    assert "score_pct_blended_v2_lifecycle_weighted||||80.69" in output
-    assert "sector_rank_position||||1/2" in output
-    assert "industry_rank_position||||1/2" in output
+    assert "score_pct_blended_v2_pre|80.10|80.20|80.30|80.40" in output
+    assert "score_pct_blended_v2_lifecycle_weighted|80.60|80.70|80.80|80.90" in output
+    assert "sector_rank_position|1/2|1/2|1/2|1/2 (Technology)" in output
+    assert "industry_rank_position|1/2|1/2|1/2|1/2 (Electrical Equipment)" in output
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,

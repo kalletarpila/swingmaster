@@ -18,6 +18,7 @@ FACTOR_SPECS = (
 )
 
 METRIC_ORDER = (
+    "ticker",
     "quarter",
     "lifecycle_class",
     "fundamental_score_v1",
@@ -169,38 +170,19 @@ def compute_factor_percentiles_by_date(
     return result
 
 
-def resolve_percentile_target_date(
-    conn: sqlite3.Connection,
-    rule_id: str,
-    explicit_target_date: str | None,
-) -> str | None:
-    if explicit_target_date is not None:
-        return explicit_target_date
-    row = conn.execute(
-        """
-        SELECT MAX(target_date)
-        FROM rc_fundamental_score_percentile
-        WHERE rule_id = ?
-        """,
-        (rule_id,),
-    ).fetchone()
-    if row is None or row[0] is None:
-        return None
-    return str(row[0])
-
-
 def load_stored_percentile_rows(
     conn: sqlite3.Connection,
     rule_id: str,
-    target_date: str | None,
-) -> dict[tuple[str, str], sqlite3.Row]:
-    if target_date is None:
+    target_dates: list[str],
+) -> dict[tuple[str, str, str], sqlite3.Row]:
+    if not target_dates:
         return {}
+    placeholders = ", ".join("?" for _ in target_dates)
     previous_row_factory = conn.row_factory
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
-            """
+            f"""
             SELECT
                 p.*,
                 RANK() OVER (
@@ -213,14 +195,14 @@ def load_stored_percentile_rows(
                 ) AS industry_rank
             FROM rc_fundamental_score_percentile p
             WHERE p.rule_id = ?
-              AND p.target_date = ?
+              AND p.target_date IN ({placeholders})
             ORDER BY p.ticker ASC, p.as_of_date ASC
             """,
-            (rule_id, target_date),
+            [rule_id, *target_dates],
         ).fetchall()
     finally:
         conn.row_factory = previous_row_factory
-    return {(str(row["ticker"]), str(row["as_of_date"])): row for row in rows}
+    return {(str(row["ticker"]), str(row["target_date"]), str(row["as_of_date"])): row for row in rows}
 
 
 def build_snapshot_matrix(
@@ -234,18 +216,22 @@ def build_snapshot_matrix(
     as_of_dates = [str(row["as_of_date"]) for row in quarter_rows]
     peer_rows_by_date = load_peer_rows_by_date(conn, as_of_dates)
     factor_percentiles_by_date = compute_factor_percentiles_by_date(peer_rows_by_date)
-    stored_percentiles = load_stored_percentile_rows(conn, rule_id, percentile_target_date)
+    stored_target_dates = [percentile_target_date] if percentile_target_date is not None else as_of_dates
+    stored_percentiles = load_stored_percentile_rows(conn, rule_id, stored_target_dates)
 
     matrix_rows: list[dict[str, str]] = []
     for row in quarter_rows:
         as_of_date = str(row["as_of_date"])
-        key = (str(row["ticker"]), as_of_date)
+        row_target_date = percentile_target_date if percentile_target_date is not None else as_of_date
+        key = (str(row["ticker"]), row_target_date, as_of_date)
         stored_row = stored_percentiles.get(key)
         factor_percentiles = factor_percentiles_by_date.get(as_of_date, {})
+        is_last_quarter = as_of_date == as_of_dates[-1]
 
         matrix_rows.append(
             {
                 "quarter": as_of_date,
+                "ticker": ticker.upper(),
                 "lifecycle_class": str(row["lifecycle_class"]) if row["lifecycle_class"] is not None else "",
                 "fundamental_score_v1": _format_optional_float(_coerce_optional_float(row["fundamental_score"])),
                 "fundamental_score_v2_lifecycle": _format_optional_float(
@@ -310,6 +296,14 @@ def build_snapshot_matrix(
                 "sector_rank_position": _format_rank_position(
                     int(stored_row["sector_rank"]) if stored_row is not None and stored_row["sector_rank"] is not None else None,
                     int(stored_row["sector_size"]) if stored_row is not None and stored_row["sector_size"] is not None else None,
+                )
+                + (
+                    f" ({stored_row['sector']})"
+                    if is_last_quarter
+                    and stored_row is not None
+                    and stored_row["sector"] is not None
+                    and stored_row["sector_rank"] is not None
+                    else ""
                 ),
                 "industry_rank_position": _format_rank_position(
                     int(stored_row["industry_rank"])
@@ -318,6 +312,14 @@ def build_snapshot_matrix(
                     int(stored_row["industry_size"])
                     if stored_row is not None and stored_row["industry_size"] is not None
                     else None,
+                )
+                + (
+                    f" ({stored_row['industry']})"
+                    if is_last_quarter
+                    and stored_row is not None
+                    and stored_row["industry"] is not None
+                    and stored_row["industry_rank"] is not None
+                    else ""
                 ),
             }
         )
@@ -338,13 +340,12 @@ def main() -> None:
     ticker = args.ticker.upper()
 
     with sqlite3.connect(str(db_path)) as conn:
-        percentile_target_date = resolve_percentile_target_date(conn, args.rule_id, args.percentile_target_date)
         matrix_rows = build_snapshot_matrix(
             conn=conn,
             ticker=ticker,
             quarters=args.quarters,
             rule_id=args.rule_id,
-            percentile_target_date=percentile_target_date,
+            percentile_target_date=args.percentile_target_date,
         )
 
     print(format_snapshot_matrix(matrix_rows))

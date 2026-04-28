@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+from swingmaster.fundamentals.price_behavior_snapshot import load_price_behavior_snapshot
 from swingmaster.fundamentals.score_percentile import FUND_SCORE_PERCENTILE_V2_PRE, compute_percentiles
 
 
@@ -87,6 +88,20 @@ DISPLAY_LABELS = {
     "dilution_component": "dilution_component (max 10p)",
 }
 CSV_OUTPUT_DIR = Path("/home/kalle/projects/swingmaster/ticker_fundamentals")
+PRICE_BEHAVIOR_METRICS: tuple[str, ...] = (
+    "price_behavior_as_of_date",
+    "price_return_3m_pct",
+    "price_return_6m_pct",
+    "price_return_12m_pct",
+    "distance_from_52w_high_pct",
+    "relative_strength_6m_vs_sp500_pct",
+    "price_return_since_last_report_pct",
+    "relative_return_vs_sp500_since_last_report_pct",
+    "earnings_reaction_1d_pct",
+    "earnings_reaction_3d_pct",
+    "post_earnings_drift_20d_pct",
+    "volume_ratio_since_last_report_vs_3m_avg",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,6 +118,12 @@ def parse_args() -> argparse.Namespace:
         "--percentile-target-date",
         default=None,
         help="Optional stored percentile target_date; defaults to each row as_of_date",
+    )
+    parser.add_argument("--ohlcv-db", default=None, help="Optional OHLCV SQLite database path for price behavior snapshot")
+    parser.add_argument(
+        "--price-behavior-snapshot",
+        action="store_true",
+        help="Append latest price behavior snapshot block using OHLCV data",
     )
     return parser.parse_args()
 
@@ -436,7 +457,7 @@ def build_snapshot_matrix(
     return matrix_rows
 
 
-def format_snapshot_matrix(matrix_rows: list[dict[str, str]]) -> str:
+def format_snapshot_matrix(matrix_rows: list[dict[str, str]], price_behavior_snapshot: dict[str, str] | None = None) -> str:
     lines: list[str] = []
     for metric in SECTIONED_METRICS:
         if metric is None:
@@ -445,6 +466,11 @@ def format_snapshot_matrix(matrix_rows: list[dict[str, str]]) -> str:
         row_values = [row[metric] for row in matrix_rows]
         label = DISPLAY_LABELS.get(metric, metric)
         lines.append(";".join([label, *row_values]))
+    if price_behavior_snapshot is not None:
+        lines.append("")
+        lines.append("price_behavior_snapshot")
+        for metric in PRICE_BEHAVIOR_METRICS:
+            lines.append(f"{metric};{price_behavior_snapshot.get(metric, '')}")
     return "\n".join(lines)
 
 
@@ -458,7 +484,12 @@ def _format_csv_value(value: str) -> str:
     return value
 
 
-def write_snapshot_csv(matrix_rows: list[dict[str, str]], ticker: str, output_date: str) -> Path:
+def write_snapshot_csv(
+    matrix_rows: list[dict[str, str]],
+    ticker: str,
+    output_date: str,
+    price_behavior_snapshot: dict[str, str] | None = None,
+) -> Path:
     CSV_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}.csv"
     with output_path.open("w", encoding="utf-8", newline="") as handle:
@@ -469,14 +500,24 @@ def write_snapshot_csv(matrix_rows: list[dict[str, str]], ticker: str, output_da
                 continue
             row_values = [_format_csv_value(row[metric]) for row in matrix_rows]
             writer.writerow([DISPLAY_LABELS.get(metric, metric), *row_values])
+        if price_behavior_snapshot is not None:
+            writer.writerow([])
+            writer.writerow(["price_behavior_snapshot"])
+            for metric in PRICE_BEHAVIOR_METRICS:
+                writer.writerow([metric, _format_csv_value(price_behavior_snapshot.get(metric, ""))])
     return output_path
 
 
-def ensure_snapshot_csv_written(matrix_rows: list[dict[str, str]], ticker: str, output_date: str) -> Path:
-    output_path = write_snapshot_csv(matrix_rows, ticker, output_date)
+def ensure_snapshot_csv_written(
+    matrix_rows: list[dict[str, str]],
+    ticker: str,
+    output_date: str,
+    price_behavior_snapshot: dict[str, str] | None = None,
+) -> Path:
+    output_path = write_snapshot_csv(matrix_rows, ticker, output_date, price_behavior_snapshot)
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
-    output_path = write_snapshot_csv(matrix_rows, ticker, output_date)
+    output_path = write_snapshot_csv(matrix_rows, ticker, output_date, price_behavior_snapshot)
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
     raise RuntimeError(f"FUNDAMENTAL_TICKER_SNAPSHOT_CSV_NOT_WRITTEN:{output_path}")
@@ -487,6 +528,8 @@ def main() -> None:
     db_path = resolve_db_path(args.db)
     ticker = args.ticker.upper()
     output_date = resolve_output_date()
+    if args.price_behavior_snapshot and not args.ohlcv_db:
+        raise RuntimeError("PRICE_BEHAVIOR_SNAPSHOT_REQUIRES_OHLCV_DB")
     with sqlite3.connect(str(db_path)) as conn:
         matrix_rows = build_snapshot_matrix(
             conn=conn,
@@ -495,8 +538,13 @@ def main() -> None:
             rule_id=args.rule_id,
             percentile_target_date=args.percentile_target_date,
         )
-    ensure_snapshot_csv_written(matrix_rows, ticker, output_date)
-    print(format_snapshot_matrix(matrix_rows))
+    price_behavior_snapshot: dict[str, str] | None = None
+    if args.price_behavior_snapshot:
+        ohlcv_db_path = resolve_db_path(args.ohlcv_db)
+        latest_quarter_date = matrix_rows[-1]["quarter"]
+        price_behavior_snapshot = load_price_behavior_snapshot(ohlcv_db_path, ticker, latest_quarter_date)
+    ensure_snapshot_csv_written(matrix_rows, ticker, output_date, price_behavior_snapshot)
+    print(format_snapshot_matrix(matrix_rows, price_behavior_snapshot))
 
 
 if __name__ == "__main__":

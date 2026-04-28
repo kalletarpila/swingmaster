@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+import pytest
 
 from swingmaster.cli import run_fundamental_ticker_snapshot
 from swingmaster.cli.run_fundamental_migrations import run_migration
@@ -197,6 +199,8 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
             quarters=4,
             rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
             percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
         ),
     )
     monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
@@ -214,6 +218,240 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
     assert "growth_component (max 15p);15,00;15,00;15,00;15,00" in cli_csv_content
     assert "percentile_rank_bucket;Top 20%;Top 20%;Top 20%;Top 20%" in cli_csv_content
     assert "percentile_delta_4q;;;;0,80" in cli_csv_content
+
+
+def test_price_behavior_snapshot_requires_ohlcv_db(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot.db"
+    run_migration(db_path)
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=4,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=True,
+        ),
+    )
+    with pytest.raises(RuntimeError, match="PRICE_BEHAVIOR_SNAPSHOT_REQUIRES_OHLCV_DB"):
+        ticker_snapshot_main()
+
+
+def test_price_behavior_snapshot_stdout_and_csv(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(
+            conn,
+            ticker="VRT",
+            as_of_date="2025-12-31",
+            lifecycle_class="SCALING",
+            fundamental_score=67.0,
+            fundamental_score_lifecycle=71.1,
+            growth_component=15.0,
+            margin_component=12.0,
+            margin_trend_component=6.0,
+            fcf_component=15.0,
+            consistency_component=8.0,
+            leverage_component=12.0,
+            dilution_component=10.0,
+            growth=0.70,
+            margin=0.32,
+            margin_trend=0.22,
+            fcf=0.27,
+            fcf_trend=0.07,
+            leverage=1.0,
+            dilution=0.04,
+            latest_period_end_date="2025-12-31",
+        )
+        _insert_ttm_row(
+            conn,
+            ticker="VRT",
+            as_of_date="2026-03-31",
+            lifecycle_class="SCALING",
+            fundamental_score=74.0,
+            fundamental_score_lifecycle=77.8,
+            growth_component=15.0,
+            margin_component=15.0,
+            margin_trend_component=9.0,
+            fcf_component=15.0,
+            consistency_component=10.0,
+            leverage_component=12.0,
+            dilution_component=10.0,
+            growth=0.80,
+            margin=0.33,
+            margin_trend=0.23,
+            fcf=0.28,
+            fcf_trend=0.08,
+            leverage=0.8,
+            dilution=0.05,
+            latest_period_end_date="2026-03-31",
+        )
+        _insert_quarterly_row(conn, "VRT", "2025-12-31", 1200.0, 320.0, 270.0, 11.0, 18.0)
+        _insert_quarterly_row(conn, "VRT", "2026-03-31", 1300.0, 330.0, 280.0, 11.5, 17.0)
+        _insert_percentile_row(conn, "VRT", "2025-12-31", "2025-12-31", "Technology", "Electrical Equipment", 80.30, 80.80)
+        _insert_percentile_row(conn, "VRT", "2026-03-31", "2026-03-31", "Technology", "Electrical Equipment", 80.40, 80.90)
+        conn.commit()
+
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "VRT",
+        300,
+        anchor_close=400.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=300.0,
+        close_1_after_report=303.0,
+        close_3_after_report=309.0,
+        close_20_after_report=330.0,
+        volume_before_report=100.0,
+        volume_after_report=250.0,
+    )
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "^GSPC",
+        300,
+        anchor_close=200.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=180.0,
+        close_1_after_report=181.0,
+        close_3_after_report=183.0,
+        close_20_after_report=190.0,
+        return_6m_pct=14.59,
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=2,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=True,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out.strip()
+
+    assert "price_behavior_snapshot" in cli_output
+    assert "price_behavior_as_of_date;2026-04-30" in cli_output
+    assert "price_return_3m_pct;9.29" in cli_output
+    assert "price_return_6m_pct;20.48" in cli_output
+    assert "price_return_12m_pct;48.15" in cli_output
+    assert "distance_from_52w_high_pct;-9.09" in cli_output
+    assert "relative_strength_6m_vs_sp500_pct;5.89" in cli_output
+    assert "price_return_since_last_report_pct;33.33" in cli_output
+    assert "relative_return_vs_sp500_since_last_report_pct;22.22" in cli_output
+    assert "earnings_reaction_1d_pct;1.00" in cli_output
+    assert "earnings_reaction_3d_pct;3.00" in cli_output
+    assert "post_earnings_drift_20d_pct;10.00" in cli_output
+    assert "volume_ratio_since_last_report_vs_3m_avg;2.50" in cli_output
+    assert "price_return_3m_pct;9.29;" not in cli_output
+    assert cli_output.index("earnings_reaction_1d_pct;1.00") < cli_output.index("post_earnings_drift_20d_pct;10.00")
+    assert cli_output.index("earnings_reaction_3d_pct;3.00") < cli_output.index("post_earnings_drift_20d_pct;10.00")
+
+    cli_csv_path = tmp_path / "ticker_fundamentals" / "VRT_2026-04-27.csv"
+    cli_csv_content = cli_csv_path.read_text(encoding="utf-8")
+    assert "price_behavior_snapshot" in cli_csv_content
+    assert "price_behavior_as_of_date;2026-04-30" in cli_csv_content
+    assert "price_return_3m_pct;9,29" in cli_csv_content
+    assert "relative_strength_6m_vs_sp500_pct;5,89" in cli_csv_content
+    assert "earnings_reaction_1d_pct;1,00" in cli_csv_content
+    assert "earnings_reaction_3d_pct;3,00" in cli_csv_content
+
+
+def test_price_behavior_snapshot_missing_benchmark_and_future_data(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(
+            conn,
+            ticker="VRT",
+            as_of_date="2026-04-09",
+            lifecycle_class="SCALING",
+            fundamental_score=74.0,
+            fundamental_score_lifecycle=77.8,
+            growth_component=15.0,
+            margin_component=15.0,
+            margin_trend_component=9.0,
+            fcf_component=15.0,
+            consistency_component=10.0,
+            leverage_component=12.0,
+            dilution_component=10.0,
+            growth=0.80,
+            margin=0.33,
+            margin_trend=0.23,
+            fcf=0.28,
+            fcf_trend=0.08,
+            leverage=0.8,
+            dilution=0.05,
+            latest_period_end_date="2026-04-09",
+        )
+        _insert_quarterly_row(conn, "VRT", "2026-04-09", 1300.0, 330.0, 280.0, 11.5, 17.0)
+        _insert_percentile_row(conn, "VRT", "2026-04-09", "2026-04-09", "Technology", "Electrical Equipment", 80.40, 80.90)
+        conn.commit()
+
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "VRT",
+        260,
+        anchor_close=400.0,
+        anchor_date="2026-04-10",
+        report_date="2026-04-09",
+        report_day_close=390.0,
+        close_1_after_report=395.0,
+        close_3_after_report=405.0,
+        close_20_after_report=410.0,
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=True,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out.strip()
+
+    assert "relative_strength_6m_vs_sp500_pct;" in cli_output
+    assert "relative_strength_6m_vs_sp500_pct;;" not in cli_output
+    assert "post_earnings_drift_20d_pct;" in cli_output
+    assert "post_earnings_drift_20d_pct;;" not in cli_output
+    for line in cli_output.splitlines():
+        if line.startswith("relative_strength_6m_vs_sp500_pct;"):
+            assert line == "relative_strength_6m_vs_sp500_pct;"
+        if line.startswith("relative_return_vs_sp500_since_last_report_pct;"):
+            assert line == "relative_return_vs_sp500_since_last_report_pct;"
+        if line.startswith("earnings_reaction_1d_pct;"):
+            assert line != "earnings_reaction_1d_pct;"
+        if line.startswith("earnings_reaction_3d_pct;"):
+            assert line == "earnings_reaction_3d_pct;"
+        if line.startswith("post_earnings_drift_20d_pct;"):
+            assert line == "post_earnings_drift_20d_pct;"
 
 
 def _insert_ttm_row(
@@ -274,6 +512,85 @@ def _insert_ttm_row(
             "TTM_RUN_V1",
         ),
     )
+
+
+def _create_ohlcv_schema(db_path: Path) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE osakedata (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                osake TEXT,
+                pvm TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT DEFAULT 'usa',
+                UNIQUE(osake, pvm)
+            )
+            """
+        )
+        conn.commit()
+
+
+def _insert_ohlcv_series(
+    db_path: Path,
+    ticker: str,
+    length: int,
+    anchor_close: float,
+    anchor_date: str,
+    report_date: str,
+    report_day_close: float,
+    close_1_after_report: float,
+    close_3_after_report: float,
+    close_20_after_report: float,
+    return_3m_pct: float = 9.29,
+    return_6m_pct: float = 20.48,
+    return_12m_pct: float = 48.15,
+    high_multiplier: float = 1.10,
+    volume_before_report: float = 100.0,
+    volume_after_report: float = 250.0,
+) -> None:
+    anchor_day = date.fromisoformat(anchor_date)
+    start_day = anchor_day - timedelta(days=length - 1)
+    report_day = date.fromisoformat(report_date)
+    report_index = (report_day - start_day).days
+    with sqlite3.connect(str(db_path)) as conn:
+        for index in range(length):
+            date_text = (start_day + timedelta(days=index)).isoformat()
+            close = 100.0 + index
+            if index == length - 1:
+                close = anchor_close
+            if index == length - 1 - 63:
+                close = anchor_close / (1.0 + return_3m_pct / 100.0)
+            if index == length - 1 - 126:
+                close = anchor_close / (1.0 + return_6m_pct / 100.0)
+            if index == length - 1 - 252:
+                close = anchor_close / (1.0 + return_12m_pct / 100.0)
+            if index == report_index:
+                close = report_day_close
+            if index == report_index + 1 and report_index + 1 < length:
+                close = close_1_after_report
+            if index == report_index + 3 and report_index + 3 < length:
+                close = close_3_after_report
+            if index == report_index + 20 and report_index + 20 < length:
+                close = close_20_after_report
+            high = close
+            if index == length - 2:
+                high = anchor_close * high_multiplier
+            volume = volume_before_report
+            if index > report_index:
+                volume = volume_after_report
+            conn.execute(
+                """
+                INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'usa')
+                """,
+                (ticker.upper(), date_text, close, high, close, close, volume),
+            )
+        conn.commit()
 
 
 def _insert_quarterly_row(

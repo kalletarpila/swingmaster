@@ -182,6 +182,12 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
     assert "revenue;1000.00;1100.00;1200.00;1300.00" in output
     assert "margin_trend_delta_4q;;;;0.03" in output
     assert "fcf_margin_trend_delta_4q;;;;0.03" in output
+    assert "score_delta_qoq;;-2.50;-4.00;6.70" in output
+    assert "percentile_delta_qoq;;0.10;0.10;0.10" in output
+    assert "margin_trend_delta_qoq;;0.01;0.01;0.01" in output
+    assert "fcf_margin_trend_delta_qoq;;0.01;0.01;0.01" in output
+    assert "consistency_delta_qoq;;0.00;0.00;0.00" in output
+    assert "growth_pct_global_delta_qoq;;0.00;0.00;0.00" in output
     assert "shares_outstanding_delta_4q;;;;1.50" in output
     assert "net_debt_to_ebitda_delta_4q;;;;-1.20" in output
     assert "percentile_delta_4q;;;;0.80" in output
@@ -189,6 +195,8 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
     assert "lifecycle_transition_4q;;;;SCALING to SCALING" in output
     assert "sector_rank_position;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2 (Technology)" in output
     assert "industry_rank_position;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2;Sijalla 1/2 (Electrical Equipment)" in output
+    assert output.index("fcf_margin_trend_delta_4q;;;;0.03") < output.index("score_delta_qoq;;-2.50;-4.00;6.70")
+    assert output.index("growth_pct_global_delta_qoq;;0.00;0.00;0.00") < output.index("shares_outstanding_delta_4q;;;;1.50")
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,
@@ -217,6 +225,8 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
     assert "fundamental_score_v1;73,00;71,00;67,00;74,00" in cli_csv_content
     assert "growth_component (max 15p);15,00;15,00;15,00;15,00" in cli_csv_content
     assert "percentile_rank_bucket;Top 20%;Top 20%;Top 20%;Top 20%" in cli_csv_content
+    assert "score_delta_qoq;;-2,50;-4,00;6,70" in cli_csv_content
+    assert "percentile_delta_qoq;;0,10;0,10;0,10" in cli_csv_content
     assert "percentile_delta_4q;;;;0,80" in cli_csv_content
 
 

@@ -68,6 +68,12 @@ SECTIONED_METRICS: tuple[str | None, ...] = (
     None,
     "margin_trend_delta_4q",
     "fcf_margin_trend_delta_4q",
+    "score_delta_qoq",
+    "percentile_delta_qoq",
+    "margin_trend_delta_qoq",
+    "fcf_margin_trend_delta_qoq",
+    "consistency_delta_qoq",
+    "growth_pct_global_delta_qoq",
     "shares_outstanding_delta_4q",
     "net_debt_to_ebitda_delta_4q",
     None,
@@ -423,6 +429,12 @@ def build_snapshot_matrix(
                 "total_debt": _format_optional_float(_coerce_optional_float(quarterly_row["total_debt"] if quarterly_row is not None else None)),
                 "margin_trend_delta_4q": margin_trend_delta_4q if is_last_quarter else "",
                 "fcf_margin_trend_delta_4q": fcf_margin_trend_delta_4q if is_last_quarter else "",
+                "score_delta_qoq": "",
+                "percentile_delta_qoq": "",
+                "margin_trend_delta_qoq": "",
+                "fcf_margin_trend_delta_qoq": "",
+                "consistency_delta_qoq": "",
+                "growth_pct_global_delta_qoq": "",
                 "shares_outstanding_delta_4q": shares_outstanding_delta_4q if is_last_quarter else "",
                 "net_debt_to_ebitda_delta_4q": net_debt_to_ebitda_delta_4q if is_last_quarter else "",
                 "sector_rank_position": _format_rank_position(
@@ -453,6 +465,33 @@ def build_snapshot_matrix(
                 "leverage_pct": _format_optional_float(factor_percentiles.get("leverage_pct", {}).get(ticker.upper())),
                 "dilution_pct": _format_optional_float(factor_percentiles.get("dilution_pct", {}).get(ticker.upper())),
             }
+        )
+    for index in range(1, len(matrix_rows)):
+        previous_row = matrix_rows[index - 1]
+        current_row = matrix_rows[index]
+        current_row["score_delta_qoq"] = _delta_formatted(
+            current_row["fundamental_score_v2_lifecycle"],
+            previous_row["fundamental_score_v2_lifecycle"],
+        )
+        current_row["percentile_delta_qoq"] = _delta_formatted(
+            current_row["fundamental_score_percentile_blended_lifecycle_weighted"],
+            previous_row["fundamental_score_percentile_blended_lifecycle_weighted"],
+        )
+        current_row["margin_trend_delta_qoq"] = _delta_formatted(
+            current_row["ebit_margin_trend_4q"],
+            previous_row["ebit_margin_trend_4q"],
+        )
+        current_row["fcf_margin_trend_delta_qoq"] = _delta_formatted(
+            current_row["fcf_margin_trend_4q"],
+            previous_row["fcf_margin_trend_4q"],
+        )
+        current_row["consistency_delta_qoq"] = _delta_formatted(
+            current_row["consistency_pct_global"],
+            previous_row["consistency_pct_global"],
+        )
+        current_row["growth_pct_global_delta_qoq"] = _delta_formatted(
+            current_row["growth_pct_global"],
+            previous_row["growth_pct_global"],
         )
     return matrix_rows
 

@@ -1,0 +1,1169 @@
+# SwingMaster Fundamental + Price Behavior Snapshot
+
+This document explains the current `run_fundamental_ticker_snapshot.py` report as it is implemented now.
+
+The goal is to help an external reader understand:
+
+1. what each section means
+2. which metrics are absolute vs relative
+3. how the metrics are calculated at a high level
+4. how the snapshot can be used as a BUY background-check tool
+5. the exact calculation rules currently used in code
+
+This document intentionally corrects several earlier misunderstandings:
+
+- `fundamental_score_v1` is not percentile-based and not cross-sectional. It is a rule-based point score.
+- `lifecycle_class` does not currently use the labels `STABILIZING` or `WEAKENING`.
+- the implemented lifecycle classes are:
+  - `STARTUP`
+  - `GROWTH`
+  - `SCALING`
+  - `MATURE`
+  - `TRANSITION`
+  - `DECLINING`
+  - `DISTRESSED`
+  - `UNCLASSIFIED`
+- the `price_behavior_snapshot` block is a single latest-market snapshot, not a four-quarter series.
+
+---
+
+# 1. What the Snapshot Is
+
+The ticker snapshot combines two layers:
+
+1. a four-quarter fundamental history
+2. an optional latest price-behavior snapshot
+
+It is not a price target model.
+
+It is mainly a structured decision-support report for questions like:
+
+- Is the business quality strong?
+- Is the quality improving or weakening?
+- How does the company rank vs peers?
+- Does market behavior confirm or reject the fundamentals?
+
+---
+
+# 2. Report Structure
+
+The report currently has these sections, in this order:
+
+1. header rows
+2. fundamental scores
+3. baseline score components
+4. raw TTM profitability and balance-sheet factors
+5. percentile scores
+6. global factor percentiles
+7. selected quarterly raw values
+8. 4Q delta rows
+9. QoQ delta rows
+10. 4Q summary rows
+11. sector and industry ranks
+12. optional `price_behavior_snapshot` block
+
+The first 11 sections are quarter-column based.
+
+The optional `price_behavior_snapshot` block is a single latest snapshot, one value per row.
+
+---
+
+# 3. Lifecycle Class
+
+Variable:
+
+- `lifecycle_class`
+
+Current possible values:
+
+- `STARTUP`
+- `GROWTH`
+- `SCALING`
+- `MATURE`
+- `TRANSITION`
+- `DECLINING`
+- `DISTRESSED`
+- `UNCLASSIFIED`
+
+Lifecycle is a rule-based stage label derived from:
+
+- revenue growth
+- EBIT margin
+- EBIT margin trend
+- FCF margin
+
+It is not a machine-learning label and not a percentile score.
+
+Practical interpretation:
+
+- `STARTUP`: very fast growth, but still structurally unprofitable
+- `GROWTH`: strong growth, profitability still modest
+- `SCALING`: still growing, profitability improving
+- `MATURE`: high-quality and already financially efficient
+- `TRANSITION`: profitable, but not yet fully mature
+- `DECLINING`: growth or margin trend weakening
+- `DISTRESSED`: both operating margin and cash flow badly negative
+- `UNCLASSIFIED`: none of the explicit rules matched
+
+Important:
+
+- lifecycle is chosen by ordered rules
+- the first matching rule wins
+- this means rule order matters
+
+---
+
+# 4. Fundamental Scores
+
+Variables:
+
+- `fundamental_score_v1`
+- `fundamental_score_v2_lifecycle`
+
+These are not percentile scores.
+
+They are point-based composite scores built from:
+
+- growth
+- margin
+- margin trend
+- free cash flow margin
+- leverage
+- dilution
+- lifecycle bonus/penalty
+- consistency
+
+Interpretation:
+
+- higher = stronger rule-based quality
+- lower = weaker rule-based quality
+
+Difference between the two:
+
+- `fundamental_score_v1` = baseline point score
+- `fundamental_score_v2_lifecycle` = lifecycle-weighted overlay score
+
+So `v2_lifecycle` is not a separate raw model. It is a lifecycle-adjusted version of the same baseline component structure.
+
+---
+
+# 5. Score Components
+
+Variables:
+
+- `growth_component`
+- `margin_component`
+- `margin_trend_component`
+- `fcf_component`
+- `consistency_component`
+- `leverage_component`
+- `dilution_component`
+
+These are the baseline component scores used in `fundamental_score_v1`.
+
+They are point buckets, not percentiles.
+
+Example:
+
+- `growth_component = 12`
+- `margin_component = 15`
+
+means the company matched certain predefined score thresholds.
+
+Important:
+
+- these rows are absolute rules
+- they do not depend on other companies
+
+---
+
+# 6. Raw TTM Factors
+
+Variables:
+
+- `revenue_growth_ttm_yoy`
+- `ebit_margin_ttm`
+- `ebit_margin_trend_4q`
+- `fcf_margin_ttm`
+- `fcf_margin_trend_4q`
+- `net_debt_to_ebitda`
+- `share_dilution_yoy`
+
+These are direct inputs or near-direct inputs into scoring.
+
+They act as a sanity-check layer.
+
+If you see a strong percentile but weak raw economics, that tension matters.
+
+Examples:
+
+- high `revenue_growth_ttm_yoy` = strong top-line expansion
+- high `ebit_margin_ttm` = stronger operating profitability
+- positive `ebit_margin_trend_4q` = margins improving
+- high `fcf_margin_ttm` = earnings converting to cash
+- lower `net_debt_to_ebitda` is better
+- lower or negative `share_dilution_yoy` is better
+
+---
+
+# 7. Percentile Scores
+
+Variables:
+
+- `fundamental_score_percentile_global`
+- `fundamental_score_percentile_sector`
+- `fundamental_score_percentile_industry`
+- `fundamental_score_percentile_blended`
+- `fundamental_score_percentile_blended_lifecycle_weighted`
+
+These are cross-sectional scores on a `0..100` scale.
+
+Meaning:
+
+- `80` means the company is better than about 80% of the comparison set for that level
+
+Levels:
+
+- `global`: all eligible companies in the snapshot universe
+- `sector`: same sector, if sector size is large enough
+- `industry`: same industry, if industry size is large enough
+- `blended`: weighted combination of available levels
+
+Important:
+
+- these are relative, not absolute
+- this is where peer comparison actually happens
+
+Also important:
+
+- if sector or industry groups are too small, those percentiles become empty
+- the blended score then renormalizes over the levels that remain available
+
+---
+
+# 8. Percentile Rank Bucket
+
+Variable:
+
+- `percentile_rank_bucket`
+
+This is a label derived from `fundamental_score_percentile_blended_lifecycle_weighted`.
+
+Current mapping:
+
+- `>= 90`: `Top 10%`
+- `>= 80`: `Top 20%`
+- `>= 70`: `Top 30%`
+- `>= 60`: `Top 40%`
+- `>= 50`: `Above median`
+- `>= 40`: `Neutral`
+- `>= 30`: `Weak`
+- `>= 20`: `Very weak`
+- `< 20`: `Bottom bucket`
+
+This is only a convenience label, not a separate score.
+
+---
+
+# 9. Global Factor Percentiles
+
+Variables:
+
+- `growth_pct_global`
+- `margin_pct_global`
+- `margin_trend_pct_global`
+- `fcf_pct_global`
+- `consistency_pct_global`
+- `leverage_pct_global`
+- `dilution_pct_global`
+
+These explain where the percentile strength comes from.
+
+They are global cross-sectional percentiles for the factor families.
+
+Interpretation:
+
+- `growth_pct_global`: relative revenue growth strength
+- `margin_pct_global`: relative EBIT margin strength
+- `margin_trend_pct_global`: relative EBIT margin improvement strength
+- `fcf_pct_global`: relative FCF margin strength
+- `consistency_pct_global`: relative stability strength
+- `leverage_pct_global`: relative balance-sheet conservatism
+- `dilution_pct_global`: relative friendliness to shareholders on share count
+
+Note:
+
+- for `leverage` and `dilution`, lower raw values are better, but the percentile is still expressed so that higher percentile means better
+
+---
+
+# 10. Quarterly Raw Values
+
+Variables:
+
+- `revenue`
+- `operating_income`
+- `free_cashflow`
+- `shares_outstanding`
+- `total_debt`
+
+These come from the quarterly table, not from TTM.
+
+They help the reader inspect the quarter-level pattern behind the TTM metrics.
+
+Typical use:
+
+- is revenue still rising?
+- is operating income expanding or stalling?
+- is free cash flow volatile?
+- is share count drifting up?
+- is debt rising?
+
+---
+
+# 11. 4Q Delta Rows
+
+Variables:
+
+- `margin_trend_delta_4q`
+- `fcf_margin_trend_delta_4q`
+- `shares_outstanding_delta_4q`
+- `net_debt_to_ebitda_delta_4q`
+- `percentile_delta_4q`
+- `score_delta_4q`
+- `lifecycle_transition_4q`
+
+These are long-horizon change indicators.
+
+Meaning:
+
+- `margin_trend_delta_4q`: latest minus earliest `ebit_margin_trend_4q`
+- `fcf_margin_trend_delta_4q`: latest minus earliest `fcf_margin_trend_4q`
+- `shares_outstanding_delta_4q`: latest minus earliest quarterly share count
+- `net_debt_to_ebitda_delta_4q`: latest minus earliest leverage ratio
+- `percentile_delta_4q`: latest lifecycle-weighted blended percentile minus earliest baseline blended percentile
+- `score_delta_4q`: latest lifecycle score minus earliest lifecycle score
+- `lifecycle_transition_4q`: first lifecycle label to latest lifecycle label
+
+Use:
+
+- QoQ tells the short-term slope
+- 4Q tells the more structural shift
+
+---
+
+# 12. QoQ Delta Rows
+
+Variables:
+
+- `score_delta_qoq`
+- `percentile_delta_qoq`
+- `margin_trend_delta_qoq`
+- `fcf_margin_trend_delta_qoq`
+- `consistency_delta_qoq`
+- `growth_pct_global_delta_qoq`
+
+These are quarter-to-quarter deltas across the displayed columns.
+
+Format rule:
+
+- first quarter column is empty
+- each later column = current quarter minus previous quarter
+
+Example:
+
+- `score_delta_qoq;;-6.40;-0.30;-3.30`
+
+means:
+
+- Q1: no previous quarter inside the displayed window
+- Q2: `Q2 - Q1 = -6.40`
+- Q3: `Q3 - Q2 = -0.30`
+- Q4: `Q4 - Q3 = -3.30`
+
+This is useful for detecting near-term acceleration or weakening.
+
+---
+
+# 13. Sector and Industry Rank
+
+Variables:
+
+- `sector_rank_position`
+- `industry_rank_position`
+
+Example:
+
+- `Sijalla 3/27`
+
+means the company ranks third within a group of 27.
+
+Current implementation appends the group name only to the latest displayed quarter.
+
+Use:
+
+- industry rank is often the more important micro-comparison
+- sector rank is the broader relative context
+
+---
+
+# 14. Price Behavior Snapshot
+
+This block appears only when `--price-behavior-snapshot` is enabled together with `--ohlcv-db`.
+
+Important:
+
+- it is not quarter-column based
+- it is a latest market snapshot block
+- each row has a single current value
+
+Variables:
+
+- `price_behavior_as_of_date`
+- `price_return_3m_pct`
+- `price_return_6m_pct`
+- `price_return_12m_pct`
+- `distance_from_52w_high_pct`
+- `relative_strength_6m_vs_sp500_pct`
+- `price_return_since_last_report_pct`
+- `relative_return_vs_sp500_since_last_report_pct`
+- `earnings_reaction_1d_pct`
+- `earnings_reaction_3d_pct`
+- `post_earnings_drift_20d_pct`
+- `volume_ratio_since_last_report_vs_3m_avg`
+
+This layer answers:
+
+- is the market confirming the story?
+- did the stock outperform or underperform?
+- how did price behave around the last report?
+
+---
+
+# 15. Practical Interpretation Framework
+
+The snapshot is strongest when all three line up:
+
+1. quality is high
+2. quality is improving
+3. market behavior confirms it
+
+Examples:
+
+## Strong candidate
+
+- high percentile
+- `SCALING` or strong `MATURE`
+- positive QoQ or 4Q trend
+- positive relative strength
+
+## Quality watchlist candidate
+
+- high score / percentile
+- lifecycle acceptable
+- price confirmation still weak or mixed
+
+## Avoid / low-priority candidate
+
+- weak percentile
+- `DECLINING` or `DISTRESSED`
+- negative deltas
+- weak price behavior
+
+This is a decision-support framework, not a hard-coded buy rule.
+
+---
+
+# 16. Important Corrections vs Earlier Draft
+
+The earlier draft was incomplete or partially incorrect in these key ways:
+
+## 16.1 Lifecycle labels
+
+The implementation does not use:
+
+- `STABILIZING`
+- `WEAKENING`
+
+The actual implemented classes are:
+
+- `STARTUP`
+- `GROWTH`
+- `SCALING`
+- `MATURE`
+- `TRANSITION`
+- `DECLINING`
+- `DISTRESSED`
+- `UNCLASSIFIED`
+
+## 16.2 Fundamental score is not relative
+
+`fundamental_score_v1` and `fundamental_score_v2_lifecycle` are rule-based point scores.
+
+They are not percentile ranks.
+
+The relative layer starts at the percentile block.
+
+## 16.3 Price behavior snapshot is latest-only
+
+The current implementation does not calculate the price-behavior block separately for each quarter column.
+
+It calculates a single latest snapshot as of the latest OHLCV date available for the ticker.
+
+## 16.4 Some interpretation labels were not implemented features
+
+Terms like:
+
+- `leader`
+- `follower`
+- `confirmed leader`
+- `momentum without quality`
+
+can be useful analytical language, but they are not stored classification outputs in the current codebase.
+
+They should be treated as analyst interpretation, not native engine fields.
+
+---
+
+# 17. Full Calculation Rules
+
+This section lists the current implementation rules.
+
+## 17.1 Lifecycle Classification Rules
+
+Lifecycle is evaluated in this order. The first match wins.
+
+### `DISTRESSED`
+
+If:
+
+- `ebit_margin_ttm < -0.20`
+- and `fcf_margin_ttm < -0.20`
+
+### `STARTUP`
+
+If:
+
+- `revenue_growth_ttm_yoy > 0.30`
+- and `ebit_margin_ttm < -0.05`
+- and `fcf_margin_ttm < 0`
+
+### `GROWTH`
+
+If:
+
+- `revenue_growth_ttm_yoy > 0.20`
+- and `ebit_margin_ttm < 0.10`
+
+### `SCALING`
+
+If:
+
+- `revenue_growth_ttm_yoy > 0.10`
+- and `ebit_margin_trend_4q > 0`
+- and `ebit_margin_ttm >= 0`
+
+### `MATURE`
+
+If:
+
+- `ebit_margin_ttm >= 0.15`
+- and `fcf_margin_ttm >= 0.05`
+- and `revenue_growth_ttm_yoy >= -0.05` or `NULL`
+
+### `TRANSITION`
+
+If:
+
+- `0 <= ebit_margin_ttm < 0.15`
+- and `fcf_margin_ttm >= 0`
+- and `revenue_growth_ttm_yoy >= -0.05` or `NULL`
+- and `ebit_margin_trend_4q >= -0.05` or `NULL`
+
+### `DECLINING`
+
+If:
+
+- `revenue_growth_ttm_yoy < -0.05`
+- or `ebit_margin_trend_4q < -0.05`
+
+### `UNCLASSIFIED`
+
+Fallback if none of the above matched.
+
+---
+
+## 17.2 Baseline Fundamental Score Component Rules
+
+### Growth component
+
+Based on `revenue_growth_ttm_yoy`:
+
+- `NULL` -> `6`
+- `>= 0.30` -> `15`
+- `>= 0.20` -> `12`
+- `>= 0.10` -> `9`
+- `>= 0.00` -> `5`
+- else -> `0`
+
+### Margin component
+
+Based on `ebit_margin_ttm`:
+
+- `NULL` -> `0`
+- `>= 0.25` -> `15`
+- `>= 0.15` -> `12`
+- `>= 0.08` -> `8`
+- `>= 0.00` -> `4`
+- else -> `0`
+
+### Margin trend component
+
+Based on `ebit_margin_trend_4q`:
+
+- `NULL` -> `6`
+- `>= 0.05` -> `15`
+- `>= 0.02` -> `10`
+- `>= 0.00` -> `6`
+- else -> `2`
+
+### FCF component
+
+Based on `fcf_margin_ttm`:
+
+- `NULL` -> `0`
+- `>= 0.20` -> `15`
+- `>= 0.10` -> `12`
+- `>= 0.05` -> `8`
+- `>= 0.00` -> `4`
+- else -> `0`
+
+### Leverage component
+
+Based on `net_debt_to_ebitda`:
+
+- `NULL` -> `8`
+- `<= 0` -> `15`
+- `<= 1` -> `12`
+- `<= 2` -> `8`
+- `<= 3` -> `4`
+- else -> `0`
+
+### Dilution component
+
+First, if `abs(share_dilution_yoy) > 0.50`, treat it as `NULL` for scoring only.
+
+Then:
+
+- `NULL` -> `5`
+- `<= -0.02` -> `10`
+- `<= 0.00` -> `8`
+- `<= 0.02` -> `5`
+- `<= 0.05` -> `2`
+- else -> `0`
+
+### Lifecycle component
+
+Based on `lifecycle_class`:
+
+- `STARTUP` -> `-5`
+- `GROWTH` -> `2`
+- `SCALING` -> `4`
+- `MATURE` -> `5`
+- `DECLINING` -> `-5`
+- `DISTRESSED` -> `-10`
+- all others -> `0`
+
+### Consistency component
+
+Uses the latest up to 4 historical values for:
+
+- `revenue_growth_ttm_yoy`
+- `ebit_margin_ttm`
+- `fcf_margin_ttm`
+
+Needs at least 3 non-null observations for each metric or returns `0`.
+
+For each metric:
+
+- compute population standard deviation
+- divide by absolute mean
+- this gives coefficient of variation
+
+Take the average coefficient of variation across the 3 metric families.
+
+Then:
+
+- `<= 0.05` -> `10`
+- `<= 0.10` -> `8`
+- `<= 0.15` -> `6`
+- `<= 0.20` -> `4`
+- `<= 0.30` -> `2`
+- else -> `0`
+
+### Baseline score formula
+
+`fundamental_score_v1` =
+
+- growth component
+- + margin component
+- + margin trend component
+- + fcf component
+- + leverage component
+- + dilution component
+- + lifecycle component
+- + consistency component
+
+Then clamp to:
+
+- minimum `0`
+- maximum `100`
+
+---
+
+## 17.3 Lifecycle-Weighted Fundamental Score Rules
+
+`fundamental_score_v2_lifecycle` uses the same baseline components, but multiplies them by lifecycle-specific weights.
+
+### `SCALING`
+
+- growth `x 1.25`
+- margin `x 0.90`
+- margin trend `x 1.25`
+- fcf `x 0.90`
+- leverage `x 1.00`
+- dilution `x 1.00`
+- lifecycle `x 1.00`
+- consistency `x 1.25`
+
+### `STARTUP`
+
+- growth `x 1.40`
+- margin `x 0.60`
+- margin trend `x 0.90`
+- fcf `x 0.60`
+- leverage `x 0.70`
+- dilution `x 1.00`
+- lifecycle `x 1.00`
+- consistency `x 1.15`
+
+### `DISTRESSED`
+
+- growth `x 0.70`
+- margin `x 0.60`
+- margin trend `x 0.75`
+- fcf `x 1.25`
+- leverage `x 1.40`
+- dilution `x 1.10`
+- lifecycle `x 1.00`
+- consistency `x 1.20`
+- then subtract `4`
+
+### `TRANSITION`
+
+- growth `x 1.15`
+- margin `x 1.05`
+- margin trend `x 1.35`
+- fcf `x 1.00`
+- leverage `x 1.00`
+- dilution `x 1.00`
+- lifecycle `x 1.00`
+- consistency `x 1.20`
+
+### `DECLINING`
+
+- growth `x 0.65`
+- margin `x 0.85`
+- margin trend `x 0.70`
+- fcf `x 1.00`
+- leverage `x 1.10`
+- dilution `x 1.10`
+- lifecycle `x 1.00`
+- consistency `x 0.80`
+- then subtract `3`
+
+### `GROWTH`
+
+- growth `x 1.10`
+- margin `x 1.05`
+- margin trend `x 1.10`
+- fcf `x 1.00`
+- leverage `x 1.00`
+- dilution `x 1.00`
+- lifecycle `x 1.00`
+- consistency `x 1.10`
+
+### `MATURE`
+
+- growth `x 0.95`
+- margin `x 1.10`
+- margin trend `x 1.00`
+- fcf `x 1.15`
+- leverage `x 1.05`
+- dilution `x 1.10`
+- lifecycle `x 1.00`
+- consistency `x 1.15`
+
+### Others
+
+All factors stay unchanged.
+
+Then sum the lifecycle-weighted components and clamp to `0..100`.
+
+No extra integer rounding is applied.
+
+---
+
+## 17.4 Percentile Score Rules
+
+The percentile system operates on the latest available fundamental snapshot per ticker as of a chosen target date.
+
+### Factor inputs
+
+- `growth` -> `revenue_growth_ttm_yoy`
+- `margin` -> `ebit_margin_ttm`
+- `margin_trend` -> `ebit_margin_trend_4q`
+- `fcf` -> `fcf_margin_ttm`
+- `consistency` -> `consistency_component_lifecycle`
+- `leverage` -> `net_debt_to_ebitda`
+- `dilution` -> `share_dilution_yoy`
+
+### Higher-is-better factors
+
+- `growth`
+- `margin`
+- `margin_trend`
+- `fcf`
+- `consistency`
+
+### Lower-is-better factors
+
+- `leverage`
+- `dilution`
+
+### Percentile method
+
+For each factor:
+
+- sort values ascending
+- ties get average rank
+- if `n == 1`, percentile = `100`
+- higher-is-better uses direct percentile
+- lower-is-better uses inverted percentile
+
+### Factor weights
+
+- growth = `20.0`
+- margin = `15.0`
+- margin trend = `10.0`
+- fcf = `20.0`
+- consistency = `20.0`
+- leverage = `7.5`
+- dilution = `7.5`
+
+### Minimum factor count
+
+Need at least `4` available factor percentiles.
+
+If fewer than 4 are available, that level score is `NULL`.
+
+### Level scores
+
+The system computes:
+
+- `global`
+- `sector`
+- `industry`
+
+with renormalization over available factors only.
+
+### Minimum group sizes
+
+- sector score valid only if sector size `>= 50`
+- industry score valid only if industry size `>= 20`
+
+### Blended percentile
+
+Blended weights:
+
+- global = `0.40`
+- sector = `0.35`
+- industry = `0.25`
+
+If one level is missing, weights renormalize across the remaining levels.
+
+---
+
+## 17.5 Lifecycle-Weighted Percentile Rules
+
+The lifecycle-weighted percentile score uses the same factor percentiles, but modifies factor weights by lifecycle class.
+
+### `SCALING`
+
+- growth `x 1.15`
+- margin `x 0.95`
+- margin trend `x 1.20`
+- fcf `x 1.05`
+- consistency `x 1.10`
+- leverage `x 1.00`
+- dilution `x 1.00`
+- adjustment `0`
+
+### `MATURE`
+
+- growth `x 0.90`
+- margin `x 1.15`
+- margin trend `x 1.00`
+- fcf `x 1.20`
+- consistency `x 1.15`
+- leverage `x 1.05`
+- dilution `x 1.05`
+- adjustment `0`
+
+### `GROWTH`
+
+- growth `x 1.15`
+- margin `x 1.00`
+- margin trend `x 1.10`
+- fcf `x 1.00`
+- consistency `x 1.10`
+- leverage `x 1.00`
+- dilution `x 1.00`
+- adjustment `0`
+
+### `TRANSITION`
+
+- growth `x 1.05`
+- margin `x 1.05`
+- margin trend `x 1.10`
+- fcf `x 1.15`
+- consistency `x 1.20`
+- leverage `x 1.00`
+- dilution `x 1.05`
+- adjustment `0`
+
+### `STARTUP`
+
+- growth `x 1.25`
+- margin `x 0.70`
+- margin trend `x 1.00`
+- fcf `x 0.70`
+- consistency `x 1.15`
+- leverage `x 0.90`
+- dilution `x 1.00`
+- adjustment `0`
+
+### `DECLINING`
+
+- growth `x 0.75`
+- margin `x 0.90`
+- margin trend `x 0.75`
+- fcf `x 1.00`
+- consistency `x 0.85`
+- leverage `x 1.05`
+- dilution `x 1.05`
+- adjustment `-3`
+
+### `DISTRESSED`
+
+- growth `x 0.70`
+- margin `x 0.75`
+- margin trend `x 0.70`
+- fcf `x 1.10`
+- consistency `x 0.85`
+- leverage `x 1.15`
+- dilution `x 1.10`
+- adjustment `-4`
+
+### `UNCLASSIFIED`
+
+All multipliers `1.00`, adjustment `0`.
+
+### Formula
+
+For each available factor:
+
+- effective weight = base factor weight x lifecycle multiplier
+
+Then:
+
+- weighted average percentile over available factors
+- plus lifecycle adjustment
+- clamp to `0..100`
+
+The blended lifecycle-weighted percentile then combines:
+
+- global lifecycle-weighted score
+- sector lifecycle-weighted score
+- industry lifecycle-weighted score
+
+using the same `0.40 / 0.35 / 0.25` weights with renormalization.
+
+---
+
+## 17.6 Snapshot QoQ Rules
+
+For displayed quarter columns:
+
+- first column = empty
+- each later column = current displayed value minus previous displayed value
+
+This currently applies to:
+
+- `score_delta_qoq` from `fundamental_score_v2_lifecycle`
+- `percentile_delta_qoq` from `fundamental_score_percentile_blended_lifecycle_weighted`
+- `margin_trend_delta_qoq` from `ebit_margin_trend_4q`
+- `fcf_margin_trend_delta_qoq` from `fcf_margin_trend_4q`
+- `consistency_delta_qoq` from `consistency_pct_global`
+- `growth_pct_global_delta_qoq` from `growth_pct_global`
+
+If either adjacent value is missing, the delta is empty.
+
+---
+
+## 17.7 Price Behavior Snapshot Rules
+
+This block is computed only if:
+
+- `--price-behavior-snapshot`
+- and `--ohlcv-db`
+
+are provided.
+
+### OHLCV source
+
+- database table: `osakedata`
+- ticker normalized to uppercase
+- market fixed to `usa`
+- benchmark ticker = `^GSPC`
+
+### Current anchor
+
+Current anchor = latest OHLCV row available for the ticker.
+
+### Metrics
+
+#### `price_return_3m_pct`
+
+`100 * (anchor_close / close_63_trading_days_ago - 1)`
+
+#### `price_return_6m_pct`
+
+`100 * (anchor_close / close_126_trading_days_ago - 1)`
+
+#### `price_return_12m_pct`
+
+`100 * (anchor_close / close_252_trading_days_ago - 1)`
+
+#### `distance_from_52w_high_pct`
+
+Over the last 252 trading days ending at anchor:
+
+`100 * (anchor_close / max_high_252d - 1)`
+
+#### `relative_strength_6m_vs_sp500_pct`
+
+Ticker 6M return minus benchmark 6M return.
+
+#### `price_return_since_last_report_pct`
+
+Use the latest displayed quarter date as report date proxy.
+
+Report anchor = latest ticker trading day `<= latest quarter date`.
+
+Then:
+
+`100 * (current_anchor_close / report_anchor_close - 1)`
+
+#### `relative_return_vs_sp500_since_last_report_pct`
+
+Ticker since-report return minus benchmark since-report return.
+
+#### `earnings_reaction_1d_pct`
+
+Event anchor = report anchor.
+
+Reaction day 1 = next trading day after event anchor.
+
+`100 * (close_day_1 / close_event_anchor - 1)`
+
+#### `earnings_reaction_3d_pct`
+
+Event anchor = report anchor.
+
+Reaction day 3 = third trading day after event anchor.
+
+`100 * (close_day_3 / close_event_anchor - 1)`
+
+#### `post_earnings_drift_20d_pct`
+
+Event anchor = report anchor.
+
+Drift end = 20 trading days after event anchor.
+
+`100 * (close_20td_after_event / close_event_anchor - 1)`
+
+This is descriptive/reporting only and not safe as a production signal without explicit as-of controls.
+
+#### `volume_ratio_since_last_report_vs_3m_avg`
+
+Numerator:
+
+- average volume from first trading day after report anchor through current anchor
+
+Denominator:
+
+- average volume over the 63 trading days ending at report anchor
+
+Formula:
+
+- numerator average / denominator average
+
+### Missing data behavior
+
+If required data is missing or insufficient:
+
+- output is empty for that metric
+
+The report should not fail just because one price-behavior metric is unavailable.
+
+---
+
+# 18. Recommended Reading Order
+
+A practical reading sequence is:
+
+1. `lifecycle_class`
+2. `fundamental_score_v2_lifecycle`
+3. `fundamental_score_percentile_blended_lifecycle_weighted`
+4. `growth_pct_global`, `margin_pct_global`, `fcf_pct_global`, `consistency_pct_global`
+5. QoQ and 4Q delta rows
+6. `sector_rank_position` and `industry_rank_position`
+7. `price_behavior_snapshot`
+
+This gives:
+
+- stage
+- quality
+- relative standing
+- trend
+- market confirmation
+
+---
+
+# 19. Bottom Line
+
+The snapshot is best understood as a layered decision-support report:
+
+1. absolute business quality rules
+2. relative peer ranking
+3. time-direction signals
+4. optional market-confirmation signals
+
+The highest-conviction situations are usually those where:
+
+- lifecycle is favorable
+- percentile rank is strong
+- QoQ / 4Q momentum is improving
+- price behavior does not contradict the fundamental picture
+

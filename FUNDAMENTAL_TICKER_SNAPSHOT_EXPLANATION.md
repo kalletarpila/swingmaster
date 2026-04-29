@@ -879,8 +879,8 @@ with renormalization over available factors only.
 
 ### Minimum group sizes
 
-- sector score valid only if sector size `>= 50`
-- industry score valid only if industry size `>= 20`
+- sector score valid only if sector size `>= 10`
+- industry score valid only if industry size `>= 10`
 
 ### Blended percentile
 
@@ -1166,4 +1166,3 @@ The highest-conviction situations are usually those where:
 - percentile rank is strong
 - QoQ / 4Q momentum is improving
 - price behavior does not contradict the fundamental picture
-

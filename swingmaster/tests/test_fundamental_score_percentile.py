@@ -139,6 +139,33 @@ def test_industry_percentiles_are_null_below_minimum_size() -> None:
     assert row["fundamental_score_percentile_industry"] is None
 
 
+def test_sector_and_industry_percentiles_are_computed_at_minimum_size_threshold() -> None:
+    rows = [
+        _snapshot_row(
+            f"T{i:02d}",
+            "2025-12-31",
+            growth=float(i),
+            sector="Tech",
+            industry="Hardware",
+        )
+        for i in range(10)
+    ]
+    percentile_rows = build_percentile_rows(
+        snapshot_rows=rows,
+        target_date="2025-12-31",
+        rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+        run_id="RUN1",
+        created_at_utc="2026-04-25T00:00:00Z",
+    )
+    row = next(item for item in percentile_rows if item["ticker"] == "T00")
+    assert row["sector_size"] == 10
+    assert row["industry_size"] == 10
+    assert row["growth_pct_sector"] == pytest.approx(0.0)
+    assert row["growth_pct_industry"] == pytest.approx(0.0)
+    assert row["fundamental_score_percentile_sector"] is not None
+    assert row["fundamental_score_percentile_industry"] is not None
+
+
 def test_weighted_score_renormalizes_available_factors_only() -> None:
     score = compute_weighted_percentile_score(
         {

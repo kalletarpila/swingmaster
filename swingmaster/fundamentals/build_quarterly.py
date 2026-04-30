@@ -26,6 +26,7 @@ FIELD_MAPPINGS: dict[str, tuple[str, tuple[str, ...]]] = {
             "Cash And Cash Equivalents",
             "Cash Cash Equivalents And Short Term Investments",
             "Cash And Short Term Investments",
+            "CashAndCashEquivalentsAtCarryingValue",
         ),
     ),
     "total_debt": (
@@ -83,6 +84,8 @@ def build_quarterly_rows(raw_rows: list[sqlite3.Row], run_id: str) -> list[dict[
         statement_type = str(row["statement_type"])
         field_name = str(row["field_name"])
         raw_lookup[(statement_type, period_end_date, field_name)] = row["field_value"]
+        base_field_name = field_name.split("|", 1)[0]
+        raw_lookup.setdefault((statement_type, period_end_date, base_field_name), row["field_value"])
         if period_end_date not in seen_periods:
             seen_periods.add(period_end_date)
             periods.append(period_end_date)
@@ -110,6 +113,9 @@ def build_quarterly_rows(raw_rows: list[sqlite3.Row], run_id: str) -> list[dict[
         for normalized_field, (statement_type, candidate_names) in FIELD_MAPPINGS.items():
             quarterly_row[normalized_field] = _resolve_field_value(raw_lookup, statement_type, period_end_date, candidate_names)
 
+        if quarterly_row["total_debt"] is None:
+            quarterly_row["total_debt"] = _resolve_total_debt_value(raw_lookup, period_end_date)
+
         operating_cashflow = quarterly_row["operating_cashflow"]
         capex = quarterly_row["capex"]
         if operating_cashflow is not None and capex is not None:
@@ -130,6 +136,18 @@ def _resolve_field_value(
         if raw_key in raw_lookup:
             return raw_lookup[raw_key]
     return None
+
+
+def _resolve_total_debt_value(
+    raw_lookup: dict[tuple[str, str, str], float | None],
+    period_end_date: str,
+) -> float | None:
+    current = raw_lookup.get(("balance", period_end_date, "LongTermDebtCurrent"))
+    noncurrent = raw_lookup.get(("balance", period_end_date, "LongTermDebtNoncurrent"))
+    values = [value for value in (current, noncurrent) if value is not None]
+    if not values:
+        return None
+    return float(sum(values))
 
 
 def insert_quarterly_rows(conn: sqlite3.Connection, quarterly_rows: list[dict[str, Any]]) -> int:

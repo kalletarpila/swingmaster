@@ -74,6 +74,57 @@ def test_build_quarterly_successful_normalization(tmp_path: Path) -> None:
         )
 
 
+def test_build_quarterly_maps_sec_cash_name_and_sums_split_debt_fields(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_sec_names.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_raw_row(
+            conn,
+            "VRT",
+            "balance",
+            "2025-12-31",
+            "CashAndCashEquivalentsAtCarryingValue|form=10-K|unit=USD|fy=2025|fp=FY",
+            1728400000.0,
+        )
+        _insert_raw_row(
+            conn,
+            "VRT",
+            "balance",
+            "2025-12-31",
+            "LongTermDebtCurrent|form=10-K|unit=USD|fy=2025|fp=FY",
+            20900000.0,
+        )
+        _insert_raw_row(
+            conn,
+            "VRT",
+            "balance",
+            "2025-12-31",
+            "LongTermDebtNoncurrent|form=10-K|unit=USD|fy=2025|fp=FY",
+            2892100000.0,
+        )
+        conn.commit()
+
+        periods_detected, rows_written = build_and_insert_quarterly_rows(
+            conn=conn,
+            ticker="VRT",
+            run_id="FUND_BUILD_Q_VRT_V1",
+            dry_run=False,
+        )
+
+        assert periods_detected == 1
+        assert rows_written == 1
+
+        row = conn.execute(
+            """
+            SELECT cash, total_debt
+            FROM rc_fundamental_quarterly
+            WHERE ticker='VRT' AND period_end_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row == (1728400000.0, 2913000000.0)
+
+
 def test_build_quarterly_uses_union_of_periods(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamentals_quarterly_union.db"
     run_migration(db_path)

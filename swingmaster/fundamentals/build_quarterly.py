@@ -5,10 +5,19 @@ from typing import Any
 
 
 FIELD_MAPPINGS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "revenue": ("income", ("Total Revenue", "Revenue", "Operating Revenue")),
+    "revenue": (
+        "income",
+        (
+            "Total Revenue",
+            "Revenue",
+            "Operating Revenue",
+            "Revenues",
+            "RevenueFromContractWithCustomerExcludingAssessedTax",
+        ),
+    ),
     "gross_profit": ("income", ("Gross Profit",)),
-    "operating_income": ("income", ("Operating Income", "EBIT")),
-    "ebit": ("income", ("EBIT", "Operating Income")),
+    "operating_income": ("income", ("Operating Income", "EBIT", "OperatingIncomeLoss")),
+    "ebit": ("income", ("EBIT", "Operating Income", "OperatingIncomeLoss")),
     "ebitda": ("income", ("EBITDA", "Normalized EBITDA")),
     "net_income": ("income", ("Net Income", "Net Income Common Stockholders")),
     "operating_cashflow": (
@@ -17,9 +26,20 @@ FIELD_MAPPINGS: dict[str, tuple[str, tuple[str, ...]]] = {
             "Operating Cash Flow",
             "Total Cash From Operating Activities",
             "Cash Flow From Continuing Operating Activities",
+            "NetCashProvidedByUsedInOperatingActivities",
+            "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
         ),
     ),
-    "capex": ("cashflow", ("Capital Expenditure", "Capital Expenditures", "Capital Spending")),
+    "capex": (
+        "cashflow",
+        (
+            "Capital Expenditure",
+            "Capital Expenditures",
+            "Capital Spending",
+            "PaymentsToAcquirePropertyPlantAndEquipment",
+            "PaymentsToAcquireProductiveAssets",
+        ),
+    ),
     "cash": (
         "balance",
         (
@@ -144,7 +164,8 @@ def _resolve_total_debt_value(
 ) -> float | None:
     current = raw_lookup.get(("balance", period_end_date, "LongTermDebtCurrent"))
     noncurrent = raw_lookup.get(("balance", period_end_date, "LongTermDebtNoncurrent"))
-    values = [value for value in (current, noncurrent) if value is not None]
+    short_term = raw_lookup.get(("balance", period_end_date, "ShortTermBorrowings"))
+    values = [value for value in (current, noncurrent, short_term) if value is not None]
     if not values:
         return None
     return float(sum(values))

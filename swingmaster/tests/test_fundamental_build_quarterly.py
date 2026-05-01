@@ -125,6 +125,114 @@ def test_build_quarterly_maps_sec_cash_name_and_sums_split_debt_fields(tmp_path:
         assert row == (1728400000.0, 2913000000.0)
 
 
+def test_build_quarterly_maps_additional_sec_fact_names(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_additional_sec_fact_names.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_raw_row(
+            conn,
+            "MSFT",
+            "income",
+            "2025-12-31",
+            "RevenueFromContractWithCustomerExcludingAssessedTax|form=10-Q|unit=USD|fy=2026|fp=Q2",
+            81273000000.0,
+        )
+        _insert_raw_row(
+            conn,
+            "MSFT",
+            "income",
+            "2025-12-31",
+            "OperatingIncomeLoss|form=10-Q|unit=USD|fy=2026|fp=Q2",
+            31303000000.0,
+        )
+        _insert_raw_row(
+            conn,
+            "MSFT",
+            "cashflow",
+            "2025-12-31",
+            "NetCashProvidedByUsedInOperatingActivities|form=10-Q|unit=USD|fy=2026|fp=Q2",
+            40213000000.0,
+        )
+        _insert_raw_row(
+            conn,
+            "MSFT",
+            "cashflow",
+            "2025-12-31",
+            "PaymentsToAcquirePropertyPlantAndEquipment|form=10-Q|unit=USD|fy=2026|fp=Q2",
+            -1287000000.0,
+        )
+        _insert_raw_row(
+            conn,
+            "MSFT",
+            "balance",
+            "2025-12-31",
+            "CashAndCashEquivalentsAtCarryingValue|form=10-Q|unit=USD|fy=2026|fp=Q2",
+            32400000000.0,
+        )
+        _insert_raw_row(
+            conn,
+            "MSFT",
+            "balance",
+            "2025-12-31",
+            "LongTermDebtCurrent|form=10-Q|unit=USD|fy=2026|fp=Q2",
+            3749000000.0,
+        )
+        _insert_raw_row(
+            conn,
+            "MSFT",
+            "balance",
+            "2025-12-31",
+            "LongTermDebtNoncurrent|form=10-Q|unit=USD|fy=2026|fp=Q2",
+            40109000000.0,
+        )
+        _insert_raw_row(
+            conn,
+            "MSFT",
+            "balance",
+            "2025-12-31",
+            "ShortTermBorrowings|form=10-Q|unit=USD|fy=2026|fp=Q2",
+            500000000.0,
+        )
+        conn.commit()
+
+        periods_detected, rows_written = build_and_insert_quarterly_rows(
+            conn=conn,
+            ticker="MSFT",
+            run_id="FUND_BUILD_Q_MSFT_V1",
+            dry_run=False,
+        )
+
+        assert periods_detected == 1
+        assert rows_written == 1
+
+        row = conn.execute(
+            """
+            SELECT
+                revenue,
+                operating_income,
+                ebit,
+                operating_cashflow,
+                capex,
+                free_cashflow,
+                cash,
+                total_debt
+            FROM rc_fundamental_quarterly
+            WHERE ticker='MSFT' AND period_end_date='2025-12-31'
+            """
+        ).fetchone()
+        assert row == (
+            81273000000.0,
+            31303000000.0,
+            31303000000.0,
+            40213000000.0,
+            -1287000000.0,
+            38926000000.0,
+            32400000000.0,
+            44358000000.0,
+        )
+
+
 def test_build_quarterly_uses_union_of_periods(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamentals_quarterly_union.db"
     run_migration(db_path)

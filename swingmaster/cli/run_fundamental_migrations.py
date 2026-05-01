@@ -36,10 +36,14 @@ TTM_COMPONENT_COLUMNS = (
     ("consistency_component_lifecycle", "REAL"),
 )
 PERCENTILE_LIFECYCLE_COLUMNS = (
+    ("sector_rank_blended", "INTEGER"),
+    ("industry_rank_blended", "INTEGER"),
     ("fundamental_score_percentile_global_lifecycle_weighted", "REAL"),
     ("fundamental_score_percentile_sector_lifecycle_weighted", "REAL"),
     ("fundamental_score_percentile_industry_lifecycle_weighted", "REAL"),
     ("fundamental_score_percentile_blended_lifecycle_weighted", "REAL"),
+    ("sector_rank_blended_lifecycle_weighted", "INTEGER"),
+    ("industry_rank_blended_lifecycle_weighted", "INTEGER"),
     ("percentile_lifecycle_weight_rule", "TEXT"),
 )
 

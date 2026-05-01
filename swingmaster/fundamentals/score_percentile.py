@@ -328,6 +328,38 @@ def build_percentile_rows(
         )
         row_result["percentile_lifecycle_weight_rule"] = FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE
         percentile_rows.append(row_result)
+    _assign_partition_ranks(
+        percentile_rows,
+        partition_key="sector",
+        partition_size_key="sector_size",
+        min_size=SECTOR_MIN_SIZE,
+        score_key="fundamental_score_percentile_blended",
+        rank_key="sector_rank_blended",
+    )
+    _assign_partition_ranks(
+        percentile_rows,
+        partition_key="industry",
+        partition_size_key="industry_size",
+        min_size=INDUSTRY_MIN_SIZE,
+        score_key="fundamental_score_percentile_blended",
+        rank_key="industry_rank_blended",
+    )
+    _assign_partition_ranks(
+        percentile_rows,
+        partition_key="sector",
+        partition_size_key="sector_size",
+        min_size=SECTOR_MIN_SIZE,
+        score_key="fundamental_score_percentile_blended_lifecycle_weighted",
+        rank_key="sector_rank_blended_lifecycle_weighted",
+    )
+    _assign_partition_ranks(
+        percentile_rows,
+        partition_key="industry",
+        partition_size_key="industry_size",
+        min_size=INDUSTRY_MIN_SIZE,
+        score_key="fundamental_score_percentile_blended_lifecycle_weighted",
+        rank_key="industry_rank_blended_lifecycle_weighted",
+    )
     return percentile_rows
 
 
@@ -429,10 +461,14 @@ def write_percentile_rows(conn: sqlite3.Connection, rows: Iterable[dict[str, Any
             fundamental_score_percentile_sector,
             fundamental_score_percentile_industry,
             fundamental_score_percentile_blended,
+            sector_rank_blended,
+            industry_rank_blended,
             fundamental_score_percentile_global_lifecycle_weighted,
             fundamental_score_percentile_sector_lifecycle_weighted,
             fundamental_score_percentile_industry_lifecycle_weighted,
             fundamental_score_percentile_blended_lifecycle_weighted,
+            sector_rank_blended_lifecycle_weighted,
+            industry_rank_blended_lifecycle_weighted,
             percentile_lifecycle_weight_rule,
             created_at_utc
         ) VALUES (
@@ -471,10 +507,14 @@ def write_percentile_rows(conn: sqlite3.Connection, rows: Iterable[dict[str, Any
             :fundamental_score_percentile_sector,
             :fundamental_score_percentile_industry,
             :fundamental_score_percentile_blended,
+            :sector_rank_blended,
+            :industry_rank_blended,
             :fundamental_score_percentile_global_lifecycle_weighted,
             :fundamental_score_percentile_sector_lifecycle_weighted,
             :fundamental_score_percentile_industry_lifecycle_weighted,
             :fundamental_score_percentile_blended_lifecycle_weighted,
+            :sector_rank_blended_lifecycle_weighted,
+            :industry_rank_blended_lifecycle_weighted,
             :percentile_lifecycle_weight_rule,
             :created_at_utc
         )
@@ -610,3 +650,31 @@ def _store_factor_percentiles(
 ) -> None:
     for factor_name, percentile in factor_scores.items():
         row_result[f"{factor_name}_pct_{suffix}"] = percentile
+
+
+def _assign_partition_ranks(
+    percentile_rows: list[dict[str, Any]],
+    *,
+    partition_key: str,
+    partition_size_key: str,
+    min_size: int,
+    score_key: str,
+    rank_key: str,
+) -> None:
+    grouped_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in percentile_rows:
+        row[rank_key] = None
+        partition_value = row.get(partition_key)
+        partition_size = row.get(partition_size_key)
+        score = row.get(score_key)
+        if partition_value is None or partition_size is None or partition_size < min_size or score is None:
+            continue
+        grouped_rows[str(partition_value)].append(row)
+
+    for partition_value in grouped_rows.values():
+        ranked_rows = sorted(
+            partition_value,
+            key=lambda item: (-float(item[score_key]), str(item["ticker"])),
+        )
+        for index, row in enumerate(ranked_rows, start=1):
+            row[rank_key] = index

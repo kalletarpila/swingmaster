@@ -227,6 +227,14 @@ def test_run_migration_creates_percentile_score_table(tmp_path: Path) -> None:
         for column_name, _column_type in PERCENTILE_LIFECYCLE_COLUMNS:
             assert column_name in percentile_columns
 
+        for column_name in (
+            "sector_rank_blended",
+            "industry_rank_blended",
+            "sector_rank_blended_lifecycle_weighted",
+            "industry_rank_blended_lifecycle_weighted",
+        ):
+            assert column_name in percentile_columns
+
 
 def test_run_migration_adds_missing_percentile_lifecycle_columns_to_existing_db(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamentals_existing_percentile.db"

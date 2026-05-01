@@ -166,6 +166,40 @@ def test_sector_and_industry_percentiles_are_computed_at_minimum_size_threshold(
     assert row["fundamental_score_percentile_industry"] is not None
 
 
+def test_partition_ranks_are_computed_with_ticker_tie_break_and_null_below_minimum() -> None:
+    rows = [
+        _snapshot_row("AAA", "2025-12-31", growth=10.0, sector="Tech", industry="Software"),
+        _snapshot_row("AAB", "2025-12-31", growth=10.0, sector="Tech", industry="Software"),
+        _snapshot_row("AAC", "2025-12-31", growth=9.0, sector="Tech", industry="Software"),
+        _snapshot_row("AAD", "2025-12-31", growth=8.0, sector="Tech", industry="Software"),
+        _snapshot_row("AAE", "2025-12-31", growth=7.0, sector="Tech", industry="Software"),
+        _snapshot_row("AAF", "2025-12-31", growth=6.0, sector="Tech", industry="Software"),
+        _snapshot_row("AAG", "2025-12-31", growth=5.0, sector="Tech", industry="Software"),
+        _snapshot_row("AAH", "2025-12-31", growth=4.0, sector="Tech", industry="Software"),
+        _snapshot_row("AAI", "2025-12-31", growth=3.0, sector="Tech", industry="Software"),
+        _snapshot_row("AAJ", "2025-12-31", growth=2.0, sector="Tech", industry="Software"),
+        _snapshot_row("SM1", "2025-12-31", growth=1.0, sector="Small", industry="Tiny"),
+        _snapshot_row("SM2", "2025-12-31", growth=2.0, sector="Small", industry="Tiny"),
+        _snapshot_row("SM3", "2025-12-31", growth=3.0, sector="Small", industry="Tiny"),
+    ]
+    percentile_rows = build_percentile_rows(
+        snapshot_rows=rows,
+        target_date="2025-12-31",
+        rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+        run_id="RUN1",
+        created_at_utc="2026-04-25T00:00:00Z",
+    )
+    by_ticker = {row["ticker"]: row for row in percentile_rows}
+    assert by_ticker["AAA"]["sector_rank_blended"] == 1
+    assert by_ticker["AAB"]["sector_rank_blended"] == 2
+    assert by_ticker["AAA"]["industry_rank_blended"] == 1
+    assert by_ticker["AAB"]["industry_rank_blended"] == 2
+    assert by_ticker["AAA"]["sector_rank_blended_lifecycle_weighted"] == 1
+    assert by_ticker["AAB"]["sector_rank_blended_lifecycle_weighted"] == 2
+    assert by_ticker["SM1"]["sector_rank_blended"] is None
+    assert by_ticker["SM1"]["industry_rank_blended"] is None
+
+
 def test_weighted_score_renormalizes_available_factors_only() -> None:
     score = compute_weighted_percentile_score(
         {

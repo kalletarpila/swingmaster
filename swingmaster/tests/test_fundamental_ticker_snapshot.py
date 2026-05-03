@@ -466,6 +466,82 @@ def test_price_behavior_snapshot_uses_omxh_benchmark_for_he_ticker(monkeypatch, 
     assert "relative_return_vs_sp500_since_last_report_pct;22.22" in cli_output
 
 
+def test_snapshot_includes_exact_match_valuation_rows_only(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_valuation.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(
+            conn,
+            ticker="VRT",
+            as_of_date="2025-12-31",
+            lifecycle_class="SCALING",
+            fundamental_score=67.0,
+            fundamental_score_lifecycle=71.1,
+            growth_component=15.0,
+            margin_component=12.0,
+            margin_trend_component=6.0,
+            fcf_component=15.0,
+            consistency_component=8.0,
+            leverage_component=12.0,
+            dilution_component=10.0,
+            growth=0.70,
+            margin=0.32,
+            margin_trend=0.22,
+            fcf=0.27,
+            fcf_trend=0.07,
+            leverage=1.0,
+            dilution=0.04,
+            latest_period_end_date="2025-12-31",
+        )
+        _insert_ttm_row(
+            conn,
+            ticker="VRT",
+            as_of_date="2026-03-31",
+            lifecycle_class="SCALING",
+            fundamental_score=74.0,
+            fundamental_score_lifecycle=77.8,
+            growth_component=15.0,
+            margin_component=15.0,
+            margin_trend_component=9.0,
+            fcf_component=15.0,
+            consistency_component=10.0,
+            leverage_component=12.0,
+            dilution_component=10.0,
+            growth=0.80,
+            margin=0.33,
+            margin_trend=0.23,
+            fcf=0.28,
+            fcf_trend=0.08,
+            leverage=0.8,
+            dilution=0.05,
+            latest_period_end_date="2026-03-31",
+        )
+        _insert_quarterly_row(conn, "VRT", "2025-12-31", 1200.0, 320.0, 270.0, 11.0, 18.0)
+        _insert_quarterly_row(conn, "VRT", "2026-03-31", 1300.0, 330.0, 280.0, 11.5, 17.0)
+        _insert_percentile_row(conn, "VRT", "2025-12-31", "2025-12-31", "Technology", "Electrical Equipment", 80.30, 80.80)
+        _insert_percentile_row(conn, "VRT", "2026-03-31", "2026-03-31", "Technology", "Electrical Equipment", 80.40, 80.90)
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_valuation (
+                ticker, as_of_date, valuation_ev_ebit, valuation_bucket, valuation_status, market_cap,
+                enterprise_value, close_price, shares_outstanding, cash, total_debt, ebit_ttm,
+                fundamental_score_lifecycle, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("VRT", "2026-03-31", 12.34, "FAIR", "OK", 100.0, 90.0, 10.0, 10.0, 5.0, 0.0, 7.0, 77.8, "VAL_RUN", "2026-04-25T00:00:00Z"),
+        )
+        conn.commit()
+
+        matrix_rows = build_snapshot_matrix(conn, "VRT", 2, FUND_SCORE_PERCENTILE_V2_PRE, None)
+        output = format_snapshot_matrix(matrix_rows)
+
+    assert "valuation_ev_ebit;;12.34" in output
+    assert "valuation_bucket;;FAIR" in output
+    assert "valuation_status;;OK" in output
+    assert output.index("valuation_status;;OK") < output.index("revenue;1200.00;1300.00")
+
+
 def test_delta_formatted_treats_empty_string_as_missing() -> None:
     from swingmaster.cli.run_fundamental_ticker_snapshot import _delta_formatted
 

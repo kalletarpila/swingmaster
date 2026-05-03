@@ -60,6 +60,10 @@ SECTIONED_METRICS: tuple[str | None, ...] = (
     "leverage_pct_global",
     "dilution_pct_global",
     None,
+    "valuation_ev_ebit",
+    "valuation_bucket",
+    "valuation_status",
+    None,
     "revenue",
     "operating_income",
     "free_cashflow",
@@ -300,6 +304,32 @@ def load_stored_percentile_rows(
     return {(str(row["ticker"]), str(row["target_date"]), str(row["as_of_date"])): row for row in rows}
 
 
+def load_stored_valuation_rows(
+    conn: sqlite3.Connection,
+    ticker: str,
+    as_of_dates: list[str],
+) -> dict[tuple[str, str], sqlite3.Row]:
+    if not as_of_dates:
+        return {}
+    placeholders = ", ".join("?" for _ in as_of_dates)
+    previous_row_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM rc_fundamental_valuation
+            WHERE ticker = ?
+              AND as_of_date IN ({placeholders})
+            ORDER BY as_of_date ASC
+            """,
+            [ticker.upper(), *as_of_dates],
+        ).fetchall()
+    finally:
+        conn.row_factory = previous_row_factory
+    return {(str(row["ticker"]), str(row["as_of_date"])): row for row in rows}
+
+
 def _delta_formatted(current_value: object, previous_value: object) -> str:
     current = _coerce_optional_float(current_value)
     previous = _coerce_optional_float(previous_value)
@@ -346,6 +376,7 @@ def build_snapshot_matrix(
     factor_percentiles_by_date = compute_factor_percentiles_by_date(peer_rows_by_date)
     stored_target_dates = [percentile_target_date] if percentile_target_date is not None else as_of_dates
     stored_percentiles = load_stored_percentile_rows(conn, rule_id, stored_target_dates)
+    stored_valuations = load_stored_valuation_rows(conn, ticker, as_of_dates)
 
     earliest_row = quarter_rows[0]
     latest_row = quarter_rows[-1]
@@ -379,6 +410,7 @@ def build_snapshot_matrix(
         stored_row = stored_percentiles.get((ticker.upper(), row_target_date, as_of_date))
         factor_percentiles = factor_percentiles_by_date.get(as_of_date, {})
         quarterly_row = quarterly_rows.get((ticker.upper(), period_end_date))
+        valuation_row = stored_valuations.get((ticker.upper(), as_of_date))
         is_last_quarter = index == len(quarter_rows) - 1
         score_delta = _delta_formatted(row["fundamental_score_lifecycle"], row["fundamental_score"])
         percentile_delta = _delta_formatted(
@@ -424,6 +456,9 @@ def build_snapshot_matrix(
                 "consistency_pct_global": _format_optional_float(_coerce_optional_float(stored_row["consistency_pct_global"] if stored_row is not None else None)),
                 "leverage_pct_global": _format_optional_float(_coerce_optional_float(stored_row["leverage_pct_global"] if stored_row is not None else None)),
                 "dilution_pct_global": _format_optional_float(_coerce_optional_float(stored_row["dilution_pct_global"] if stored_row is not None else None)),
+                "valuation_ev_ebit": _format_optional_float(_coerce_optional_float(valuation_row["valuation_ev_ebit"] if valuation_row is not None else None)),
+                "valuation_bucket": str(valuation_row["valuation_bucket"]) if valuation_row is not None and valuation_row["valuation_bucket"] is not None else "",
+                "valuation_status": str(valuation_row["valuation_status"]) if valuation_row is not None and valuation_row["valuation_status"] is not None else "",
                 "revenue": _format_optional_float(_coerce_optional_float(quarterly_row["revenue"] if quarterly_row is not None else None)),
                 "operating_income": _format_optional_float(_coerce_optional_float(quarterly_row["operating_income"] if quarterly_row is not None else None)),
                 "free_cashflow": _format_optional_float(_coerce_optional_float(quarterly_row["free_cashflow"] if quarterly_row is not None else None)),

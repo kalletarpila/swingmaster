@@ -58,6 +58,14 @@ def test_run_migration_creates_required_tables_and_is_idempotent(tmp_path: Path)
         }
         for column_name, _column_type in TTM_COMPONENT_COLUMNS:
             assert column_name in ttm_columns
+        table_row = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table' AND name='rc_fundamental_valuation'
+            """
+        ).fetchone()
+        assert table_row == ("rc_fundamental_valuation",)
 
 
 def test_run_migration_adds_missing_ttm_component_columns_to_existing_db(tmp_path: Path) -> None:

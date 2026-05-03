@@ -15,6 +15,7 @@ REQUIRED_TABLES = (
     "rc_fundamental_finnhub_raw",
     "rc_fundamental_yahoo_raw",
     "rc_fundamental_yahoo_quarterly",
+    "rc_fundamental_valuation",
 )
 SCHEMA_VERSION = 1
 TTM_COMPONENT_COLUMNS = (
@@ -78,6 +79,10 @@ def get_yahoo_quarterly_migration_file_path() -> Path:
     return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "018_rc_fundamental_yahoo_quarterly.sql"
 
 
+def get_valuation_migration_file_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "019_rc_fundamental_valuation.sql"
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -88,6 +93,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_finnhub_audit_migration_file_path(),
         get_yahoo_audit_migration_file_path(),
         get_yahoo_quarterly_migration_file_path(),
+        get_valuation_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")

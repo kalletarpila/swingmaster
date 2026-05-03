@@ -23,16 +23,18 @@ This document intentionally corrects several earlier misunderstandings:
   - `DECLINING`
   - `DISTRESSED`
   - `UNCLASSIFIED`
-- the `price_behavior_snapshot` block is a single latest-market snapshot, not a four-quarter series.
+- the `price_behavior_snapshot` block is a single latest-market snapshot, not a quarter-column series.
+- the `valuation_snapshot` block is also a single latest snapshot, not a quarter-column series.
 
 ---
 
 # 1. What the Snapshot Is
 
-The ticker snapshot combines two layers:
+The ticker snapshot combines three layers:
 
-1. a four-quarter fundamental history
+1. a multi-quarter fundamental history controlled by `--quarters`
 2. an optional latest price-behavior snapshot
+3. a latest valuation snapshot based on the most recent stored valuation row for the ticker
 
 It is not a price target model.
 
@@ -61,10 +63,15 @@ The report currently has these sections, in this order:
 10. 4Q summary rows
 11. sector and industry ranks
 12. optional `price_behavior_snapshot` block
+13. latest `valuation_snapshot` block
 
 The first 11 sections are quarter-column based.
 
+The number of displayed quarter columns is controlled by `--quarters`. It is often `4`, but the implementation is not fixed to exactly four.
+
 The optional `price_behavior_snapshot` block is a single latest snapshot, one value per row.
+
+The `valuation_snapshot` block is also a single latest snapshot, one value per row. It does not use the displayed quarter columns.
 
 ---
 
@@ -438,6 +445,13 @@ This layer answers:
 - did the stock outperform or underperform?
 - how did price behave around the last report?
 
+Important current market logic:
+
+- for most tickers, the OHLCV lookup uses `market='usa'` with benchmark `^GSPC`
+- for `.HE` tickers, the lookup uses `market='omxh'` with benchmark `^OMXH25`
+
+So the field names still say `...vs_sp500...`, but for OMXH tickers the implemented benchmark is currently `^OMXH25`
+
 ---
 
 # 15. Practical Interpretation Framework
@@ -510,7 +524,25 @@ The current implementation does not calculate the price-behavior block separatel
 
 It calculates a single latest snapshot as of the latest OHLCV date available for the ticker.
 
-## 16.4 Some interpretation labels were not implemented features
+## 16.4 Quarter-based valuation rows still exist
+
+The main quarter-column table still contains the older quarter-based valuation rows:
+
+- `valuation_date`
+- `valuation_fundamental_as_of_date`
+- `valuation_fundamental_staleness_days`
+- `valuation_ev_ebit`
+- `valuation_fcf_yield`
+- `valuation_ebit_margin`
+- `valuation_bucket`
+- `valuation_status`
+- `valuation_model_version`
+
+Those rows are still looked up by exact quarter/as-of-date match and remain part of the quarter-column matrix.
+
+The separate `valuation_snapshot` block is added in addition to them and is usually the more useful current valuation view.
+
+## 16.5 Some interpretation labels were not implemented features
 
 Terms like:
 
@@ -1034,8 +1066,12 @@ are provided.
 
 - database table: `osakedata`
 - ticker normalized to uppercase
-- market fixed to `usa`
-- benchmark ticker = `^GSPC`
+- market is resolved from ticker:
+  - `.HE` -> `omxh`
+  - otherwise default `usa`
+- benchmark ticker is resolved from market:
+  - `omxh` -> `^OMXH25`
+  - `usa` -> `^GSPC`
 
 ### Current anchor
 
@@ -1129,7 +1165,85 @@ The report should not fail just because one price-behavior metric is unavailable
 
 ---
 
-# 18. Recommended Reading Order
+# 18. Valuation Snapshot
+
+This block is appended after `price_behavior_snapshot` if price behavior is enabled.
+
+If price behavior is not enabled, `valuation_snapshot` is appended directly after the quarter-based rows.
+
+Important:
+
+- it is not quarter-column based
+- it uses the latest stored row from `rc_fundamental_valuation` for the ticker
+- current implementation looks up:
+
+`SELECT * FROM rc_fundamental_valuation WHERE ticker = ? ORDER BY as_of_date DESC LIMIT 1`
+
+- the valuation date is currently stored in `rc_fundamental_valuation.as_of_date`
+
+Variables:
+
+- `valuation_date`
+- `valuation_fundamental_as_of_date`
+- `valuation_fundamental_staleness_days`
+- `valuation_ev_ebit`
+- `valuation_fcf_yield`
+- `valuation_ebit_margin`
+- `adjusted_expensive_threshold`
+- `valuation_debt_assumed_zero`
+- `valuation_cash_assumed_zero`
+- `valuation_bucket`
+- `valuation_status`
+- `valuation_model_version`
+
+What the block means:
+
+- `valuation_date`: the market-price anchor used by the valuation run
+- `valuation_fundamental_as_of_date`: the latest TTM row used, constrained to `<= valuation_date`
+- `valuation_fundamental_staleness_days`: `valuation_date - valuation_fundamental_as_of_date`
+- `valuation_ev_ebit`: EV / EBIT using the stored valuation logic
+- `valuation_fcf_yield`: `fcf_ttm / market_cap` as a decimal, not percent
+- `valuation_ebit_margin`: EBIT margin used by the valuation model
+- `adjusted_expensive_threshold`: EBIT-margin-based expensive threshold from the valuation model
+- `valuation_debt_assumed_zero`: `1` if missing `total_debt` was assumed as zero in Valuation V2.2
+- `valuation_cash_assumed_zero`: `1` if missing `cash` was assumed as zero in Valuation V2.2
+- `valuation_bucket`: current deterministic valuation label
+- `valuation_status`: current data-quality / validity status
+- `valuation_model_version`: printed exactly as stored in the valuation table
+
+Important:
+
+- the snapshot code does not reinterpret or normalize this field
+- if the stored value is `V2`, the snapshot prints `V2` even if later valuation logic has evolved
+
+Current EV input handling in Valuation V2.2:
+
+- missing `total_debt` is assumed as `0`
+- missing `cash` is assumed as `0`
+- these assumptions are audited via:
+  - `valuation_debt_assumed_zero`
+  - `valuation_cash_assumed_zero`
+
+Important:
+
+- missing debt or cash no longer makes valuation invalid by itself
+- missing `shares_outstanding` still makes valuation invalid with `valuation_status = MISSING_SHARES`
+- missing valuation row does not fail the snapshot
+- in that case the block is still printed, but all values are empty
+
+This block answers:
+
+- what is the latest stored valuation view for the ticker?
+- how stale is the fundamental anchor behind that valuation?
+- did valuation rely on zero-assumption fallback for debt or cash?
+
+This block does not compute valuation itself.
+
+It only reads the latest already-stored valuation row from `rc_fundamental_valuation`.
+
+---
+
+# 19. Recommended Reading Order
 
 A practical reading sequence is:
 
@@ -1140,6 +1254,7 @@ A practical reading sequence is:
 5. QoQ and 4Q delta rows
 6. `sector_rank_position` and `industry_rank_position`
 7. `price_behavior_snapshot`
+8. `valuation_snapshot`
 
 This gives:
 
@@ -1148,10 +1263,11 @@ This gives:
 - relative standing
 - trend
 - market confirmation
+- current valuation context
 
 ---
 
-# 19. Bottom Line
+# 20. Bottom Line
 
 The snapshot is best understood as a layered decision-support report:
 
@@ -1159,6 +1275,7 @@ The snapshot is best understood as a layered decision-support report:
 2. relative peer ranking
 3. time-direction signals
 4. optional market-confirmation signals
+5. latest stored valuation context
 
 The highest-conviction situations are usually those where:
 
@@ -1166,3 +1283,4 @@ The highest-conviction situations are usually those where:
 - percentile rank is strong
 - QoQ / 4Q momentum is improving
 - price behavior does not contradict the fundamental picture
+- valuation context is at least understandable and not driven by missing-core-input failures

@@ -60,6 +60,10 @@ VALUATION_V21_COLUMNS = (
     ("valuation_fundamental_as_of_date", "TEXT"),
     ("valuation_fundamental_staleness_days", "INTEGER"),
 )
+VALUATION_V22_COLUMNS = (
+    ("debt_assumed_zero", "INTEGER"),
+    ("cash_assumed_zero", "INTEGER"),
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -101,6 +105,10 @@ def get_valuation_v21_migration_file_path() -> Path:
     return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "021_rc_fundamental_valuation_v21.sql"
 
 
+def get_valuation_v22_migration_file_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "022_rc_fundamental_valuation_v22.sql"
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -114,6 +122,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_valuation_migration_file_path(),
         get_valuation_v2_migration_file_path(),
         get_valuation_v21_migration_file_path(),
+        get_valuation_v22_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")
@@ -122,6 +131,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
     ensure_percentile_lifecycle_columns(conn)
     ensure_valuation_v2_columns(conn)
     ensure_valuation_v21_columns(conn)
+    ensure_valuation_v22_columns(conn)
     conn.commit()
 
 
@@ -183,6 +193,22 @@ def ensure_valuation_v21_columns(conn: sqlite3.Connection) -> None:
         )
     }
     for column_name, column_type in VALUATION_V21_COLUMNS:
+        if column_name in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE rc_fundamental_valuation ADD COLUMN {column_name} {column_type}")
+        existing_columns.add(column_name)
+
+
+def ensure_valuation_v22_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_valuation)
+            """
+        )
+    }
+    for column_name, column_type in VALUATION_V22_COLUMNS:
         if column_name in existing_columns:
             continue
         conn.execute(f"ALTER TABLE rc_fundamental_valuation ADD COLUMN {column_name} {column_type}")
@@ -262,6 +288,12 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
     ]
     if missing_valuation_v21_columns:
         raise RuntimeError(f"FUNDAMENTAL_VALUATION_V21_COLUMNS_MISSING:{','.join(missing_valuation_v21_columns)}")
+
+    missing_valuation_v22_columns = [
+        column_name for column_name, _column_type in VALUATION_V22_COLUMNS if column_name not in valuation_columns
+    ]
+    if missing_valuation_v22_columns:
+        raise RuntimeError(f"FUNDAMENTAL_VALUATION_V22_COLUMNS_MISSING:{','.join(missing_valuation_v22_columns)}")
 
     return len(REQUIRED_TABLES)
 

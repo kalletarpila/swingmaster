@@ -10,6 +10,7 @@ from swingmaster.cli.run_fundamental_migrations import (
     TTM_COMPONENT_COLUMNS,
     VALUATION_V2_COLUMNS,
     VALUATION_V21_COLUMNS,
+    VALUATION_V22_COLUMNS,
     get_migration_file_path,
     run_migration,
     validate_fundamental_schema,
@@ -79,6 +80,8 @@ def test_run_migration_creates_required_tables_and_is_idempotent(tmp_path: Path)
         for column_name, _column_type in VALUATION_V2_COLUMNS:
             assert column_name in valuation_columns
         for column_name, _column_type in VALUATION_V21_COLUMNS:
+            assert column_name in valuation_columns
+        for column_name, _column_type in VALUATION_V22_COLUMNS:
             assert column_name in valuation_columns
 
 

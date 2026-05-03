@@ -23,7 +23,7 @@ def test_exact_ttm_match_uses_zero_staleness(tmp_path: Path) -> None:
         ebit_margin_ttm=0.10,
         score=50.0,
     )
-    assert row == ("2026-03-31", "2026-03-31", 0, 10.0, 0.07, 0.10, "CHEAP", "OK", "V2")
+    assert row == ("2026-03-31", "2026-03-31", 0, 10.0, 0.07, 0.10, "CHEAP", "OK", 0, 0, "V2")
 
 
 def test_latest_prior_ttm_fallback_uses_previous_fundamental_without_lookahead(tmp_path: Path) -> None:
@@ -76,7 +76,7 @@ def test_staleness_between_121_and_240_days_is_stale_fundamentals(tmp_path: Path
         ebit_margin_ttm=0.10,
         score=50.0,
     )
-    assert row == ("2026-08-01", "2026-03-31", 123, 10.0, 0.05, 0.10, "FAIR", "STALE_FUNDAMENTALS", "V2")
+    assert row == ("2026-08-01", "2026-03-31", 123, 10.0, 0.05, 0.10, "FAIR", "STALE_FUNDAMENTALS", 0, 0, "V2")
 
 
 def test_staleness_above_240_days_is_too_stale_and_invalid(tmp_path: Path) -> None:
@@ -94,7 +94,7 @@ def test_staleness_above_240_days_is_too_stale_and_invalid(tmp_path: Path) -> No
         ebit_margin_ttm=0.10,
         score=50.0,
     )
-    assert row == ("2026-12-31", "2026-03-31", 275, 10.0, 0.05, 0.10, "INVALID", "TOO_STALE_FUNDAMENTALS", "V2")
+    assert row == ("2026-12-31", "2026-03-31", 275, 10.0, 0.05, 0.10, "INVALID", "TOO_STALE_FUNDAMENTALS", 0, 0, "V2")
 
 
 def test_ev_ebit_at_or_above_thirty_is_very_expensive(tmp_path: Path) -> None:
@@ -140,6 +140,79 @@ def test_missing_fcf_is_invalid_missing_fcf(tmp_path: Path) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         row = conn.execute("SELECT valuation_bucket, valuation_status FROM rc_fundamental_valuation").fetchone()
     assert row == ("INVALID", "MISSING_FCF")
+
+
+def test_missing_total_debt_assumes_zero_and_stays_ok(tmp_path: Path) -> None:
+    row = _run_single_ticker_case(
+        tmp_path,
+        ticker="TD1.HE",
+        valuation_date="2026-03-31",
+        ttm_as_of_date="2026-03-31",
+        close=10.0,
+        shares_outstanding=10.0,
+        cash=0.0,
+        total_debt=None,
+        ebit_ttm=10.0,
+        fcf_ttm=7.0,
+        ebit_margin_ttm=0.10,
+        score=50.0,
+    )
+    assert row == ("2026-03-31", "2026-03-31", 0, 10.0, 0.07, 0.10, "CHEAP", "OK", 1, 0, "V2")
+
+
+def test_missing_cash_assumes_zero_and_stays_ok(tmp_path: Path) -> None:
+    row = _run_single_ticker_case(
+        tmp_path,
+        ticker="CS1.HE",
+        valuation_date="2026-03-31",
+        ttm_as_of_date="2026-03-31",
+        close=10.0,
+        shares_outstanding=10.0,
+        cash=None,
+        total_debt=0.0,
+        ebit_ttm=10.0,
+        fcf_ttm=7.0,
+        ebit_margin_ttm=0.10,
+        score=50.0,
+    )
+    assert row == ("2026-03-31", "2026-03-31", 0, 10.0, 0.07, 0.10, "CHEAP", "OK", 0, 1, "V2")
+
+
+def test_missing_both_ev_inputs_assume_zero_and_stay_ok(tmp_path: Path) -> None:
+    row = _run_single_ticker_case(
+        tmp_path,
+        ticker="EV0.HE",
+        valuation_date="2026-03-31",
+        ttm_as_of_date="2026-03-31",
+        close=10.0,
+        shares_outstanding=10.0,
+        cash=None,
+        total_debt=None,
+        ebit_ttm=10.0,
+        fcf_ttm=7.0,
+        ebit_margin_ttm=0.10,
+        score=50.0,
+    )
+    assert row == ("2026-03-31", "2026-03-31", 0, 10.0, 0.07, 0.10, "CHEAP", "OK", 1, 1, "V2")
+
+
+def test_missing_total_debt_with_invalid_ebit_still_returns_invalid_ebit(tmp_path: Path) -> None:
+    row = _run_single_ticker_case(
+        tmp_path,
+        ticker="BAD.HE",
+        valuation_date="2026-03-31",
+        ttm_as_of_date="2026-03-31",
+        close=10.0,
+        shares_outstanding=10.0,
+        cash=0.0,
+        total_debt=None,
+        ebit_ttm=0.0,
+        fcf_ttm=7.0,
+        ebit_margin_ttm=0.10,
+        score=50.0,
+    )
+    assert row[7] == "INVALID_EBIT"
+    assert row[6] == "INVALID"
 
 
 def test_existing_v1_invalid_statuses_still_work(tmp_path: Path) -> None:
@@ -285,6 +358,8 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
             "fair_count": 1,
             "expensive_count": 0,
             "very_expensive_count": 0,
+            "debt_assumed_zero_count": 0,
+            "cash_assumed_zero_count": 0,
             "model_version": "V2",
             "dry_run": "true",
             "replace": "false",
@@ -305,6 +380,8 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
         "SUMMARY fair_count=1",
         "SUMMARY expensive_count=0",
         "SUMMARY very_expensive_count=0",
+        "SUMMARY debt_assumed_zero_count=0",
+        "SUMMARY cash_assumed_zero_count=0",
         "SUMMARY model_version=V2",
         "SUMMARY dry_run=true",
         "SUMMARY replace=false",
@@ -326,7 +403,7 @@ def _run_single_ticker_case(
     fcf_ttm: float | None,
     ebit_margin_ttm: float | None,
     score: float | None,
-) -> tuple[str, str, int, float | None, float | None, float | None, str, str, str | None]:
+) -> tuple[str, str, int, float | None, float | None, float | None, str, str, int | None, int | None, str | None]:
     db_path = tmp_path / f"{ticker.replace('.', '_')}.db"
     osakedata_db_path = tmp_path / f"{ticker.replace('.', '_')}_osakedata.db"
     run_migration(db_path)
@@ -353,7 +430,7 @@ def _run_single_ticker_case(
             """
             SELECT as_of_date, valuation_fundamental_as_of_date, valuation_fundamental_staleness_days,
                    valuation_ev_ebit, valuation_fcf_yield, valuation_ebit_margin,
-                   valuation_bucket, valuation_status, valuation_model_version
+                   valuation_bucket, valuation_status, debt_assumed_zero, cash_assumed_zero, valuation_model_version
             FROM rc_fundamental_valuation
             """
         ).fetchone()

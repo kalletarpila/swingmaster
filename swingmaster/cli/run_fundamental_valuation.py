@@ -161,6 +161,10 @@ def build_valuation_row(
     shares_outstanding = _coerce_optional_float(quarterly_row["shares_outstanding"]) if quarterly_row is not None else None
     cash = _coerce_optional_float(quarterly_row["cash"]) if quarterly_row is not None else None
     total_debt = _coerce_optional_float(quarterly_row["total_debt"]) if quarterly_row is not None else None
+    debt_assumed_zero = 1 if total_debt is None else 0
+    cash_assumed_zero = 1 if cash is None else 0
+    total_debt_used = 0.0 if total_debt is None else total_debt
+    cash_used = 0.0 if cash is None else cash
     ebit_ttm = _coerce_optional_float(ttm_row["ebit_ttm"])
     fcf_ttm = _coerce_optional_float(ttm_row["fcf_ttm"])
     valuation_ebit_margin = _coerce_optional_float(ttm_row["ebit_margin_ttm"])
@@ -173,8 +177,8 @@ def build_valuation_row(
         market_cap = close_price * shares_outstanding
 
     enterprise_value: float | None = None
-    if market_cap is not None and total_debt is not None and cash is not None:
-        enterprise_value = market_cap + total_debt - cash
+    if market_cap is not None:
+        enterprise_value = market_cap + total_debt_used - cash_used
 
     valuation_ev_ebit: float | None = None
     if enterprise_value is not None and ebit_ttm is not None and ebit_ttm > 0:
@@ -194,9 +198,6 @@ def build_valuation_row(
         valuation_bucket = "INVALID"
     elif ebit_ttm is None or ebit_ttm <= 0:
         valuation_status = "INVALID_EBIT"
-        valuation_bucket = "INVALID"
-    elif total_debt is None or cash is None:
-        valuation_status = "MISSING_EV_INPUT"
         valuation_bucket = "INVALID"
     elif fcf_ttm is None:
         valuation_status = "MISSING_FCF"
@@ -242,12 +243,14 @@ def build_valuation_row(
         "valuation_model_version": "V2",
         "valuation_bucket": valuation_bucket,
         "valuation_status": valuation_status,
+        "debt_assumed_zero": debt_assumed_zero,
+        "cash_assumed_zero": cash_assumed_zero,
         "market_cap": market_cap,
         "enterprise_value": enterprise_value,
         "close_price": close_price,
         "shares_outstanding": shares_outstanding,
-        "cash": cash,
-        "total_debt": total_debt,
+        "cash": cash_used,
+        "total_debt": total_debt_used,
         "ebit_ttm": ebit_ttm,
         "fundamental_score_lifecycle": fundamental_score_lifecycle,
         "run_id": run_id,
@@ -295,6 +298,8 @@ def insert_valuation_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) 
             valuation_fundamental_staleness_days,
             valuation_bucket,
             valuation_status,
+            debt_assumed_zero,
+            cash_assumed_zero,
             market_cap,
             enterprise_value,
             close_price,
@@ -305,7 +310,7 @@ def insert_valuation_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) 
             fundamental_score_lifecycle,
             run_id,
             created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -320,6 +325,8 @@ def insert_valuation_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) 
                 row["valuation_fundamental_staleness_days"],
                 row["valuation_bucket"],
                 row["valuation_status"],
+                row["debt_assumed_zero"],
+                row["cash_assumed_zero"],
                 row["market_cap"],
                 row["enterprise_value"],
                 row["close_price"],
@@ -385,6 +392,8 @@ def run_fundamental_valuation(
     fair_count = sum(1 for row in valuation_rows if row["valuation_bucket"] == "FAIR")
     expensive_count = sum(1 for row in valuation_rows if row["valuation_bucket"] == "EXPENSIVE")
     very_expensive_count = sum(1 for row in valuation_rows if row["valuation_bucket"] == "VERY_EXPENSIVE")
+    debt_assumed_zero_count = sum(1 for row in valuation_rows if row["debt_assumed_zero"] == 1)
+    cash_assumed_zero_count = sum(1 for row in valuation_rows if row["cash_assumed_zero"] == 1)
 
     return {
         "market": market,
@@ -397,6 +406,8 @@ def run_fundamental_valuation(
         "fair_count": fair_count,
         "expensive_count": expensive_count,
         "very_expensive_count": very_expensive_count,
+        "debt_assumed_zero_count": debt_assumed_zero_count,
+        "cash_assumed_zero_count": cash_assumed_zero_count,
         "model_version": "V2",
         "dry_run": "true" if dry_run else "false",
         "replace": "true" if replace else "false",
@@ -426,6 +437,8 @@ def main() -> None:
     _summary(fair_count=summary["fair_count"])
     _summary(expensive_count=summary["expensive_count"])
     _summary(very_expensive_count=summary["very_expensive_count"])
+    _summary(debt_assumed_zero_count=summary["debt_assumed_zero_count"])
+    _summary(cash_assumed_zero_count=summary["cash_assumed_zero_count"])
     _summary(model_version=summary["model_version"])
     _summary(dry_run=summary["dry_run"])
     _summary(replace=summary["replace"])

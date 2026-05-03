@@ -535,12 +535,12 @@ def test_snapshot_keeps_exact_match_quarter_valuation_rows_and_adds_latest_valua
             INSERT INTO rc_fundamental_valuation (
                 ticker, as_of_date, valuation_ev_ebit, valuation_fcf_yield, valuation_ebit_margin, adjusted_expensive_threshold,
                 valuation_model_version, valuation_fundamental_as_of_date, valuation_fundamental_staleness_days,
-                valuation_bucket, valuation_status, market_cap,
+                valuation_bucket, valuation_status, debt_assumed_zero, cash_assumed_zero, market_cap,
                 enterprise_value, close_price, shares_outstanding, cash, total_debt, ebit_ttm,
                 fundamental_score_lifecycle, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("VRT", "2026-03-31", 12.34, 0.05, 0.23, 28.0, "V2", "2025-12-31", 90, "FAIR", "OK", 100.0, 90.0, 10.0, 10.0, 5.0, 0.0, 7.0, 77.8, "VAL_RUN", "2026-04-25T00:00:00Z"),
+            ("VRT", "2026-03-31", 12.34, 0.05, 0.23, 28.0, "V2", "2025-12-31", 90, "FAIR", "OK", 1, 0, 100.0, 90.0, 10.0, 10.0, 5.0, 0.0, 7.0, 77.8, "VAL_RUN", "2026-04-25T00:00:00Z"),
         )
         conn.commit()
 
@@ -566,6 +566,8 @@ def test_snapshot_keeps_exact_match_quarter_valuation_rows_and_adds_latest_valua
     assert "valuation_fcf_yield;0.05" in output
     assert "valuation_ebit_margin;0.23" in output
     assert "adjusted_expensive_threshold;28.00" in output
+    assert "valuation_debt_assumed_zero;1" in output
+    assert "valuation_cash_assumed_zero;0" in output
     assert "valuation_bucket;FAIR" in output
     assert "valuation_status;OK" in output
     assert "valuation_model_version;V2" in output
@@ -612,24 +614,24 @@ def test_valuation_snapshot_uses_latest_row_by_ticker(tmp_path: Path) -> None:
             INSERT INTO rc_fundamental_valuation (
                 ticker, as_of_date, valuation_ev_ebit, valuation_fcf_yield, valuation_ebit_margin, adjusted_expensive_threshold,
                 valuation_model_version, valuation_fundamental_as_of_date, valuation_fundamental_staleness_days,
-                valuation_bucket, valuation_status, market_cap,
+                valuation_bucket, valuation_status, debt_assumed_zero, cash_assumed_zero, market_cap,
                 enterprise_value, close_price, shares_outstanding, cash, total_debt, ebit_ttm,
                 fundamental_score_lifecycle, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("VRT", "2025-12-31", 10.0, 0.07, 0.20, 28.0, "V2", "2025-12-31", 0, "CHEAP", "OK", 100.0, 90.0, 10.0, 10.0, 5.0, 0.0, 7.0, 71.1, "VAL_RUN_1", "2026-04-25T00:00:00Z"),
+            ("VRT", "2025-12-31", 10.0, 0.07, 0.20, 28.0, "V2", "2025-12-31", 0, "CHEAP", "OK", 0, 0, 100.0, 90.0, 10.0, 10.0, 5.0, 0.0, 7.0, 71.1, "VAL_RUN_1", "2026-04-25T00:00:00Z"),
         )
         conn.execute(
             """
             INSERT INTO rc_fundamental_valuation (
                 ticker, as_of_date, valuation_ev_ebit, valuation_fcf_yield, valuation_ebit_margin, adjusted_expensive_threshold,
                 valuation_model_version, valuation_fundamental_as_of_date, valuation_fundamental_staleness_days,
-                valuation_bucket, valuation_status, market_cap,
+                valuation_bucket, valuation_status, debt_assumed_zero, cash_assumed_zero, market_cap,
                 enterprise_value, close_price, shares_outstanding, cash, total_debt, ebit_ttm,
                 fundamental_score_lifecycle, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("VRT", "2026-03-31", 12.34, 0.05, 0.23, 28.0, "V2", "2025-12-31", 90, "FAIR", "OK", 100.0, 90.0, 10.0, 10.0, 5.0, 0.0, 7.0, 71.1, "VAL_RUN_2", "2026-04-25T00:00:00Z"),
+            ("VRT", "2026-03-31", 12.34, 0.05, 0.23, 28.0, "V2", "2025-12-31", 90, "FAIR", "OK", 1, 0, 100.0, 90.0, 10.0, 10.0, 5.0, 0.0, 7.0, 71.1, "VAL_RUN_2", "2026-04-25T00:00:00Z"),
         )
         conn.commit()
 
@@ -685,6 +687,8 @@ def test_valuation_snapshot_block_present_with_empty_values_when_missing(tmp_pat
     assert "valuation_fcf_yield;" in output
     assert "valuation_ebit_margin;" in output
     assert "adjusted_expensive_threshold;" in output
+    assert "valuation_debt_assumed_zero;" in output
+    assert "valuation_cash_assumed_zero;" in output
     assert "valuation_bucket;" in output
     assert "valuation_status;" in output
     assert "valuation_model_version;" in output

@@ -17,6 +17,7 @@ from swingmaster.fundamentals.score_percentile import (
     compute_percentiles,
     compute_weighted_percentile_score,
     load_latest_percentile_snapshot,
+    resolve_industry_min_size,
     resolve_min_universe_size,
     run_fundamental_score_percentile,
 )
@@ -138,6 +139,31 @@ def test_industry_percentiles_are_null_below_minimum_size() -> None:
     assert row["industry_size"] == 3
     assert row["growth_pct_industry"] is None
     assert row["fundamental_score_percentile_industry"] is None
+
+
+def test_omxh_industry_percentiles_are_computed_at_five_company_threshold() -> None:
+    rows = [
+        _snapshot_row(
+            f"T{i:02d}",
+            "2025-12-31",
+            growth=float(i),
+            sector="Tech",
+            industry="Hardware",
+        )
+        for i in range(5)
+    ]
+    percentile_rows = build_percentile_rows(
+        snapshot_rows=rows,
+        target_date="2025-12-31",
+        rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+        run_id="RUN1",
+        created_at_utc="2026-04-25T00:00:00Z",
+        market="omxh",
+    )
+    row = next(item for item in percentile_rows if item["ticker"] == "T00")
+    assert row["industry_size"] == 5
+    assert row["growth_pct_industry"] == pytest.approx(0.0)
+    assert row["fundamental_score_percentile_industry"] is not None
 
 
 def test_sector_and_industry_percentiles_are_computed_at_minimum_size_threshold() -> None:
@@ -492,6 +518,12 @@ def test_resolve_min_universe_size_is_market_specific() -> None:
     assert resolve_min_universe_size("omxh") == 50
     assert resolve_min_universe_size("fin") == 50
     assert resolve_min_universe_size("se") == 500
+
+
+def test_resolve_industry_min_size_is_market_specific() -> None:
+    assert resolve_industry_min_size("usa") == 10
+    assert resolve_industry_min_size("omxh") == 5
+    assert resolve_industry_min_size("fin") == 10
 
 
 def test_fin_market_uses_lower_minimum_universe_size(tmp_path: Path) -> None:

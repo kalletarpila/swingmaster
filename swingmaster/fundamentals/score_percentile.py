@@ -17,6 +17,9 @@ MIN_UNIVERSE_SIZE_BY_MARKET = {
     "omxh": 50,
     "usa": 500,
 }
+INDUSTRY_MIN_SIZE_BY_MARKET = {
+    "omxh": 5,
+}
 MIN_AVAILABLE_FACTORS = 4
 FACTOR_WEIGHTS = {
     "growth": 20.0,
@@ -153,6 +156,10 @@ def resolve_min_universe_size(market: str) -> int:
     return MIN_UNIVERSE_SIZE_BY_MARKET.get(str(market).lower(), MIN_UNIVERSE_SIZE)
 
 
+def resolve_industry_min_size(market: str) -> int:
+    return INDUSTRY_MIN_SIZE_BY_MARKET.get(str(market).lower(), INDUSTRY_MIN_SIZE)
+
+
 def load_latest_percentile_snapshot(
     fundamentals_conn: sqlite3.Connection,
     osakedata_conn: sqlite3.Connection,
@@ -250,8 +257,10 @@ def build_percentile_rows(
     rule_id: str,
     run_id: str,
     created_at_utc: str,
+    market: str = "usa",
 ) -> list[dict[str, Any]]:
     universe_size = len(snapshot_rows)
+    industry_min_size = resolve_industry_min_size(market)
     global_percentiles = {
         factor_name: _compute_factor_percentiles(snapshot_rows, factor_name)
         for factor_name in FACTOR_COLUMNS
@@ -299,7 +308,7 @@ def build_percentile_rows(
         industry_factor_scores = _level_factor_percentiles(
             industry_percentiles.get(snapshot_row.industry, {}),
             snapshot_row.ticker,
-            allowed=industry_size is not None and industry_size >= INDUSTRY_MIN_SIZE,
+            allowed=industry_size is not None and industry_size >= industry_min_size,
         )
 
         _store_factor_percentiles(row_result, global_factor_scores, "global")
@@ -349,7 +358,7 @@ def build_percentile_rows(
         percentile_rows,
         partition_key="industry",
         partition_size_key="industry_size",
-        min_size=INDUSTRY_MIN_SIZE,
+        min_size=industry_min_size,
         score_key="fundamental_score_percentile_blended",
         rank_key="industry_rank_blended",
     )
@@ -365,7 +374,7 @@ def build_percentile_rows(
         percentile_rows,
         partition_key="industry",
         partition_size_key="industry_size",
-        min_size=INDUSTRY_MIN_SIZE,
+        min_size=industry_min_size,
         score_key="fundamental_score_percentile_blended_lifecycle_weighted",
         rank_key="industry_rank_blended_lifecycle_weighted",
     )
@@ -562,6 +571,7 @@ def run_fundamental_score_percentile(
         rule_id=rule_id,
         run_id=run_id,
         created_at_utc=created_at_utc,
+        market=market,
     )
     rows_written = 0
     if not dry_run:

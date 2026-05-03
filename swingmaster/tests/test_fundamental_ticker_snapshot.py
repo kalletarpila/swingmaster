@@ -382,6 +382,13 @@ def test_price_behavior_snapshot_stdout_and_csv(monkeypatch, capsys, tmp_path: P
     assert "earnings_reaction_3d_pct;3,00" in cli_csv_content
 
 
+def test_delta_formatted_treats_empty_string_as_missing() -> None:
+    from swingmaster.cli.run_fundamental_ticker_snapshot import _delta_formatted
+
+    assert _delta_formatted("", "10.0") == ""
+    assert _delta_formatted("10.0", "") == ""
+
+
 def test_price_behavior_snapshot_missing_benchmark_and_future_data(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ticker_snapshot.db"
     ohlcv_db_path = tmp_path / "osakedata.db"

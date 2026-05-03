@@ -141,6 +141,8 @@ def resolve_db_path(db_arg: str) -> Path:
 def _coerce_optional_float(value: object) -> float | None:
     if value is None:
         return None
+    if isinstance(value, str) and value.strip() == "":
+        return None
     return float(value)
 
 

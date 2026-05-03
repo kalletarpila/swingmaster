@@ -12,6 +12,9 @@ REQUIRED_TABLES = (
     "rc_fundamental_quarterly",
     "rc_fundamental_ttm",
     "rc_fundamental_score_percentile",
+    "rc_fundamental_finnhub_raw",
+    "rc_fundamental_yahoo_raw",
+    "rc_fundamental_yahoo_quarterly",
 )
 SCHEMA_VERSION = 1
 TTM_COMPONENT_COLUMNS = (
@@ -63,13 +66,32 @@ def get_migration_file_path() -> Path:
     return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "001_create_fundamentals_schema.sql"
 
 
+def get_finnhub_audit_migration_file_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "016_rc_fundamental_finnhub_raw.sql"
+
+
+def get_yahoo_audit_migration_file_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "017_rc_fundamental_yahoo_raw.sql"
+
+
+def get_yahoo_quarterly_migration_file_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "018_rc_fundamental_yahoo_quarterly.sql"
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
 
 def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) -> None:
-    sql_text = migration_file.read_text(encoding="utf-8")
-    conn.executescript(sql_text)
+    migration_files = (
+        migration_file,
+        get_finnhub_audit_migration_file_path(),
+        get_yahoo_audit_migration_file_path(),
+        get_yahoo_quarterly_migration_file_path(),
+    )
+    for current_migration_file in migration_files:
+        sql_text = current_migration_file.read_text(encoding="utf-8")
+        conn.executescript(sql_text)
     ensure_ttm_component_columns(conn)
     ensure_percentile_lifecycle_columns(conn)
     conn.commit()

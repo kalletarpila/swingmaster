@@ -40,7 +40,7 @@ def _insert_yahoo_raw_row(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                "fin",
+                "omxh",
                 "yahoo",
                 symbol,
                 canonical_json_dumps(info),
@@ -101,7 +101,7 @@ def test_dry_run_writes_zero_rows(tmp_path: Path) -> None:
 
     result = run_fundamental_yahoo_quarterly_write.run_yahoo_quarterly_write(
         db_path=db_path,
-        market="fin",
+        market="omxh",
         symbol="NOKIA.HE",
         run_id="WRITE1",
         dry_run=True,
@@ -123,7 +123,7 @@ def test_writer_skips_snapshot_only_row_and_writes_five_rows(tmp_path: Path) -> 
 
     result = run_fundamental_yahoo_quarterly_write.run_yahoo_quarterly_write(
         db_path=db_path,
-        market="fin",
+        market="omxh",
         symbol="NOKIA.HE",
         run_id="WRITE2",
         dry_run=False,
@@ -164,13 +164,13 @@ def test_replace_symbol_deletes_existing_rows_before_insert(tmp_path: Path) -> N
                 market, symbol, period_end_date, shares_outstanding, shares_source, shares_quality, source_run_id, run_id, created_at_utc
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("fin", "NOKIA.HE", "2025-03-31", 1.0, "snapshot", "REVIEW", "OLDRAW", "OLDRUN", "2026-01-01T00:00:00+00:00"),
+            ("omxh", "NOKIA.HE", "2025-03-31", 1.0, "snapshot", "REVIEW", "OLDRAW", "OLDRUN", "2026-01-01T00:00:00+00:00"),
         )
         conn.commit()
 
     result = run_fundamental_yahoo_quarterly_write.run_yahoo_quarterly_write(
         db_path=db_path,
-        market="fin",
+        market="omxh",
         symbol="NOKIA.HE",
         run_id="WRITE3",
         dry_run=False,
@@ -181,7 +181,7 @@ def test_replace_symbol_deletes_existing_rows_before_insert(tmp_path: Path) -> N
     assert result["rows_written"] == 5
     with sqlite3.connect(str(db_path)) as conn:
         count = conn.execute(
-            "SELECT COUNT(*) FROM rc_fundamental_yahoo_quarterly WHERE market='fin' AND symbol='NOKIA.HE'"
+            "SELECT COUNT(*) FROM rc_fundamental_yahoo_quarterly WHERE market='omxh' AND symbol='NOKIA.HE'"
         ).fetchone()[0]
     assert count == 5
 
@@ -194,7 +194,7 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
         "parse_args",
         lambda: Namespace(
             db=str(db_path),
-            market="fin",
+            market="omxh",
             symbol="NOKIA.HE",
             run_id="WRITE4",
             dry_run=True,
@@ -205,7 +205,7 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
         run_fundamental_yahoo_quarterly_write,
         "run_yahoo_quarterly_write",
         lambda **kwargs: {
-            "market": "fin",
+            "market": "omxh",
             "symbol": "NOKIA.HE",
             "source_run_id": "RAW1",
             "periods_total": 6,
@@ -223,7 +223,7 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
     run_fundamental_yahoo_quarterly_write.main()
     out = capsys.readouterr().out.strip().splitlines()
     assert out == [
-        "SUMMARY market=fin",
+        "SUMMARY market=omxh",
         "SUMMARY symbol=NOKIA.HE",
         "SUMMARY source_run_id=RAW1",
         "SUMMARY periods_total=6",

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_MARKET = "fin"
+DEFAULT_MARKET = "omxh"
 DEFAULT_SYMBOL = "NOKIA.HE"
 CORE_FIELDS = (
     "revenue",

@@ -11,7 +11,7 @@ from typing import Any
 from swingmaster.fundamentals.providers.yahoo import YahooFinanceClient
 
 
-DEFAULT_MARKET = "fin"
+DEFAULT_MARKET = "omxh"
 DEFAULT_EXCHANGE = "HE"
 DEFAULT_SYMBOLS = "NOKIA.HE"
 DEFAULT_PROVIDER = "yahoo"

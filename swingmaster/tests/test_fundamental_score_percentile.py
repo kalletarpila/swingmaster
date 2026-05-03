@@ -516,7 +516,7 @@ def test_dry_run_writes_no_rows(tmp_path: Path) -> None:
 def test_resolve_min_universe_size_is_market_specific() -> None:
     assert resolve_min_universe_size("usa") == 500
     assert resolve_min_universe_size("omxh") == 50
-    assert resolve_min_universe_size("fin") == 50
+    assert resolve_min_universe_size("fin") == 500
     assert resolve_min_universe_size("se") == 500
 
 

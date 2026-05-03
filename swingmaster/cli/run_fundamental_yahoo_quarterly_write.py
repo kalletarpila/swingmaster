@@ -14,7 +14,7 @@ from swingmaster.cli.run_fundamental_yahoo_quarterly_prototype import (
 )
 
 
-DEFAULT_MARKET = "fin"
+DEFAULT_MARKET = "omxh"
 
 
 def parse_args() -> argparse.Namespace:

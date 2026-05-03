@@ -79,12 +79,12 @@ def test_dry_run_writes_zero_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "yahoo_to_quarterly_dry.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
-        _insert_yahoo_quarterly_row(conn, market="fin", symbol="NOKIA.HE", period_end_date="2025-03-31", revenue=10.0)
+        _insert_yahoo_quarterly_row(conn, market="omxh", symbol="NOKIA.HE", period_end_date="2025-03-31", revenue=10.0)
         conn.commit()
 
     summary = run_fundamental_yahoo_to_quarterly.run_yahoo_to_quarterly(
         db_path=db_path,
-        market="fin",
+        market="omxh",
         symbol="NOKIA.HE",
         run_id="BRIDGE1",
         dry_run=True,
@@ -101,14 +101,14 @@ def test_rows_written_in_deterministic_period_order(tmp_path: Path) -> None:
     db_path = tmp_path / "yahoo_to_quarterly_order.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
-        _insert_yahoo_quarterly_row(conn, market="fin", symbol="NOKIA.HE", period_end_date="2025-12-31", revenue=30.0)
-        _insert_yahoo_quarterly_row(conn, market="fin", symbol="NOKIA.HE", period_end_date="2025-03-31", revenue=10.0)
-        _insert_yahoo_quarterly_row(conn, market="fin", symbol="NOKIA.HE", period_end_date="2025-06-30", revenue=20.0)
+        _insert_yahoo_quarterly_row(conn, market="omxh", symbol="NOKIA.HE", period_end_date="2025-12-31", revenue=30.0)
+        _insert_yahoo_quarterly_row(conn, market="omxh", symbol="NOKIA.HE", period_end_date="2025-03-31", revenue=10.0)
+        _insert_yahoo_quarterly_row(conn, market="omxh", symbol="NOKIA.HE", period_end_date="2025-06-30", revenue=20.0)
         conn.commit()
 
     run_fundamental_yahoo_to_quarterly.run_yahoo_to_quarterly(
         db_path=db_path,
-        market="fin",
+        market="omxh",
         symbol="NOKIA.HE",
         run_id="BRIDGE2",
         dry_run=False,
@@ -128,19 +128,19 @@ def test_snapshot_only_empty_rows_are_skipped(tmp_path: Path) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         _insert_yahoo_quarterly_row(
             conn,
-            market="fin",
+            market="omxh",
             symbol="NOKIA.HE",
             period_end_date="2024-12-31",
             shares_outstanding=100.0,
             shares_source="snapshot",
             shares_quality="REVIEW",
         )
-        _insert_yahoo_quarterly_row(conn, market="fin", symbol="NOKIA.HE", period_end_date="2025-03-31", revenue=10.0)
+        _insert_yahoo_quarterly_row(conn, market="omxh", symbol="NOKIA.HE", period_end_date="2025-03-31", revenue=10.0)
         conn.commit()
 
     summary = run_fundamental_yahoo_to_quarterly.run_yahoo_to_quarterly(
         db_path=db_path,
-        market="fin",
+        market="omxh",
         symbol="NOKIA.HE",
         run_id="BRIDGE3",
         dry_run=False,
@@ -156,7 +156,7 @@ def test_replace_symbol_deletes_only_rows_for_selected_ticker(tmp_path: Path) ->
     db_path = tmp_path / "yahoo_to_quarterly_replace.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
-        _insert_yahoo_quarterly_row(conn, market="fin", symbol="NOKIA.HE", period_end_date="2025-03-31", revenue=10.0)
+        _insert_yahoo_quarterly_row(conn, market="omxh", symbol="NOKIA.HE", period_end_date="2025-03-31", revenue=10.0)
         conn.execute(
             """
             INSERT INTO rc_fundamental_quarterly (
@@ -177,7 +177,7 @@ def test_replace_symbol_deletes_only_rows_for_selected_ticker(tmp_path: Path) ->
 
     run_fundamental_yahoo_to_quarterly.run_yahoo_to_quarterly(
         db_path=db_path,
-        market="fin",
+        market="omxh",
         symbol="NOKIA.HE",
         run_id="BRIDGE4",
         dry_run=False,
@@ -200,7 +200,7 @@ def test_field_mapping_is_correct(tmp_path: Path) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         _insert_yahoo_quarterly_row(
             conn,
-            market="fin",
+            market="omxh",
             symbol="NOKIA.HE",
             period_end_date="2025-03-31",
             revenue=1000.0,
@@ -220,7 +220,7 @@ def test_field_mapping_is_correct(tmp_path: Path) -> None:
 
     run_fundamental_yahoo_to_quarterly.run_yahoo_to_quarterly(
         db_path=db_path,
-        market="fin",
+        market="omxh",
         symbol="NOKIA.HE",
         run_id="BRIDGE5",
         dry_run=False,
@@ -278,7 +278,7 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
         "parse_args",
         lambda: Namespace(
             db=str(db_path),
-            market="fin",
+            market="omxh",
             symbol="NOKIA.HE",
             run_id="BRIDGE6",
             dry_run=True,
@@ -289,7 +289,7 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
         run_fundamental_yahoo_to_quarterly,
         "run_yahoo_to_quarterly",
         lambda **kwargs: {
-            "market": "fin",
+            "market": "omxh",
             "symbol": "NOKIA.HE",
             "source": "yahoo",
             "input_rows": 6,
@@ -304,7 +304,7 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
     run_fundamental_yahoo_to_quarterly.main()
     out = capsys.readouterr().out.strip().splitlines()
     assert out == [
-        "SUMMARY market=fin",
+        "SUMMARY market=omxh",
         "SUMMARY symbol=NOKIA.HE",
         "SUMMARY source=yahoo",
         "SUMMARY input_rows=6",

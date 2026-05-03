@@ -60,7 +60,7 @@ def test_run_yahoo_batch_fin_applies_limit_in_sorted_order(monkeypatch, tmp_path
 
     assert processed_symbols == ["KNEBV.HE", "NOKIA.HE"]
     assert summary == {
-        "market": "fin",
+        "market": "omxh",
         "universe_size": 3,
         "symbols_processed": 2,
         "symbols_ok": 2,
@@ -108,7 +108,7 @@ def test_run_yahoo_batch_fin_continues_after_symbol_error(monkeypatch, capsys, t
     )
 
     assert summary == {
-        "market": "fin",
+        "market": "omxh",
         "universe_size": 3,
         "symbols_processed": 3,
         "symbols_ok": 2,

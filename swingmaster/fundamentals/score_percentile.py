@@ -13,7 +13,6 @@ SECTOR_MIN_SIZE = 10
 INDUSTRY_MIN_SIZE = 10
 MIN_UNIVERSE_SIZE = 500
 MIN_UNIVERSE_SIZE_BY_MARKET = {
-    "fin": 50,
     "omxh": 50,
     "usa": 500,
 }

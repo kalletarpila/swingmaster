@@ -88,7 +88,7 @@ def test_status_classification_ok_empty_error_and_dry_run(monkeypatch, tmp_path:
 
     summary = run_fundamental_finnhub_audit.run_finnhub_audit(
         db_path=db_path,
-        market="fin",
+        market="omxh",
         exchange="HE",
         symbols_arg="BBB.HE,CCC.HE,AAA.HE",
         limit=None,
@@ -97,7 +97,7 @@ def test_status_classification_ok_empty_error_and_dry_run(monkeypatch, tmp_path:
     )
 
     assert summary == {
-        "market": "fin",
+        "market": "omxh",
         "exchange": "HE",
         "symbols_total": 3,
         "symbols_processed": 3,
@@ -129,7 +129,7 @@ def test_status_classification_persists_rows(monkeypatch, tmp_path: Path) -> Non
 
     summary = run_fundamental_finnhub_audit.run_finnhub_audit(
         db_path=db_path,
-        market="fin",
+        market="omxh",
         exchange="HE",
         symbols_arg=None,
         limit=None,
@@ -171,7 +171,7 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
         "parse_args",
         lambda: Namespace(
             db=str(db_path),
-            market="fin",
+            market="omxh",
             exchange="HE",
             symbols=None,
             limit=None,
@@ -183,7 +183,7 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
         run_fundamental_finnhub_audit,
         "run_finnhub_audit",
         lambda **kwargs: {
-            "market": "fin",
+            "market": "omxh",
             "exchange": "HE",
             "symbols_total": 1,
             "symbols_processed": 1,
@@ -199,7 +199,7 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
     run_fundamental_finnhub_audit.main()
     out = capsys.readouterr().out.strip().splitlines()
     assert out == [
-        "SUMMARY market=fin",
+        "SUMMARY market=omxh",
         "SUMMARY exchange=HE",
         "SUMMARY symbols_total=1",
         "SUMMARY symbols_processed=1",

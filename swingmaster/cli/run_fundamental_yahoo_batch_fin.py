@@ -15,7 +15,7 @@ from swingmaster.fundamentals.lifecycle import run_lifecycle_classification
 from swingmaster.fundamentals.score import run_fundamental_scoring
 
 
-DEFAULT_MARKET = "fin"
+DEFAULT_MARKET = "omxh"
 UNIVERSE_MARKET = "omxh"
 DEFAULT_EXCHANGE = "HE"
 YAHOO_TICKER_DELAY_SECONDS = 0.5

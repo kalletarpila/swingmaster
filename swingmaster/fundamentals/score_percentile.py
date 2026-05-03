@@ -12,6 +12,11 @@ FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE = "FUND_SCORE_PERCENTILE_V2_2_LIFE
 SECTOR_MIN_SIZE = 10
 INDUSTRY_MIN_SIZE = 10
 MIN_UNIVERSE_SIZE = 500
+MIN_UNIVERSE_SIZE_BY_MARKET = {
+    "fin": 50,
+    "omxh": 50,
+    "usa": 500,
+}
 MIN_AVAILABLE_FACTORS = 4
 FACTOR_WEIGHTS = {
     "growth": 20.0,
@@ -142,6 +147,10 @@ def resolve_created_at_utc(created_at_utc: str | None) -> str:
     if created_at_utc is not None:
         return created_at_utc
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def resolve_min_universe_size(market: str) -> int:
+    return MIN_UNIVERSE_SIZE_BY_MARKET.get(str(market).lower(), MIN_UNIVERSE_SIZE)
 
 
 def load_latest_percentile_snapshot(
@@ -541,9 +550,10 @@ def run_fundamental_score_percentile(
         target_date=target_date,
         market=market,
     )
+    min_universe_size = resolve_min_universe_size(market)
     if not snapshot_rows:
         raise RuntimeError(f"FUND_SCORE_PERCENTILE_NO_ROWS:{target_date}")
-    if len(snapshot_rows) < MIN_UNIVERSE_SIZE:
+    if len(snapshot_rows) < min_universe_size:
         raise RuntimeError(f"FUND_SCORE_PERCENTILE_UNIVERSE_TOO_SMALL:{len(snapshot_rows)}")
 
     percentile_rows = build_percentile_rows(

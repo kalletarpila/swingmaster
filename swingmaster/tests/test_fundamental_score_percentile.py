@@ -17,6 +17,7 @@ from swingmaster.fundamentals.score_percentile import (
     compute_percentiles,
     compute_weighted_percentile_score,
     load_latest_percentile_snapshot,
+    resolve_min_universe_size,
     run_fundamental_score_percentile,
 )
 
@@ -486,6 +487,40 @@ def test_dry_run_writes_no_rows(tmp_path: Path) -> None:
         assert row_count == 0
 
 
+def test_resolve_min_universe_size_is_market_specific() -> None:
+    assert resolve_min_universe_size("usa") == 500
+    assert resolve_min_universe_size("omxh") == 50
+    assert resolve_min_universe_size("fin") == 50
+    assert resolve_min_universe_size("se") == 500
+
+
+def test_fin_market_uses_lower_minimum_universe_size(tmp_path: Path) -> None:
+    fundamentals_db_path = tmp_path / "fundamentals_fin_min.db"
+    osakedata_db_path = tmp_path / "osakedata_fin_min.db"
+    run_migration(fundamentals_db_path)
+    _create_osakedata_db(osakedata_db_path)
+
+    with sqlite3.connect(str(fundamentals_db_path)) as fundamentals_conn, sqlite3.connect(str(osakedata_db_path)) as osakedata_conn:
+        _insert_large_percentile_dataset(
+            fundamentals_conn,
+            osakedata_conn,
+            row_count=50,
+            market="omxh",
+        )
+        summary = run_fundamental_score_percentile(
+            fundamentals_conn=fundamentals_conn,
+            osakedata_conn=osakedata_conn,
+            target_date="2026-04-25",
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            run_id="RUN_FIN_50",
+            market="omxh",
+            created_at_utc="2026-04-25T00:00:00Z",
+            dry_run=True,
+        )
+        assert summary["universe_size"] == 50
+        assert summary["rows_computed"] == 50
+
+
 def test_cli_writes_expected_rows_and_summary_status_ok(monkeypatch, capsys, tmp_path: Path) -> None:
     fundamentals_db_path = tmp_path / "fundamentals_cli.db"
     osakedata_db_path = tmp_path / "osakedata_cli.db"
@@ -673,6 +708,7 @@ def _insert_large_percentile_dataset(
     fundamentals_conn: sqlite3.Connection,
     osakedata_conn: sqlite3.Connection,
     row_count: int,
+    market: str = "usa",
 ) -> None:
     for index in range(row_count):
         ticker = f"T{index:04d}"
@@ -692,7 +728,7 @@ def _insert_large_percentile_dataset(
         _insert_meta_row(
             osakedata_conn,
             ticker=ticker,
-            market="usa",
+            market=market,
             sector="Technology",
             industry="Software",
         )

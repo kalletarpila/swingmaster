@@ -5,8 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-MARKET = "usa"
-BENCHMARK_TICKER = "^GSPC"
+DEFAULT_MARKET = "usa"
+DEFAULT_BENCHMARK_TICKER = "^GSPC"
+BENCHMARK_TICKER_BY_MARKET = {
+    "omxh": "^OMXH25",
+    "usa": "^GSPC",
+}
 
 
 @dataclass(frozen=True)
@@ -25,9 +29,12 @@ def load_price_behavior_snapshot(
     if not ohlcv_db_path.exists():
         raise RuntimeError(f"OHLCV_DB_NOT_FOUND:{ohlcv_db_path}")
 
+    market = _resolve_market_for_ticker(ticker)
+    benchmark_ticker = BENCHMARK_TICKER_BY_MARKET.get(market, DEFAULT_BENCHMARK_TICKER)
+
     with sqlite3.connect(str(ohlcv_db_path)) as conn:
-        ticker_rows = _load_ohlcv_rows(conn, ticker.upper())
-        benchmark_rows = _load_ohlcv_rows(conn, BENCHMARK_TICKER)
+        ticker_rows = _load_ohlcv_rows(conn, ticker.upper(), market)
+        benchmark_rows = _load_ohlcv_rows(conn, benchmark_ticker, market)
 
     snapshot = {
         "price_behavior_as_of_date": "",
@@ -83,7 +90,14 @@ def load_price_behavior_snapshot(
     return snapshot
 
 
-def _load_ohlcv_rows(conn: sqlite3.Connection, ticker: str) -> list[OhlcvRow]:
+def _resolve_market_for_ticker(ticker: str) -> str:
+    normalized_ticker = ticker.upper()
+    if normalized_ticker.endswith(".HE") or normalized_ticker == "^OMXH25":
+        return "omxh"
+    return DEFAULT_MARKET
+
+
+def _load_ohlcv_rows(conn: sqlite3.Connection, ticker: str, market: str) -> list[OhlcvRow]:
     rows = conn.execute(
         """
         SELECT pvm, high, close, volume
@@ -92,7 +106,7 @@ def _load_ohlcv_rows(conn: sqlite3.Connection, ticker: str) -> list[OhlcvRow]:
           AND market = ?
         ORDER BY pvm ASC
         """,
-        (ticker.upper(), MARKET),
+        (ticker.upper(), market),
     ).fetchall()
     return [OhlcvRow(str(row[0]), _to_float(row[1]), _to_float(row[2]), _to_float(row[3])) for row in rows]
 

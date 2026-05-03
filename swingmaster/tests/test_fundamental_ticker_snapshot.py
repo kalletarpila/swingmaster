@@ -382,6 +382,90 @@ def test_price_behavior_snapshot_stdout_and_csv(monkeypatch, capsys, tmp_path: P
     assert "earnings_reaction_3d_pct;3,00" in cli_csv_content
 
 
+def test_price_behavior_snapshot_uses_omxh_benchmark_for_he_ticker(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_omxh.db"
+    ohlcv_db_path = tmp_path / "osakedata_omxh.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(
+            conn,
+            ticker="NOKIA.HE",
+            as_of_date="2026-03-31",
+            lifecycle_class="TRANSITION",
+            fundamental_score=44.0,
+            fundamental_score_lifecycle=47.2,
+            growth_component=6.0,
+            margin_component=4.0,
+            margin_trend_component=6.0,
+            fcf_component=8.0,
+            consistency_component=0.0,
+            leverage_component=15.0,
+            dilution_component=5.0,
+            growth=0.10,
+            margin=0.04,
+            margin_trend=0.02,
+            fcf=0.07,
+            fcf_trend=0.01,
+            leverage=-1.43,
+            dilution=0.04,
+            latest_period_end_date="2026-03-31",
+        )
+        _insert_quarterly_row(conn, "NOKIA.HE", "2026-03-31", 1300.0, 330.0, 280.0, 11.5, 17.0)
+        _insert_percentile_row(conn, "NOKIA.HE", "2026-03-31", "2026-03-31", "Technology", "Communication Equipment", 46.90, 46.74)
+        conn.commit()
+
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "NOKIA.HE",
+        300,
+        anchor_close=400.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=300.0,
+        close_1_after_report=303.0,
+        close_3_after_report=309.0,
+        close_20_after_report=330.0,
+        market="omxh",
+    )
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "^OMXH25",
+        300,
+        anchor_close=200.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=180.0,
+        close_1_after_report=181.0,
+        close_3_after_report=183.0,
+        close_20_after_report=190.0,
+        return_6m_pct=14.59,
+        market="omxh",
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="NOKIA.HE",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=True,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out.strip()
+
+    assert "relative_strength_6m_vs_sp500_pct;5.89" in cli_output
+    assert "relative_return_vs_sp500_since_last_report_pct;22.22" in cli_output
+
+
 def test_delta_formatted_treats_empty_string_as_missing() -> None:
     from swingmaster.cli.run_fundamental_ticker_snapshot import _delta_formatted
 
@@ -569,6 +653,7 @@ def _insert_ohlcv_series(
     high_multiplier: float = 1.10,
     volume_before_report: float = 100.0,
     volume_after_report: float = 250.0,
+    market: str = "usa",
 ) -> None:
     anchor_day = date.fromisoformat(anchor_date)
     start_day = anchor_day - timedelta(days=length - 1)
@@ -603,9 +688,9 @@ def _insert_ohlcv_series(
             conn.execute(
                 """
                 INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'usa')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (ticker.upper(), date_text, close, high, close, close, volume),
+                (ticker.upper(), date_text, close, high, close, close, volume, market),
             )
         conn.commit()
 

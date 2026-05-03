@@ -13,6 +13,7 @@ from swingmaster.cli.run_fundamental_ticker_snapshot import (
     build_snapshot_matrix,
     ensure_snapshot_csv_written,
     format_snapshot_matrix,
+    load_latest_valuation_snapshot,
     main as ticker_snapshot_main,
 )
 
@@ -163,7 +164,8 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
         conn.commit()
 
         matrix_rows = build_snapshot_matrix(conn, "VRT", 4, FUND_SCORE_PERCENTILE_V2_PRE, None)
-        output = format_snapshot_matrix(matrix_rows)
+        valuation_snapshot = load_latest_valuation_snapshot(conn, "VRT")
+        output = format_snapshot_matrix(matrix_rows, valuation_snapshot=valuation_snapshot)
 
     assert "ticker;VRT;VRT;VRT;VRT" in output
     assert "quarter;2025-06-30;2025-09-30;2025-12-31;2026-03-31" in output
@@ -213,7 +215,7 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
     )
     monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
     monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
-    ensured_csv = ensure_snapshot_csv_written(matrix_rows, "VRT", "2026-04-27")
+    ensured_csv = ensure_snapshot_csv_written(matrix_rows, "VRT", "2026-04-27", valuation_snapshot=valuation_snapshot)
     assert ensured_csv.exists()
     assert ensured_csv.stat().st_size > 0
     ticker_snapshot_main()
@@ -228,6 +230,10 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
     assert "score_delta_qoq;;-2,50;-4,00;6,70" in cli_csv_content
     assert "percentile_delta_qoq;;0,10;0,10;0,10" in cli_csv_content
     assert "percentile_delta_4q;;;;0,80" in cli_csv_content
+    assert "valuation_snapshot" in cli_output
+    assert "valuation_date;" in cli_output
+    assert "valuation_snapshot" in cli_csv_content
+    assert "valuation_date;" in cli_csv_content
 
 
 def test_price_behavior_snapshot_requires_ohlcv_db(monkeypatch, tmp_path: Path) -> None:
@@ -368,6 +374,8 @@ def test_price_behavior_snapshot_stdout_and_csv(monkeypatch, capsys, tmp_path: P
     assert "earnings_reaction_3d_pct;3.00" in cli_output
     assert "post_earnings_drift_20d_pct;10.00" in cli_output
     assert "volume_ratio_since_last_report_vs_3m_avg;2.50" in cli_output
+    assert "valuation_snapshot" in cli_output
+    assert cli_output.index("price_behavior_snapshot") < cli_output.index("valuation_snapshot")
     assert "price_return_3m_pct;9.29;" not in cli_output
     assert cli_output.index("earnings_reaction_1d_pct;1.00") < cli_output.index("post_earnings_drift_20d_pct;10.00")
     assert cli_output.index("earnings_reaction_3d_pct;3.00") < cli_output.index("post_earnings_drift_20d_pct;10.00")
@@ -376,6 +384,7 @@ def test_price_behavior_snapshot_stdout_and_csv(monkeypatch, capsys, tmp_path: P
     cli_csv_content = cli_csv_path.read_text(encoding="utf-8")
     assert "price_behavior_snapshot" in cli_csv_content
     assert "price_behavior_as_of_date;2026-04-30" in cli_csv_content
+    assert "valuation_snapshot" in cli_csv_content
     assert "price_return_3m_pct;9,29" in cli_csv_content
     assert "relative_strength_6m_vs_sp500_pct;5,89" in cli_csv_content
     assert "earnings_reaction_1d_pct;1,00" in cli_csv_content
@@ -466,7 +475,7 @@ def test_price_behavior_snapshot_uses_omxh_benchmark_for_he_ticker(monkeypatch, 
     assert "relative_return_vs_sp500_since_last_report_pct;22.22" in cli_output
 
 
-def test_snapshot_includes_exact_match_valuation_rows_only(tmp_path: Path) -> None:
+def test_snapshot_keeps_exact_match_quarter_valuation_rows_and_adds_latest_valuation_snapshot(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ticker_snapshot_valuation.db"
     run_migration(db_path)
 
@@ -536,7 +545,8 @@ def test_snapshot_includes_exact_match_valuation_rows_only(tmp_path: Path) -> No
         conn.commit()
 
         matrix_rows = build_snapshot_matrix(conn, "VRT", 2, FUND_SCORE_PERCENTILE_V2_PRE, None)
-        output = format_snapshot_matrix(matrix_rows)
+        valuation_snapshot = load_latest_valuation_snapshot(conn, "VRT")
+        output = format_snapshot_matrix(matrix_rows, valuation_snapshot=valuation_snapshot)
 
     assert "valuation_date;;2026-03-31" in output
     assert "valuation_fundamental_as_of_date;;2025-12-31" in output
@@ -548,6 +558,17 @@ def test_snapshot_includes_exact_match_valuation_rows_only(tmp_path: Path) -> No
     assert "valuation_status;;OK" in output
     assert "valuation_model_version;;V2" in output
     assert output.index("valuation_status;;OK") < output.index("revenue;1200.00;1300.00")
+    assert "valuation_snapshot" in output
+    assert "valuation_date;2026-03-31" in output
+    assert "valuation_fundamental_as_of_date;2025-12-31" in output
+    assert "valuation_fundamental_staleness_days;90" in output
+    assert "valuation_ev_ebit;12.34" in output
+    assert "valuation_fcf_yield;0.05" in output
+    assert "valuation_ebit_margin;0.23" in output
+    assert "adjusted_expensive_threshold;28.00" in output
+    assert "valuation_bucket;FAIR" in output
+    assert "valuation_status;OK" in output
+    assert "valuation_model_version;V2" in output
 
 
 def test_delta_formatted_treats_empty_string_as_missing() -> None:
@@ -555,6 +576,118 @@ def test_delta_formatted_treats_empty_string_as_missing() -> None:
 
     assert _delta_formatted("", "10.0") == ""
     assert _delta_formatted("10.0", "") == ""
+
+
+def test_valuation_snapshot_uses_latest_row_by_ticker(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_valuation_latest.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(
+            conn,
+            ticker="VRT",
+            as_of_date="2025-12-31",
+            lifecycle_class="SCALING",
+            fundamental_score=67.0,
+            fundamental_score_lifecycle=71.1,
+            growth_component=15.0,
+            margin_component=12.0,
+            margin_trend_component=6.0,
+            fcf_component=15.0,
+            consistency_component=8.0,
+            leverage_component=12.0,
+            dilution_component=10.0,
+            growth=0.70,
+            margin=0.32,
+            margin_trend=0.22,
+            fcf=0.27,
+            fcf_trend=0.07,
+            leverage=1.0,
+            dilution=0.04,
+            latest_period_end_date="2025-12-31",
+        )
+        _insert_quarterly_row(conn, "VRT", "2025-12-31", 1200.0, 320.0, 270.0, 11.0, 18.0)
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_valuation (
+                ticker, as_of_date, valuation_ev_ebit, valuation_fcf_yield, valuation_ebit_margin, adjusted_expensive_threshold,
+                valuation_model_version, valuation_fundamental_as_of_date, valuation_fundamental_staleness_days,
+                valuation_bucket, valuation_status, market_cap,
+                enterprise_value, close_price, shares_outstanding, cash, total_debt, ebit_ttm,
+                fundamental_score_lifecycle, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("VRT", "2025-12-31", 10.0, 0.07, 0.20, 28.0, "V2", "2025-12-31", 0, "CHEAP", "OK", 100.0, 90.0, 10.0, 10.0, 5.0, 0.0, 7.0, 71.1, "VAL_RUN_1", "2026-04-25T00:00:00Z"),
+        )
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_valuation (
+                ticker, as_of_date, valuation_ev_ebit, valuation_fcf_yield, valuation_ebit_margin, adjusted_expensive_threshold,
+                valuation_model_version, valuation_fundamental_as_of_date, valuation_fundamental_staleness_days,
+                valuation_bucket, valuation_status, market_cap,
+                enterprise_value, close_price, shares_outstanding, cash, total_debt, ebit_ttm,
+                fundamental_score_lifecycle, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("VRT", "2026-03-31", 12.34, 0.05, 0.23, 28.0, "V2", "2025-12-31", 90, "FAIR", "OK", 100.0, 90.0, 10.0, 10.0, 5.0, 0.0, 7.0, 71.1, "VAL_RUN_2", "2026-04-25T00:00:00Z"),
+        )
+        conn.commit()
+
+        matrix_rows = build_snapshot_matrix(conn, "VRT", 1, FUND_SCORE_PERCENTILE_V2_PRE, None)
+        valuation_snapshot = load_latest_valuation_snapshot(conn, "VRT")
+        output = format_snapshot_matrix(matrix_rows, valuation_snapshot=valuation_snapshot)
+
+    assert "valuation_snapshot" in output
+    assert "valuation_date;2026-03-31" in output
+    assert "valuation_bucket;FAIR" in output
+
+
+def test_valuation_snapshot_block_present_with_empty_values_when_missing(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_valuation_missing.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(
+            conn,
+            ticker="VRT",
+            as_of_date="2025-12-31",
+            lifecycle_class="SCALING",
+            fundamental_score=67.0,
+            fundamental_score_lifecycle=71.1,
+            growth_component=15.0,
+            margin_component=12.0,
+            margin_trend_component=6.0,
+            fcf_component=15.0,
+            consistency_component=8.0,
+            leverage_component=12.0,
+            dilution_component=10.0,
+            growth=0.70,
+            margin=0.32,
+            margin_trend=0.22,
+            fcf=0.27,
+            fcf_trend=0.07,
+            leverage=1.0,
+            dilution=0.04,
+            latest_period_end_date="2025-12-31",
+        )
+        _insert_quarterly_row(conn, "VRT", "2025-12-31", 1200.0, 320.0, 270.0, 11.0, 18.0)
+        conn.commit()
+
+        matrix_rows = build_snapshot_matrix(conn, "VRT", 1, FUND_SCORE_PERCENTILE_V2_PRE, None)
+        valuation_snapshot = load_latest_valuation_snapshot(conn, "VRT")
+        output = format_snapshot_matrix(matrix_rows, valuation_snapshot=valuation_snapshot)
+
+    assert "valuation_snapshot" in output
+    assert "valuation_date;" in output
+    assert "valuation_fundamental_as_of_date;" in output
+    assert "valuation_fundamental_staleness_days;" in output
+    assert "valuation_ev_ebit;" in output
+    assert "valuation_fcf_yield;" in output
+    assert "valuation_ebit_margin;" in output
+    assert "adjusted_expensive_threshold;" in output
+    assert "valuation_bucket;" in output
+    assert "valuation_status;" in output
+    assert "valuation_model_version;" in output
 
 
 def test_price_behavior_snapshot_missing_benchmark_and_future_data(monkeypatch, capsys, tmp_path: Path) -> None:

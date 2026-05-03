@@ -118,6 +118,18 @@ PRICE_BEHAVIOR_METRICS: tuple[str, ...] = (
     "post_earnings_drift_20d_pct",
     "volume_ratio_since_last_report_vs_3m_avg",
 )
+VALUATION_SNAPSHOT_METRICS: tuple[str, ...] = (
+    "valuation_date",
+    "valuation_fundamental_as_of_date",
+    "valuation_fundamental_staleness_days",
+    "valuation_ev_ebit",
+    "valuation_fcf_yield",
+    "valuation_ebit_margin",
+    "adjusted_expensive_threshold",
+    "valuation_bucket",
+    "valuation_status",
+    "valuation_model_version",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -336,6 +348,40 @@ def load_stored_valuation_rows(
     return {(str(row["ticker"]), str(row["as_of_date"])): row for row in rows}
 
 
+def load_latest_valuation_snapshot(conn: sqlite3.Connection, ticker: str) -> dict[str, str]:
+    previous_row_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM rc_fundamental_valuation
+            WHERE ticker = ?
+            ORDER BY as_of_date DESC
+            LIMIT 1
+            """,
+            (ticker.upper(),),
+        ).fetchone()
+    finally:
+        conn.row_factory = previous_row_factory
+
+    if row is None:
+        return {metric: "" for metric in VALUATION_SNAPSHOT_METRICS}
+
+    return {
+        "valuation_date": str(row["as_of_date"]) if row["as_of_date"] is not None else "",
+        "valuation_fundamental_as_of_date": str(row["valuation_fundamental_as_of_date"]) if row["valuation_fundamental_as_of_date"] is not None else "",
+        "valuation_fundamental_staleness_days": str(row["valuation_fundamental_staleness_days"]) if row["valuation_fundamental_staleness_days"] is not None else "",
+        "valuation_ev_ebit": _format_optional_float(_coerce_optional_float(row["valuation_ev_ebit"])),
+        "valuation_fcf_yield": _format_optional_float(_coerce_optional_float(row["valuation_fcf_yield"])),
+        "valuation_ebit_margin": _format_optional_float(_coerce_optional_float(row["valuation_ebit_margin"])),
+        "adjusted_expensive_threshold": _format_optional_float(_coerce_optional_float(row["adjusted_expensive_threshold"])),
+        "valuation_bucket": str(row["valuation_bucket"]) if row["valuation_bucket"] is not None else "",
+        "valuation_status": str(row["valuation_status"]) if row["valuation_status"] is not None else "",
+        "valuation_model_version": str(row["valuation_model_version"]) if row["valuation_model_version"] is not None else "",
+    }
+
+
 def _delta_formatted(current_value: object, previous_value: object) -> str:
     current = _coerce_optional_float(current_value)
     previous = _coerce_optional_float(previous_value)
@@ -545,7 +591,11 @@ def build_snapshot_matrix(
     return matrix_rows
 
 
-def format_snapshot_matrix(matrix_rows: list[dict[str, str]], price_behavior_snapshot: dict[str, str] | None = None) -> str:
+def format_snapshot_matrix(
+    matrix_rows: list[dict[str, str]],
+    price_behavior_snapshot: dict[str, str] | None = None,
+    valuation_snapshot: dict[str, str] | None = None,
+) -> str:
     lines: list[str] = []
     for metric in SECTIONED_METRICS:
         if metric is None:
@@ -559,6 +609,11 @@ def format_snapshot_matrix(matrix_rows: list[dict[str, str]], price_behavior_sna
         lines.append("price_behavior_snapshot")
         for metric in PRICE_BEHAVIOR_METRICS:
             lines.append(f"{metric};{price_behavior_snapshot.get(metric, '')}")
+    if valuation_snapshot is not None:
+        lines.append("")
+        lines.append("valuation_snapshot")
+        for metric in VALUATION_SNAPSHOT_METRICS:
+            lines.append(f"{metric};{valuation_snapshot.get(metric, '')}")
     return "\n".join(lines)
 
 
@@ -577,6 +632,7 @@ def write_snapshot_csv(
     ticker: str,
     output_date: str,
     price_behavior_snapshot: dict[str, str] | None = None,
+    valuation_snapshot: dict[str, str] | None = None,
 ) -> Path:
     CSV_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}.csv"
@@ -593,6 +649,11 @@ def write_snapshot_csv(
             writer.writerow(["price_behavior_snapshot"])
             for metric in PRICE_BEHAVIOR_METRICS:
                 writer.writerow([metric, _format_csv_value(price_behavior_snapshot.get(metric, ""))])
+        if valuation_snapshot is not None:
+            writer.writerow([])
+            writer.writerow(["valuation_snapshot"])
+            for metric in VALUATION_SNAPSHOT_METRICS:
+                writer.writerow([metric, _format_csv_value(valuation_snapshot.get(metric, ""))])
     return output_path
 
 
@@ -601,11 +662,12 @@ def ensure_snapshot_csv_written(
     ticker: str,
     output_date: str,
     price_behavior_snapshot: dict[str, str] | None = None,
+    valuation_snapshot: dict[str, str] | None = None,
 ) -> Path:
-    output_path = write_snapshot_csv(matrix_rows, ticker, output_date, price_behavior_snapshot)
+    output_path = write_snapshot_csv(matrix_rows, ticker, output_date, price_behavior_snapshot, valuation_snapshot)
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
-    output_path = write_snapshot_csv(matrix_rows, ticker, output_date, price_behavior_snapshot)
+    output_path = write_snapshot_csv(matrix_rows, ticker, output_date, price_behavior_snapshot, valuation_snapshot)
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
     raise RuntimeError(f"FUNDAMENTAL_TICKER_SNAPSHOT_CSV_NOT_WRITTEN:{output_path}")
@@ -626,13 +688,14 @@ def main() -> None:
             rule_id=args.rule_id,
             percentile_target_date=args.percentile_target_date,
         )
+        valuation_snapshot = load_latest_valuation_snapshot(conn, ticker)
     price_behavior_snapshot: dict[str, str] | None = None
     if args.price_behavior_snapshot:
         ohlcv_db_path = resolve_db_path(args.ohlcv_db)
         latest_quarter_date = matrix_rows[-1]["quarter"]
         price_behavior_snapshot = load_price_behavior_snapshot(ohlcv_db_path, ticker, latest_quarter_date)
-    ensure_snapshot_csv_written(matrix_rows, ticker, output_date, price_behavior_snapshot)
-    print(format_snapshot_matrix(matrix_rows, price_behavior_snapshot))
+    ensure_snapshot_csv_written(matrix_rows, ticker, output_date, price_behavior_snapshot, valuation_snapshot)
+    print(format_snapshot_matrix(matrix_rows, price_behavior_snapshot, valuation_snapshot))
 
 
 if __name__ == "__main__":

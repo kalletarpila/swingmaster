@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,11 +11,11 @@ DEFAULT_MARKET = "omxh"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compute deterministic Fundamental Valuation V1 using EV/EBIT")
+    parser = argparse.ArgumentParser(description="Compute deterministic Fundamental Valuation V2")
     parser.add_argument("--db", required=True, help="Fundamentals SQLite database path")
     parser.add_argument("--osakedata-db", required=True, help="OHLCV SQLite database path")
     parser.add_argument("--market", default=DEFAULT_MARKET, help="Market code for OHLCV close lookup and ticker universe")
-    parser.add_argument("--as-of-date", required=True, help="Target date in YYYY-MM-DD format")
+    parser.add_argument("--as-of-date", required=True, help="Valuation date in YYYY-MM-DD format")
     parser.add_argument("--ticker", default=None, help="Optional single ticker override")
     parser.add_argument("--run-id", required=True, help="Deterministic run identifier")
     parser.add_argument("--dry-run", action="store_true", help="Compute without writing rows")
@@ -51,7 +51,7 @@ def load_market_ticker_universe(osakedata_conn: sqlite3.Connection, market: str)
 
 def load_ttm_rows(
     fundamentals_conn: sqlite3.Connection,
-    as_of_date: str,
+    valuation_date: str,
     ticker: str | None,
     market_universe: list[str] | None,
 ) -> list[sqlite3.Row]:
@@ -59,33 +59,41 @@ def load_ttm_rows(
     fundamentals_conn.row_factory = sqlite3.Row
     try:
         if ticker is not None:
-            rows = fundamentals_conn.execute(
+            candidate_rows = fundamentals_conn.execute(
                 """
-                SELECT ticker, as_of_date, latest_period_end_date, ebit_ttm, fundamental_score_lifecycle
+                SELECT ticker, as_of_date, latest_period_end_date, ebit_ttm, fundamental_score_lifecycle,
+                       fcf_ttm, ebit_margin_ttm
                 FROM rc_fundamental_ttm
                 WHERE ticker = ?
-                  AND as_of_date = ?
-                ORDER BY ticker ASC
+                  AND as_of_date <= ?
+                ORDER BY ticker ASC, as_of_date DESC
                 """,
-                (ticker.upper(), as_of_date),
+                (ticker.upper(), valuation_date),
             ).fetchall()
         else:
             if not market_universe:
                 return []
             placeholders = ", ".join("?" for _ in market_universe)
-            rows = fundamentals_conn.execute(
+            candidate_rows = fundamentals_conn.execute(
                 f"""
-                SELECT ticker, as_of_date, latest_period_end_date, ebit_ttm, fundamental_score_lifecycle
+                SELECT ticker, as_of_date, latest_period_end_date, ebit_ttm, fundamental_score_lifecycle,
+                       fcf_ttm, ebit_margin_ttm
                 FROM rc_fundamental_ttm
-                WHERE as_of_date = ?
+                WHERE as_of_date <= ?
                   AND ticker IN ({placeholders})
-                ORDER BY ticker ASC
+                ORDER BY ticker ASC, as_of_date DESC
                 """,
-                [as_of_date, *market_universe],
+                [valuation_date, *market_universe],
             ).fetchall()
     finally:
         fundamentals_conn.row_factory = previous_row_factory
-    return rows
+    latest_rows_by_ticker: dict[str, sqlite3.Row] = {}
+    for row in candidate_rows:
+        current_ticker = str(row["ticker"]).upper()
+        if current_ticker in latest_rows_by_ticker:
+            continue
+        latest_rows_by_ticker[current_ticker] = row
+    return [latest_rows_by_ticker[ticker_key] for ticker_key in sorted(latest_rows_by_ticker)]
 
 
 def load_quarterly_ev_inputs(
@@ -138,7 +146,12 @@ def _coerce_optional_float(value: object) -> float | None:
     return float(value)
 
 
+def compute_staleness_days(valuation_date: str, fundamental_as_of_date: str) -> int:
+    return (date.fromisoformat(valuation_date) - date.fromisoformat(fundamental_as_of_date)).days
+
+
 def build_valuation_row(
+    valuation_date: str,
     ttm_row: sqlite3.Row,
     quarterly_row: sqlite3.Row | None,
     close_price: float | None,
@@ -149,7 +162,11 @@ def build_valuation_row(
     cash = _coerce_optional_float(quarterly_row["cash"]) if quarterly_row is not None else None
     total_debt = _coerce_optional_float(quarterly_row["total_debt"]) if quarterly_row is not None else None
     ebit_ttm = _coerce_optional_float(ttm_row["ebit_ttm"])
+    fcf_ttm = _coerce_optional_float(ttm_row["fcf_ttm"])
+    valuation_ebit_margin = _coerce_optional_float(ttm_row["ebit_margin_ttm"])
     fundamental_score_lifecycle = _coerce_optional_float(ttm_row["fundamental_score_lifecycle"])
+    valuation_fundamental_as_of_date = str(ttm_row["as_of_date"])
+    valuation_fundamental_staleness_days = compute_staleness_days(valuation_date, valuation_fundamental_as_of_date)
 
     market_cap: float | None = None
     if close_price is not None and shares_outstanding is not None and shares_outstanding > 0:
@@ -163,6 +180,12 @@ def build_valuation_row(
     if enterprise_value is not None and ebit_ttm is not None and ebit_ttm > 0:
         valuation_ev_ebit = enterprise_value / ebit_ttm
 
+    valuation_fcf_yield: float | None = None
+    if market_cap is not None and market_cap > 0 and fcf_ttm is not None:
+        valuation_fcf_yield = fcf_ttm / market_cap
+
+    adjusted_expensive_threshold: float | None = None
+
     if close_price is None:
         valuation_status = "MISSING_PRICE"
         valuation_bucket = "INVALID"
@@ -175,23 +198,48 @@ def build_valuation_row(
     elif total_debt is None or cash is None:
         valuation_status = "MISSING_EV_INPUT"
         valuation_bucket = "INVALID"
+    elif fcf_ttm is None:
+        valuation_status = "MISSING_FCF"
+        valuation_bucket = "INVALID"
+    elif market_cap is None or market_cap <= 0:
+        valuation_status = "INVALID_MARKET_CAP"
+        valuation_bucket = "INVALID"
+    elif valuation_ebit_margin is None:
+        valuation_status = "MISSING_EBIT_MARGIN"
+        valuation_bucket = "INVALID"
+    elif valuation_fundamental_staleness_days > 240:
+        valuation_status = "TOO_STALE_FUNDAMENTALS"
+        valuation_bucket = "INVALID"
     else:
-        valuation_status = "OK"
-        expensive_threshold = 25.0 if fundamental_score_lifecycle is not None and fundamental_score_lifecycle >= 60 else 18.0
+        valuation_status = "OK" if valuation_fundamental_staleness_days <= 120 else "STALE_FUNDAMENTALS"
+        if valuation_ebit_margin >= 0.20:
+            adjusted_expensive_threshold = 28.0
+        elif valuation_ebit_margin >= 0.15:
+            adjusted_expensive_threshold = 25.0
+        else:
+            adjusted_expensive_threshold = 22.0
         if valuation_ev_ebit is None:
             valuation_bucket = "INVALID"
             valuation_status = "INVALID_EBIT"
-        elif valuation_ev_ebit < 10:
+        elif valuation_ev_ebit >= 30.0 or valuation_fcf_yield < 0.03:
+            valuation_bucket = "VERY_EXPENSIVE"
+        elif valuation_ev_ebit < 12.0 and valuation_fcf_yield >= 0.07:
             valuation_bucket = "CHEAP"
-        elif valuation_ev_ebit < expensive_threshold:
-            valuation_bucket = "FAIR"
-        else:
+        elif valuation_ev_ebit >= adjusted_expensive_threshold or valuation_fcf_yield < 0.04:
             valuation_bucket = "EXPENSIVE"
+        else:
+            valuation_bucket = "FAIR"
 
     return {
         "ticker": str(ttm_row["ticker"]).upper(),
-        "as_of_date": str(ttm_row["as_of_date"]),
+        "as_of_date": valuation_date,
+        "valuation_fundamental_as_of_date": valuation_fundamental_as_of_date,
+        "valuation_fundamental_staleness_days": valuation_fundamental_staleness_days,
         "valuation_ev_ebit": valuation_ev_ebit,
+        "valuation_fcf_yield": valuation_fcf_yield,
+        "valuation_ebit_margin": valuation_ebit_margin,
+        "adjusted_expensive_threshold": adjusted_expensive_threshold,
+        "valuation_model_version": "V2",
         "valuation_bucket": valuation_bucket,
         "valuation_status": valuation_status,
         "market_cap": market_cap,
@@ -239,6 +287,12 @@ def insert_valuation_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) 
             ticker,
             as_of_date,
             valuation_ev_ebit,
+            valuation_fcf_yield,
+            valuation_ebit_margin,
+            adjusted_expensive_threshold,
+            valuation_model_version,
+            valuation_fundamental_as_of_date,
+            valuation_fundamental_staleness_days,
             valuation_bucket,
             valuation_status,
             market_cap,
@@ -251,13 +305,19 @@ def insert_valuation_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) 
             fundamental_score_lifecycle,
             run_id,
             created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
                 row["ticker"],
                 row["as_of_date"],
                 row["valuation_ev_ebit"],
+                row["valuation_fcf_yield"],
+                row["valuation_ebit_margin"],
+                row["adjusted_expensive_threshold"],
+                row["valuation_model_version"],
+                row["valuation_fundamental_as_of_date"],
+                row["valuation_fundamental_staleness_days"],
                 row["valuation_bucket"],
                 row["valuation_status"],
                 row["market_cap"],
@@ -302,6 +362,7 @@ def run_fundamental_valuation(
                 close_price = load_latest_close_price(osakedata_conn, str(ttm_row["ticker"]), market, as_of_date)
                 valuation_rows.append(
                     build_valuation_row(
+                        valuation_date=as_of_date,
                         ttm_row=ttm_row,
                         quarterly_row=quarterly_row,
                         close_price=close_price,
@@ -323,6 +384,7 @@ def run_fundamental_valuation(
     cheap_count = sum(1 for row in valuation_rows if row["valuation_bucket"] == "CHEAP")
     fair_count = sum(1 for row in valuation_rows if row["valuation_bucket"] == "FAIR")
     expensive_count = sum(1 for row in valuation_rows if row["valuation_bucket"] == "EXPENSIVE")
+    very_expensive_count = sum(1 for row in valuation_rows if row["valuation_bucket"] == "VERY_EXPENSIVE")
 
     return {
         "market": market,
@@ -334,6 +396,8 @@ def run_fundamental_valuation(
         "cheap_count": cheap_count,
         "fair_count": fair_count,
         "expensive_count": expensive_count,
+        "very_expensive_count": very_expensive_count,
+        "model_version": "V2",
         "dry_run": "true" if dry_run else "false",
         "replace": "true" if replace else "false",
         "run_id": run_id,
@@ -361,6 +425,8 @@ def main() -> None:
     _summary(cheap_count=summary["cheap_count"])
     _summary(fair_count=summary["fair_count"])
     _summary(expensive_count=summary["expensive_count"])
+    _summary(very_expensive_count=summary["very_expensive_count"])
+    _summary(model_version=summary["model_version"])
     _summary(dry_run=summary["dry_run"])
     _summary(replace=summary["replace"])
     _summary(run_id=summary["run_id"])

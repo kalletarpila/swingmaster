@@ -524,21 +524,29 @@ def test_snapshot_includes_exact_match_valuation_rows_only(tmp_path: Path) -> No
         conn.execute(
             """
             INSERT INTO rc_fundamental_valuation (
-                ticker, as_of_date, valuation_ev_ebit, valuation_bucket, valuation_status, market_cap,
+                ticker, as_of_date, valuation_ev_ebit, valuation_fcf_yield, valuation_ebit_margin, adjusted_expensive_threshold,
+                valuation_model_version, valuation_fundamental_as_of_date, valuation_fundamental_staleness_days,
+                valuation_bucket, valuation_status, market_cap,
                 enterprise_value, close_price, shares_outstanding, cash, total_debt, ebit_ttm,
                 fundamental_score_lifecycle, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("VRT", "2026-03-31", 12.34, "FAIR", "OK", 100.0, 90.0, 10.0, 10.0, 5.0, 0.0, 7.0, 77.8, "VAL_RUN", "2026-04-25T00:00:00Z"),
+            ("VRT", "2026-03-31", 12.34, 0.05, 0.23, 28.0, "V2", "2025-12-31", 90, "FAIR", "OK", 100.0, 90.0, 10.0, 10.0, 5.0, 0.0, 7.0, 77.8, "VAL_RUN", "2026-04-25T00:00:00Z"),
         )
         conn.commit()
 
         matrix_rows = build_snapshot_matrix(conn, "VRT", 2, FUND_SCORE_PERCENTILE_V2_PRE, None)
         output = format_snapshot_matrix(matrix_rows)
 
+    assert "valuation_date;;2026-03-31" in output
+    assert "valuation_fundamental_as_of_date;;2025-12-31" in output
+    assert "valuation_fundamental_staleness_days;;90" in output
     assert "valuation_ev_ebit;;12.34" in output
+    assert "valuation_fcf_yield;;0.05" in output
+    assert "valuation_ebit_margin;;0.23" in output
     assert "valuation_bucket;;FAIR" in output
     assert "valuation_status;;OK" in output
+    assert "valuation_model_version;;V2" in output
     assert output.index("valuation_status;;OK") < output.index("revenue;1200.00;1300.00")
 
 

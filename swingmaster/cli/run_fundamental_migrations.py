@@ -50,6 +50,16 @@ PERCENTILE_LIFECYCLE_COLUMNS = (
     ("industry_rank_blended_lifecycle_weighted", "INTEGER"),
     ("percentile_lifecycle_weight_rule", "TEXT"),
 )
+VALUATION_V2_COLUMNS = (
+    ("valuation_fcf_yield", "REAL"),
+    ("valuation_ebit_margin", "REAL"),
+    ("adjusted_expensive_threshold", "REAL"),
+    ("valuation_model_version", "TEXT"),
+)
+VALUATION_V21_COLUMNS = (
+    ("valuation_fundamental_as_of_date", "TEXT"),
+    ("valuation_fundamental_staleness_days", "INTEGER"),
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,6 +93,14 @@ def get_valuation_migration_file_path() -> Path:
     return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "019_rc_fundamental_valuation.sql"
 
 
+def get_valuation_v2_migration_file_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "020_rc_fundamental_valuation_v2.sql"
+
+
+def get_valuation_v21_migration_file_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "021_rc_fundamental_valuation_v21.sql"
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -94,12 +112,16 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_yahoo_audit_migration_file_path(),
         get_yahoo_quarterly_migration_file_path(),
         get_valuation_migration_file_path(),
+        get_valuation_v2_migration_file_path(),
+        get_valuation_v21_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")
         conn.executescript(sql_text)
     ensure_ttm_component_columns(conn)
     ensure_percentile_lifecycle_columns(conn)
+    ensure_valuation_v2_columns(conn)
+    ensure_valuation_v21_columns(conn)
     conn.commit()
 
 
@@ -132,6 +154,38 @@ def ensure_percentile_lifecycle_columns(conn: sqlite3.Connection) -> None:
         if column_name in existing_columns:
             continue
         conn.execute(f"ALTER TABLE rc_fundamental_score_percentile ADD COLUMN {column_name} {column_type}")
+        existing_columns.add(column_name)
+
+
+def ensure_valuation_v2_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_valuation)
+            """
+        )
+    }
+    for column_name, column_type in VALUATION_V2_COLUMNS:
+        if column_name in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE rc_fundamental_valuation ADD COLUMN {column_name} {column_type}")
+        existing_columns.add(column_name)
+
+
+def ensure_valuation_v21_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_valuation)
+            """
+        )
+    }
+    for column_name, column_type in VALUATION_V21_COLUMNS:
+        if column_name in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE rc_fundamental_valuation ADD COLUMN {column_name} {column_type}")
         existing_columns.add(column_name)
 
 
@@ -188,6 +242,26 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
     ]
     if missing_percentile_columns:
         raise RuntimeError(f"FUNDAMENTAL_PERCENTILE_COLUMNS_MISSING:{','.join(missing_percentile_columns)}")
+
+    valuation_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_valuation)
+            """
+        )
+    }
+    missing_valuation_columns = [
+        column_name for column_name, _column_type in VALUATION_V2_COLUMNS if column_name not in valuation_columns
+    ]
+    if missing_valuation_columns:
+        raise RuntimeError(f"FUNDAMENTAL_VALUATION_COLUMNS_MISSING:{','.join(missing_valuation_columns)}")
+
+    missing_valuation_v21_columns = [
+        column_name for column_name, _column_type in VALUATION_V21_COLUMNS if column_name not in valuation_columns
+    ]
+    if missing_valuation_v21_columns:
+        raise RuntimeError(f"FUNDAMENTAL_VALUATION_V21_COLUMNS_MISSING:{','.join(missing_valuation_v21_columns)}")
 
     return len(REQUIRED_TABLES)
 

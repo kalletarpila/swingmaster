@@ -10,6 +10,7 @@ REQUIRED_TABLES = (
     "rc_fundamental_run",
     "rc_fundamental_statement_raw",
     "rc_fundamental_quarterly",
+    "rc_fundamental_quarterly_enrichment_audit",
     "rc_fundamental_ttm",
     "rc_fundamental_score_percentile",
     "rc_fundamental_finnhub_raw",
@@ -109,6 +110,10 @@ def get_valuation_v22_migration_file_path() -> Path:
     return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "022_rc_fundamental_valuation_v22.sql"
 
 
+def get_quarterly_enrichment_audit_migration_file_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "023_rc_fundamental_quarterly_enrichment_audit.sql"
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -123,6 +128,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_valuation_v2_migration_file_path(),
         get_valuation_v21_migration_file_path(),
         get_valuation_v22_migration_file_path(),
+        get_quarterly_enrichment_audit_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")

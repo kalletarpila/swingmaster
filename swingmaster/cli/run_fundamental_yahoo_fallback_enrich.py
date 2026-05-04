@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -111,9 +111,41 @@ def load_yahoo_rows(conn: sqlite3.Connection, market: str, ticker: str) -> dict[
     return {str(row["period_end_date"]): row for row in rows}
 
 
+def _calendar_quarter(value: date) -> int:
+    return ((value.month - 1) // 3) + 1
+
+
+def resolve_yahoo_match(
+    yahoo_rows_by_period: dict[str, sqlite3.Row],
+    period_end_date: str,
+) -> tuple[sqlite3.Row | None, str | None]:
+    exact_match = yahoo_rows_by_period.get(period_end_date)
+    if exact_match is not None:
+        return exact_match, "EXACT"
+
+    sec_date = date.fromisoformat(period_end_date)
+    sec_quarter = _calendar_quarter(sec_date)
+    candidates: list[tuple[int, date, sqlite3.Row]] = []
+    for yahoo_period_end_date, yahoo_row in yahoo_rows_by_period.items():
+        yahoo_date = date.fromisoformat(yahoo_period_end_date)
+        if yahoo_date.year != sec_date.year:
+            continue
+        if _calendar_quarter(yahoo_date) != sec_quarter:
+            continue
+        abs_diff_days = abs((yahoo_date - sec_date).days)
+        if abs_diff_days > 7:
+            continue
+        candidates.append((abs_diff_days, yahoo_date, yahoo_row))
+    if not candidates:
+        return None, None
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    return candidates[0][2], "SAME_QUARTER_DATE_TOLERANCE"
+
+
 def build_field_updates(
     quarterly_row: sqlite3.Row,
     yahoo_row: sqlite3.Row,
+    match_method: str,
     run_id: str,
     created_at_utc: str,
 ) -> tuple[dict[str, float], list[dict[str, Any]]]:
@@ -136,6 +168,8 @@ def build_field_updates(
                 "primary_source": "sec_edgar",
                 "fallback_source": "yahoo",
                 "enrichment_status": "FILLED_FROM_YAHOO",
+                "matched_yahoo_period_end_date": str(yahoo_row["period_end_date"]),
+                "match_method": match_method,
                 "run_id": run_id,
                 "created_at_utc": created_at_utc,
             }
@@ -191,9 +225,11 @@ def insert_audit_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> i
             primary_source,
             fallback_source,
             enrichment_status,
+            matched_yahoo_period_end_date,
+            match_method,
             run_id,
             created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -205,6 +241,8 @@ def insert_audit_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> i
                 row["primary_source"],
                 row["fallback_source"],
                 row["enrichment_status"],
+                row["matched_yahoo_period_end_date"],
+                row["match_method"],
                 row["run_id"],
                 row["created_at_utc"],
             )
@@ -231,6 +269,8 @@ def run_yahoo_fallback_enrich(
     fields_filled = 0
     rows_updated = 0
     no_match_count = 0
+    exact_matches = 0
+    quarter_aligned_matches = 0
     pending_updates: list[tuple[str, str, dict[str, float]]] = []
     pending_audit_rows: list[dict[str, Any]] = []
 
@@ -244,12 +284,16 @@ def run_yahoo_fallback_enrich(
                 quarterly_rows_scanned += 1
                 fields_checked += len(ALLOWED_FIELDS)
                 period_end_date = str(quarterly_row["period_end_date"])
-                yahoo_row = yahoo_rows_by_period.get(period_end_date)
+                yahoo_row, match_method = resolve_yahoo_match(yahoo_rows_by_period, period_end_date)
                 if yahoo_row is None:
                     no_match_count += 1
                     continue
                 yahoo_rows_matched += 1
-                updates, audit_rows = build_field_updates(quarterly_row, yahoo_row, run_id, created_at_utc)
+                if match_method == "EXACT":
+                    exact_matches += 1
+                elif match_method == "SAME_QUARTER_DATE_TOLERANCE":
+                    quarter_aligned_matches += 1
+                updates, audit_rows = build_field_updates(quarterly_row, yahoo_row, str(match_method), run_id, created_at_utc)
                 if not updates:
                     continue
                 rows_updated += 1
@@ -276,6 +320,8 @@ def run_yahoo_fallback_enrich(
         "fields_filled": fields_filled,
         "rows_updated": rows_updated,
         "no_match_count": no_match_count,
+        "exact_matches": exact_matches,
+        "quarter_aligned_matches": quarter_aligned_matches,
         "dry_run": "true" if dry_run else "false",
         "run_id": run_id,
     }
@@ -302,6 +348,8 @@ def main() -> None:
     _summary(fields_filled=summary["fields_filled"])
     _summary(rows_updated=summary["rows_updated"])
     _summary(no_match_count=summary["no_match_count"])
+    _summary(exact_matches=summary["exact_matches"])
+    _summary(quarter_aligned_matches=summary["quarter_aligned_matches"])
     _summary(dry_run=summary["dry_run"])
     _summary(run_id=summary["run_id"])
     for field_name in ALLOWED_FIELDS:

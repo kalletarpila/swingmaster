@@ -65,6 +65,10 @@ VALUATION_V22_COLUMNS = (
     ("debt_assumed_zero", "INTEGER"),
     ("cash_assumed_zero", "INTEGER"),
 )
+QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS = (
+    ("matched_yahoo_period_end_date", "TEXT"),
+    ("match_method", "TEXT"),
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -114,6 +118,10 @@ def get_quarterly_enrichment_audit_migration_file_path() -> Path:
     return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "023_rc_fundamental_quarterly_enrichment_audit.sql"
 
 
+def get_quarterly_enrichment_audit_v2_migration_file_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "024_rc_fundamental_quarterly_enrichment_audit_v2.sql"
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -129,6 +137,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_valuation_v21_migration_file_path(),
         get_valuation_v22_migration_file_path(),
         get_quarterly_enrichment_audit_migration_file_path(),
+        get_quarterly_enrichment_audit_v2_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")
@@ -138,6 +147,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
     ensure_valuation_v2_columns(conn)
     ensure_valuation_v21_columns(conn)
     ensure_valuation_v22_columns(conn)
+    ensure_quarterly_enrichment_audit_v2_columns(conn)
     conn.commit()
 
 
@@ -221,6 +231,22 @@ def ensure_valuation_v22_columns(conn: sqlite3.Connection) -> None:
         existing_columns.add(column_name)
 
 
+def ensure_quarterly_enrichment_audit_v2_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_quarterly_enrichment_audit)
+            """
+        )
+    }
+    for column_name, column_type in QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS:
+        if column_name in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE rc_fundamental_quarterly_enrichment_audit ADD COLUMN {column_name} {column_type}")
+        existing_columns.add(column_name)
+
+
 def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
     existing_tables = {
         str(row[0])
@@ -300,6 +326,25 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
     ]
     if missing_valuation_v22_columns:
         raise RuntimeError(f"FUNDAMENTAL_VALUATION_V22_COLUMNS_MISSING:{','.join(missing_valuation_v22_columns)}")
+
+    quarterly_enrichment_audit_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_quarterly_enrichment_audit)
+            """
+        )
+    }
+    missing_quarterly_enrichment_audit_v2_columns = [
+        column_name
+        for column_name, _column_type in QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS
+        if column_name not in quarterly_enrichment_audit_columns
+    ]
+    if missing_quarterly_enrichment_audit_v2_columns:
+        raise RuntimeError(
+            "FUNDAMENTAL_QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS_MISSING:"
+            + ",".join(missing_quarterly_enrichment_audit_v2_columns)
+        )
 
     return len(REQUIRED_TABLES)
 

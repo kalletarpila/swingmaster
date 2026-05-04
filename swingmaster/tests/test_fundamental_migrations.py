@@ -8,6 +8,7 @@ from swingmaster.cli.run_fundamental_migrations import (
     REQUIRED_TABLES,
     SCHEMA_VERSION,
     TTM_COMPONENT_COLUMNS,
+    QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS,
     VALUATION_V2_COLUMNS,
     VALUATION_V21_COLUMNS,
     VALUATION_V22_COLUMNS,
@@ -83,6 +84,16 @@ def test_run_migration_creates_required_tables_and_is_idempotent(tmp_path: Path)
             assert column_name in valuation_columns
         for column_name, _column_type in VALUATION_V22_COLUMNS:
             assert column_name in valuation_columns
+        quarterly_enrichment_audit_columns = {
+            str(row[1])
+            for row in conn.execute(
+                """
+                PRAGMA table_info(rc_fundamental_quarterly_enrichment_audit)
+                """
+            )
+        }
+        for column_name, _column_type in QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS:
+            assert column_name in quarterly_enrichment_audit_columns
 
 
 def test_run_migration_adds_missing_ttm_component_columns_to_existing_db(tmp_path: Path) -> None:

@@ -145,6 +145,8 @@ def test_fills_missing_sec_value_and_inserts_audit_row(tmp_path: Path) -> None:
 
     assert summary["fields_filled"] == 1
     assert summary["filled_total_debt"] == 1
+    assert summary["exact_matches"] == 1
+    assert summary["quarter_aligned_matches"] == 0
     with sqlite3.connect(str(db_path)) as conn:
         row = conn.execute(
             """
@@ -155,39 +157,134 @@ def test_fills_missing_sec_value_and_inserts_audit_row(tmp_path: Path) -> None:
         ).fetchone()
         audit_row = conn.execute(
             """
-            SELECT field_name, old_value, new_value, primary_source, fallback_source, enrichment_status
+            SELECT field_name, old_value, new_value, primary_source, fallback_source, enrichment_status,
+                   matched_yahoo_period_end_date, match_method
             FROM rc_fundamental_quarterly_enrichment_audit
             WHERE ticker='LRCX' AND period_end_date='2026-03-29'
             """
         ).fetchone()
     assert row == (123.0,)
-    assert audit_row == ("total_debt", None, 123.0, "sec_edgar", "yahoo", "FILLED_FROM_YAHOO")
+    assert audit_row == ("total_debt", None, 123.0, "sec_edgar", "yahoo", "FILLED_FROM_YAHOO", "2026-03-29", "EXACT")
 
 
-def test_exact_period_matching_only(tmp_path: Path) -> None:
+def test_lrcx_style_same_quarter_date_tolerance_match_works(tmp_path: Path) -> None:
     db_path = tmp_path / "fallback_exact_period.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
+        _insert_quarterly_row(conn, ticker="LRCX", period_end_date="2026-03-29", shares_outstanding=None)
+        _insert_yahoo_quarterly_row(conn, market="usa", symbol="LRCX", period_end_date="2026-03-31", shares_outstanding=10.0)
+        conn.commit()
+
+    summary = run_fundamental_yahoo_fallback_enrich.run_yahoo_fallback_enrich(
+        db_path=db_path,
+        market="usa",
+        ticker="LRCX",
+        run_id="ENRICH3",
+        dry_run=False,
+        replace_audit_for_run=False,
+    )
+
+    assert summary["no_match_count"] == 0
+    assert summary["fields_filled"] == 1
+    assert summary["exact_matches"] == 0
+    assert summary["quarter_aligned_matches"] == 1
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT shares_outstanding
+            FROM rc_fundamental_quarterly
+            WHERE ticker='LRCX' AND period_end_date='2026-03-29'
+            """
+        ).fetchone()
+        audit_row = conn.execute(
+            """
+            SELECT matched_yahoo_period_end_date, match_method
+            FROM rc_fundamental_quarterly_enrichment_audit
+            WHERE ticker='LRCX' AND period_end_date='2026-03-29'
+            """
+        ).fetchone()
+    assert row == (10.0,)
+    assert audit_row == ("2026-03-31", "SAME_QUARTER_DATE_TOLERANCE")
+
+
+def test_different_quarter_does_not_match(tmp_path: Path) -> None:
+    db_path = tmp_path / "fallback_different_quarter.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
         _insert_quarterly_row(conn, ticker="UHAL", period_end_date="2025-12-31", shares_outstanding=None)
-        _insert_yahoo_quarterly_row(conn, market="usa", symbol="UHAL", period_end_date="2025-12-30", shares_outstanding=10.0)
+        _insert_yahoo_quarterly_row(conn, market="usa", symbol="UHAL", period_end_date="2026-01-02", shares_outstanding=10.0)
         conn.commit()
 
     summary = run_fundamental_yahoo_fallback_enrich.run_yahoo_fallback_enrich(
         db_path=db_path,
         market="usa",
         ticker="UHAL",
-        run_id="ENRICH3",
+        run_id="ENRICH3B",
         dry_run=False,
         replace_audit_for_run=False,
     )
 
     assert summary["no_match_count"] == 1
     assert summary["fields_filled"] == 0
+
+
+def test_date_diff_above_seven_does_not_match(tmp_path: Path) -> None:
+    db_path = tmp_path / "fallback_date_diff.db"
+    run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
-        value = conn.execute(
-            "SELECT shares_outstanding FROM rc_fundamental_quarterly WHERE ticker='UHAL' AND period_end_date='2025-12-31'"
-        ).fetchone()[0]
-    assert value is None
+        _insert_quarterly_row(conn, ticker="META", period_end_date="2026-03-20", shares_outstanding=None)
+        _insert_yahoo_quarterly_row(conn, market="usa", symbol="META", period_end_date="2026-03-31", shares_outstanding=10.0)
+        conn.commit()
+
+    summary = run_fundamental_yahoo_fallback_enrich.run_yahoo_fallback_enrich(
+        db_path=db_path,
+        market="usa",
+        ticker="META",
+        run_id="ENRICH3C",
+        dry_run=False,
+        replace_audit_for_run=False,
+    )
+
+    assert summary["no_match_count"] == 1
+    assert summary["fields_filled"] == 0
+
+
+def test_multiple_same_quarter_candidates_choose_smallest_abs_diff_then_earlier_date(tmp_path: Path) -> None:
+    db_path = tmp_path / "fallback_multiple_candidates.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_quarterly_row(conn, ticker="AMD", period_end_date="2026-03-29", shares_outstanding=None)
+        _insert_yahoo_quarterly_row(conn, market="usa", symbol="AMD", period_end_date="2026-03-27", shares_outstanding=11.0)
+        _insert_yahoo_quarterly_row(conn, market="usa", symbol="AMD", period_end_date="2026-03-31", shares_outstanding=12.0)
+        conn.commit()
+
+    summary = run_fundamental_yahoo_fallback_enrich.run_yahoo_fallback_enrich(
+        db_path=db_path,
+        market="usa",
+        ticker="AMD",
+        run_id="ENRICH3D",
+        dry_run=False,
+        replace_audit_for_run=False,
+    )
+
+    assert summary["quarter_aligned_matches"] == 1
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT shares_outstanding
+            FROM rc_fundamental_quarterly
+            WHERE ticker='AMD' AND period_end_date='2026-03-29'
+            """
+        ).fetchone()
+        audit_row = conn.execute(
+            """
+            SELECT matched_yahoo_period_end_date, match_method
+            FROM rc_fundamental_quarterly_enrichment_audit
+            WHERE ticker='AMD' AND period_end_date='2026-03-29'
+            """
+        ).fetchone()
+    assert row == (11.0,)
+    assert audit_row == ("2026-03-27", "SAME_QUARTER_DATE_TOLERANCE")
 
 
 def test_multiple_fields_filled_insert_two_audit_rows(tmp_path: Path) -> None:
@@ -363,6 +460,8 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
             "fields_filled": 2,
             "rows_updated": 1,
             "no_match_count": 2,
+            "exact_matches": 1,
+            "quarter_aligned_matches": 0,
             "dry_run": "true",
             "run_id": "ENRICHCLI",
             "filled_revenue": 0,
@@ -389,6 +488,8 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
         "SUMMARY fields_filled=2",
         "SUMMARY rows_updated=1",
         "SUMMARY no_match_count=2",
+        "SUMMARY exact_matches=1",
+        "SUMMARY quarter_aligned_matches=0",
         "SUMMARY dry_run=true",
         "SUMMARY run_id=ENRICHCLI",
         "SUMMARY filled_revenue=0",

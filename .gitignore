@@ -35,3 +35,13 @@ daily_reports/*_daily_report_*.csv
 # Weekly report outputs
 weekly_reports/*.txt
 weekly_reports/*.csv
+
+# Analysis output data files (can be large)
+analysis_output/**/*.csv
+analysis_output/**/*.xlsx
+analysis_output/**/*.xls
+
+# Loose CSV/Excel in project root
+*.csv
+*.xlsx
+*.xls

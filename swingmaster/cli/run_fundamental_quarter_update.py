@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from swingmaster.cli.run_fundamental_bootstrap_sec_raw import SEC_USER_AGENT, run_sec_raw_bootstrap
+from swingmaster.fundamentals.build_quarterly import build_and_insert_quarterly_rows
 from swingmaster.cli.run_fundamental_quarter_state import acknowledge_ingested, load_latest_quarter_rows
 from swingmaster.cli.run_fundamental_quarterly_to_ttm import run_quarterly_to_ttm
-from swingmaster.cli.run_fundamental_sec_reconstruct_quarterly import run_sec_reconstruct_quarterly
 from swingmaster.cli.run_fundamental_yahoo_audit import run_yahoo_audit
 from swingmaster.cli.run_fundamental_yahoo_fallback_enrich import run_yahoo_fallback_enrich
 from swingmaster.cli.run_fundamental_yahoo_quarterly_write import run_yahoo_quarterly_write
@@ -47,7 +47,7 @@ def derive_child_run_ids(base_run_id: str) -> dict[str, str]:
         "yqtr": f"{base_run_id}__YQTR",
         "qbridge": f"{base_run_id}__QBRIDGE",
         "sec_raw": f"{base_run_id}__SEC_RAW",
-        "sec_quarterly_recon": f"{base_run_id}__SEC_QUARTERLY_RECON",
+        "quarterly": f"{base_run_id}__QUARTERLY",
         "ttm": f"{base_run_id}__TTM",
         "lifecycle": f"{base_run_id}__LIFECYCLE",
         "score": f"{base_run_id}__SCORE",
@@ -170,6 +170,16 @@ def acknowledge_ticker(db_path: Path, ticker: str, run_id: str) -> int:
     return rows_updated
 
 
+def run_sec_quarterly_build_step(db_path: Path, ticker: str, run_id: str, dry_run: bool) -> tuple[int, int]:
+    with sqlite3.connect(str(db_path)) as conn:
+        return build_and_insert_quarterly_rows(
+            conn=conn,
+            ticker=ticker.upper(),
+            run_id=run_id,
+            dry_run=dry_run,
+        )
+
+
 def run_quarterly_refresh(
     db_path: Path,
     ticker: str,
@@ -202,18 +212,17 @@ def run_quarterly_refresh(
                 user_agent=SEC_USER_AGENT,
                 dry_run=False,
             )
-            sec_fact_rows_read, reconstructed_rows = run_sec_reconstruct_quarterly(
+            periods_detected, rows_written = run_sec_quarterly_build_step(
                 db_path=db_path,
                 ticker=ticker,
-                run_id=child_run_ids["sec_quarterly_recon"],
-                retrieved_at_utc=retrieved_at_utc,
+                run_id=child_run_ids["quarterly"],
                 dry_run=False,
             )
             sec_refresh_summary = {
                 "cik": cik,
                 "rows": rows,
-                "sec_fact_rows_read": sec_fact_rows_read,
-                "reconstructed_rows": reconstructed_rows,
+                "periods_detected": periods_detected,
+                "rows_written": rows_written,
             }
             with sqlite3.connect(str(db_path)) as conn:
                 if not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date):

@@ -94,6 +94,14 @@ def test_run_migration_creates_required_tables_and_is_idempotent(tmp_path: Path)
         }
         for column_name, _column_type in QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS:
             assert column_name in quarterly_enrichment_audit_columns
+        quarter_state_row = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table' AND name='rc_fundamental_quarter_state'
+            """
+        ).fetchone()
+        assert quarter_state_row == ("rc_fundamental_quarter_state",)
 
 
 def test_run_migration_adds_missing_ttm_component_columns_to_existing_db(tmp_path: Path) -> None:

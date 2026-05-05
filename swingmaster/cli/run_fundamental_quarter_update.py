@@ -8,9 +8,14 @@ from typing import Any
 
 from swingmaster.cli.run_fundamental_quarter_state import acknowledge_ingested, load_latest_quarter_rows
 from swingmaster.cli.run_fundamental_quarterly_to_ttm import run_quarterly_to_ttm
+from swingmaster.cli.run_fundamental_yahoo_audit import run_yahoo_audit
 from swingmaster.cli.run_fundamental_yahoo_fallback_enrich import run_yahoo_fallback_enrich
+from swingmaster.cli.run_fundamental_yahoo_quarterly_write import run_yahoo_quarterly_write
+from swingmaster.cli.run_fundamental_yahoo_to_quarterly import run_yahoo_to_quarterly
 from swingmaster.fundamentals.lifecycle import run_lifecycle_classification
 from swingmaster.fundamentals.score import run_fundamental_scoring
+
+DEFAULT_EXCHANGE = "HE"
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,6 +41,9 @@ def resolve_db_path(db_arg: str) -> Path:
 
 def derive_child_run_ids(base_run_id: str) -> dict[str, str]:
     return {
+        "raw": f"{base_run_id}__RAW",
+        "yqtr": f"{base_run_id}__YQTR",
+        "qbridge": f"{base_run_id}__QBRIDGE",
         "ttm": f"{base_run_id}__TTM",
         "lifecycle": f"{base_run_id}__LIFECYCLE",
         "score": f"{base_run_id}__SCORE",
@@ -128,6 +136,62 @@ def acknowledge_ticker(db_path: Path, ticker: str, run_id: str) -> int:
     return rows_updated
 
 
+def run_quarterly_refresh(
+    db_path: Path,
+    ticker: str,
+    market: str,
+    child_run_ids: dict[str, str],
+) -> dict[str, Any]:
+    if market == "usa":
+        enrich_summary = run_yahoo_fallback_enrich(
+            db_path=db_path,
+            market=market,
+            ticker=ticker,
+            run_id=child_run_ids["enrich"],
+            dry_run=False,
+            replace_audit_for_run=False,
+        )
+        return {
+            "mode": "enrich",
+            "summary": enrich_summary,
+        }
+
+    raw_summary = run_yahoo_audit(
+        db_path=db_path,
+        market=market,
+        exchange=DEFAULT_EXCHANGE,
+        symbols_arg=ticker,
+        limit=None,
+        run_id=child_run_ids["raw"],
+        dry_run=False,
+    )
+    if int(raw_summary["ok_count"]) <= 0:
+        raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_RAW_NOT_USABLE:{ticker}")
+
+    yahoo_quarterly_summary = run_yahoo_quarterly_write(
+        db_path=db_path,
+        market=market,
+        symbol=ticker,
+        run_id=child_run_ids["yqtr"],
+        dry_run=False,
+        replace_symbol=True,
+    )
+    quarterly_bridge_summary = run_yahoo_to_quarterly(
+        db_path=db_path,
+        market=market,
+        symbol=ticker,
+        run_id=child_run_ids["qbridge"],
+        dry_run=False,
+        replace_symbol=True,
+    )
+    return {
+        "mode": "yahoo_refresh",
+        "raw_summary": raw_summary,
+        "yahoo_quarterly_summary": yahoo_quarterly_summary,
+        "quarterly_bridge_summary": quarterly_bridge_summary,
+    }
+
+
 def process_ticker(
     db_path: Path,
     row: sqlite3.Row,
@@ -141,16 +205,13 @@ def process_ticker(
         raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_DETECTED_DATE_MISSING:{ticker}")
 
     print(f"TICKER {ticker} market={market} detected_period={detected_source_period_end_date}")
-
-    if market == "usa":
-        run_yahoo_fallback_enrich(
-            db_path=db_path,
-            market=market,
-            ticker=ticker,
-            run_id=child_run_ids["enrich"],
-            dry_run=False,
-            replace_audit_for_run=False,
-        )
+    quarterly_refresh_summary = run_quarterly_refresh(
+        db_path=db_path,
+        ticker=ticker,
+        market=market,
+        child_run_ids=child_run_ids,
+    )
+    print("STEP quarterly_refresh=OK")
 
     ttm_summary = run_quarterly_to_ttm(
         db_path=db_path,
@@ -190,6 +251,7 @@ def process_ticker(
         print("STEP ack=OK")
 
     return {
+        "quarterly_refresh_mode": 1 if quarterly_refresh_summary else 0,
         "ttm_rows_written": int(ttm_summary["rows_written"]),
         "lifecycle_rows_written": lifecycle_rows_written,
         "score_rows_written": score_rows_written,
@@ -243,6 +305,8 @@ def run_fundamental_quarter_update(
                 step_name = "state"
             elif "ACK_PERIOD_MISMATCH" in message:
                 step_name = "ack"
+            elif "RAW_NOT_USABLE" in message:
+                step_name = "quarterly_refresh"
             elif "FUNDAMENTAL_TTM" in message:
                 step_name = "ttm"
             elif "LIFECYCLE" in message:
@@ -250,7 +314,7 @@ def run_fundamental_quarter_update(
             elif "SCORE" in message:
                 step_name = "score"
             elif "YAHOO" in message or "ENRICH" in message:
-                step_name = "enrichment"
+                step_name = "quarterly_refresh"
             print(f"TICKER {current_ticker}=FAILED")
             print(f"ERROR ticker={current_ticker} step={step_name}")
             raise

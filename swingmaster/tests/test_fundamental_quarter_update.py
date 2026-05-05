@@ -133,7 +133,7 @@ def test_successful_run_executes_usa_steps_in_order_and_acknowledges(
     monkeypatch.setattr(
         run_fundamental_quarter_update,
         "run_quarterly_refresh",
-        lambda **kwargs: calls.append("quarterly_refresh") or {"mode": "enrich"},
+        lambda **kwargs: calls.append("quarterly_refresh") or {"mode": "enrich", "sec_refresh_required": False},
     )
     monkeypatch.setattr(
         run_fundamental_quarter_update,
@@ -209,7 +209,11 @@ def test_failure_stops_processing_and_leaves_state_unchanged(
     _insert_quarterly_row(db_path, "MSFT", "2026-03-31")
     calls: list[str] = []
 
-    monkeypatch.setattr(run_fundamental_quarter_update, "run_quarterly_refresh", lambda **kwargs: {"mode": "enrich"})
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_quarterly_refresh",
+        lambda **kwargs: {"mode": "enrich", "sec_refresh_required": False},
+    )
 
     def _fake_ttm(**kwargs):
         calls.append(kwargs["ticker"])
@@ -251,6 +255,8 @@ def test_child_run_id_derivation_is_correct() -> None:
         "score": "USA_QUARTER_UPDATE_20260505__SCORE",
         "ack": "USA_QUARTER_UPDATE_20260505__ACK",
         "enrich": "USA_QUARTER_UPDATE_20260505__ENRICH",
+        "sec_raw": "USA_QUARTER_UPDATE_20260505__SEC_RAW",
+        "sec_quarterly_recon": "USA_QUARTER_UPDATE_20260505__SEC_QUARTERLY_RECON",
     }
 
 
@@ -281,7 +287,7 @@ def test_non_usa_processing_uses_quarterly_refresh(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         run_fundamental_quarter_update,
         "run_quarterly_refresh",
-        lambda **kwargs: calls.append("quarterly_refresh") or {"mode": "yahoo_refresh"},
+        lambda **kwargs: calls.append("quarterly_refresh") or {"mode": "yahoo_refresh", "sec_refresh_required": False},
     )
     monkeypatch.setattr(run_fundamental_quarter_update, "run_quarterly_to_ttm", lambda **kwargs: calls.append("ttm") or {"rows_written": 1})
     monkeypatch.setattr(run_fundamental_quarter_update, "run_lifecycle_step", lambda **kwargs: calls.append("lifecycle") or 1)
@@ -304,6 +310,8 @@ def test_run_quarterly_refresh_usa_uses_enrichment_only(monkeypatch: pytest.Monk
     db_path = tmp_path / "quarter_update_usa_refresh.db"
     run_migration(db_path)
     calls: list[str] = []
+    _insert_state_row(db_path, "AAPL", "usa", "2026-03-28", "2026-03-31", 1)
+    _insert_quarterly_row(db_path, "AAPL", "2026-03-28")
 
     monkeypatch.setattr(
         run_fundamental_quarter_update,
@@ -324,6 +332,7 @@ def test_run_quarterly_refresh_usa_uses_enrichment_only(monkeypatch: pytest.Monk
     )
     assert calls == ["enrich"]
     assert summary["mode"] == "enrich"
+    assert summary["sec_refresh_required"] is False
 
 
 def test_run_quarterly_refresh_non_usa_runs_raw_write_bridge(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -408,3 +417,94 @@ def test_ack_safety_rule_still_fails_if_quarterly_max_date_below_detected(
             dry_run=False,
             skip_ack=False,
         )
+
+
+def test_run_quarterly_refresh_usa_runs_sec_refresh_when_needed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "quarter_update_usa_sec_needed.db"
+    run_migration(db_path)
+    _insert_state_row(db_path, "LRCX", "usa", "2025-12-28", "2026-03-29", 1)
+    _insert_quarterly_row(db_path, "LRCX", "2025-12-28")
+    calls: list[str] = []
+
+    def _fake_sec_raw(**kwargs):
+        calls.append("sec_raw")
+        return "0000707549", [{"ticker": "LRCX"}]
+
+    def _fake_sec_recon(**kwargs):
+        calls.append("sec_recon")
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "INSERT INTO rc_fundamental_quarterly (ticker, period_end_date, run_id) VALUES (?, ?, ?)",
+                ("LRCX", "2026-03-29", "SEC_RECON"),
+            )
+            conn.commit()
+        return 10, [{"period_end_date": "2026-03-29"}]
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_sec_raw_bootstrap", _fake_sec_raw)
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_sec_reconstruct_quarterly", _fake_sec_recon)
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_yahoo_fallback_enrich",
+        lambda **kwargs: calls.append("enrich") or {"fields_filled": 0},
+    )
+
+    summary = run_fundamental_quarter_update.run_quarterly_refresh(
+        db_path=db_path,
+        ticker="LRCX",
+        market="usa",
+        child_run_ids=run_fundamental_quarter_update.derive_child_run_ids("BASE"),
+    )
+    assert calls == ["sec_raw", "sec_recon", "enrich"]
+    assert summary["sec_refresh_required"] is True
+
+
+def test_run_quarterly_refresh_usa_fails_if_sec_refresh_does_not_satisfy_detected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "quarter_update_usa_sec_missing.db"
+    run_migration(db_path)
+    _insert_state_row(db_path, "LRCX", "usa", "2025-12-28", "2026-03-29", 1)
+    _insert_quarterly_row(db_path, "LRCX", "2025-12-28")
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_sec_raw_bootstrap", lambda **kwargs: ("0000707549", []))
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_sec_reconstruct_quarterly", lambda **kwargs: (10, []))
+
+    with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_SEC_REFRESH_MISSING_DETECTED:LRCX"):
+        run_fundamental_quarter_update.run_quarterly_refresh(
+            db_path=db_path,
+            ticker="LRCX",
+            market="usa",
+            child_run_ids=run_fundamental_quarter_update.derive_child_run_ids("BASE"),
+        )
+
+
+def test_run_quarterly_refresh_usa_skips_sec_when_quarterly_already_satisfies_detected_even_if_state_stale(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "quarter_update_usa_state_stale.db"
+    run_migration(db_path)
+    _insert_state_row(db_path, "LRCX", "usa", "2025-12-28", "2026-03-31", 1)
+    _insert_quarterly_row(db_path, "LRCX", "2026-03-29")
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_sec_raw_bootstrap",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("sec raw should be skipped")),
+    )
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_yahoo_fallback_enrich",
+        lambda **kwargs: calls.append("enrich") or {"fields_filled": 0},
+    )
+
+    summary = run_fundamental_quarter_update.run_quarterly_refresh(
+        db_path=db_path,
+        ticker="LRCX",
+        market="usa",
+        child_run_ids=run_fundamental_quarter_update.derive_child_run_ids("BASE"),
+    )
+    assert calls == ["enrich"]
+    assert summary["sec_refresh_required"] is False

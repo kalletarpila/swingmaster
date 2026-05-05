@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from swingmaster.cli.run_fundamental_bootstrap_sec_raw import SEC_USER_AGENT, run_sec_raw_bootstrap
 from swingmaster.cli.run_fundamental_quarter_state import acknowledge_ingested, load_latest_quarter_rows
 from swingmaster.cli.run_fundamental_quarterly_to_ttm import run_quarterly_to_ttm
+from swingmaster.cli.run_fundamental_sec_reconstruct_quarterly import run_sec_reconstruct_quarterly
 from swingmaster.cli.run_fundamental_yahoo_audit import run_yahoo_audit
 from swingmaster.cli.run_fundamental_yahoo_fallback_enrich import run_yahoo_fallback_enrich
 from swingmaster.cli.run_fundamental_yahoo_quarterly_write import run_yahoo_quarterly_write
@@ -44,6 +46,8 @@ def derive_child_run_ids(base_run_id: str) -> dict[str, str]:
         "raw": f"{base_run_id}__RAW",
         "yqtr": f"{base_run_id}__YQTR",
         "qbridge": f"{base_run_id}__QBRIDGE",
+        "sec_raw": f"{base_run_id}__SEC_RAW",
+        "sec_quarterly_recon": f"{base_run_id}__SEC_QUARTERLY_RECON",
         "ttm": f"{base_run_id}__TTM",
         "lifecycle": f"{base_run_id}__LIFECYCLE",
         "score": f"{base_run_id}__SCORE",
@@ -123,6 +127,36 @@ def latest_quarter_meets_detected(conn: sqlite3.Connection, ticker: str, detecte
     return str(row[0]) >= detected_source_period_end_date
 
 
+def _calendar_quarter(value: date) -> int:
+    return ((value.month - 1) // 3) + 1
+
+
+def usa_quarter_satisfies_detected(conn: sqlite3.Connection, ticker: str, detected_source_period_end_date: str) -> bool:
+    detected_date = date.fromisoformat(detected_source_period_end_date)
+    detected_quarter = _calendar_quarter(detected_date)
+    rows = conn.execute(
+        """
+        SELECT period_end_date
+        FROM rc_fundamental_quarterly
+        WHERE ticker = ?
+        ORDER BY period_end_date ASC
+        """,
+        (ticker.upper(),),
+    ).fetchall()
+    for row in rows:
+        period_end_date = row[0]
+        if period_end_date is None:
+            continue
+        quarter_date = date.fromisoformat(str(period_end_date))
+        if quarter_date.year != detected_date.year:
+            continue
+        if _calendar_quarter(quarter_date) != detected_quarter:
+            continue
+        if abs((quarter_date - detected_date).days) <= 7:
+            return True
+    return False
+
+
 def acknowledge_ticker(db_path: Path, ticker: str, run_id: str) -> int:
     with sqlite3.connect(str(db_path)) as conn:
         rows = load_latest_quarter_rows(conn, ticker.upper())
@@ -143,6 +177,48 @@ def run_quarterly_refresh(
     child_run_ids: dict[str, str],
 ) -> dict[str, Any]:
     if market == "usa":
+        retrieved_at_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        with sqlite3.connect(str(db_path)) as conn:
+            state_row = conn.execute(
+                """
+                SELECT detected_source_period_end_date
+                FROM rc_fundamental_quarter_state
+                WHERE ticker = ?
+                """,
+                (ticker.upper(),),
+            ).fetchone()
+            detected_source_period_end_date = str(state_row[0]) if state_row is not None and state_row[0] is not None else None
+            if detected_source_period_end_date is None:
+                raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_DETECTED_DATE_MISSING:{ticker}")
+            sec_refresh_required = not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date)
+
+        sec_refresh_summary: dict[str, Any] | None = None
+        if sec_refresh_required:
+            cik, rows = run_sec_raw_bootstrap(
+                db_path=db_path,
+                ticker=ticker,
+                run_id=child_run_ids["sec_raw"],
+                retrieved_at_utc=retrieved_at_utc,
+                user_agent=SEC_USER_AGENT,
+                dry_run=False,
+            )
+            sec_fact_rows_read, reconstructed_rows = run_sec_reconstruct_quarterly(
+                db_path=db_path,
+                ticker=ticker,
+                run_id=child_run_ids["sec_quarterly_recon"],
+                retrieved_at_utc=retrieved_at_utc,
+                dry_run=False,
+            )
+            sec_refresh_summary = {
+                "cik": cik,
+                "rows": rows,
+                "sec_fact_rows_read": sec_fact_rows_read,
+                "reconstructed_rows": reconstructed_rows,
+            }
+            with sqlite3.connect(str(db_path)) as conn:
+                if not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date):
+                    raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_SEC_REFRESH_MISSING_DETECTED:{ticker}")
+
         enrich_summary = run_yahoo_fallback_enrich(
             db_path=db_path,
             market=market,
@@ -153,6 +229,8 @@ def run_quarterly_refresh(
         )
         return {
             "mode": "enrich",
+            "sec_refresh_required": sec_refresh_required,
+            "sec_refresh_summary": sec_refresh_summary,
             "summary": enrich_summary,
         }
 
@@ -241,7 +319,12 @@ def process_ticker(
         print("STEP ack=SKIPPED")
     else:
         with sqlite3.connect(str(db_path)) as conn:
-            if not latest_quarter_meets_detected(conn, ticker, str(detected_source_period_end_date)):
+            detected_period_text = str(detected_source_period_end_date)
+            if market == "usa":
+                ack_allowed = usa_quarter_satisfies_detected(conn, ticker, detected_period_text)
+            else:
+                ack_allowed = latest_quarter_meets_detected(conn, ticker, detected_period_text)
+            if not ack_allowed:
                 raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_ACK_PERIOD_MISMATCH:{ticker}")
         ack_rows_written = acknowledge_ticker(
             db_path=db_path,
@@ -306,6 +389,8 @@ def run_fundamental_quarter_update(
             elif "ACK_PERIOD_MISMATCH" in message:
                 step_name = "ack"
             elif "RAW_NOT_USABLE" in message:
+                step_name = "quarterly_refresh"
+            elif "SEC_REFRESH" in message:
                 step_name = "quarterly_refresh"
             elif "FUNDAMENTAL_TTM" in message:
                 step_name = "ttm"

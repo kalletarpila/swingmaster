@@ -1,0 +1,106 @@
+# Datacenter Network Interpretation Summary (V7b)
+
+## Inputs and Parameters
+- v7_dir: analysis_output/datacenter_network_centrality_2023_2026
+- output_dir: analysis_output/datacenter_network_interpretation_2023_2026
+- theme_name: datacenter
+
+## Thresholds
+- min_operating_relevance_score: 0.35
+- min_network_importance_score: 0.3
+- min_seed_subtheme_count: 2
+- min_core_neighbor_count: 3
+- min_cross_sector_degree: 2
+- min_bridge_score: 0.2
+
+## Summary Counts
+- Total nodes: 709
+- HIGH operating relevance: 55
+- MEDIUM operating relevance: 503
+- LOW operating relevance: 151
+- Seed nodes: 109
+- OPERATING_CORE nodes: 52
+- ECOSYSTEM_BRIDGE nodes: 0
+
+## Top 10 Operating Relevance Tickers
+| ticker | subtheme_guess | operating_relevance_score | network_importance_score | interpretation_flag |
+| --- | --- | --- | --- | --- |
+| ROG | NETWORKING_OPTICAL_CONNECTIVITY | 0.9219 | 0.8734 | OPERATING_CORE |
+| LFUS | NETWORKING_OPTICAL_CONNECTIVITY | 0.9217 | 0.8509 | OPERATING_CORE |
+| FBIN | ELECTRICAL_POWER_EQUIPMENT | 0.9215 | 0.8536 | OPERATING_CORE |
+| KLIC | SEMICONDUCTOR_EQUIPMENT | 0.9210 | 0.8505 | OPERATING_CORE |
+| OC | ELECTRICAL_POWER_EQUIPMENT | 0.9206 | 0.8522 | OPERATING_CORE |
+| VSH | SEMICONDUCTORS_AI_CHIPS | 0.9205 | 0.8504 | OPERATING_CORE |
+| MAS | ELECTRICAL_POWER_EQUIPMENT | 0.9205 | 0.8534 | OPERATING_CORE |
+| ITW | ELECTRICAL_POWER_EQUIPMENT | 0.9202 | 0.8517 | OPERATING_CORE |
+| KN | NETWORKING_OPTICAL_CONNECTIVITY | 0.9192 | 0.8491 | OPERATING_CORE |
+| MTSI | SEMICONDUCTORS_AI_CHIPS | 0.9177 | 0.8372 | OPERATING_CORE |
+
+## Top 10 Non-Seed Operating Relevance Tickers
+| ticker | subtheme_guess | operating_relevance_score | seed_subtheme_count | core_neighbor_count |
+| --- | --- | --- | --- | --- |
+| ROG | NETWORKING_OPTICAL_CONNECTIVITY | 0.9219 | 6 | 77 |
+| LFUS | NETWORKING_OPTICAL_CONNECTIVITY | 0.9217 | 6 | 110 |
+| FBIN | ELECTRICAL_POWER_EQUIPMENT | 0.9215 | 5 | 52 |
+| KLIC | SEMICONDUCTOR_EQUIPMENT | 0.9210 | 6 | 101 |
+| OC | ELECTRICAL_POWER_EQUIPMENT | 0.9206 | 6 | 60 |
+| VSH | SEMICONDUCTORS_AI_CHIPS | 0.9205 | 6 | 94 |
+| MAS | ELECTRICAL_POWER_EQUIPMENT | 0.9205 | 5 | 51 |
+| ITW | ELECTRICAL_POWER_EQUIPMENT | 0.9202 | 5 | 48 |
+| KN | NETWORKING_OPTICAL_CONNECTIVITY | 0.9192 | 6 | 98 |
+| MTSI | SEMICONDUCTORS_AI_CHIPS | 0.9177 | 8 | 98 |
+
+## Top 10 Seed Subtheme Connectors
+| ticker | seed_subtheme_count | seed_subthemes | ecosystem_bridge_score | operating_relevance_score |
+| --- | --- | --- | --- | --- |
+| RVT | 8 | DATACENTER_REIT, ELECTRICAL_POWER_EQUIPMENT, ENGINEERING_CONSTRUCTION_INFRA, NETWORKING_OPTICAL_CONNECTIVITY, POWER_GENERATION_UTILITIES, SEMICONDUCTORS_AI_CHIPS, SEMICONDUCTOR_EQUIPMENT, SERVER_STORAGE_HARDWARE | 0.9579 | 0.6459 |
+| RMT | 8 | DATACENTER_REIT, ELECTRICAL_POWER_EQUIPMENT, ENGINEERING_CONSTRUCTION_INFRA, NETWORKING_OPTICAL_CONNECTIVITY, POWER_GENERATION_UTILITIES, SEMICONDUCTORS_AI_CHIPS, SEMICONDUCTOR_EQUIPMENT, SERVER_STORAGE_HARDWARE | 0.9564 | 0.6460 |
+| GDV | 8 | DATACENTER_REIT, ELECTRICAL_POWER_EQUIPMENT, ENGINEERING_CONSTRUCTION_INFRA, NETWORKING_OPTICAL_CONNECTIVITY, POWER_GENERATION_UTILITIES, SEMICONDUCTORS_AI_CHIPS, SEMICONDUCTOR_EQUIPMENT, SERVER_STORAGE_HARDWARE | 0.9542 | 0.6407 |
+| MKSI | 8 | DATACENTER_REIT, ELECTRICAL_POWER_EQUIPMENT, ENGINEERING_CONSTRUCTION_INFRA, NETWORKING_OPTICAL_CONNECTIVITY, POWER_GENERATION_UTILITIES, SEMICONDUCTORS_AI_CHIPS, SEMICONDUCTOR_EQUIPMENT, SERVER_STORAGE_HARDWARE | 0.9487 | 0.6427 |
+| ETN | 8 | DATACENTER_REIT, ELECTRICAL_POWER_EQUIPMENT, ENGINEERING_CONSTRUCTION_INFRA, NETWORKING_OPTICAL_CONNECTIVITY, POWER_GENERATION_UTILITIES, SEMICONDUCTORS_AI_CHIPS, SEMICONDUCTOR_EQUIPMENT, SERVER_STORAGE_HARDWARE | 0.9484 | 0.6360 |
+| APH | 8 | DATACENTER_REIT, ELECTRICAL_POWER_EQUIPMENT, ENGINEERING_CONSTRUCTION_INFRA, NETWORKING_OPTICAL_CONNECTIVITY, POWER_GENERATION_UTILITIES, SEMICONDUCTORS_AI_CHIPS, SEMICONDUCTOR_EQUIPMENT, SERVER_STORAGE_HARDWARE | 0.9480 | 0.6396 |
+| PWR | 8 | DATACENTER_REIT, ELECTRICAL_POWER_EQUIPMENT, ENGINEERING_CONSTRUCTION_INFRA, NETWORKING_OPTICAL_CONNECTIVITY, POWER_GENERATION_UTILITIES, SEMICONDUCTORS_AI_CHIPS, SEMICONDUCTOR_EQUIPMENT, SERVER_STORAGE_HARDWARE | 0.9464 | 0.6227 |
+| ASG | 8 | DATACENTER_REIT, ELECTRICAL_POWER_EQUIPMENT, ENGINEERING_CONSTRUCTION_INFRA, NETWORKING_OPTICAL_CONNECTIVITY, POWER_GENERATION_UTILITIES, SEMICONDUCTORS_AI_CHIPS, SEMICONDUCTOR_EQUIPMENT, SERVER_STORAGE_HARDWARE | 0.9048 | 0.6400 |
+| MTSI | 8 | DATACENTER_REIT, ELECTRICAL_POWER_EQUIPMENT, ENGINEERING_CONSTRUCTION_INFRA, NETWORKING_OPTICAL_CONNECTIVITY, POWER_GENERATION_UTILITIES, SEMICONDUCTORS_AI_CHIPS, SEMICONDUCTOR_EQUIPMENT, SERVER_STORAGE_HARDWARE | 0.9002 | 0.9177 |
+| BTX | 8 | DATACENTER_REIT, ELECTRICAL_POWER_EQUIPMENT, ENGINEERING_CONSTRUCTION_INFRA, NETWORKING_OPTICAL_CONNECTIVITY, POWER_GENERATION_UTILITIES, SEMICONDUCTORS_AI_CHIPS, SEMICONDUCTOR_EQUIPMENT, SERVER_STORAGE_HARDWARE | 0.8524 | 0.6157 |
+
+## Top 10 Ecosystem Bridges
+| ticker | ecosystem_bridge_type | seed_subtheme_count | neighbor_subtheme_count | ecosystem_bridge_score |
+| --- | --- | --- | --- | --- |
+| FBK | SEED_SUBTHEME_BRIDGE | 4 | 5 | 0.9664 |
+| SSB | SEED_SUBTHEME_BRIDGE | 6 | 5 | 0.9656 |
+| ONB | SEED_SUBTHEME_BRIDGE | 6 | 6 | 0.9655 |
+| FITB | SEED_SUBTHEME_BRIDGE | 6 | 5 | 0.9629 |
+| FNB | SEED_SUBTHEME_BRIDGE | 6 | 5 | 0.9597 |
+| RVT | SEED_SUBTHEME_BRIDGE | 8 | 6 | 0.9579 |
+| CCS | SEED_SUBTHEME_BRIDGE | 4 | 5 | 0.9578 |
+| TMHC | SEED_SUBTHEME_BRIDGE | 5 | 6 | 0.9564 |
+| RMT | SEED_SUBTHEME_BRIDGE | 8 | 6 | 0.9564 |
+| MTH | SEED_SUBTHEME_BRIDGE | 5 | 5 | 0.9564 |
+
+## Interpretation Flag Summary
+| interpretation_flag | ticker_count | seed_count | average_operating_relevance_score |
+| --- | --- | --- | --- |
+| OPERATING_CORE | 52 | 0 | 0.8846 |
+| SEED_ANCHOR | 109 | 109 | 0.5999 |
+| FINANCIAL_OR_FUND_NOISE | 257 | 0 | 0.5523 |
+| BROAD_BETA_RISK | 291 | 0 | 0.4593 |
+
+## Scoring Notes
+
+### operating_relevance_score
+Combines operating subtheme classification, network importance, core connectivity, seed subtheme diversity, and cross-sector reach.
+Range: 0.00 to 1.00. Tiers: HIGH (>=0.70), MEDIUM (>=0.45), LOW (<0.45).
+
+### seed_subtheme_count
+Number of distinct operating datacenter seed subthemes this node connects to.
+Higher values indicate connectors that bridge multiple parts of the ecosystem.
+
+### ecosystem_bridge_score
+Weights seed subtheme diversity, cross-subtheme connections, cross-sector reach, core density, and edge strength.
+Identifies companies that bridge fragmented parts of the ecosystem.
+
+## Warnings
+- These are statistical/network prioritization outputs, not proof of business exposure.
+- Manual business review is required before any investment decisions.
+- Network connectivity does not imply causality or strong business relationships.

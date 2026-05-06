@@ -43,6 +43,20 @@ CORE_SUBTHEMES = {
     "ENGINEERING_CONSTRUCTION_INFRA",
 }
 
+FINANCIAL_INDUSTRY_TERMS = [
+    "asset management",
+    "capital markets",
+    "banks",
+    "credit services",
+    "insurance",
+]
+
+NON_CORE_INDUSTRY_TERMS = [
+    "reit - hotel & motel",
+    "auto & truck dealerships",
+    "recreational vehicles",
+]
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -167,15 +181,37 @@ def classify_subtheme(
     sector_l = sector_t.lower()
     industry_l = industry_t.lower()
 
-    neighbors = set(parse_list_column(seed_neighbors))
-    nearest = set(parse_list_column(nearest_seed_tickers))
-    context = {x.upper() for x in neighbors.union(nearest)}
+    # Deterministic priority order required by V6c update.
+    if ticker_u in {"EQIX", "DLR", "AMT", "CCI", "SBAC"} or "reit - specialty" in industry_l:
+        return "DATACENTER_REIT"
 
-    if "semiconductor equipment" in industry_l or ticker_u in {
-        "ASML", "AMAT", "LRCX", "KLAC", "MKSI", "NVMI", "UCTT", "VECO", "ICHR",
-        "ENTG", "COHU", "ONTO", "TER", "FORM", "CAMT",
+    if "utilities" in sector_l or ticker_u in {
+        "CEG", "VST", "NEE", "TLN", "PEG", "NRG", "SO", "DUK", "PCG", "XEL",
+        "ETR", "EXC", "PPL", "SRE", "DTE", "AEP", "ED",
     }:
-        return "SEMICONDUCTOR_EQUIPMENT"
+        return "POWER_GENERATION_UTILITIES"
+
+    if ticker_u in {
+        "PWR", "FIX", "STRL", "MYRG", "MTZ", "EME", "FLR", "J", "ACM", "DY",
+        "PRIM", "IESC", "ACA", "ECG",
+    }:
+        return "ENGINEERING_CONSTRUCTION_INFRA"
+    if "engineering & construction" in industry_l or "infrastructure operations" in industry_l:
+        return "ENGINEERING_CONSTRUCTION_INFRA"
+
+    if ticker_u in {
+        "VRT", "ETN", "NVT", "HUBB", "POWL", "GNRC", "EMR", "GEV", "TT", "DOV",
+        "AEIS", "PH", "GTES", "NPO", "IEX", "NDSN", "ITT", "GGG", "CMI", "RRX",
+        "CR", "PNR", "IR", "FLS", "AME", "CSW", "JCI", "SPXC", "ROK", "ITW", "KAI",
+    }:
+        return "ELECTRICAL_POWER_EQUIPMENT"
+    if (
+        "electrical equipment" in industry_l
+        or "electrical equipment & parts" in industry_l
+        or "specialty industrial machinery" in industry_l
+        or "building products & equipment" in industry_l
+    ):
+        return "ELECTRICAL_POWER_EQUIPMENT"
 
     if ticker_u in {"DELL", "HPE", "SMCI", "NTAP", "PSTG", "WDC", "STX", "HPQ"}:
         return "SERVER_STORAGE_HARDWARE"
@@ -183,8 +219,9 @@ def classify_subtheme(
         return "SERVER_STORAGE_HARDWARE"
 
     if ticker_u in {
-        "ANET", "CIEN", "GLW", "APH", "TEL", "COMM", "COHR", "LITE",
-        "FN", "AAOI", "NTCT", "CSCO", "JNPR",
+        "ANET", "CIEN", "GLW", "APH", "TEL", "COMM", "COHR", "LITE", "FN", "AAOI",
+        "NTCT", "CSCO", "JNPR", "FLEX", "JBL", "LFUS", "PLXS", "TTMI", "BDC", "BHE",
+        "CTS", "BELFB", "ROG", "OLED", "KN", "CLS", "ZBRA",
     }:
         return "NETWORKING_OPTICAL_CONNECTIVITY"
     if (
@@ -196,39 +233,16 @@ def classify_subtheme(
         return "NETWORKING_OPTICAL_CONNECTIVITY"
 
     if ticker_u in {
-        "VRT", "ETN", "NVT", "HUBB", "POWL", "GNRC", "ABB", "SU.PA",
-        "LEGR.PA", "EMR", "GEV", "TT",
+        "ASML", "AMAT", "LRCX", "KLAC", "MKSI", "NVMI", "UCTT", "VECO", "ICHR", "ENTG",
+        "COHU", "ONTO", "TER", "FORM", "CAMT", "ACLS", "AMKR",
+    } or "semiconductor equipment" in industry_l:
+        return "SEMICONDUCTOR_EQUIPMENT"
+
+    if "semiconductors" in industry_l or ticker_u in {
+        "NVDA", "AMD", "AVGO", "TSM", "ARM", "MRVL", "MPWR", "ADI", "MCHP", "NXPI",
+        "LSCC", "MU", "QCOM", "TXN", "QRVO", "SITM", "SWKS", "RMBS", "MTSI", "CRUS",
+        "DIOD", "ON", "STM", "POWI", "SYNA", "ASX",
     }:
-        return "ELECTRICAL_POWER_EQUIPMENT"
-    if (
-        "electrical equipment" in industry_l
-        or "specialty industrial machinery" in industry_l
-        or "building products & equipment" in industry_l
-    ):
-        return "ELECTRICAL_POWER_EQUIPMENT"
-
-    if "utilities" in sector_l or ticker_u in {
-        "CEG", "VST", "NEE", "TLN", "PEG", "NRG", "SO", "DUK", "PCG", "XEL", "ETR"
-    }:
-        return "POWER_GENERATION_UTILITIES"
-
-    if ticker_u in {"EQIX", "DLR", "AMT", "CCI", "SBAC"} or "reit - specialty" in industry_l:
-        return "DATACENTER_REIT"
-
-    if ticker_u in {"PWR", "FIX", "STRL", "MYRG", "MTZ", "EME", "FLR", "J", "ACM", "DY"}:
-        return "ENGINEERING_CONSTRUCTION_INFRA"
-    if "engineering & construction" in industry_l or "infrastructure operations" in industry_l:
-        return "ENGINEERING_CONSTRUCTION_INFRA"
-
-    if "semiconductors" in industry_l:
-        equipment_context = {
-            "ASML", "AMAT", "LRCX", "KLAC", "MKSI", "NVMI", "UCTT", "VECO", "ICHR",
-            "ENTG", "COHU", "ONTO", "TER", "FORM", "CAMT",
-        }
-        if len(context.intersection(equipment_context)) >= 3 and _to_text(seed_status).upper() == "FIRST_HOP":
-            # Small deterministic tie-break: if strong equipment context dominates,
-            # classify first-hop semiconductor names as equipment-adjacent.
-            return "SEMICONDUCTOR_EQUIPMENT"
         return "SEMICONDUCTORS_AI_CHIPS"
 
     if (
@@ -241,6 +255,11 @@ def classify_subtheme(
         return "BROAD_TECH_OR_INDUSTRIAL_BETA"
 
     return "OTHER_OR_UNCLASSIFIED"
+
+
+def _industry_contains_any(industry: object, terms: list[str]) -> bool:
+    il = _to_text(industry).lower()
+    return any(term in il for term in terms)
 
 
 def compute_priority_scores(nodes: pd.DataFrame) -> pd.DataFrame:
@@ -957,6 +976,146 @@ def write_validation_shortlist(
     return out
 
 
+def write_core_and_broad_shortlists(
+    validation_shortlist: pd.DataFrame,
+    theme_name: str,
+    min_seed_neighbor_count: int,
+    output_dir: Path,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    src = validation_shortlist.copy()
+
+    # Core shortlist: operating datacenter ecosystem candidates.
+    core = src[src["subtheme_guess"].isin(sorted(CORE_SUBTHEMES))].copy()
+    core = core[core.get("sector", "").astype(str) != "Financial Services"].copy()
+    core = core[~core["industry"].map(lambda v: _industry_contains_any(v, FINANCIAL_INDUSTRY_TERMS + NON_CORE_INDUSTRY_TERMS))].copy()
+
+    core_reason_map: dict[str, str] = {}
+    for _, row in core.iterrows():
+        reasons = {
+            "CORE_DATACENTER_SUBTHEME",
+            "NON_FINANCIAL_OPERATING_COMPANY",
+        }
+        status = _to_text(row.get("seed_status")).upper()
+        if status == "FIRST_HOP":
+            reasons.add("FIRST_HOP")
+        if status == "SECOND_HOP":
+            reasons.add("SECOND_HOP")
+        if _to_float(row.get("seed_neighbor_count")) >= float(min_seed_neighbor_count):
+            reasons.add("MULTI_SEED_CONNECTED")
+        if _to_float(row.get("cross_sector_degree")) > 0:
+            reasons.add("CROSS_SECTOR_RELEVANT")
+        core_reason_map[_to_text(row.get("ticker"))] = _sorted_join(sorted(reasons))
+
+    core["theme_name"] = theme_name
+    core["core_validation_reason"] = core["ticker"].map(lambda t: core_reason_map.get(_to_text(t), ""))
+    core["_tier_rank"] = core["priority_tier"].map({"HIGH": 0, "MEDIUM": 1, "LOW": 2}).fillna(9)
+    core = core.sort_values(
+        by=["_tier_rank", "priority_score", "seed_neighbor_count", "best_seed_edge_score", "ticker"],
+        ascending=[True, False, False, False, True],
+        na_position="last",
+        kind="mergesort",
+    ).drop(columns=["_tier_rank"]).head(300)
+
+    core_cols = [
+        "theme_name",
+        "ticker",
+        "sector",
+        "industry",
+        "subtheme_guess",
+        "priority_score",
+        "priority_tier",
+        "seed_status",
+        "seed_distance",
+        "seed_neighbor_count",
+        "seed_neighbors",
+        "best_seed_edge_score",
+        "best_seed_neighbor",
+        "best_first_hop_edge_score",
+        "best_first_hop_neighbor",
+        "weighted_degree",
+        "cross_sector_degree",
+        "cross_industry_degree",
+        "validation_reason",
+        "core_validation_reason",
+    ]
+    for col in core_cols:
+        if col not in core.columns:
+            core[col] = np.nan
+    core = core[core_cols].copy()
+    core.to_csv(output_dir / "datacenter_core_validation_shortlist.csv", index=False)
+
+    # Broad beta shortlist: statistically connected but less directly operational names.
+    broad = src.copy()
+    broad_mask = (
+        broad["subtheme_guess"].isin([
+            "OTHER_OR_UNCLASSIFIED",
+            "BROAD_TECH_OR_INDUSTRIAL_BETA",
+            "SOFTWARE_PLATFORM_ADJACENT",
+        ])
+        | (broad.get("sector", "").astype(str) == "Financial Services")
+        | broad["industry"].map(lambda v: _industry_contains_any(v, FINANCIAL_INDUSTRY_TERMS + NON_CORE_INDUSTRY_TERMS))
+    )
+    broad = broad[broad_mask].copy()
+
+    broad_reason_map: dict[str, str] = {}
+    for _, row in broad.iterrows():
+        reasons = {"STATISTICAL_BETA_CANDIDATE"}
+        subtheme = _to_text(row.get("subtheme_guess"))
+        sector = _to_text(row.get("sector"))
+        industry = _to_text(row.get("industry"))
+        if subtheme == "OTHER_OR_UNCLASSIFIED":
+            reasons.add("OTHER_OR_UNCLASSIFIED")
+        if subtheme == "BROAD_TECH_OR_INDUSTRIAL_BETA":
+            reasons.add("BROAD_TECH_OR_INDUSTRIAL_BETA")
+        if subtheme == "SOFTWARE_PLATFORM_ADJACENT":
+            reasons.add("SOFTWARE_PLATFORM_ADJACENT")
+        if sector == "Financial Services":
+            reasons.add("FINANCIAL_SERVICES")
+        if _industry_contains_any(industry, FINANCIAL_INDUSTRY_TERMS):
+            reasons.add("FINANCIAL_OR_FUND_INDUSTRY")
+        if _industry_contains_any(industry, NON_CORE_INDUSTRY_TERMS):
+            reasons.add("NON_CORE_CONSUMER_OR_REAL_ESTATE")
+        broad_reason_map[_to_text(row.get("ticker"))] = _sorted_join(sorted(reasons))
+
+    broad["theme_name"] = theme_name
+    broad["broad_beta_reason"] = broad["ticker"].map(lambda t: broad_reason_map.get(_to_text(t), ""))
+    broad = broad.sort_values(
+        by=["priority_score", "seed_neighbor_count", "weighted_degree", "ticker"],
+        ascending=[False, False, False, True],
+        kind="mergesort",
+    ).head(300)
+
+    broad_cols = [
+        "theme_name",
+        "ticker",
+        "sector",
+        "industry",
+        "subtheme_guess",
+        "priority_score",
+        "priority_tier",
+        "seed_status",
+        "seed_distance",
+        "seed_neighbor_count",
+        "seed_neighbors",
+        "best_seed_edge_score",
+        "best_seed_neighbor",
+        "best_first_hop_edge_score",
+        "best_first_hop_neighbor",
+        "weighted_degree",
+        "cross_sector_degree",
+        "cross_industry_degree",
+        "validation_reason",
+        "broad_beta_reason",
+    ]
+    for col in broad_cols:
+        if col not in broad.columns:
+            broad[col] = np.nan
+    broad = broad[broad_cols].copy()
+    broad.to_csv(output_dir / "datacenter_broad_beta_candidates.csv", index=False)
+
+    return core, broad
+
+
 def _markdown_table(df: pd.DataFrame, columns: list[str], top_n: int = 10) -> str:
     if df.empty:
         return "(no rows)"
@@ -990,6 +1149,8 @@ def write_markdown_report(
     multi_seed_candidates: pd.DataFrame,
     bridges_top: pd.DataFrame,
     subtheme_groups: pd.DataFrame,
+    core_validation_shortlist: pd.DataFrame,
+    broad_beta_candidates: pd.DataFrame,
 ) -> None:
     seeds_found = int(seed_summary_compact.get("found_in_graph", pd.Series([], dtype=bool)).map(_to_bool).sum())
     lines: list[str] = []
@@ -1014,6 +1175,8 @@ def write_markdown_report(
     lines.append(f"- multi_seed_candidates: {len(multi_seed_candidates)}")
     lines.append(f"- cross_sector_bridges: {len(bridges_top)}")
     lines.append(f"- subthemes: {subtheme_groups['subtheme_guess'].nunique() if not subtheme_groups.empty else 0}")
+    lines.append(f"- core_validation_candidates: {len(core_validation_shortlist)}")
+    lines.append(f"- broad_beta_candidates: {len(broad_beta_candidates)}")
     lines.append("")
 
     lines.append("## Top 10 Priority Candidates")
@@ -1064,9 +1227,36 @@ def write_markdown_report(
     ))
     lines.append("")
 
+    lines.append("## Top 10 Core Validation Candidates")
+    lines.append(_markdown_table(
+        core_validation_shortlist.sort_values(
+            by=["priority_score", "ticker"],
+            ascending=[False, True],
+            kind="mergesort",
+        ),
+        ["ticker", "subtheme_guess", "priority_score", "priority_tier", "seed_status", "seed_neighbor_count"],
+        top_n=10,
+    ))
+    lines.append("")
+
+    lines.append("## Top 10 Broad Beta Candidates")
+    lines.append(_markdown_table(
+        broad_beta_candidates.sort_values(
+            by=["priority_score", "ticker"],
+            ascending=[False, True],
+            kind="mergesort",
+        ),
+        ["ticker", "subtheme_guess", "priority_score", "priority_tier", "seed_status", "seed_neighbor_count"],
+        top_n=10,
+    ))
+    lines.append("")
+
     lines.append("## Important Notes")
     lines.append("- These outputs are statistical candidate signals, not proof of business relationships.")
     lines.append("- All candidates require manual business validation before investment use.")
+    lines.append("- datacenter_core_validation_shortlist.csv is the preferred manual validation starting point.")
+    lines.append("- datacenter_broad_beta_candidates.csv contains statistically connected but less directly operational candidates.")
+    lines.append("- Financial Services and fund-like/market-beta candidates are intentionally separated from the operating datacenter ecosystem list.")
 
     (output_dir / "datacenter_focused_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -1086,6 +1276,8 @@ def write_readme(output_dir: Path) -> None:
         "- datacenter_seed_summary_compact.csv: compact summary of each seed and top direct neighbors.",
         "- datacenter_cliques_top.csv: strongest cliques containing at least one seed or first-hop ticker.",
         "- datacenter_validation_shortlist.csv: concise manual validation list with reason tags.",
+        "- datacenter_core_validation_shortlist.csv: clean operating-company shortlist for manual validation.",
+        "- datacenter_broad_beta_candidates.csv: broad beta/statistical candidates separated from the core list.",
         "- datacenter_focused_report.md: compact markdown summary (top 10 sections).",
         "- datacenter_report_readme.md: this file.",
     ]
@@ -1176,6 +1368,13 @@ def main() -> None:
         output_dir=output_dir,
     )
 
+    core_validation_shortlist, broad_beta_candidates = write_core_and_broad_shortlists(
+        validation_shortlist=validation_shortlist,
+        theme_name=args.theme_name,
+        min_seed_neighbor_count=args.min_seed_neighbor_count,
+        output_dir=output_dir,
+    )
+
     write_markdown_report(
         input_dir=input_dir,
         output_dir=output_dir,
@@ -1186,6 +1385,8 @@ def main() -> None:
         multi_seed_candidates=multi_seed_candidates,
         bridges_top=bridges_top,
         subtheme_groups=subtheme_groups,
+        core_validation_shortlist=core_validation_shortlist,
+        broad_beta_candidates=broad_beta_candidates,
     )
     write_readme(output_dir)
 
@@ -1207,6 +1408,8 @@ def main() -> None:
     print(f"SUMMARY rows_datacenter_seed_summary_compact={len(seed_summary_compact)}")
     print(f"SUMMARY rows_datacenter_cliques_top={len(cliques_top)}")
     print(f"SUMMARY rows_datacenter_validation_shortlist={len(validation_shortlist)}")
+    print(f"SUMMARY rows_datacenter_core_validation_shortlist={len(core_validation_shortlist)}")
+    print(f"SUMMARY rows_datacenter_broad_beta_candidates={len(broad_beta_candidates)}")
     print("SUMMARY status=OK")
 
 

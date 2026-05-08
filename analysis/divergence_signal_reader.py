@@ -38,6 +38,105 @@ _SIGNAL_FIELDS = (
     "pivot2_date_r3",
 )
 
+_EVENT_DEFINITIONS: tuple[dict[str, str], ...] = (
+    {
+        "flag": "is_bullish_divergence_r2",
+        "divergence_pattern": "Bullish Divergence R2",
+        "divergence_group": "BULLISH_DIVERGENCE",
+        "divergence_variant": "REGULAR",
+        "divergence_direction": "BULLISH",
+        "divergence_radius": "R2",
+        "signal_strength_field": "bullish_strength",
+        "pivot_gap_field": "pivot_gap_r2",
+        "pivot_drop_pct_field": "pivot_drop_pct_r2",
+        "pivot2_date_field": "pivot2_date_r2",
+    },
+    {
+        "flag": "is_bearish_divergence_r2",
+        "divergence_pattern": "Bearish Divergence R2",
+        "divergence_group": "BEARISH_DIVERGENCE",
+        "divergence_variant": "REGULAR",
+        "divergence_direction": "BEARISH",
+        "divergence_radius": "R2",
+        "signal_strength_field": "bearish_strength",
+        "pivot_gap_field": "pivot_gap_r2",
+        "pivot_drop_pct_field": "pivot_drop_pct_r2",
+        "pivot2_date_field": "pivot2_date_r2",
+    },
+    {
+        "flag": "is_hidden_bullish_divergence_r2",
+        "divergence_pattern": "Hidden Bullish Divergence R2",
+        "divergence_group": "HIDDEN_BULLISH_DIVERGENCE",
+        "divergence_variant": "HIDDEN",
+        "divergence_direction": "BULLISH",
+        "divergence_radius": "R2",
+        "signal_strength_field": "hidden_bullish_strength",
+        "pivot_gap_field": "hidden_pivot_gap_r2",
+        "pivot_drop_pct_field": "hidden_pivot_drop_pct_r2",
+        "pivot2_date_field": "pivot2_date_r2",
+    },
+    {
+        "flag": "is_hidden_bearish_divergence_r2",
+        "divergence_pattern": "Hidden Bearish Divergence R2",
+        "divergence_group": "HIDDEN_BEARISH_DIVERGENCE",
+        "divergence_variant": "HIDDEN",
+        "divergence_direction": "BEARISH",
+        "divergence_radius": "R2",
+        "signal_strength_field": "hidden_bearish_strength",
+        "pivot_gap_field": "hidden_pivot_gap_r2",
+        "pivot_drop_pct_field": "hidden_pivot_drop_pct_r2",
+        "pivot2_date_field": "pivot2_date_r2",
+    },
+    {
+        "flag": "is_bullish_divergence_r3",
+        "divergence_pattern": "Bullish Divergence R3",
+        "divergence_group": "BULLISH_DIVERGENCE",
+        "divergence_variant": "REGULAR",
+        "divergence_direction": "BULLISH",
+        "divergence_radius": "R3",
+        "signal_strength_field": "bullish_strength",
+        "pivot_gap_field": "pivot_gap_r3",
+        "pivot_drop_pct_field": "pivot_drop_pct_r3",
+        "pivot2_date_field": "pivot2_date_r3",
+    },
+    {
+        "flag": "is_bearish_divergence_r3",
+        "divergence_pattern": "Bearish Divergence R3",
+        "divergence_group": "BEARISH_DIVERGENCE",
+        "divergence_variant": "REGULAR",
+        "divergence_direction": "BEARISH",
+        "divergence_radius": "R3",
+        "signal_strength_field": "bearish_strength",
+        "pivot_gap_field": "pivot_gap_r3",
+        "pivot_drop_pct_field": "pivot_drop_pct_r3",
+        "pivot2_date_field": "pivot2_date_r3",
+    },
+    {
+        "flag": "is_hidden_bullish_divergence_r3",
+        "divergence_pattern": "Hidden Bullish Divergence R3",
+        "divergence_group": "HIDDEN_BULLISH_DIVERGENCE",
+        "divergence_variant": "HIDDEN",
+        "divergence_direction": "BULLISH",
+        "divergence_radius": "R3",
+        "signal_strength_field": "hidden_bullish_strength",
+        "pivot_gap_field": "hidden_pivot_gap_r3",
+        "pivot_drop_pct_field": "hidden_pivot_drop_pct_r3",
+        "pivot2_date_field": "pivot2_date_r3",
+    },
+    {
+        "flag": "is_hidden_bearish_divergence_r3",
+        "divergence_pattern": "Hidden Bearish Divergence R3",
+        "divergence_group": "HIDDEN_BEARISH_DIVERGENCE",
+        "divergence_variant": "HIDDEN",
+        "divergence_direction": "BEARISH",
+        "divergence_radius": "R3",
+        "signal_strength_field": "hidden_bearish_strength",
+        "pivot_gap_field": "hidden_pivot_gap_r3",
+        "pivot_drop_pct_field": "hidden_pivot_drop_pct_r3",
+        "pivot2_date_field": "pivot2_date_r3",
+    },
+)
+
 
 @dataclass
 class DivergenceSignalRawExport:
@@ -252,11 +351,7 @@ def _fetch_recent_signal_rows(
 
 def _signal_exists_sql() -> str:
     return """
-        COALESCE(bullish_strength, 0) > 0
-        OR COALESCE(bearish_strength, 0) > 0
-        OR COALESCE(hidden_bullish_strength, 0) > 0
-        OR COALESCE(hidden_bearish_strength, 0) > 0
-        OR COALESCE(is_bullish_divergence_r2, 0) = 1
+        COALESCE(is_bullish_divergence_r2, 0) = 1
         OR COALESCE(is_bearish_divergence_r2, 0) = 1
         OR COALESCE(is_hidden_bullish_divergence_r2, 0) = 1
         OR COALESCE(is_hidden_bearish_divergence_r2, 0) = 1
@@ -272,10 +367,6 @@ def _signal_exists(row: sqlite3.Row | None) -> bool:
         return False
     return any(
         (
-            float(row["bullish_strength"] or 0) > 0,
-            float(row["bearish_strength"] or 0) > 0,
-            float(row["hidden_bullish_strength"] or 0) > 0,
-            float(row["hidden_bearish_strength"] or 0) > 0,
             int(row["is_bullish_divergence_r2"] or 0) == 1,
             int(row["is_bearish_divergence_r2"] or 0) == 1,
             int(row["is_hidden_bullish_divergence_r2"] or 0) == 1,
@@ -364,6 +455,10 @@ def _build_context_snapshot_row(
         "latest_row_is_hidden_bearish_divergence_r3": None if latest_row is None else latest_row["is_hidden_bearish_divergence_r3"],
         "latest_signal_found": latest_signal_row is not None,
         "latest_signal_date": None if latest_signal_row is None else latest_signal_row["date"],
+        "latest_signal_pattern": None if latest_signal_row is None else _first_signal_event(latest_signal_row)["divergence_pattern"],
+        "latest_signal_group": None if latest_signal_row is None else _first_signal_event(latest_signal_row)["divergence_group"],
+        "latest_signal_radius": None if latest_signal_row is None else _first_signal_event(latest_signal_row)["divergence_radius"],
+        "latest_signal_source_flag": None if latest_signal_row is None else _first_signal_event(latest_signal_row)["source_flag"],
         "divergence_warning_flags": warning_flags,
     }
 
@@ -377,8 +472,36 @@ def _build_signal_rows(
     window_meta: dict[str, Any],
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for index, row in enumerate(signal_rows, start=1):
-        rows.append(
+    sequence_index = 1
+    for row in signal_rows:
+        for event_row in _expand_signal_events(
+            row,
+            ticker=ticker,
+            market=market,
+            as_of_date=as_of_date,
+            window_meta=window_meta,
+            sequence_index_start=sequence_index,
+        ):
+            rows.append(event_row)
+            sequence_index += 1
+    return rows
+
+
+def _expand_signal_events(
+    row: sqlite3.Row,
+    *,
+    ticker: str,
+    market: str | None,
+    as_of_date: str,
+    window_meta: dict[str, Any],
+    sequence_index_start: int,
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    sequence_index = sequence_index_start
+    for event_def in _EVENT_DEFINITIONS:
+        if int(row[event_def["flag"]] or 0) != 1:
+            continue
+        events.append(
             {
                 "ticker": ticker,
                 "market": market,
@@ -387,83 +510,37 @@ def _build_signal_rows(
                 "sequence_available_trading_days": window_meta["sequence_available_trading_days"],
                 "sequence_window_start_date": window_meta["sequence_window_start_date"],
                 "sequence_window_end_date": window_meta["sequence_window_end_date"],
-                "sequence_index": index,
+                "sequence_index": sequence_index,
                 "signal_date": row["date"],
-                "bullish_strength": row["bullish_strength"],
-                "bearish_strength": row["bearish_strength"],
-                "hidden_bullish_strength": row["hidden_bullish_strength"],
-                "hidden_bearish_strength": row["hidden_bearish_strength"],
+                "divergence_pattern": event_def["divergence_pattern"],
+                "divergence_group": event_def["divergence_group"],
+                "divergence_variant": event_def["divergence_variant"],
+                "divergence_direction": event_def["divergence_direction"],
+                "divergence_radius": event_def["divergence_radius"],
+                "signal_strength": row[event_def["signal_strength_field"]],
                 "rsi": row["rsi"],
-                "is_bullish_divergence": row["is_bullish_divergence"],
-                "is_bearish_divergence": row["is_bearish_divergence"],
-                "is_hidden_bullish_divergence": row["is_hidden_bullish_divergence"],
-                "is_hidden_bearish_divergence": row["is_hidden_bearish_divergence"],
-                "is_bullish_divergence_r2": row["is_bullish_divergence_r2"],
-                "is_bearish_divergence_r2": row["is_bearish_divergence_r2"],
-                "is_hidden_bullish_divergence_r2": row["is_hidden_bullish_divergence_r2"],
-                "is_hidden_bearish_divergence_r2": row["is_hidden_bearish_divergence_r2"],
-                "is_bullish_divergence_r3": row["is_bullish_divergence_r3"],
-                "is_bearish_divergence_r3": row["is_bearish_divergence_r3"],
-                "is_hidden_bullish_divergence_r3": row["is_hidden_bullish_divergence_r3"],
-                "is_hidden_bearish_divergence_r3": row["is_hidden_bearish_divergence_r3"],
-                "pivot_gap": row["pivot_gap"],
-                "pivot_drop_pct": row["pivot_drop_pct"],
-                "pivot_gap_r2": row["pivot_gap_r2"],
-                "pivot_drop_pct_r2": row["pivot_drop_pct_r2"],
-                "hidden_pivot_gap_r2": row["hidden_pivot_gap_r2"],
-                "hidden_pivot_drop_pct_r2": row["hidden_pivot_drop_pct_r2"],
-                "pivot2_date_r2": row["pivot2_date_r2"],
-                "pivot_gap_r3": row["pivot_gap_r3"],
-                "pivot_drop_pct_r3": row["pivot_drop_pct_r3"],
-                "hidden_pivot_gap_r3": row["hidden_pivot_gap_r3"],
-                "hidden_pivot_drop_pct_r3": row["hidden_pivot_drop_pct_r3"],
-                "pivot2_date_r3": row["pivot2_date_r3"],
-                "has_bullish_signal": _has_bullish_signal(row),
-                "has_bearish_signal": _has_bearish_signal(row),
-                "has_hidden_bullish_signal": _has_hidden_bullish_signal(row),
-                "has_hidden_bearish_signal": _has_hidden_bearish_signal(row),
-                "has_r2_signal": _has_r2_signal(row),
-                "has_r3_signal": _has_r3_signal(row),
+                "pivot_gap": row[event_def["pivot_gap_field"]],
+                "pivot_drop_pct": row[event_def["pivot_drop_pct_field"]],
+                "pivot2_date": row[event_def["pivot2_date_field"]],
+                "source_flag": event_def["flag"],
             }
         )
-    return rows
+        sequence_index += 1
+    return events
 
 
-def _has_bullish_signal(row: sqlite3.Row) -> bool:
-    return float(row["bullish_strength"] or 0) > 0 or int(row["is_bullish_divergence_r2"] or 0) == 1 or int(row["is_bullish_divergence_r3"] or 0) == 1
-
-
-def _has_bearish_signal(row: sqlite3.Row) -> bool:
-    return float(row["bearish_strength"] or 0) > 0 or int(row["is_bearish_divergence_r2"] or 0) == 1 or int(row["is_bearish_divergence_r3"] or 0) == 1
-
-
-def _has_hidden_bullish_signal(row: sqlite3.Row) -> bool:
-    return float(row["hidden_bullish_strength"] or 0) > 0 or int(row["is_hidden_bullish_divergence_r2"] or 0) == 1 or int(row["is_hidden_bullish_divergence_r3"] or 0) == 1
-
-
-def _has_hidden_bearish_signal(row: sqlite3.Row) -> bool:
-    return float(row["hidden_bearish_strength"] or 0) > 0 or int(row["is_hidden_bearish_divergence_r2"] or 0) == 1 or int(row["is_hidden_bearish_divergence_r3"] or 0) == 1
-
-
-def _has_r2_signal(row: sqlite3.Row) -> bool:
-    return any(
-        int(row[field] or 0) == 1
-        for field in (
-            "is_bullish_divergence_r2",
-            "is_bearish_divergence_r2",
-            "is_hidden_bullish_divergence_r2",
-            "is_hidden_bearish_divergence_r2",
-        )
+def _first_signal_event(row: sqlite3.Row) -> dict[str, Any] | None:
+    events = _expand_signal_events(
+        row,
+        ticker=str(row["ticker"]),
+        market=None,
+        as_of_date=str(row["date"]),
+        window_meta={
+            "sequence_window_trading_days": 0,
+            "sequence_available_trading_days": 0,
+            "sequence_window_start_date": None,
+            "sequence_window_end_date": None,
+        },
+        sequence_index_start=1,
     )
-
-
-def _has_r3_signal(row: sqlite3.Row) -> bool:
-    return any(
-        int(row[field] or 0) == 1
-        for field in (
-            "is_bullish_divergence_r3",
-            "is_bearish_divergence_r3",
-            "is_hidden_bullish_divergence_r3",
-            "is_hidden_bearish_divergence_r3",
-        )
-    )
+    return None if not events else events[0]

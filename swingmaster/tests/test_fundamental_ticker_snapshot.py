@@ -1769,7 +1769,14 @@ def test_divergence_snapshot_appends_sections_and_rows(monkeypatch, capsys, tmp_
     _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
     for pvm in ("2026-04-29", "2026-04-30"):
         _insert_ohlcv_close(ohlcv_db_path, "VRT", pvm, 400.0, "usa")
-    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30", bullish_strength=0.743, rsi=69.37757195130224)
+    _insert_divergence_test_row(
+        analysis_db_path,
+        "VRT",
+        "2026-04-30",
+        bullish_strength=0.743,
+        rsi=69.37757195130224,
+        is_bullish_divergence_r2=1,
+    )
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,
@@ -1798,8 +1805,9 @@ def test_divergence_snapshot_appends_sections_and_rows(monkeypatch, capsys, tmp_
     assert "section;divergence_context_snapshot" in cli_output
     assert "section;divergence_signals_60td" in cli_output
     assert "ticker;market;as_of_date;sequence_window_trading_days;sequence_available_trading_days;sequence_window_start_date;sequence_window_end_date;latest_valid_close_date_on_or_before_as_of_date;latest_divergence_date_on_or_before_as_of_date;divergence_coverage_status;" in cli_output
-    assert "ticker;market;as_of_date;sequence_window_trading_days;sequence_available_trading_days;sequence_window_start_date;sequence_window_end_date;sequence_index;signal_date;bullish_strength;" in cli_output
-    assert "0,743;0,0;0,0;0,0;69,37757195130224;" in cli_output
+    assert "ticker;market;as_of_date;sequence_window_trading_days;sequence_available_trading_days;sequence_window_start_date;sequence_window_end_date;sequence_index;signal_date;divergence_pattern;divergence_group;divergence_variant;divergence_direction;divergence_radius;signal_strength;rsi;pivot_gap;pivot_drop_pct;pivot2_date;source_flag" in cli_output
+    assert "Bullish Divergence R2;BULLISH_DIVERGENCE;REGULAR;BULLISH;R2;0,743;69,37757195130224" in cli_output
+    assert "is_bullish_divergence_r2" not in cli_output.split("section;divergence_signals_60td\n", 1)[1].splitlines()[0]
 
 
 def test_divergence_snapshot_no_lookahead_and_pivot2_date_exclusion(monkeypatch, capsys, tmp_path: Path) -> None:
@@ -1852,9 +1860,9 @@ def test_divergence_snapshot_sequence_ordering_through_cli(monkeypatch, capsys, 
     _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
     for pvm in ("2026-04-28", "2026-04-29", "2026-04-30"):
         _insert_ohlcv_close(ohlcv_db_path, "VRT", pvm, 400.0, "usa")
-    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30", bearish_strength=0.3)
-    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-28", bullish_strength=0.1)
-    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-29", hidden_bullish_strength=0.2)
+    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30", bearish_strength=0.3, is_bearish_divergence_r3=1)
+    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-28", bullish_strength=0.1, is_bullish_divergence_r2=1)
+    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-29", hidden_bullish_strength=0.2, is_hidden_bullish_divergence_r2=1)
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,
@@ -1884,6 +1892,11 @@ def test_divergence_snapshot_sequence_ordering_through_cli(monkeypatch, capsys, 
 
     assert [row[7] for row in event_rows] == ["1", "2", "3"]
     assert [row[8] for row in event_rows] == ["2026-04-28", "2026-04-29", "2026-04-30"]
+    assert [row[9] for row in event_rows] == [
+        "Bullish Divergence R2",
+        "Hidden Bullish Divergence R2",
+        "Bearish Divergence R3",
+    ]
 
 
 def test_divergence_snapshot_empty_recent_signals_section(monkeypatch, capsys, tmp_path: Path) -> None:
@@ -1895,7 +1908,7 @@ def test_divergence_snapshot_empty_recent_signals_section(monkeypatch, capsys, t
     _create_divergence_analysis_schema(analysis_db_path)
     _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
     _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
-    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30")
+    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30", bullish_strength=0.2)
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,
@@ -1971,6 +1984,110 @@ def test_divergence_snapshot_coverage_statuses_and_no_summary_counts(monkeypatch
     assert "hidden_bullish_count_60td" not in cli_output
 
 
+def test_divergence_snapshot_strength_only_rows_are_not_printed_and_latest_signal_uses_r2_r3(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_divergence_strength_only.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_divergence_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-29", 390.0, "usa")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-29", bullish_strength=0.1, is_bullish_divergence_r2=1)
+    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30", bearish_strength=0.5)
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            divergence_snapshot=True,
+            divergence_analysis_db=str(analysis_db_path),
+            divergence_as_of_date="2026-04-30",
+            divergence_market="usa",
+            divergence_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    context_section = cli_output.split("section;divergence_context_snapshot\n", 1)[1].split("\n\nsection;divergence_signals_60td\n", 1)[0].splitlines()
+    context_header = context_section[0].split(";")
+    context_values = context_section[1].split(";")
+    latest_signal_index = context_header.index("latest_signal_date")
+    assert context_values[latest_signal_index] == "2026-04-29"
+    recent_section = cli_output.split("section;divergence_signals_60td\n", 1)[1].strip().splitlines()
+    assert len(recent_section) == 2
+    assert "2026-04-30;Bearish Divergence" not in recent_section[1]
+    assert "2026-04-29;Bullish Divergence R2;BULLISH_DIVERGENCE;REGULAR;BULLISH;R2;0,1" in recent_section[1]
+
+
+def test_divergence_snapshot_multiple_same_date_flags_print_multiple_rows(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_divergence_multi.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_divergence_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_divergence_test_row(
+        analysis_db_path,
+        "VRT",
+        "2026-04-30",
+        bullish_strength=0.11,
+        hidden_bearish_strength=0.22,
+        rsi=61.5,
+        is_bullish_divergence_r2=1,
+        is_hidden_bearish_divergence_r3=1,
+        pivot_gap_r2=5,
+        pivot_drop_pct_r2=1.5,
+        pivot2_date_r2="2026-04-20",
+        hidden_pivot_gap_r3=6,
+        hidden_pivot_drop_pct_r3=2.5,
+        pivot2_date_r3="2026-04-10",
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            divergence_snapshot=True,
+            divergence_analysis_db=str(analysis_db_path),
+            divergence_as_of_date="2026-04-30",
+            divergence_market="usa",
+            divergence_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+    recent_section = cli_output.split("section;divergence_signals_60td\n", 1)[1].strip().splitlines()
+
+    assert len(recent_section) == 3
+    assert "Bullish Divergence R2;BULLISH_DIVERGENCE;REGULAR;BULLISH;R2;0,11;61,5;5;1,5;2026-04-20;is_bullish_divergence_r2" in recent_section[1]
+    assert "Hidden Bearish Divergence R3;HIDDEN_BEARISH_DIVERGENCE;HIDDEN;BEARISH;R3;0,22;61,5;6;2,5;2026-04-10;is_hidden_bearish_divergence_r3" in recent_section[2]
+
+
 def test_divergence_as_of_date_derives_from_price_behavior_snapshot(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ticker_snapshot_divergence_derived_pb.db"
     analysis_db_path = tmp_path / "analysis.db"
@@ -2004,7 +2121,7 @@ def test_divergence_as_of_date_derives_from_price_behavior_snapshot(monkeypatch,
         close_20_after_report=190.0,
         return_6m_pct=14.59,
     )
-    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30", bullish_strength=0.1)
+    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30", bullish_strength=0.1, is_bullish_divergence_r2=1)
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,
@@ -2045,7 +2162,7 @@ def test_divergence_as_of_date_falls_back_to_latest_valid_close_date(monkeypatch
     _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
     _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-29", 390.0, "usa")
     _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
-    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30", bullish_strength=0.1)
+    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30", bullish_strength=0.1, is_bullish_divergence_r2=1)
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,
@@ -2084,7 +2201,7 @@ def test_divergence_snapshot_does_not_write_to_analysis_or_ohlcv_db(monkeypatch,
     _create_divergence_analysis_schema(analysis_db_path)
     _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
     _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
-    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30", bullish_strength=0.1)
+    _insert_divergence_test_row(analysis_db_path, "VRT", "2026-04-30", bullish_strength=0.1, is_bullish_divergence_r2=1)
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,

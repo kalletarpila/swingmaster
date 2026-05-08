@@ -75,14 +75,15 @@ def test_signal_rows_include_only_actual_signal_rows(tmp_path: Path) -> None:
         _insert_close(osakedata_db, "AAA", pvm, 10.0, "usa")
     _insert_divergence_row(analysis_db, "AAA", "2026-04-28")
     _insert_divergence_row(analysis_db, "AAA", "2026-04-29", bullish_strength=0.1)
-    _insert_divergence_row(analysis_db, "AAA", "2026-04-30")
+    _insert_divergence_row(analysis_db, "AAA", "2026-04-30", is_bullish_divergence_r2=1)
 
     result = read_divergence_signal_raw_export(str(analysis_db), str(osakedata_db), "AAA", "2026-04-30", market="usa")
 
-    assert [row["signal_date"] for row in result.divergence_signal_rows_60td] == ["2026-04-29"]
+    assert [row["signal_date"] for row in result.divergence_signal_rows_60td] == ["2026-04-30"]
+    assert result.divergence_signal_rows_60td[0]["divergence_pattern"] == "Bullish Divergence R2"
 
 
-def test_signal_existence_via_strength_fields(tmp_path: Path) -> None:
+def test_strength_only_rows_are_excluded(tmp_path: Path) -> None:
     analysis_db, osakedata_db = _create_test_dbs(tmp_path)
     for pvm in ("2026-04-27", "2026-04-28", "2026-04-29", "2026-04-30"):
         _insert_close(osakedata_db, "AAA", pvm, 10.0, "usa")
@@ -93,10 +94,10 @@ def test_signal_existence_via_strength_fields(tmp_path: Path) -> None:
 
     result = read_divergence_signal_raw_export(str(analysis_db), str(osakedata_db), "AAA", "2026-04-30", market="usa")
 
-    assert [row["signal_date"] for row in result.divergence_signal_rows_60td] == ["2026-04-27", "2026-04-28", "2026-04-29", "2026-04-30"]
+    assert result.divergence_signal_rows_60td == []
 
 
-def test_signal_existence_via_r2_and_r3_flags(tmp_path: Path) -> None:
+def test_r2_r3_rows_expand_into_event_rows(tmp_path: Path) -> None:
     analysis_db, osakedata_db = _create_test_dbs(tmp_path)
     for pvm in _date_range("2026-04-25", 8):
         _insert_close(osakedata_db, "AAA", pvm, 10.0, "usa")
@@ -110,15 +111,108 @@ def test_signal_existence_via_r2_and_r3_flags(tmp_path: Path) -> None:
     result = read_divergence_signal_raw_export(str(analysis_db), str(osakedata_db), "AAA", "2026-04-30", market="usa")
 
     assert len(result.divergence_signal_rows_60td) == 6
+    assert result.divergence_signal_rows_60td[1]["divergence_pattern"] == "Bearish Divergence R2"
+    assert result.divergence_signal_rows_60td[1]["divergence_group"] == "BEARISH_DIVERGENCE"
+    assert result.divergence_signal_rows_60td[1]["divergence_variant"] == "REGULAR"
+    assert result.divergence_signal_rows_60td[1]["divergence_direction"] == "BEARISH"
+    assert result.divergence_signal_rows_60td[1]["divergence_radius"] == "R2"
+    assert result.divergence_signal_rows_60td[1]["source_flag"] == "is_bearish_divergence_r2"
+
+
+def test_multiple_flags_on_same_date_produce_multiple_rows_in_deterministic_order(tmp_path: Path) -> None:
+    analysis_db, osakedata_db = _create_test_dbs(tmp_path)
+    _insert_close(osakedata_db, "AAA", "2026-04-30", 10.0, "usa")
+    _insert_divergence_row(
+        analysis_db,
+        "AAA",
+        "2026-04-30",
+        bullish_strength=0.4,
+        bearish_strength=0.2,
+        hidden_bullish_strength=0.3,
+        hidden_bearish_strength=0.1,
+        is_bullish_divergence_r2=1,
+        is_bearish_divergence_r2=1,
+        is_hidden_bullish_divergence_r2=1,
+        is_hidden_bearish_divergence_r2=1,
+        is_bullish_divergence_r3=1,
+        is_bearish_divergence_r3=1,
+        is_hidden_bullish_divergence_r3=1,
+        is_hidden_bearish_divergence_r3=1,
+        rsi=55.5,
+    )
+
+    result = read_divergence_signal_raw_export(str(analysis_db), str(osakedata_db), "AAA", "2026-04-30", market="usa")
+
+    assert [row["divergence_pattern"] for row in result.divergence_signal_rows_60td] == [
+        "Bullish Divergence R2",
+        "Bearish Divergence R2",
+        "Hidden Bullish Divergence R2",
+        "Hidden Bearish Divergence R2",
+        "Bullish Divergence R3",
+        "Bearish Divergence R3",
+        "Hidden Bullish Divergence R3",
+        "Hidden Bearish Divergence R3",
+    ]
+    assert [row["sequence_index"] for row in result.divergence_signal_rows_60td] == [1, 2, 3, 4, 5, 6, 7, 8]
+
+
+def test_strength_and_pivot_fields_map_to_correct_event(tmp_path: Path) -> None:
+    analysis_db, osakedata_db = _create_test_dbs(tmp_path)
+    _insert_close(osakedata_db, "AAA", "2026-04-30", 10.0, "usa")
+    _insert_divergence_row(
+        analysis_db,
+        "AAA",
+        "2026-04-30",
+        bullish_strength=0.4,
+        bearish_strength=0.5,
+        hidden_bullish_strength=0.6,
+        hidden_bearish_strength=0.7,
+        rsi=55.5,
+        is_bullish_divergence_r2=1,
+        is_hidden_bearish_divergence_r2=1,
+        is_bearish_divergence_r3=1,
+        is_hidden_bullish_divergence_r3=1,
+        pivot_gap_r2=12,
+        pivot_drop_pct_r2=1.2,
+        hidden_pivot_gap_r2=13,
+        hidden_pivot_drop_pct_r2=1.3,
+        pivot2_date_r2="2026-04-20",
+        pivot_gap_r3=22,
+        pivot_drop_pct_r3=2.2,
+        hidden_pivot_gap_r3=23,
+        hidden_pivot_drop_pct_r3=2.3,
+        pivot2_date_r3="2026-04-10",
+    )
+
+    result = read_divergence_signal_raw_export(str(analysis_db), str(osakedata_db), "AAA", "2026-04-30", market="usa")
+    rows_by_pattern = {row["divergence_pattern"]: row for row in result.divergence_signal_rows_60td}
+
+    assert rows_by_pattern["Bullish Divergence R2"]["signal_strength"] == 0.4
+    assert rows_by_pattern["Bullish Divergence R2"]["pivot_gap"] == 12
+    assert rows_by_pattern["Bullish Divergence R2"]["pivot_drop_pct"] == 1.2
+    assert rows_by_pattern["Bullish Divergence R2"]["pivot2_date"] == "2026-04-20"
+    assert rows_by_pattern["Hidden Bearish Divergence R2"]["signal_strength"] == 0.7
+    assert rows_by_pattern["Hidden Bearish Divergence R2"]["pivot_gap"] == 13
+    assert rows_by_pattern["Hidden Bearish Divergence R2"]["pivot_drop_pct"] == 1.3
+    assert rows_by_pattern["Hidden Bearish Divergence R2"]["pivot2_date"] == "2026-04-20"
+    assert rows_by_pattern["Bearish Divergence R3"]["signal_strength"] == 0.5
+    assert rows_by_pattern["Bearish Divergence R3"]["pivot_gap"] == 22
+    assert rows_by_pattern["Bearish Divergence R3"]["pivot_drop_pct"] == 2.2
+    assert rows_by_pattern["Bearish Divergence R3"]["pivot2_date"] == "2026-04-10"
+    assert rows_by_pattern["Hidden Bullish Divergence R3"]["signal_strength"] == 0.6
+    assert rows_by_pattern["Hidden Bullish Divergence R3"]["pivot_gap"] == 23
+    assert rows_by_pattern["Hidden Bullish Divergence R3"]["pivot_drop_pct"] == 2.3
+    assert rows_by_pattern["Hidden Bullish Divergence R3"]["pivot2_date"] == "2026-04-10"
+    assert all(row["rsi"] == 55.5 for row in result.divergence_signal_rows_60td)
 
 
 def test_event_sequence_ordering_uses_date_asc(tmp_path: Path) -> None:
     analysis_db, osakedata_db = _create_test_dbs(tmp_path)
     for pvm in ("2026-04-28", "2026-04-29", "2026-04-30"):
         _insert_close(osakedata_db, "AAA", pvm, 10.0, "usa")
-    _insert_divergence_row(analysis_db, "AAA", "2026-04-30", bearish_strength=0.3)
-    _insert_divergence_row(analysis_db, "AAA", "2026-04-28", bullish_strength=0.1)
-    _insert_divergence_row(analysis_db, "AAA", "2026-04-29", hidden_bullish_strength=0.2)
+    _insert_divergence_row(analysis_db, "AAA", "2026-04-30", is_bearish_divergence_r3=1, bearish_strength=0.3)
+    _insert_divergence_row(analysis_db, "AAA", "2026-04-28", is_bullish_divergence_r2=1, bullish_strength=0.1)
+    _insert_divergence_row(analysis_db, "AAA", "2026-04-29", is_hidden_bullish_divergence_r2=1, hidden_bullish_strength=0.2)
 
     result = read_divergence_signal_raw_export(str(analysis_db), str(osakedata_db), "AAA", "2026-04-30", market="usa")
 
@@ -175,14 +269,38 @@ def test_latest_available_row_may_differ_from_latest_signal_row(tmp_path: Path) 
     analysis_db, osakedata_db = _create_test_dbs(tmp_path)
     for pvm in ("2026-04-29", "2026-04-30"):
         _insert_close(osakedata_db, "AAA", pvm, 10.0, "usa")
-    _insert_divergence_row(analysis_db, "AAA", "2026-04-29", bullish_strength=0.4)
-    _insert_divergence_row(analysis_db, "AAA", "2026-04-30")
+    _insert_divergence_row(analysis_db, "AAA", "2026-04-29", bullish_strength=0.4, is_bullish_divergence_r2=1)
+    _insert_divergence_row(analysis_db, "AAA", "2026-04-30", bearish_strength=0.2)
 
     result = read_divergence_signal_raw_export(str(analysis_db), str(osakedata_db), "AAA", "2026-04-30", market="usa")
     row = result.divergence_context_snapshot_rows[0]
 
     assert row["latest_row_date"] == "2026-04-30"
     assert row["latest_signal_date"] == "2026-04-29"
+
+
+def test_signal_rows_do_not_include_wide_boolean_fields(tmp_path: Path) -> None:
+    analysis_db, osakedata_db = _create_test_dbs(tmp_path)
+    _insert_close(osakedata_db, "AAA", "2026-04-30", 10.0, "usa")
+    _insert_divergence_row(analysis_db, "AAA", "2026-04-30", bullish_strength=0.4, is_bullish_divergence_r2=1)
+
+    result = read_divergence_signal_raw_export(str(analysis_db), str(osakedata_db), "AAA", "2026-04-30", market="usa")
+    row = result.divergence_signal_rows_60td[0]
+
+    assert "is_bullish_divergence_r2" not in row
+    assert "is_bearish_divergence_r2" not in row
+    assert "is_hidden_bullish_divergence_r2" not in row
+    assert "is_hidden_bearish_divergence_r2" not in row
+    assert "is_bullish_divergence_r3" not in row
+    assert "is_bearish_divergence_r3" not in row
+    assert "is_hidden_bullish_divergence_r3" not in row
+    assert "is_hidden_bearish_divergence_r3" not in row
+    assert "has_bullish_signal" not in row
+    assert "has_bearish_signal" not in row
+    assert "has_hidden_bullish_signal" not in row
+    assert "has_hidden_bearish_signal" not in row
+    assert "has_r2_signal" not in row
+    assert "has_r3_signal" not in row
 
 
 def test_no_summary_counts_are_returned(tmp_path: Path) -> None:

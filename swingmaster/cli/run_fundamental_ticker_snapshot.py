@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from analysis.candlestick_signal_reader import read_candlestick_signal_raw_export
+from analysis.divergence_signal_reader import read_divergence_signal_raw_export
 from analysis.stock_dow_structure_reader import read_stock_dow_structure_raw_export
 from swingmaster.fundamentals.price_behavior_snapshot import load_price_behavior_snapshot
 from swingmaster.fundamentals.price_behavior_snapshot import _resolve_market_for_ticker
@@ -248,6 +249,83 @@ CANDLESTICK_EVENTS_COLUMNS: tuple[str, ...] = (
     "rsi14",
     "created_at",
 )
+DIVERGENCE_CONTEXT_SNAPSHOT_COLUMNS: tuple[str, ...] = (
+    "ticker",
+    "market",
+    "as_of_date",
+    "sequence_window_trading_days",
+    "sequence_available_trading_days",
+    "sequence_window_start_date",
+    "sequence_window_end_date",
+    "latest_valid_close_date_on_or_before_as_of_date",
+    "latest_divergence_date_on_or_before_as_of_date",
+    "divergence_coverage_status",
+    "divergence_coverage_reason",
+    "latest_row_found",
+    "latest_row_date",
+    "latest_row_bullish_strength",
+    "latest_row_bearish_strength",
+    "latest_row_hidden_bullish_strength",
+    "latest_row_hidden_bearish_strength",
+    "latest_row_rsi",
+    "latest_row_is_bullish_divergence_r2",
+    "latest_row_is_bearish_divergence_r2",
+    "latest_row_is_hidden_bullish_divergence_r2",
+    "latest_row_is_hidden_bearish_divergence_r2",
+    "latest_row_is_bullish_divergence_r3",
+    "latest_row_is_bearish_divergence_r3",
+    "latest_row_is_hidden_bullish_divergence_r3",
+    "latest_row_is_hidden_bearish_divergence_r3",
+    "latest_signal_found",
+    "latest_signal_date",
+    "divergence_warning_flags",
+)
+DIVERGENCE_SIGNALS_COLUMNS: tuple[str, ...] = (
+    "ticker",
+    "market",
+    "as_of_date",
+    "sequence_window_trading_days",
+    "sequence_available_trading_days",
+    "sequence_window_start_date",
+    "sequence_window_end_date",
+    "sequence_index",
+    "signal_date",
+    "bullish_strength",
+    "bearish_strength",
+    "hidden_bullish_strength",
+    "hidden_bearish_strength",
+    "rsi",
+    "is_bullish_divergence",
+    "is_bearish_divergence",
+    "is_hidden_bullish_divergence",
+    "is_hidden_bearish_divergence",
+    "is_bullish_divergence_r2",
+    "is_bearish_divergence_r2",
+    "is_hidden_bullish_divergence_r2",
+    "is_hidden_bearish_divergence_r2",
+    "is_bullish_divergence_r3",
+    "is_bearish_divergence_r3",
+    "is_hidden_bullish_divergence_r3",
+    "is_hidden_bearish_divergence_r3",
+    "pivot_gap",
+    "pivot_drop_pct",
+    "pivot_gap_r2",
+    "pivot_drop_pct_r2",
+    "hidden_pivot_gap_r2",
+    "hidden_pivot_drop_pct_r2",
+    "pivot2_date_r2",
+    "pivot_gap_r3",
+    "pivot_drop_pct_r3",
+    "hidden_pivot_gap_r3",
+    "hidden_pivot_drop_pct_r3",
+    "pivot2_date_r3",
+    "has_bullish_signal",
+    "has_bearish_signal",
+    "has_hidden_bullish_signal",
+    "has_hidden_bearish_signal",
+    "has_r2_signal",
+    "has_r3_signal",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -301,6 +379,20 @@ def parse_args() -> argparse.Namespace:
         default=60,
         help="Recent trading-day window for candlestick snapshot",
     )
+    parser.add_argument(
+        "--divergence-snapshot",
+        action="store_true",
+        help="Append raw divergence snapshot blocks using analysis.db and OHLCV data",
+    )
+    parser.add_argument("--divergence-analysis-db", default=None, help="Analysis SQLite database path for divergence reader")
+    parser.add_argument("--divergence-as-of-date", default=None, help="Explicit as-of date for divergence snapshot")
+    parser.add_argument("--divergence-market", default=None, help="Explicit market for divergence snapshot")
+    parser.add_argument(
+        "--divergence-recent-window-trading-days",
+        type=int,
+        default=60,
+        help="Recent trading-day window for divergence snapshot",
+    )
     args = parser.parse_args()
     if args.dow_structure_snapshot and not args.dow_analysis_db:
         parser.error("--dow-analysis-db is required when --dow-structure-snapshot is used")
@@ -310,6 +402,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--candlestick-analysis-db is required when --candlestick-snapshot is used")
     if args.candlestick_snapshot and not args.ohlcv_db:
         parser.error("--ohlcv-db is required when --candlestick-snapshot is used")
+    if args.divergence_snapshot and not args.divergence_analysis_db:
+        parser.error("--divergence-analysis-db is required when --divergence-snapshot is used")
+    if args.divergence_snapshot and not args.ohlcv_db:
+        parser.error("--ohlcv-db is required when --divergence-snapshot is used")
     return args
 
 
@@ -756,6 +852,7 @@ def format_snapshot_matrix(
     valuation_snapshot: dict[str, str] | None = None,
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    divergence_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
     lines: list[str] = []
     for metric in SECTIONED_METRICS:
@@ -779,6 +876,8 @@ def format_snapshot_matrix(
         lines.extend(_format_dow_structure_snapshot_lines(dow_structure_snapshot))
     if candlestick_snapshot is not None:
         lines.extend(_format_candlestick_snapshot_lines(candlestick_snapshot))
+    if divergence_snapshot is not None:
+        lines.extend(_format_divergence_snapshot_lines(divergence_snapshot))
     return "\n".join(lines)
 
 
@@ -800,6 +899,7 @@ def write_snapshot_csv(
     valuation_snapshot: dict[str, str] | None = None,
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    divergence_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
     CSV_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}.csv"
@@ -825,6 +925,8 @@ def write_snapshot_csv(
             _write_dow_structure_snapshot_csv(writer, dow_structure_snapshot)
         if candlestick_snapshot is not None:
             _write_candlestick_snapshot_csv(writer, candlestick_snapshot)
+        if divergence_snapshot is not None:
+            _write_divergence_snapshot_csv(writer, divergence_snapshot)
     return output_path
 
 
@@ -836,6 +938,7 @@ def ensure_snapshot_csv_written(
     valuation_snapshot: dict[str, str] | None = None,
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    divergence_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
     output_path = write_snapshot_csv(
         matrix_rows,
@@ -845,6 +948,7 @@ def ensure_snapshot_csv_written(
         valuation_snapshot,
         dow_structure_snapshot,
         candlestick_snapshot,
+        divergence_snapshot,
     )
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
@@ -856,6 +960,7 @@ def ensure_snapshot_csv_written(
         valuation_snapshot,
         dow_structure_snapshot,
         candlestick_snapshot,
+        divergence_snapshot,
     )
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
@@ -877,6 +982,10 @@ def _format_dow_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> lis
 
 
 def _format_candlestick_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> list[str]:
+    return [_format_csv_value(_format_dow_export_value(row.get(column))) for column in columns]
+
+
+def _format_divergence_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> list[str]:
     return [_format_csv_value(_format_dow_export_value(row.get(column))) for column in columns]
 
 
@@ -928,6 +1037,34 @@ def _write_candlestick_snapshot_csv(
         writer.writerow([_format_csv_value(value) for value in _format_candlestick_row_values(row, CANDLESTICK_EVENTS_COLUMNS)])
 
 
+def _format_divergence_snapshot_lines(divergence_snapshot: dict[str, list[dict[str, Any]]]) -> list[str]:
+    lines = ["", "section;divergence_context_snapshot", ";".join(DIVERGENCE_CONTEXT_SNAPSHOT_COLUMNS)]
+    for row in divergence_snapshot.get("divergence_context_snapshot_rows", []):
+        lines.append(";".join(_format_divergence_row_values(row, DIVERGENCE_CONTEXT_SNAPSHOT_COLUMNS)))
+    lines.append("")
+    lines.append("section;divergence_signals_60td")
+    lines.append(";".join(DIVERGENCE_SIGNALS_COLUMNS))
+    for row in divergence_snapshot.get("divergence_signal_rows_60td", []):
+        lines.append(";".join(_format_divergence_row_values(row, DIVERGENCE_SIGNALS_COLUMNS)))
+    return lines
+
+
+def _write_divergence_snapshot_csv(
+    writer: csv.writer,
+    divergence_snapshot: dict[str, list[dict[str, Any]]],
+) -> None:
+    writer.writerow([])
+    writer.writerow(["section", "divergence_context_snapshot"])
+    writer.writerow(list(DIVERGENCE_CONTEXT_SNAPSHOT_COLUMNS))
+    for row in divergence_snapshot.get("divergence_context_snapshot_rows", []):
+        writer.writerow([_format_csv_value(value) for value in _format_divergence_row_values(row, DIVERGENCE_CONTEXT_SNAPSHOT_COLUMNS)])
+    writer.writerow([])
+    writer.writerow(["section", "divergence_signals_60td"])
+    writer.writerow(list(DIVERGENCE_SIGNALS_COLUMNS))
+    for row in divergence_snapshot.get("divergence_signal_rows_60td", []):
+        writer.writerow([_format_csv_value(value) for value in _format_divergence_row_values(row, DIVERGENCE_SIGNALS_COLUMNS)])
+
+
 def _resolve_dow_market(args: argparse.Namespace, ticker: str) -> str | None:
     dow_market = getattr(args, "dow_market", None)
     if dow_market is not None:
@@ -958,6 +1095,14 @@ def _fetch_latest_valid_close_date_for_dow(
 
 
 def _fetch_latest_valid_close_date_for_candlestick(
+    ohlcv_db_path: Path,
+    ticker: str,
+    market: str | None,
+) -> str | None:
+    return _fetch_latest_valid_close_date_for_dow(ohlcv_db_path, ticker, market)
+
+
+def _fetch_latest_valid_close_date_for_divergence(
     ohlcv_db_path: Path,
     ticker: str,
     market: str | None,
@@ -1052,6 +1197,53 @@ def _load_candlestick_snapshot(
     ).to_dict()
 
 
+def _resolve_divergence_market(args: argparse.Namespace, ticker: str) -> str | None:
+    divergence_market = getattr(args, "divergence_market", None)
+    if divergence_market is not None:
+        return divergence_market
+    if getattr(args, "price_behavior_snapshot", False):
+        return _resolve_market_for_ticker(ticker)
+    return None
+
+
+def _derive_divergence_as_of_date(
+    args: argparse.Namespace,
+    ticker: str,
+    ohlcv_db_path: Path,
+    price_behavior_snapshot: dict[str, str] | None,
+    market: str | None,
+) -> str:
+    divergence_as_of_date = getattr(args, "divergence_as_of_date", None)
+    if divergence_as_of_date:
+        return divergence_as_of_date
+    if price_behavior_snapshot is not None:
+        price_behavior_as_of_date = price_behavior_snapshot.get("price_behavior_as_of_date", "")
+        if price_behavior_as_of_date:
+            return price_behavior_as_of_date
+    latest_valid_close_date = _fetch_latest_valid_close_date_for_divergence(ohlcv_db_path, ticker, market)
+    if latest_valid_close_date is None:
+        raise RuntimeError(f"DIVERGENCE_AS_OF_DATE_NOT_FOUND:{ticker}")
+    return latest_valid_close_date
+
+
+def _load_divergence_snapshot(
+    args: argparse.Namespace,
+    ticker: str,
+    ohlcv_db_path: Path,
+    price_behavior_snapshot: dict[str, str] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    market = _resolve_divergence_market(args, ticker)
+    as_of_date = _derive_divergence_as_of_date(args, ticker, ohlcv_db_path, price_behavior_snapshot, market)
+    return read_divergence_signal_raw_export(
+        analysis_db_path=str(resolve_db_path(args.divergence_analysis_db)),
+        osakedata_db_path=str(ohlcv_db_path),
+        ticker=ticker,
+        as_of_date=as_of_date,
+        market=market,
+        recent_window_trading_days=getattr(args, "divergence_recent_window_trading_days", 60),
+    ).to_dict()
+
+
 def main() -> None:
     args = parse_args()
     db_path = resolve_db_path(args.db)
@@ -1061,6 +1253,7 @@ def main() -> None:
         raise RuntimeError("PRICE_BEHAVIOR_SNAPSHOT_REQUIRES_OHLCV_DB")
     dow_structure_snapshot_enabled = getattr(args, "dow_structure_snapshot", False)
     candlestick_snapshot_enabled = getattr(args, "candlestick_snapshot", False)
+    divergence_snapshot_enabled = getattr(args, "divergence_snapshot", False)
     with sqlite3.connect(str(db_path)) as conn:
         matrix_rows = build_snapshot_matrix(
             conn=conn,
@@ -1076,7 +1269,7 @@ def main() -> None:
         ohlcv_db_path = resolve_db_path(args.ohlcv_db)
         latest_quarter_date = matrix_rows[-1]["quarter"]
         price_behavior_snapshot = load_price_behavior_snapshot(ohlcv_db_path, ticker, latest_quarter_date)
-    elif dow_structure_snapshot_enabled or candlestick_snapshot_enabled:
+    elif dow_structure_snapshot_enabled or candlestick_snapshot_enabled or divergence_snapshot_enabled:
         ohlcv_db_path = resolve_db_path(args.ohlcv_db)
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None
     if dow_structure_snapshot_enabled:
@@ -1088,6 +1281,11 @@ def main() -> None:
         if ohlcv_db_path is None:
             ohlcv_db_path = resolve_db_path(args.ohlcv_db)
         candlestick_snapshot = _load_candlestick_snapshot(args, ticker, ohlcv_db_path, price_behavior_snapshot)
+    divergence_snapshot: dict[str, list[dict[str, Any]]] | None = None
+    if divergence_snapshot_enabled:
+        if ohlcv_db_path is None:
+            ohlcv_db_path = resolve_db_path(args.ohlcv_db)
+        divergence_snapshot = _load_divergence_snapshot(args, ticker, ohlcv_db_path, price_behavior_snapshot)
     ensure_snapshot_csv_written(
         matrix_rows,
         ticker,
@@ -1096,6 +1294,7 @@ def main() -> None:
         valuation_snapshot,
         dow_structure_snapshot,
         candlestick_snapshot,
+        divergence_snapshot,
     )
     print(
         format_snapshot_matrix(
@@ -1104,6 +1303,7 @@ def main() -> None:
             valuation_snapshot,
             dow_structure_snapshot,
             candlestick_snapshot,
+            divergence_snapshot,
         )
     )
 

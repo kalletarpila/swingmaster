@@ -6,6 +6,7 @@ import sqlite3
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+import re
 from typing import Any
 
 from analysis.candlestick_signal_reader import read_candlestick_signal_raw_export
@@ -334,7 +335,7 @@ MOVING_AVERAGE_COLUMNS: tuple[str, ...] = (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Print multi-quarter ticker snapshot with scores and percentiles")
     parser.add_argument("--db", required=True, help="Fundamentals SQLite database path")
-    parser.add_argument("--ticker", required=True, help="Ticker symbol")
+    parser.add_argument("--ticker", required=True, nargs="+", help="Ticker symbol or multiple ticker symbols")
     parser.add_argument("--quarters", type=int, default=4, help="Number of latest quarters to print")
     parser.add_argument(
         "--rule-id",
@@ -428,11 +429,34 @@ def parse_args() -> argparse.Namespace:
         parser.error("--ohlcv-db is required when --divergence-snapshot is used")
     if args.moving_average_snapshot and not args.ohlcv_db:
         parser.error("--ohlcv-db is required when --moving-average-snapshot is used")
+    parsed_tickers = _parse_ticker_args(args.ticker)
+    if not parsed_tickers:
+        parser.error("--ticker must contain at least one ticker")
+    args.ticker = parsed_tickers
     return args
 
 
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
+
+
+def _parse_ticker_args(raw_ticker_args: str | list[str] | tuple[str, ...]) -> list[str]:
+    if isinstance(raw_ticker_args, str):
+        raw_values = [raw_ticker_args]
+    else:
+        raw_values = list(raw_ticker_args)
+    tickers: list[str] = []
+    seen: set[str] = set()
+    for raw_value in raw_values:
+        for part in re.split(r"[\s,]+", raw_value.strip()):
+            if not part:
+                continue
+            ticker = part.upper()
+            if ticker in seen:
+                continue
+            seen.add(ticker)
+            tickers.append(ticker)
+    return tickers
 
 
 def _coerce_optional_float(value: object) -> float | None:
@@ -1355,10 +1379,11 @@ def _load_moving_average_snapshot(
     ).to_dict()
 
 
-def main() -> None:
-    args = parse_args()
+def _build_ticker_snapshot_output(
+    args: argparse.Namespace,
+    ticker: str,
+) -> str:
     db_path = resolve_db_path(args.db)
-    ticker = args.ticker.upper()
     output_date = resolve_output_date()
     if args.price_behavior_snapshot and not args.ohlcv_db:
         raise RuntimeError("PRICE_BEHAVIOR_SNAPSHOT_REQUIRES_OHLCV_DB")
@@ -1414,17 +1439,25 @@ def main() -> None:
         divergence_snapshot,
         moving_average_snapshot,
     )
-    print(
-        format_snapshot_matrix(
-            matrix_rows,
-            price_behavior_snapshot,
-            valuation_snapshot,
-            dow_structure_snapshot,
-            candlestick_snapshot,
-            divergence_snapshot,
-            moving_average_snapshot,
-        )
+    return format_snapshot_matrix(
+        matrix_rows,
+        price_behavior_snapshot,
+        valuation_snapshot,
+        dow_structure_snapshot,
+        candlestick_snapshot,
+        divergence_snapshot,
+        moving_average_snapshot,
     )
+
+
+def main() -> None:
+    args = parse_args()
+    ticker_list = _parse_ticker_args(args.ticker)
+    outputs = [
+        _build_ticker_snapshot_output(args, ticker)
+        for ticker in ticker_list
+    ]
+    print("\n\n".join(outputs))
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from analysis.candlestick_signal_reader import read_candlestick_signal_raw_export
 from analysis.stock_dow_structure_reader import read_stock_dow_structure_raw_export
 from swingmaster.fundamentals.price_behavior_snapshot import load_price_behavior_snapshot
 from swingmaster.fundamentals.price_behavior_snapshot import _resolve_market_for_ticker
@@ -230,6 +231,23 @@ DOW_RECENT_EVENTS_COLUMNS: tuple[str, ...] = (
     "run_id",
     "created_at_utc",
 )
+CANDLESTICK_EVENTS_COLUMNS: tuple[str, ...] = (
+    "ticker",
+    "market",
+    "as_of_date",
+    "sequence_window_trading_days",
+    "sequence_available_trading_days",
+    "sequence_window_start_date",
+    "sequence_window_end_date",
+    "sequence_index",
+    "finding_id",
+    "signal_date",
+    "pattern",
+    "pattern_group",
+    "signal_strength",
+    "rsi14",
+    "created_at",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -269,11 +287,29 @@ def parse_args() -> argparse.Namespace:
         default=60,
         help="Recent trading-day window for Dow structure snapshot",
     )
+    parser.add_argument(
+        "--candlestick-snapshot",
+        action="store_true",
+        help="Append raw candlestick event rows using analysis.db and OHLCV data",
+    )
+    parser.add_argument("--candlestick-analysis-db", default=None, help="Analysis SQLite database path for candlestick reader")
+    parser.add_argument("--candlestick-as-of-date", default=None, help="Explicit as-of date for candlestick snapshot")
+    parser.add_argument("--candlestick-market", default=None, help="Explicit market for candlestick snapshot")
+    parser.add_argument(
+        "--candlestick-recent-window-trading-days",
+        type=int,
+        default=60,
+        help="Recent trading-day window for candlestick snapshot",
+    )
     args = parser.parse_args()
     if args.dow_structure_snapshot and not args.dow_analysis_db:
         parser.error("--dow-analysis-db is required when --dow-structure-snapshot is used")
     if args.dow_structure_snapshot and not args.ohlcv_db:
         parser.error("--ohlcv-db is required when --dow-structure-snapshot is used")
+    if args.candlestick_snapshot and not args.candlestick_analysis_db:
+        parser.error("--candlestick-analysis-db is required when --candlestick-snapshot is used")
+    if args.candlestick_snapshot and not args.ohlcv_db:
+        parser.error("--ohlcv-db is required when --candlestick-snapshot is used")
     return args
 
 
@@ -719,6 +755,7 @@ def format_snapshot_matrix(
     price_behavior_snapshot: dict[str, str] | None = None,
     valuation_snapshot: dict[str, str] | None = None,
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
     lines: list[str] = []
     for metric in SECTIONED_METRICS:
@@ -740,6 +777,8 @@ def format_snapshot_matrix(
             lines.append(f"{metric};{valuation_snapshot.get(metric, '')}")
     if dow_structure_snapshot is not None:
         lines.extend(_format_dow_structure_snapshot_lines(dow_structure_snapshot))
+    if candlestick_snapshot is not None:
+        lines.extend(_format_candlestick_snapshot_lines(candlestick_snapshot))
     return "\n".join(lines)
 
 
@@ -760,6 +799,7 @@ def write_snapshot_csv(
     price_behavior_snapshot: dict[str, str] | None = None,
     valuation_snapshot: dict[str, str] | None = None,
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
     CSV_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}.csv"
@@ -783,6 +823,8 @@ def write_snapshot_csv(
                 writer.writerow([metric, _format_csv_value(valuation_snapshot.get(metric, ""))])
         if dow_structure_snapshot is not None:
             _write_dow_structure_snapshot_csv(writer, dow_structure_snapshot)
+        if candlestick_snapshot is not None:
+            _write_candlestick_snapshot_csv(writer, candlestick_snapshot)
     return output_path
 
 
@@ -793,6 +835,7 @@ def ensure_snapshot_csv_written(
     price_behavior_snapshot: dict[str, str] | None = None,
     valuation_snapshot: dict[str, str] | None = None,
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
     output_path = write_snapshot_csv(
         matrix_rows,
@@ -801,6 +844,7 @@ def ensure_snapshot_csv_written(
         price_behavior_snapshot,
         valuation_snapshot,
         dow_structure_snapshot,
+        candlestick_snapshot,
     )
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
@@ -811,6 +855,7 @@ def ensure_snapshot_csv_written(
         price_behavior_snapshot,
         valuation_snapshot,
         dow_structure_snapshot,
+        candlestick_snapshot,
     )
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
@@ -828,6 +873,10 @@ def _format_dow_export_value(value: Any) -> str:
 
 
 def _format_dow_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> list[str]:
+    return [_format_dow_export_value(row.get(column)) for column in columns]
+
+
+def _format_candlestick_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> list[str]:
     return [_format_dow_export_value(row.get(column)) for column in columns]
 
 
@@ -861,6 +910,24 @@ def _write_dow_structure_snapshot_csv(
         writer.writerow([_format_csv_value(value) for value in _format_dow_row_values(row, DOW_RECENT_EVENTS_COLUMNS)])
 
 
+def _format_candlestick_snapshot_lines(candlestick_snapshot: dict[str, list[dict[str, Any]]]) -> list[str]:
+    lines = ["", "section;candlestick_events_60td", ";".join(CANDLESTICK_EVENTS_COLUMNS)]
+    for row in candlestick_snapshot.get("candlestick_event_rows_60td", []):
+        lines.append(";".join(_format_candlestick_row_values(row, CANDLESTICK_EVENTS_COLUMNS)))
+    return lines
+
+
+def _write_candlestick_snapshot_csv(
+    writer: csv.writer,
+    candlestick_snapshot: dict[str, list[dict[str, Any]]],
+) -> None:
+    writer.writerow([])
+    writer.writerow(["section", "candlestick_events_60td"])
+    writer.writerow(list(CANDLESTICK_EVENTS_COLUMNS))
+    for row in candlestick_snapshot.get("candlestick_event_rows_60td", []):
+        writer.writerow([_format_csv_value(value) for value in _format_candlestick_row_values(row, CANDLESTICK_EVENTS_COLUMNS)])
+
+
 def _resolve_dow_market(args: argparse.Namespace, ticker: str) -> str | None:
     dow_market = getattr(args, "dow_market", None)
     if dow_market is not None:
@@ -888,6 +955,14 @@ def _fetch_latest_valid_close_date_for_dow(
             params.append(market)
         row = conn.execute(query, params).fetchone()
     return None if row is None else row[0]
+
+
+def _fetch_latest_valid_close_date_for_candlestick(
+    ohlcv_db_path: Path,
+    ticker: str,
+    market: str | None,
+) -> str | None:
+    return _fetch_latest_valid_close_date_for_dow(ohlcv_db_path, ticker, market)
 
 
 def _derive_dow_as_of_date(
@@ -930,6 +1005,53 @@ def _load_dow_structure_snapshot(
     ).to_dict()
 
 
+def _resolve_candlestick_market(args: argparse.Namespace, ticker: str) -> str | None:
+    candlestick_market = getattr(args, "candlestick_market", None)
+    if candlestick_market is not None:
+        return candlestick_market
+    if getattr(args, "price_behavior_snapshot", False):
+        return _resolve_market_for_ticker(ticker)
+    return None
+
+
+def _derive_candlestick_as_of_date(
+    args: argparse.Namespace,
+    ticker: str,
+    ohlcv_db_path: Path,
+    price_behavior_snapshot: dict[str, str] | None,
+    market: str | None,
+) -> str:
+    candlestick_as_of_date = getattr(args, "candlestick_as_of_date", None)
+    if candlestick_as_of_date:
+        return candlestick_as_of_date
+    if price_behavior_snapshot is not None:
+        price_behavior_as_of_date = price_behavior_snapshot.get("price_behavior_as_of_date", "")
+        if price_behavior_as_of_date:
+            return price_behavior_as_of_date
+    latest_valid_close_date = _fetch_latest_valid_close_date_for_candlestick(ohlcv_db_path, ticker, market)
+    if latest_valid_close_date is None:
+        raise RuntimeError(f"CANDLESTICK_AS_OF_DATE_NOT_FOUND:{ticker}")
+    return latest_valid_close_date
+
+
+def _load_candlestick_snapshot(
+    args: argparse.Namespace,
+    ticker: str,
+    ohlcv_db_path: Path,
+    price_behavior_snapshot: dict[str, str] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    market = _resolve_candlestick_market(args, ticker)
+    as_of_date = _derive_candlestick_as_of_date(args, ticker, ohlcv_db_path, price_behavior_snapshot, market)
+    return read_candlestick_signal_raw_export(
+        analysis_db_path=str(resolve_db_path(args.candlestick_analysis_db)),
+        osakedata_db_path=str(ohlcv_db_path),
+        ticker=ticker,
+        as_of_date=as_of_date,
+        market=market,
+        recent_window_trading_days=getattr(args, "candlestick_recent_window_trading_days", 60),
+    ).to_dict()
+
+
 def main() -> None:
     args = parse_args()
     db_path = resolve_db_path(args.db)
@@ -938,6 +1060,7 @@ def main() -> None:
     if args.price_behavior_snapshot and not args.ohlcv_db:
         raise RuntimeError("PRICE_BEHAVIOR_SNAPSHOT_REQUIRES_OHLCV_DB")
     dow_structure_snapshot_enabled = getattr(args, "dow_structure_snapshot", False)
+    candlestick_snapshot_enabled = getattr(args, "candlestick_snapshot", False)
     with sqlite3.connect(str(db_path)) as conn:
         matrix_rows = build_snapshot_matrix(
             conn=conn,
@@ -953,13 +1076,18 @@ def main() -> None:
         ohlcv_db_path = resolve_db_path(args.ohlcv_db)
         latest_quarter_date = matrix_rows[-1]["quarter"]
         price_behavior_snapshot = load_price_behavior_snapshot(ohlcv_db_path, ticker, latest_quarter_date)
-    elif dow_structure_snapshot_enabled:
+    elif dow_structure_snapshot_enabled or candlestick_snapshot_enabled:
         ohlcv_db_path = resolve_db_path(args.ohlcv_db)
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None
     if dow_structure_snapshot_enabled:
         if ohlcv_db_path is None:
             ohlcv_db_path = resolve_db_path(args.ohlcv_db)
         dow_structure_snapshot = _load_dow_structure_snapshot(args, ticker, ohlcv_db_path, price_behavior_snapshot)
+    candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None
+    if candlestick_snapshot_enabled:
+        if ohlcv_db_path is None:
+            ohlcv_db_path = resolve_db_path(args.ohlcv_db)
+        candlestick_snapshot = _load_candlestick_snapshot(args, ticker, ohlcv_db_path, price_behavior_snapshot)
     ensure_snapshot_csv_written(
         matrix_rows,
         ticker,
@@ -967,8 +1095,17 @@ def main() -> None:
         price_behavior_snapshot,
         valuation_snapshot,
         dow_structure_snapshot,
+        candlestick_snapshot,
     )
-    print(format_snapshot_matrix(matrix_rows, price_behavior_snapshot, valuation_snapshot, dow_structure_snapshot))
+    print(
+        format_snapshot_matrix(
+            matrix_rows,
+            price_behavior_snapshot,
+            valuation_snapshot,
+            dow_structure_snapshot,
+            candlestick_snapshot,
+        )
+    )
 
 
 if __name__ == "__main__":

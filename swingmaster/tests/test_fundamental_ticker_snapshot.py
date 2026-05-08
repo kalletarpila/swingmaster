@@ -1232,6 +1232,466 @@ def test_dow_snapshot_prints_empty_recent_event_section(monkeypatch, capsys, tmp
     assert len(recent_lines) == 1
 
 
+def test_backward_compatibility_without_candlestick_flag(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_no_candlestick.db"
+    run_migration(db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out.strip()
+
+    assert "section;candlestick_events_60td" not in cli_output
+
+
+def test_candlestick_snapshot_validation_requires_analysis_db(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_fundamental_ticker_snapshot.py",
+            "--db",
+            "fund.db",
+            "--ticker",
+            "VRT",
+            "--candlestick-snapshot",
+            "--ohlcv-db",
+            "os.db",
+        ],
+    )
+    with pytest.raises(SystemExit, match="2"):
+        run_fundamental_ticker_snapshot.parse_args()
+
+
+def test_candlestick_snapshot_validation_requires_ohlcv_db(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_fundamental_ticker_snapshot.py",
+            "--db",
+            "fund.db",
+            "--ticker",
+            "VRT",
+            "--candlestick-snapshot",
+            "--candlestick-analysis-db",
+            "analysis.db",
+        ],
+    )
+    with pytest.raises(SystemExit, match="2"):
+        run_fundamental_ticker_snapshot.parse_args()
+
+
+def test_candlestick_snapshot_appends_section_and_rows(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_candlestick.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_candlestick_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    for pvm in ("2026-04-29", "2026-04-30"):
+        _insert_ohlcv_close(ohlcv_db_path, "VRT", pvm, 400.0, "usa")
+    _insert_candlestick_finding(analysis_db_path, 1, "VRT", "2026-04-30", "Hammer", 0.75, 28.5)
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            candlestick_snapshot=True,
+            candlestick_analysis_db=str(analysis_db_path),
+            candlestick_as_of_date="2026-04-30",
+            candlestick_market="usa",
+            candlestick_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "section;candlestick_events_60td" in cli_output
+    assert "ticker;market;as_of_date;sequence_window_trading_days;sequence_available_trading_days;sequence_window_start_date;sequence_window_end_date;sequence_index;finding_id;signal_date;pattern;pattern_group;signal_strength;rsi14;created_at" in cli_output
+    assert ";1;1;2026-04-30;Hammer;BULLISH_CANDLE;0.75;28.5;" in cli_output
+
+
+def test_candlestick_snapshot_no_lookahead_and_combo_exclusion(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_candlestick_no_lookahead.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_candlestick_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    for pvm in ("2026-04-28", "2026-04-29", "2026-04-30"):
+        _insert_ohlcv_close(ohlcv_db_path, "VRT", pvm, 400.0, "usa")
+    _insert_candlestick_finding(analysis_db_path, 1, "VRT", "2026-04-29", "Hammer", 0.75, 28.5)
+    _insert_candlestick_finding(analysis_db_path, 2, "VRT", "2026-05-01", "Bullish Engulfing", 0.65, 32.0)
+    _insert_candlestick_finding(analysis_db_path, 3, "VRT", "2026-04-30", "BullDiv & Hammer", 0.95, 25.0)
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            candlestick_snapshot=True,
+            candlestick_analysis_db=str(analysis_db_path),
+            candlestick_as_of_date="2026-04-30",
+            candlestick_market="usa",
+            candlestick_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "Hammer;BULLISH_CANDLE" in cli_output
+    assert "2026-05-01" not in cli_output
+    assert "BullDiv & Hammer" not in cli_output
+
+
+def test_candlestick_snapshot_sequence_ordering_through_cli(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_candlestick_order.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_candlestick_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    for pvm in ("2026-04-28", "2026-04-29", "2026-04-30"):
+        _insert_ohlcv_close(ohlcv_db_path, "VRT", pvm, 400.0, "usa")
+    _insert_candlestick_finding(analysis_db_path, 3, "VRT", "2026-04-30", "Shooting Star", 0.45, 71.0)
+    _insert_candlestick_finding(analysis_db_path, 1, "VRT", "2026-04-29", "Hammer", 0.75, 28.5)
+    _insert_candlestick_finding(analysis_db_path, 2, "VRT", "2026-04-30", "Morning Star", 0.55, 33.0)
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            candlestick_snapshot=True,
+            candlestick_analysis_db=str(analysis_db_path),
+            candlestick_as_of_date="2026-04-30",
+            candlestick_market="usa",
+            candlestick_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+    recent_section = cli_output.split("section;candlestick_events_60td\n", 1)[1].strip().splitlines()
+    event_rows = [line.split(";") for line in recent_section[1:]]
+
+    assert [row[7] for row in event_rows] == ["1", "2", "3"]
+    assert [row[8] for row in event_rows] == ["1", "2", "3"]
+    assert [row[10] for row in event_rows] == ["Hammer", "Morning Star", "Shooting Star"]
+
+
+def test_candlestick_snapshot_empty_recent_section(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_candlestick_empty.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_candlestick_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            candlestick_snapshot=True,
+            candlestick_analysis_db=str(analysis_db_path),
+            candlestick_as_of_date="2026-04-30",
+            candlestick_market="usa",
+            candlestick_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "section;candlestick_events_60td" in cli_output
+    recent_section = cli_output.split("section;candlestick_events_60td\n", 1)[1]
+    recent_lines = recent_section.strip().splitlines()
+    assert recent_lines[0].startswith("ticker;market;as_of_date;sequence_window_trading_days;")
+    assert len(recent_lines) == 1
+
+
+def test_candlestick_snapshot_has_no_summary_counts(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_candlestick_no_summary.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_candlestick_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            candlestick_snapshot=True,
+            candlestick_analysis_db=str(analysis_db_path),
+            candlestick_as_of_date="2026-04-30",
+            candlestick_market="usa",
+            candlestick_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "recent_event_summary" not in cli_output
+    assert "bullish_count_60td" not in cli_output
+    assert "bearish_count_60td" not in cli_output
+    assert "combo_count_60td" not in cli_output
+
+
+def test_candlestick_as_of_date_derives_from_price_behavior_snapshot(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_candlestick_derived_pb.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_candlestick_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "VRT",
+        260,
+        anchor_close=400.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=300.0,
+        close_1_after_report=303.0,
+        close_3_after_report=309.0,
+        close_20_after_report=330.0,
+    )
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "^GSPC",
+        260,
+        anchor_close=200.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=180.0,
+        close_1_after_report=181.0,
+        close_3_after_report=183.0,
+        close_20_after_report=190.0,
+        return_6m_pct=14.59,
+    )
+    _insert_candlestick_finding(analysis_db_path, 1, "VRT", "2026-04-30", "Hammer", 0.75, 28.5)
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=True,
+            candlestick_snapshot=True,
+            candlestick_analysis_db=str(analysis_db_path),
+            candlestick_as_of_date=None,
+            candlestick_market=None,
+            candlestick_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2099-12-31")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "price_behavior_as_of_date;2026-04-30" in cli_output
+    assert ";usa;2026-04-30;60;" in cli_output
+    assert "2099-12-31;60;" not in cli_output
+
+
+def test_candlestick_as_of_date_falls_back_to_latest_valid_close_date(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_candlestick_derived_close.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_candlestick_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-29", 390.0, "usa")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_candlestick_finding(analysis_db_path, 1, "VRT", "2026-04-30", "Hammer", 0.75, 28.5)
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            candlestick_snapshot=True,
+            candlestick_analysis_db=str(analysis_db_path),
+            candlestick_as_of_date=None,
+            candlestick_market="usa",
+            candlestick_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2099-12-31")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert ";usa;2026-04-30;60;" in cli_output
+    assert "2099-12-31;60;" not in cli_output
+
+
+def test_candlestick_snapshot_csv_uses_decimal_comma(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_candlestick_csv.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_candlestick_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_candlestick_finding(analysis_db_path, 1, "VRT", "2026-04-30", "Hammer", 0.75, 28.5)
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            candlestick_snapshot=True,
+            candlestick_analysis_db=str(analysis_db_path),
+            candlestick_as_of_date="2026-04-30",
+            candlestick_market="usa",
+            candlestick_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    _ = capsys.readouterr().out
+    csv_content = (tmp_path / "ticker_fundamentals" / "VRT_2026-04-27.csv").read_text(encoding="utf-8")
+
+    assert "section;candlestick_events_60td" in csv_content
+    assert "Hammer;BULLISH_CANDLE;0,75;28,5;" in csv_content
+
+
+def test_candlestick_snapshot_does_not_write_to_analysis_or_ohlcv_db(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_candlestick_no_write.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_candlestick_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_candlestick_finding(analysis_db_path, 1, "VRT", "2026-04-30", "Hammer", 0.75, 28.5)
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            candlestick_snapshot=True,
+            candlestick_analysis_db=str(analysis_db_path),
+            candlestick_as_of_date="2026-04-30",
+            candlestick_market="usa",
+            candlestick_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    before_findings = _count_rows(analysis_db_path, "analysis_findings")
+    before_ohlcv = _count_rows(ohlcv_db_path, "osakedata")
+
+    ticker_snapshot_main()
+
+    assert _count_rows(analysis_db_path, "analysis_findings") == before_findings
+    assert _count_rows(ohlcv_db_path, "osakedata") == before_ohlcv
+
+
 def _insert_ttm_row(
     conn: sqlite3.Connection,
     ticker: str,
@@ -1395,6 +1855,24 @@ def _create_dow_analysis_schema(db_path: Path) -> None:
         conn.commit()
 
 
+def _create_candlestick_analysis_schema(db_path: Path) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE analysis_findings (
+                id INTEGER PRIMARY KEY,
+                ticker TEXT,
+                date TEXT,
+                pattern TEXT,
+                signal_strength REAL,
+                rsi14 REAL,
+                created_at TEXT
+            )
+            """
+        )
+        conn.commit()
+
+
 def _insert_dow_status(
     db_path: Path,
     ticker: str,
@@ -1461,6 +1939,26 @@ def _insert_ohlcv_close(db_path: Path, ticker: str, pvm: str, close: float | Non
             VALUES (?, ?, 1.0, 2.0, 0.5, ?, 1000, ?)
             """,
             (ticker.upper(), pvm, close, market),
+        )
+        conn.commit()
+
+
+def _insert_candlestick_finding(
+    db_path: Path,
+    finding_id: int,
+    ticker: str,
+    signal_date: str,
+    pattern: str,
+    signal_strength: float | None,
+    rsi14: float | None,
+) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO analysis_findings (id, ticker, date, pattern, signal_strength, rsi14, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, '2026-04-30T00:00:00Z')
+            """,
+            (finding_id, ticker, signal_date, pattern, signal_strength, rsi14),
         )
         conn.commit()
 

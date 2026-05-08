@@ -6,8 +6,11 @@ import sqlite3
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
+from analysis.stock_dow_structure_reader import read_stock_dow_structure_raw_export
 from swingmaster.fundamentals.price_behavior_snapshot import load_price_behavior_snapshot
+from swingmaster.fundamentals.price_behavior_snapshot import _resolve_market_for_ticker
 from swingmaster.fundamentals.score_percentile import FUND_SCORE_PERCENTILE_V2_PRE, compute_percentiles
 
 
@@ -132,6 +135,101 @@ VALUATION_SNAPSHOT_METRICS: tuple[str, ...] = (
     "valuation_status",
     "valuation_model_version",
 )
+DOW_CONTEXT_SNAPSHOT_COLUMNS: tuple[str, ...] = (
+    "ticker",
+    "market",
+    "as_of_date",
+    "price_source",
+    "pivot_radius",
+    "status_found",
+    "status_last_status",
+    "calculated_from_date",
+    "calculated_through_date",
+    "latest_valid_close_date_on_or_before_as_of_date",
+    "coverage_status",
+    "coverage_reason",
+    "latest_event_found",
+    "latest_event_id",
+    "latest_event_type",
+    "latest_event_date",
+    "latest_confirmed_as_of_date",
+    "trend_state",
+    "dow_label_high",
+    "dow_label_low",
+    "last_high_label",
+    "last_high_label_date",
+    "last_high_label_price",
+    "last_low_label",
+    "last_low_label_date",
+    "last_low_label_price",
+    "active_bos_high_date",
+    "active_bos_high_price",
+    "active_bos_low_date",
+    "active_bos_low_price",
+    "bos_up_count",
+    "bos_down_count",
+    "break_signal",
+    "break_level_date",
+    "break_level_price",
+    "break_close_price",
+    "reset_marker",
+    "reset_reason",
+    "structure_epoch_id",
+    "structure_epoch_start_date",
+    "recent_event_window_trading_days",
+    "recent_event_available_trading_days",
+    "recent_event_window_start_date",
+    "recent_event_window_end_date",
+    "dow_warning_flags",
+)
+DOW_RECENT_EVENTS_COLUMNS: tuple[str, ...] = (
+    "ticker",
+    "market",
+    "as_of_date",
+    "price_source",
+    "pivot_radius",
+    "sequence_window_trading_days",
+    "sequence_available_trading_days",
+    "sequence_window_start_date",
+    "sequence_window_end_date",
+    "sequence_index",
+    "event_id",
+    "event_date",
+    "confirmed_as_of_date",
+    "event_type",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "structure_price",
+    "dow_label_high",
+    "dow_label_low",
+    "trend_state",
+    "last_high_label",
+    "last_high_label_date",
+    "last_high_label_price",
+    "last_low_label",
+    "last_low_label_date",
+    "last_low_label_price",
+    "active_bos_high_date",
+    "active_bos_high_price",
+    "active_bos_low_date",
+    "active_bos_low_price",
+    "bos_up_count",
+    "bos_down_count",
+    "break_signal",
+    "break_level_date",
+    "break_level_price",
+    "break_close_price",
+    "reset_marker",
+    "reset_reason",
+    "structure_epoch_id",
+    "structure_epoch_start_date",
+    "calc_version",
+    "run_id",
+    "created_at_utc",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -155,7 +253,28 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Append latest price behavior snapshot block using OHLCV data",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--dow-structure-snapshot",
+        action="store_true",
+        help="Append raw Dow structure snapshot blocks using analysis.db and OHLCV data",
+    )
+    parser.add_argument("--dow-analysis-db", default=None, help="Analysis SQLite database path for Dow structure reader")
+    parser.add_argument("--dow-as-of-date", default=None, help="Explicit as-of date for Dow structure snapshot")
+    parser.add_argument("--dow-market", default=None, help="Explicit market for Dow structure snapshot")
+    parser.add_argument("--dow-pivot-radius", type=int, default=3, help="Pivot radius for Dow structure snapshot")
+    parser.add_argument("--dow-price-source", default="close", help="Price source for Dow structure snapshot")
+    parser.add_argument(
+        "--dow-recent-window-trading-days",
+        type=int,
+        default=60,
+        help="Recent trading-day window for Dow structure snapshot",
+    )
+    args = parser.parse_args()
+    if args.dow_structure_snapshot and not args.dow_analysis_db:
+        parser.error("--dow-analysis-db is required when --dow-structure-snapshot is used")
+    if args.dow_structure_snapshot and not args.ohlcv_db:
+        parser.error("--ohlcv-db is required when --dow-structure-snapshot is used")
+    return args
 
 
 def resolve_db_path(db_arg: str) -> Path:
@@ -599,6 +718,7 @@ def format_snapshot_matrix(
     matrix_rows: list[dict[str, str]],
     price_behavior_snapshot: dict[str, str] | None = None,
     valuation_snapshot: dict[str, str] | None = None,
+    dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
     lines: list[str] = []
     for metric in SECTIONED_METRICS:
@@ -618,6 +738,8 @@ def format_snapshot_matrix(
         lines.append("valuation_snapshot")
         for metric in VALUATION_SNAPSHOT_METRICS:
             lines.append(f"{metric};{valuation_snapshot.get(metric, '')}")
+    if dow_structure_snapshot is not None:
+        lines.extend(_format_dow_structure_snapshot_lines(dow_structure_snapshot))
     return "\n".join(lines)
 
 
@@ -637,6 +759,7 @@ def write_snapshot_csv(
     output_date: str,
     price_behavior_snapshot: dict[str, str] | None = None,
     valuation_snapshot: dict[str, str] | None = None,
+    dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
     CSV_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}.csv"
@@ -658,6 +781,8 @@ def write_snapshot_csv(
             writer.writerow(["valuation_snapshot"])
             for metric in VALUATION_SNAPSHOT_METRICS:
                 writer.writerow([metric, _format_csv_value(valuation_snapshot.get(metric, ""))])
+        if dow_structure_snapshot is not None:
+            _write_dow_structure_snapshot_csv(writer, dow_structure_snapshot)
     return output_path
 
 
@@ -667,14 +792,142 @@ def ensure_snapshot_csv_written(
     output_date: str,
     price_behavior_snapshot: dict[str, str] | None = None,
     valuation_snapshot: dict[str, str] | None = None,
+    dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
-    output_path = write_snapshot_csv(matrix_rows, ticker, output_date, price_behavior_snapshot, valuation_snapshot)
+    output_path = write_snapshot_csv(
+        matrix_rows,
+        ticker,
+        output_date,
+        price_behavior_snapshot,
+        valuation_snapshot,
+        dow_structure_snapshot,
+    )
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
-    output_path = write_snapshot_csv(matrix_rows, ticker, output_date, price_behavior_snapshot, valuation_snapshot)
+    output_path = write_snapshot_csv(
+        matrix_rows,
+        ticker,
+        output_date,
+        price_behavior_snapshot,
+        valuation_snapshot,
+        dow_structure_snapshot,
+    )
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
     raise RuntimeError(f"FUNDAMENTAL_TICKER_SNAPSHOT_CSV_NOT_WRITTEN:{output_path}")
+
+
+def _format_dow_export_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return "|".join(str(item) for item in value)
+    return str(value)
+
+
+def _format_dow_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> list[str]:
+    return [_format_dow_export_value(row.get(column)) for column in columns]
+
+
+def _format_dow_structure_snapshot_lines(dow_structure_snapshot: dict[str, list[dict[str, Any]]]) -> list[str]:
+    lines = ["", "section;dow_context_snapshot", ";".join(DOW_CONTEXT_SNAPSHOT_COLUMNS)]
+    context_rows = dow_structure_snapshot.get("context_snapshot_rows", [])
+    for row in context_rows:
+        lines.append(";".join(_format_dow_row_values(row, DOW_CONTEXT_SNAPSHOT_COLUMNS)))
+    lines.append("")
+    lines.append("section;dow_recent_events_60td")
+    lines.append(";".join(DOW_RECENT_EVENTS_COLUMNS))
+    recent_rows = dow_structure_snapshot.get("recent_event_rows_60td", [])
+    for row in recent_rows:
+        lines.append(";".join(_format_dow_row_values(row, DOW_RECENT_EVENTS_COLUMNS)))
+    return lines
+
+
+def _write_dow_structure_snapshot_csv(
+    writer: csv.writer,
+    dow_structure_snapshot: dict[str, list[dict[str, Any]]],
+) -> None:
+    writer.writerow([])
+    writer.writerow(["section", "dow_context_snapshot"])
+    writer.writerow(list(DOW_CONTEXT_SNAPSHOT_COLUMNS))
+    for row in dow_structure_snapshot.get("context_snapshot_rows", []):
+        writer.writerow([_format_csv_value(value) for value in _format_dow_row_values(row, DOW_CONTEXT_SNAPSHOT_COLUMNS)])
+    writer.writerow([])
+    writer.writerow(["section", "dow_recent_events_60td"])
+    writer.writerow(list(DOW_RECENT_EVENTS_COLUMNS))
+    for row in dow_structure_snapshot.get("recent_event_rows_60td", []):
+        writer.writerow([_format_csv_value(value) for value in _format_dow_row_values(row, DOW_RECENT_EVENTS_COLUMNS)])
+
+
+def _resolve_dow_market(args: argparse.Namespace, ticker: str) -> str | None:
+    dow_market = getattr(args, "dow_market", None)
+    if dow_market is not None:
+        return dow_market
+    if getattr(args, "price_behavior_snapshot", False):
+        return _resolve_market_for_ticker(ticker)
+    return None
+
+
+def _fetch_latest_valid_close_date_for_dow(
+    ohlcv_db_path: Path,
+    ticker: str,
+    market: str | None,
+) -> str | None:
+    with sqlite3.connect(str(ohlcv_db_path)) as conn:
+        query = """
+        SELECT MAX(pvm)
+        FROM osakedata
+        WHERE osake = ?
+          AND close IS NOT NULL
+        """
+        params: list[Any] = [ticker]
+        if market is not None:
+            query += " AND market = ?"
+            params.append(market)
+        row = conn.execute(query, params).fetchone()
+    return None if row is None else row[0]
+
+
+def _derive_dow_as_of_date(
+    args: argparse.Namespace,
+    ticker: str,
+    ohlcv_db_path: Path,
+    price_behavior_snapshot: dict[str, str] | None,
+    market: str | None,
+) -> str:
+    dow_as_of_date = getattr(args, "dow_as_of_date", None)
+    if dow_as_of_date:
+        return dow_as_of_date
+    if price_behavior_snapshot is not None:
+        price_behavior_as_of_date = price_behavior_snapshot.get("price_behavior_as_of_date", "")
+        if price_behavior_as_of_date:
+            return price_behavior_as_of_date
+    latest_valid_close_date = _fetch_latest_valid_close_date_for_dow(ohlcv_db_path, ticker, market)
+    if latest_valid_close_date is None:
+        raise RuntimeError(f"DOW_AS_OF_DATE_NOT_FOUND:{ticker}")
+    return latest_valid_close_date
+
+
+def _load_dow_structure_snapshot(
+    args: argparse.Namespace,
+    ticker: str,
+    ohlcv_db_path: Path,
+    price_behavior_snapshot: dict[str, str] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    market = _resolve_dow_market(args, ticker)
+    as_of_date = _derive_dow_as_of_date(args, ticker, ohlcv_db_path, price_behavior_snapshot, market)
+    return read_stock_dow_structure_raw_export(
+        analysis_db_path=str(resolve_db_path(args.dow_analysis_db)),
+        osakedata_db_path=str(ohlcv_db_path),
+        ticker=ticker,
+        as_of_date=as_of_date,
+        market=market,
+        pivot_radius=getattr(args, "dow_pivot_radius", 3),
+        price_source=getattr(args, "dow_price_source", "close"),
+        recent_window_trading_days=getattr(args, "dow_recent_window_trading_days", 60),
+    ).to_dict()
 
 
 def main() -> None:
@@ -684,6 +937,7 @@ def main() -> None:
     output_date = resolve_output_date()
     if args.price_behavior_snapshot and not args.ohlcv_db:
         raise RuntimeError("PRICE_BEHAVIOR_SNAPSHOT_REQUIRES_OHLCV_DB")
+    dow_structure_snapshot_enabled = getattr(args, "dow_structure_snapshot", False)
     with sqlite3.connect(str(db_path)) as conn:
         matrix_rows = build_snapshot_matrix(
             conn=conn,
@@ -694,12 +948,27 @@ def main() -> None:
         )
         valuation_snapshot = load_latest_valuation_snapshot(conn, ticker)
     price_behavior_snapshot: dict[str, str] | None = None
+    ohlcv_db_path: Path | None = None
     if args.price_behavior_snapshot:
         ohlcv_db_path = resolve_db_path(args.ohlcv_db)
         latest_quarter_date = matrix_rows[-1]["quarter"]
         price_behavior_snapshot = load_price_behavior_snapshot(ohlcv_db_path, ticker, latest_quarter_date)
-    ensure_snapshot_csv_written(matrix_rows, ticker, output_date, price_behavior_snapshot, valuation_snapshot)
-    print(format_snapshot_matrix(matrix_rows, price_behavior_snapshot, valuation_snapshot))
+    elif dow_structure_snapshot_enabled:
+        ohlcv_db_path = resolve_db_path(args.ohlcv_db)
+    dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None
+    if dow_structure_snapshot_enabled:
+        if ohlcv_db_path is None:
+            ohlcv_db_path = resolve_db_path(args.ohlcv_db)
+        dow_structure_snapshot = _load_dow_structure_snapshot(args, ticker, ohlcv_db_path, price_behavior_snapshot)
+    ensure_snapshot_csv_written(
+        matrix_rows,
+        ticker,
+        output_date,
+        price_behavior_snapshot,
+        valuation_snapshot,
+        dow_structure_snapshot,
+    )
+    print(format_snapshot_matrix(matrix_rows, price_behavior_snapshot, valuation_snapshot, dow_structure_snapshot))
 
 
 if __name__ == "__main__":

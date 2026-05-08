@@ -4,6 +4,7 @@ import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 import pytest
 
 from swingmaster.cli import run_fundamental_ticker_snapshot
@@ -776,6 +777,461 @@ def test_price_behavior_snapshot_missing_benchmark_and_future_data(monkeypatch, 
             assert line == "post_earnings_drift_20d_pct;"
 
 
+def test_backward_compatibility_without_dow_flag(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_no_dow.db"
+    run_migration(db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out.strip()
+
+    assert "section;dow_context_snapshot" not in cli_output
+    assert "section;dow_recent_events_60td" not in cli_output
+
+
+def test_dow_snapshot_validation_requires_analysis_db(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_fundamental_ticker_snapshot.py",
+            "--db",
+            "fund.db",
+            "--ticker",
+            "VRT",
+            "--dow-structure-snapshot",
+            "--ohlcv-db",
+            "os.db",
+        ],
+    )
+    with pytest.raises(SystemExit, match="2"):
+        run_fundamental_ticker_snapshot.parse_args()
+
+
+def test_dow_snapshot_validation_requires_ohlcv_db(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_fundamental_ticker_snapshot.py",
+            "--db",
+            "fund.db",
+            "--ticker",
+            "VRT",
+            "--dow-structure-snapshot",
+            "--dow-analysis-db",
+            "analysis.db",
+        ],
+    )
+    with pytest.raises(SystemExit, match="2"):
+        run_fundamental_ticker_snapshot.parse_args()
+
+
+def test_dow_snapshot_appends_sections_and_headers(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_dow.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_dow_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_dow_status(analysis_db_path, "VRT", "usa", "2026-04-30", "OK")
+    _insert_dow_event(analysis_db_path, 1, "VRT", "usa", "2026-04-29", "2026-04-30", "TREND_CHANGE")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=True,
+            dow_analysis_db=str(analysis_db_path),
+            dow_as_of_date="2026-04-30",
+            dow_market="usa",
+            dow_pivot_radius=3,
+            dow_price_source="close",
+            dow_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out.strip()
+
+    assert "section;dow_context_snapshot" in cli_output
+    assert "section;dow_recent_events_60td" in cli_output
+    assert "ticker;market;as_of_date;price_source;pivot_radius;" in cli_output
+    assert "sequence_window_trading_days;sequence_available_trading_days;sequence_window_start_date;sequence_window_end_date;sequence_index;" in cli_output
+
+
+def test_dow_context_row_uses_latest_confirmed_event_from_event_table(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_dow_context.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_dow_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    for pvm in ("2026-04-28", "2026-04-29", "2026-04-30"):
+        _insert_ohlcv_close(ohlcv_db_path, "VRT", pvm, 400.0, "usa")
+    _insert_dow_status(
+        analysis_db_path,
+        "VRT",
+        "usa",
+        "2026-04-30",
+        "OK",
+        latest_event_date="2026-04-30",
+        latest_event_confirmed_as_of_date="2099-01-01",
+    )
+    _insert_dow_event(analysis_db_path, 1, "VRT", "usa", "2026-04-28", "2026-04-29", "PIVOT_LOW")
+    _insert_dow_event(analysis_db_path, 2, "VRT", "usa", "2026-04-29", "2026-04-30", "BOS_UP")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=True,
+            dow_analysis_db=str(analysis_db_path),
+            dow_as_of_date="2026-04-30",
+            dow_market="usa",
+            dow_pivot_radius=3,
+            dow_price_source="close",
+            dow_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert ";OK;calculated_through_date covers latest valid close date;true;2;BOS_UP;2026-04-29;2026-04-30;" in cli_output
+    assert "2099-01-01" not in cli_output
+
+
+def test_dow_snapshot_no_lookahead_and_recent_sequence_order(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_dow_sequence.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_dow_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    for pvm in ("2026-04-27", "2026-04-28", "2026-04-29", "2026-04-30"):
+        _insert_ohlcv_close(ohlcv_db_path, "VRT", pvm, 400.0, "usa")
+    _insert_dow_status(analysis_db_path, "VRT", "usa", "2026-04-30", "OK")
+    _insert_dow_event(analysis_db_path, 2, "VRT", "usa", "2026-04-29", "2026-04-30", "TREND_CHANGE")
+    _insert_dow_event(analysis_db_path, 1, "VRT", "usa", "2026-04-28", "2026-04-29", "PIVOT_LOW")
+    _insert_dow_event(analysis_db_path, 3, "VRT", "usa", "2026-04-30", "2026-05-02", "RESET")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=True,
+            dow_analysis_db=str(analysis_db_path),
+            dow_as_of_date="2026-04-30",
+            dow_market="usa",
+            dow_pivot_radius=3,
+            dow_price_source="close",
+            dow_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "latest_event_type;BOS_UP" not in cli_output
+    assert "2026-05-02" not in cli_output
+    recent_section = cli_output.split("section;dow_recent_events_60td\n", 1)[1].strip().splitlines()
+    event_rows = [line.split(";") for line in recent_section[1:]]
+    assert [row[9] for row in event_rows] == ["1", "2"]
+    assert [row[10] for row in event_rows] == ["1", "2"]
+    assert [row[13] for row in event_rows] == ["PIVOT_LOW", "TREND_CHANGE"]
+
+
+def test_dow_snapshot_has_no_summary_counts(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_no_summary.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_dow_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_dow_status(analysis_db_path, "VRT", "usa", "2026-04-30", "OK")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=True,
+            dow_analysis_db=str(analysis_db_path),
+            dow_as_of_date="2026-04-30",
+            dow_market="usa",
+            dow_pivot_radius=3,
+            dow_price_source="close",
+            dow_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "recent_event_summary" not in cli_output
+    assert "bos_up_count_60td" not in cli_output
+    assert "reset_count_60td" not in cli_output
+    assert "trend_change_count_60td" not in cli_output
+
+
+def test_dow_as_of_date_derives_from_price_behavior_snapshot(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_derived_price_behavior.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_dow_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "VRT",
+        260,
+        anchor_close=400.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=300.0,
+        close_1_after_report=303.0,
+        close_3_after_report=309.0,
+        close_20_after_report=330.0,
+    )
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "^GSPC",
+        260,
+        anchor_close=200.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=180.0,
+        close_1_after_report=181.0,
+        close_3_after_report=183.0,
+        close_20_after_report=190.0,
+        return_6m_pct=14.59,
+    )
+    _insert_dow_status(analysis_db_path, "VRT", "usa", "2026-04-30", "OK")
+    _insert_dow_event(analysis_db_path, 1, "VRT", "usa", "2026-04-29", "2026-04-30", "TREND_CHANGE")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=True,
+            dow_structure_snapshot=True,
+            dow_analysis_db=str(analysis_db_path),
+            dow_as_of_date=None,
+            dow_market=None,
+            dow_pivot_radius=3,
+            dow_price_source="close",
+            dow_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2099-12-31")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "price_behavior_as_of_date;2026-04-30" in cli_output
+    assert ";usa;2026-04-30;close;3;" in cli_output
+    assert "2099-12-31;close;3;" not in cli_output
+
+
+def test_dow_as_of_date_falls_back_to_latest_valid_close_date(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_derived_close.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_dow_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-29", 390.0, "usa")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_dow_status(analysis_db_path, "VRT", "usa", "2026-04-30", "OK")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=True,
+            dow_analysis_db=str(analysis_db_path),
+            dow_as_of_date=None,
+            dow_market="usa",
+            dow_pivot_radius=3,
+            dow_price_source="close",
+            dow_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2099-12-31")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert ";usa;2026-04-30;close;3;" in cli_output
+    assert "2099-12-31;close;3;" not in cli_output
+
+
+def test_dow_snapshot_does_not_write_to_analysis_or_ohlcv_db(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_no_write.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_dow_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_dow_status(analysis_db_path, "VRT", "usa", "2026-04-30", "OK")
+    _insert_dow_event(analysis_db_path, 1, "VRT", "usa", "2026-04-29", "2026-04-30", "TREND_CHANGE")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=True,
+            dow_analysis_db=str(analysis_db_path),
+            dow_as_of_date="2026-04-30",
+            dow_market="usa",
+            dow_pivot_radius=3,
+            dow_price_source="close",
+            dow_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    before_analysis_events = _count_rows(analysis_db_path, "stock_dow_structure_events")
+    before_analysis_status = _count_rows(analysis_db_path, "stock_dow_structure_status")
+    before_ohlcv = _count_rows(ohlcv_db_path, "osakedata")
+
+    ticker_snapshot_main()
+
+    assert _count_rows(analysis_db_path, "stock_dow_structure_events") == before_analysis_events
+    assert _count_rows(analysis_db_path, "stock_dow_structure_status") == before_analysis_status
+    assert _count_rows(ohlcv_db_path, "osakedata") == before_ohlcv
+
+
+def test_dow_snapshot_prints_empty_recent_event_section(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_empty_recent.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_dow_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_dow_status(analysis_db_path, "VRT", "usa", "2026-04-30", "OK")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=True,
+            dow_analysis_db=str(analysis_db_path),
+            dow_as_of_date="2026-04-30",
+            dow_market="usa",
+            dow_pivot_radius=3,
+            dow_price_source="close",
+            dow_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "section;dow_context_snapshot" in cli_output
+    assert "section;dow_recent_events_60td" in cli_output
+    recent_section = cli_output.split("section;dow_recent_events_60td\n", 1)[1]
+    recent_lines = recent_section.strip().splitlines()
+    assert recent_lines[0].startswith("ticker;market;as_of_date;price_source;pivot_radius;sequence_window_trading_days;")
+    assert len(recent_lines) == 1
+
+
 def _insert_ttm_row(
     conn: sqlite3.Connection,
     ticker: str,
@@ -834,6 +1290,185 @@ def _insert_ttm_row(
             "TTM_RUN_V1",
         ),
     )
+
+
+def _insert_minimal_snapshot_rows(db_path: Path, *, ticker: str, as_of_date: str) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(
+            conn,
+            ticker=ticker,
+            as_of_date=as_of_date,
+            lifecycle_class="SCALING",
+            fundamental_score=74.0,
+            fundamental_score_lifecycle=77.8,
+            growth_component=15.0,
+            margin_component=15.0,
+            margin_trend_component=9.0,
+            fcf_component=15.0,
+            consistency_component=10.0,
+            leverage_component=12.0,
+            dilution_component=10.0,
+            growth=0.80,
+            margin=0.33,
+            margin_trend=0.23,
+            fcf=0.28,
+            fcf_trend=0.08,
+            leverage=0.8,
+            dilution=0.05,
+            latest_period_end_date=as_of_date,
+        )
+        _insert_quarterly_row(conn, ticker, as_of_date, 1300.0, 330.0, 280.0, 11.5, 17.0)
+        _insert_percentile_row(conn, ticker, as_of_date, as_of_date, "Technology", "Electrical Equipment", 80.40, 80.90)
+        conn.commit()
+
+
+def _create_dow_analysis_schema(db_path: Path) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE stock_dow_structure_status (
+                ticker TEXT,
+                market TEXT,
+                price_source TEXT,
+                pivot_radius INTEGER,
+                calculated_from_date TEXT,
+                calculated_through_date TEXT,
+                latest_ohlcv_date_at_run TEXT,
+                latest_event_date TEXT,
+                latest_event_confirmed_as_of_date TEXT,
+                last_run_id TEXT,
+                last_run_mode TEXT,
+                last_rows_deleted INTEGER,
+                last_rows_inserted INTEGER,
+                last_status TEXT,
+                last_error_message TEXT,
+                updated_at_utc TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE stock_dow_structure_events (
+                id INTEGER PRIMARY KEY,
+                ticker TEXT,
+                market TEXT,
+                event_date TEXT,
+                confirmed_as_of_date TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                price_source TEXT,
+                structure_price REAL,
+                pivot_radius INTEGER,
+                event_type TEXT,
+                dow_label_high TEXT,
+                dow_label_low TEXT,
+                trend_state TEXT,
+                active_bos_high_date TEXT,
+                active_bos_high_price REAL,
+                active_bos_low_date TEXT,
+                active_bos_low_price REAL,
+                last_high_label TEXT,
+                last_high_label_date TEXT,
+                last_high_label_price REAL,
+                last_low_label TEXT,
+                last_low_label_date TEXT,
+                last_low_label_price REAL,
+                bos_up_count INTEGER,
+                bos_down_count INTEGER,
+                break_signal TEXT,
+                break_level_date TEXT,
+                break_level_price REAL,
+                break_close_price REAL,
+                reset_marker TEXT,
+                reset_reason TEXT,
+                structure_epoch_id INTEGER,
+                structure_epoch_start_date TEXT,
+                calc_version TEXT,
+                run_id TEXT,
+                created_at_utc TEXT
+            )
+            """
+        )
+        conn.commit()
+
+
+def _insert_dow_status(
+    db_path: Path,
+    ticker: str,
+    market: str,
+    calculated_through_date: str,
+    last_status: str,
+    latest_event_date: str | None = None,
+    latest_event_confirmed_as_of_date: str | None = None,
+) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO stock_dow_structure_status (
+                ticker, market, price_source, pivot_radius, calculated_from_date, calculated_through_date,
+                latest_ohlcv_date_at_run, latest_event_date, latest_event_confirmed_as_of_date,
+                last_run_id, last_run_mode, last_rows_deleted, last_rows_inserted, last_status, last_error_message, updated_at_utc
+            ) VALUES (?, ?, 'close', 3, '2026-01-01', ?, ?, ?, ?, 'RUN1', 'incremental', 0, 0, ?, NULL, '2026-04-30T00:00:00Z')
+            """,
+            (
+                ticker,
+                market,
+                calculated_through_date,
+                calculated_through_date,
+                latest_event_date,
+                latest_event_confirmed_as_of_date,
+                last_status,
+            ),
+        )
+        conn.commit()
+
+
+def _insert_dow_event(
+    db_path: Path,
+    event_id: int,
+    ticker: str,
+    market: str,
+    event_date: str,
+    confirmed_as_of_date: str,
+    event_type: str,
+) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO stock_dow_structure_events (
+                id, ticker, market, event_date, confirmed_as_of_date, open, high, low, close, volume,
+                price_source, structure_price, pivot_radius, event_type, dow_label_high, dow_label_low, trend_state,
+                active_bos_high_date, active_bos_high_price, active_bos_low_date, active_bos_low_price,
+                last_high_label, last_high_label_date, last_high_label_price, last_low_label, last_low_label_date,
+                last_low_label_price, bos_up_count, bos_down_count, break_signal, break_level_date, break_level_price,
+                break_close_price, reset_marker, reset_reason, structure_epoch_id, structure_epoch_start_date,
+                calc_version, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, 1.0, 2.0, 0.5, 1.5, 1000, 'close', 1.5, 3, ?, 'HH', 'HL', 'UP', NULL, NULL, NULL, NULL, 'HH', ?, 2.0, 'HL', ?, 1.0, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, 1, '2026-01-01', 'stock_dow_v1', 'RUN1', '2026-04-30T00:00:00Z')
+            """,
+            (event_id, ticker, market, event_date, confirmed_as_of_date, event_type, event_date, event_date),
+        )
+        conn.commit()
+
+
+def _insert_ohlcv_close(db_path: Path, ticker: str, pvm: str, close: float | None, market: str) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO osakedata (osake, pvm, open, high, low, close, volume, market)
+            VALUES (?, ?, 1.0, 2.0, 0.5, ?, 1000, ?)
+            """,
+            (ticker.upper(), pvm, close, market),
+        )
+        conn.commit()
+
+
+def _count_rows(db_path: Path, table_name: str) -> int:
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
+    return int(row[0])
 
 
 def _create_ohlcv_schema(db_path: Path) -> None:

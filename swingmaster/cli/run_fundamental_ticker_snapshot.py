@@ -278,6 +278,12 @@ DIVERGENCE_CONTEXT_SNAPSHOT_COLUMNS: tuple[str, ...] = (
     "latest_row_is_hidden_bearish_divergence_r3",
     "latest_signal_found",
     "latest_signal_date",
+    "latest_signal_pattern",
+    "latest_signal_group",
+    "latest_signal_variant",
+    "latest_signal_direction",
+    "latest_signal_radius",
+    "latest_signal_source_flag",
     "divergence_warning_flags",
 )
 DIVERGENCE_SIGNALS_COLUMNS: tuple[str, ...] = (

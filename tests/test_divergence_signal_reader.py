@@ -37,6 +37,12 @@ def test_pivot2_date_does_not_override_row_date_for_no_lookahead(tmp_path: Path)
     result = read_divergence_signal_raw_export(str(analysis_db), str(osakedata_db), "AAA", "2026-04-30", market="usa")
 
     assert result.divergence_context_snapshot_rows[0]["latest_signal_found"] is False
+    assert result.divergence_context_snapshot_rows[0]["latest_signal_pattern"] is None
+    assert result.divergence_context_snapshot_rows[0]["latest_signal_group"] is None
+    assert result.divergence_context_snapshot_rows[0]["latest_signal_variant"] is None
+    assert result.divergence_context_snapshot_rows[0]["latest_signal_direction"] is None
+    assert result.divergence_context_snapshot_rows[0]["latest_signal_radius"] is None
+    assert result.divergence_context_snapshot_rows[0]["latest_signal_source_flag"] is None
     assert result.divergence_signal_rows_60td == []
 
 
@@ -119,6 +125,24 @@ def test_r2_r3_rows_expand_into_event_rows(tmp_path: Path) -> None:
     assert result.divergence_signal_rows_60td[1]["source_flag"] == "is_bearish_divergence_r2"
 
 
+def test_latest_signal_metadata_fields_are_populated(tmp_path: Path) -> None:
+    analysis_db, osakedata_db = _create_test_dbs(tmp_path)
+    _insert_close(osakedata_db, "AAA", "2026-04-30", 10.0, "usa")
+    _insert_divergence_row(analysis_db, "AAA", "2026-04-30", is_hidden_bullish_divergence_r3=1)
+
+    result = read_divergence_signal_raw_export(str(analysis_db), str(osakedata_db), "AAA", "2026-04-30", market="usa")
+    row = result.divergence_context_snapshot_rows[0]
+
+    assert row["latest_signal_found"] is True
+    assert row["latest_signal_date"] == "2026-04-30"
+    assert row["latest_signal_pattern"] == "Hidden Bullish Divergence R3"
+    assert row["latest_signal_group"] == "HIDDEN_BULLISH_DIVERGENCE"
+    assert row["latest_signal_variant"] == "HIDDEN"
+    assert row["latest_signal_direction"] == "BULLISH"
+    assert row["latest_signal_radius"] == "R3"
+    assert row["latest_signal_source_flag"] == "is_hidden_bullish_divergence_r3"
+
+
 def test_multiple_flags_on_same_date_produce_multiple_rows_in_deterministic_order(tmp_path: Path) -> None:
     analysis_db, osakedata_db = _create_test_dbs(tmp_path)
     _insert_close(osakedata_db, "AAA", "2026-04-30", 10.0, "usa")
@@ -154,6 +178,29 @@ def test_multiple_flags_on_same_date_produce_multiple_rows_in_deterministic_orde
         "Hidden Bearish Divergence R3",
     ]
     assert [row["sequence_index"] for row in result.divergence_signal_rows_60td] == [1, 2, 3, 4, 5, 6, 7, 8]
+
+
+def test_latest_signal_metadata_uses_reverse_priority_on_same_date(tmp_path: Path) -> None:
+    analysis_db, osakedata_db = _create_test_dbs(tmp_path)
+    _insert_close(osakedata_db, "AAA", "2026-04-30", 10.0, "usa")
+    _insert_divergence_row(
+        analysis_db,
+        "AAA",
+        "2026-04-30",
+        is_bullish_divergence_r2=1,
+        is_hidden_bullish_divergence_r3=1,
+        is_hidden_bearish_divergence_r3=1,
+    )
+
+    result = read_divergence_signal_raw_export(str(analysis_db), str(osakedata_db), "AAA", "2026-04-30", market="usa")
+    row = result.divergence_context_snapshot_rows[0]
+
+    assert row["latest_signal_pattern"] == "Hidden Bearish Divergence R3"
+    assert row["latest_signal_group"] == "HIDDEN_BEARISH_DIVERGENCE"
+    assert row["latest_signal_variant"] == "HIDDEN"
+    assert row["latest_signal_direction"] == "BEARISH"
+    assert row["latest_signal_radius"] == "R3"
+    assert row["latest_signal_source_flag"] == "is_hidden_bearish_divergence_r3"
 
 
 def test_strength_and_pivot_fields_map_to_correct_event(tmp_path: Path) -> None:
@@ -277,6 +324,12 @@ def test_latest_available_row_may_differ_from_latest_signal_row(tmp_path: Path) 
 
     assert row["latest_row_date"] == "2026-04-30"
     assert row["latest_signal_date"] == "2026-04-29"
+    assert row["latest_signal_pattern"] == "Bullish Divergence R2"
+    assert row["latest_signal_group"] == "BULLISH_DIVERGENCE"
+    assert row["latest_signal_variant"] == "REGULAR"
+    assert row["latest_signal_direction"] == "BULLISH"
+    assert row["latest_signal_radius"] == "R2"
+    assert row["latest_signal_source_flag"] == "is_bullish_divergence_r2"
 
 
 def test_signal_rows_do_not_include_wide_boolean_fields(tmp_path: Path) -> None:

@@ -426,6 +426,7 @@ def _build_context_snapshot_row(
     latest_signal_row: sqlite3.Row | None,
     warning_flags: list[str],
 ) -> dict[str, Any]:
+    latest_signal_event = None if latest_signal_row is None else _latest_signal_event(latest_signal_row)
     return {
         "ticker": ticker,
         "market": market,
@@ -455,10 +456,12 @@ def _build_context_snapshot_row(
         "latest_row_is_hidden_bearish_divergence_r3": None if latest_row is None else latest_row["is_hidden_bearish_divergence_r3"],
         "latest_signal_found": latest_signal_row is not None,
         "latest_signal_date": None if latest_signal_row is None else latest_signal_row["date"],
-        "latest_signal_pattern": None if latest_signal_row is None else _first_signal_event(latest_signal_row)["divergence_pattern"],
-        "latest_signal_group": None if latest_signal_row is None else _first_signal_event(latest_signal_row)["divergence_group"],
-        "latest_signal_radius": None if latest_signal_row is None else _first_signal_event(latest_signal_row)["divergence_radius"],
-        "latest_signal_source_flag": None if latest_signal_row is None else _first_signal_event(latest_signal_row)["source_flag"],
+        "latest_signal_pattern": None if latest_signal_event is None else latest_signal_event["divergence_pattern"],
+        "latest_signal_group": None if latest_signal_event is None else latest_signal_event["divergence_group"],
+        "latest_signal_variant": None if latest_signal_event is None else latest_signal_event["divergence_variant"],
+        "latest_signal_direction": None if latest_signal_event is None else latest_signal_event["divergence_direction"],
+        "latest_signal_radius": None if latest_signal_event is None else latest_signal_event["divergence_radius"],
+        "latest_signal_source_flag": None if latest_signal_event is None else latest_signal_event["source_flag"],
         "divergence_warning_flags": warning_flags,
     }
 
@@ -529,8 +532,8 @@ def _expand_signal_events(
     return events
 
 
-def _first_signal_event(row: sqlite3.Row) -> dict[str, Any] | None:
-    events = _expand_signal_events(
+def _expand_signal_events_for_context(row: sqlite3.Row) -> list[dict[str, Any]]:
+    return _expand_signal_events(
         row,
         ticker=str(row["ticker"]),
         market=None,
@@ -543,4 +546,13 @@ def _first_signal_event(row: sqlite3.Row) -> dict[str, Any] | None:
         },
         sequence_index_start=1,
     )
+
+
+def _latest_signal_event(row: sqlite3.Row) -> dict[str, Any] | None:
+    events = _expand_signal_events_for_context(row)
+    return None if not events else events[-1]
+
+
+def _first_signal_event(row: sqlite3.Row) -> dict[str, Any] | None:
+    events = _expand_signal_events_for_context(row)
     return None if not events else events[0]

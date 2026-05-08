@@ -1804,7 +1804,7 @@ def test_divergence_snapshot_appends_sections_and_rows(monkeypatch, capsys, tmp_
 
     assert "section;divergence_context_snapshot" in cli_output
     assert "section;divergence_signals_60td" in cli_output
-    assert "ticker;market;as_of_date;sequence_window_trading_days;sequence_available_trading_days;sequence_window_start_date;sequence_window_end_date;latest_valid_close_date_on_or_before_as_of_date;latest_divergence_date_on_or_before_as_of_date;divergence_coverage_status;" in cli_output
+    assert "latest_signal_found;latest_signal_date;latest_signal_pattern;latest_signal_group;latest_signal_variant;latest_signal_direction;latest_signal_radius;latest_signal_source_flag;divergence_warning_flags" in cli_output
     assert "ticker;market;as_of_date;sequence_window_trading_days;sequence_available_trading_days;sequence_window_start_date;sequence_window_end_date;sequence_index;signal_date;divergence_pattern;divergence_group;divergence_variant;divergence_direction;divergence_radius;signal_strength;rsi;pivot_gap;pivot_drop_pct;pivot2_date;source_flag" in cli_output
     assert "Bullish Divergence R2;BULLISH_DIVERGENCE;REGULAR;BULLISH;R2;0,743;69,37757195130224" in cli_output
     assert "is_bullish_divergence_r2" not in cli_output.split("section;divergence_signals_60td\n", 1)[1].splitlines()[0]
@@ -2025,11 +2025,77 @@ def test_divergence_snapshot_strength_only_rows_are_not_printed_and_latest_signa
     context_header = context_section[0].split(";")
     context_values = context_section[1].split(";")
     latest_signal_index = context_header.index("latest_signal_date")
+    latest_signal_pattern_index = context_header.index("latest_signal_pattern")
+    latest_signal_group_index = context_header.index("latest_signal_group")
+    latest_signal_variant_index = context_header.index("latest_signal_variant")
+    latest_signal_direction_index = context_header.index("latest_signal_direction")
+    latest_signal_radius_index = context_header.index("latest_signal_radius")
+    latest_signal_source_flag_index = context_header.index("latest_signal_source_flag")
     assert context_values[latest_signal_index] == "2026-04-29"
+    assert context_values[latest_signal_pattern_index] == "Bullish Divergence R2"
+    assert context_values[latest_signal_group_index] == "BULLISH_DIVERGENCE"
+    assert context_values[latest_signal_variant_index] == "REGULAR"
+    assert context_values[latest_signal_direction_index] == "BULLISH"
+    assert context_values[latest_signal_radius_index] == "R2"
+    assert context_values[latest_signal_source_flag_index] == "is_bullish_divergence_r2"
     recent_section = cli_output.split("section;divergence_signals_60td\n", 1)[1].strip().splitlines()
     assert len(recent_section) == 2
     assert "2026-04-30;Bearish Divergence" not in recent_section[1]
     assert "2026-04-29;Bullish Divergence R2;BULLISH_DIVERGENCE;REGULAR;BULLISH;R2;0,1" in recent_section[1]
+
+
+def test_divergence_context_snapshot_uses_reverse_priority_for_same_date_latest_signal(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_divergence_context_priority.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_divergence_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_divergence_test_row(
+        analysis_db_path,
+        "VRT",
+        "2026-04-30",
+        is_bullish_divergence_r2=1,
+        is_hidden_bullish_divergence_r3=1,
+        is_hidden_bearish_divergence_r3=1,
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            divergence_snapshot=True,
+            divergence_analysis_db=str(analysis_db_path),
+            divergence_as_of_date="2026-04-30",
+            divergence_market="usa",
+            divergence_recent_window_trading_days=60,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    context_section = cli_output.split("section;divergence_context_snapshot\n", 1)[1].split("\n\nsection;divergence_signals_60td\n", 1)[0].splitlines()
+    context_header = context_section[0].split(";")
+    context_values = context_section[1].split(";")
+
+    assert context_values[context_header.index("latest_signal_pattern")] == "Hidden Bearish Divergence R3"
+    assert context_values[context_header.index("latest_signal_group")] == "HIDDEN_BEARISH_DIVERGENCE"
+    assert context_values[context_header.index("latest_signal_variant")] == "HIDDEN"
+    assert context_values[context_header.index("latest_signal_direction")] == "BEARISH"
+    assert context_values[context_header.index("latest_signal_radius")] == "R3"
+    assert context_values[context_header.index("latest_signal_source_flag")] == "is_hidden_bearish_divergence_r3"
 
 
 def test_divergence_snapshot_multiple_same_date_flags_print_multiple_rows(monkeypatch, capsys, tmp_path: Path) -> None:

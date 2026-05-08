@@ -877,7 +877,7 @@ def _format_dow_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> lis
 
 
 def _format_candlestick_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> list[str]:
-    return [_format_dow_export_value(row.get(column)) for column in columns]
+    return [_format_csv_value(_format_dow_export_value(row.get(column))) for column in columns]
 
 
 def _format_dow_structure_snapshot_lines(dow_structure_snapshot: dict[str, list[dict[str, Any]]]) -> list[str]:

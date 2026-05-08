@@ -1335,7 +1335,7 @@ def test_candlestick_snapshot_appends_section_and_rows(monkeypatch, capsys, tmp_
 
     assert "section;candlestick_events_60td" in cli_output
     assert "ticker;market;as_of_date;sequence_window_trading_days;sequence_available_trading_days;sequence_window_start_date;sequence_window_end_date;sequence_index;finding_id;signal_date;pattern;pattern_group;signal_strength;rsi14;created_at" in cli_output
-    assert ";1;1;2026-04-30;Hammer;BULLISH_CANDLE;0.75;28.5;" in cli_output
+    assert ";1;1;2026-04-30;Hammer;BULLISH_CANDLE;0,75;28,5;" in cli_output
 
 
 def test_candlestick_snapshot_no_lookahead_and_combo_exclusion(monkeypatch, capsys, tmp_path: Path) -> None:
@@ -1644,9 +1644,10 @@ def test_candlestick_snapshot_csv_uses_decimal_comma(monkeypatch, capsys, tmp_pa
     monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
 
     ticker_snapshot_main()
-    _ = capsys.readouterr().out
+    cli_output = capsys.readouterr().out
     csv_content = (tmp_path / "ticker_fundamentals" / "VRT_2026-04-27.csv").read_text(encoding="utf-8")
 
+    assert "Hammer;BULLISH_CANDLE;0,75;28,5;" in cli_output
     assert "section;candlestick_events_60td" in csv_content
     assert "Hammer;BULLISH_CANDLE;0,75;28,5;" in csv_content
 

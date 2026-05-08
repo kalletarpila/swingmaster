@@ -2299,6 +2299,241 @@ def test_divergence_snapshot_does_not_write_to_analysis_or_ohlcv_db(monkeypatch,
     assert _count_rows(ohlcv_db_path, "osakedata") == before_ohlcv
 
 
+def test_moving_average_snapshot_is_not_printed_without_flag(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_no_ma.db"
+    run_migration(db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+            moving_average_snapshot=False,
+        ),
+    )
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "section;moving_averages_60td" not in cli_output
+
+
+def test_moving_average_snapshot_validation_requires_ohlcv_db(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_fundamental_ticker_snapshot.py",
+            "--db",
+            "fund.db",
+            "--ticker",
+            "VRT",
+            "--moving-average-snapshot",
+        ],
+    )
+    with pytest.raises(SystemExit, match="2"):
+        run_fundamental_ticker_snapshot.parse_args()
+
+
+def test_moving_average_snapshot_appends_section_with_expected_values(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_ma.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    dates = _date_range("2026-01-01", 200)
+    for index, trade_date in enumerate(dates, start=1):
+        _insert_ohlcv_close(ohlcv_db_path, "VRT", trade_date, float(index), "usa")
+        _insert_ohlcv_close(ohlcv_db_path, "^GSPC", trade_date, float(index) * 10.0, "usa")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            moving_average_snapshot=True,
+            moving_average_as_of_date=dates[-1],
+            moving_average_market="usa",
+            moving_average_recent_window_trading_days=60,
+            moving_average_short_window=50,
+            moving_average_long_window=200,
+            moving_average_benchmark_ticker="^GSPC",
+            moving_average_benchmark_market="usa",
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+    recent_section = cli_output.split("section;moving_averages_60td\n", 1)[1].strip().splitlines()
+
+    assert recent_section[0] == "ticker;market;as_of_date;sequence_window_trading_days;sequence_available_trading_days;sequence_window_start_date;sequence_window_end_date;sequence_index;trade_date;stock_close;stock_volume;stock_ma50;stock_ma200;benchmark_ticker;benchmark_trade_date;benchmark_close;benchmark_ma50;benchmark_ma200"
+    assert len(recent_section) == 61
+    assert recent_section[1].startswith(f"VRT;usa;{dates[-1]};60;60;{dates[-60]};{dates[-1]};1;{dates[-60]};141,0;1000;116,5;;^GSPC;{dates[-60]};1410,0;1165,0;")
+    assert recent_section[-1].startswith(f"VRT;usa;{dates[-1]};60;60;{dates[-60]};{dates[-1]};60;{dates[-1]};200,0;1000;175,5;100,5;^GSPC;{dates[-1]};2000,0;1755,0;1005,0")
+    assert "ma_trend" not in cli_output
+    assert "ma_crossover" not in cli_output
+    assert "golden_cross" not in cli_output
+    assert "stock_vs_sp500" not in cli_output
+
+
+def test_moving_average_snapshot_no_lookahead_and_empty_rows(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_ma_empty.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-05-01", 101.0, "usa")
+    _insert_ohlcv_close(ohlcv_db_path, "^GSPC", "2026-05-01", 5001.0, "usa")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            moving_average_snapshot=True,
+            moving_average_as_of_date="2026-04-30",
+            moving_average_market="usa",
+            moving_average_recent_window_trading_days=60,
+            moving_average_short_window=50,
+            moving_average_long_window=200,
+            moving_average_benchmark_ticker="^GSPC",
+            moving_average_benchmark_market="usa",
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+    recent_section = cli_output.split("section;moving_averages_60td\n", 1)[1].strip().splitlines()
+
+    assert len(recent_section) == 1
+
+
+def test_moving_average_snapshot_as_of_date_derives_from_price_behavior(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_ma_pb.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "VRT",
+        260,
+        anchor_close=400.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=300.0,
+        close_1_after_report=303.0,
+        close_3_after_report=309.0,
+        close_20_after_report=330.0,
+    )
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "^GSPC",
+        260,
+        anchor_close=200.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=180.0,
+        close_1_after_report=181.0,
+        close_3_after_report=183.0,
+        close_20_after_report=190.0,
+        return_6m_pct=14.59,
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=True,
+            moving_average_snapshot=True,
+            moving_average_as_of_date=None,
+            moving_average_market=None,
+            moving_average_recent_window_trading_days=60,
+            moving_average_short_window=50,
+            moving_average_long_window=200,
+            moving_average_benchmark_ticker="^GSPC",
+            moving_average_benchmark_market="usa",
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "price_behavior_as_of_date;2026-04-30" in cli_output
+    assert "section;moving_averages_60td" in cli_output
+    assert ";2026-04-30;60;" in cli_output
+
+
+def test_moving_average_snapshot_does_not_write_to_ohlcv_db(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_ma_nowrite.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 100.0, "usa")
+    _insert_ohlcv_close(ohlcv_db_path, "^GSPC", "2026-04-30", 5000.0, "usa")
+    before_ohlcv = _count_rows(ohlcv_db_path, "osakedata")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            moving_average_snapshot=True,
+            moving_average_as_of_date="2026-04-30",
+            moving_average_market="usa",
+            moving_average_recent_window_trading_days=60,
+            moving_average_short_window=50,
+            moving_average_long_window=200,
+            moving_average_benchmark_ticker="^GSPC",
+            moving_average_benchmark_market="usa",
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+
+    assert _count_rows(ohlcv_db_path, "osakedata") == before_ohlcv
+
+
 def _insert_ttm_row(
     conn: sqlite3.Connection,
     ticker: str,
@@ -2591,6 +2826,11 @@ def _insert_ohlcv_close(db_path: Path, ticker: str, pvm: str, close: float | Non
             (ticker.upper(), pvm, close, market),
         )
         conn.commit()
+
+
+def _date_range(start_date: str, count: int) -> list[str]:
+    start = date.fromisoformat(start_date)
+    return [(start + timedelta(days=index)).isoformat() for index in range(count)]
 
 
 def _insert_candlestick_finding(

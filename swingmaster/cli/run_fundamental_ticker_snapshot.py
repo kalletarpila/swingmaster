@@ -10,6 +10,7 @@ from typing import Any
 
 from analysis.candlestick_signal_reader import read_candlestick_signal_raw_export
 from analysis.divergence_signal_reader import read_divergence_signal_raw_export
+from analysis.moving_average_reader import read_moving_average_raw_export
 from analysis.stock_dow_structure_reader import read_stock_dow_structure_raw_export
 from swingmaster.fundamentals.price_behavior_snapshot import load_price_behavior_snapshot
 from swingmaster.fundamentals.price_behavior_snapshot import _resolve_market_for_ticker
@@ -308,6 +309,26 @@ DIVERGENCE_SIGNALS_COLUMNS: tuple[str, ...] = (
     "pivot2_date",
     "source_flag",
 )
+MOVING_AVERAGE_COLUMNS: tuple[str, ...] = (
+    "ticker",
+    "market",
+    "as_of_date",
+    "sequence_window_trading_days",
+    "sequence_available_trading_days",
+    "sequence_window_start_date",
+    "sequence_window_end_date",
+    "sequence_index",
+    "trade_date",
+    "stock_close",
+    "stock_volume",
+    "stock_ma50",
+    "stock_ma200",
+    "benchmark_ticker",
+    "benchmark_trade_date",
+    "benchmark_close",
+    "benchmark_ma50",
+    "benchmark_ma200",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -375,6 +396,23 @@ def parse_args() -> argparse.Namespace:
         default=60,
         help="Recent trading-day window for divergence snapshot",
     )
+    parser.add_argument(
+        "--moving-average-snapshot",
+        action="store_true",
+        help="Append raw moving average rows using OHLCV data",
+    )
+    parser.add_argument("--moving-average-as-of-date", default=None, help="Explicit as-of date for moving average snapshot")
+    parser.add_argument("--moving-average-market", default=None, help="Explicit market for moving average snapshot")
+    parser.add_argument(
+        "--moving-average-recent-window-trading-days",
+        type=int,
+        default=60,
+        help="Recent trading-day window for moving average snapshot",
+    )
+    parser.add_argument("--moving-average-short-window", type=int, default=50, help="Short moving average window")
+    parser.add_argument("--moving-average-long-window", type=int, default=200, help="Long moving average window")
+    parser.add_argument("--moving-average-benchmark-ticker", default="^GSPC", help="Benchmark ticker for moving average snapshot")
+    parser.add_argument("--moving-average-benchmark-market", default="usa", help="Benchmark market for moving average snapshot")
     args = parser.parse_args()
     if args.dow_structure_snapshot and not args.dow_analysis_db:
         parser.error("--dow-analysis-db is required when --dow-structure-snapshot is used")
@@ -388,6 +426,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--divergence-analysis-db is required when --divergence-snapshot is used")
     if args.divergence_snapshot and not args.ohlcv_db:
         parser.error("--ohlcv-db is required when --divergence-snapshot is used")
+    if args.moving_average_snapshot and not args.ohlcv_db:
+        parser.error("--ohlcv-db is required when --moving-average-snapshot is used")
     return args
 
 
@@ -835,6 +875,7 @@ def format_snapshot_matrix(
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     divergence_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    moving_average_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
     lines: list[str] = []
     for metric in SECTIONED_METRICS:
@@ -860,6 +901,8 @@ def format_snapshot_matrix(
         lines.extend(_format_candlestick_snapshot_lines(candlestick_snapshot))
     if divergence_snapshot is not None:
         lines.extend(_format_divergence_snapshot_lines(divergence_snapshot))
+    if moving_average_snapshot is not None:
+        lines.extend(_format_moving_average_snapshot_lines(moving_average_snapshot))
     return "\n".join(lines)
 
 
@@ -882,6 +925,7 @@ def write_snapshot_csv(
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     divergence_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    moving_average_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
     CSV_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}.csv"
@@ -909,6 +953,8 @@ def write_snapshot_csv(
             _write_candlestick_snapshot_csv(writer, candlestick_snapshot)
         if divergence_snapshot is not None:
             _write_divergence_snapshot_csv(writer, divergence_snapshot)
+        if moving_average_snapshot is not None:
+            _write_moving_average_snapshot_csv(writer, moving_average_snapshot)
     return output_path
 
 
@@ -921,6 +967,7 @@ def ensure_snapshot_csv_written(
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     divergence_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    moving_average_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
     output_path = write_snapshot_csv(
         matrix_rows,
@@ -931,6 +978,7 @@ def ensure_snapshot_csv_written(
         dow_structure_snapshot,
         candlestick_snapshot,
         divergence_snapshot,
+        moving_average_snapshot,
     )
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
@@ -943,6 +991,7 @@ def ensure_snapshot_csv_written(
         dow_structure_snapshot,
         candlestick_snapshot,
         divergence_snapshot,
+        moving_average_snapshot,
     )
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
@@ -968,6 +1017,10 @@ def _format_candlestick_row_values(row: dict[str, Any], columns: tuple[str, ...]
 
 
 def _format_divergence_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> list[str]:
+    return [_format_csv_value(_format_dow_export_value(row.get(column))) for column in columns]
+
+
+def _format_moving_average_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> list[str]:
     return [_format_csv_value(_format_dow_export_value(row.get(column))) for column in columns]
 
 
@@ -1047,6 +1100,24 @@ def _write_divergence_snapshot_csv(
         writer.writerow([_format_csv_value(value) for value in _format_divergence_row_values(row, DIVERGENCE_SIGNALS_COLUMNS)])
 
 
+def _format_moving_average_snapshot_lines(moving_average_snapshot: dict[str, list[dict[str, Any]]]) -> list[str]:
+    lines = ["", "section;moving_averages_60td", ";".join(MOVING_AVERAGE_COLUMNS)]
+    for row in moving_average_snapshot.get("moving_average_rows_60td", []):
+        lines.append(";".join(_format_moving_average_row_values(row, MOVING_AVERAGE_COLUMNS)))
+    return lines
+
+
+def _write_moving_average_snapshot_csv(
+    writer: csv.writer,
+    moving_average_snapshot: dict[str, list[dict[str, Any]]],
+) -> None:
+    writer.writerow([])
+    writer.writerow(["section", "moving_averages_60td"])
+    writer.writerow(list(MOVING_AVERAGE_COLUMNS))
+    for row in moving_average_snapshot.get("moving_average_rows_60td", []):
+        writer.writerow([_format_csv_value(value) for value in _format_moving_average_row_values(row, MOVING_AVERAGE_COLUMNS)])
+
+
 def _resolve_dow_market(args: argparse.Namespace, ticker: str) -> str | None:
     dow_market = getattr(args, "dow_market", None)
     if dow_market is not None:
@@ -1085,6 +1156,14 @@ def _fetch_latest_valid_close_date_for_candlestick(
 
 
 def _fetch_latest_valid_close_date_for_divergence(
+    ohlcv_db_path: Path,
+    ticker: str,
+    market: str | None,
+) -> str | None:
+    return _fetch_latest_valid_close_date_for_dow(ohlcv_db_path, ticker, market)
+
+
+def _fetch_latest_valid_close_date_for_moving_average(
     ohlcv_db_path: Path,
     ticker: str,
     market: str | None,
@@ -1226,6 +1305,56 @@ def _load_divergence_snapshot(
     ).to_dict()
 
 
+def _resolve_moving_average_market(args: argparse.Namespace, ticker: str) -> str | None:
+    moving_average_market = getattr(args, "moving_average_market", None)
+    if moving_average_market is not None:
+        return moving_average_market
+    if getattr(args, "price_behavior_snapshot", False):
+        return _resolve_market_for_ticker(ticker)
+    return None
+
+
+def _derive_moving_average_as_of_date(
+    args: argparse.Namespace,
+    ticker: str,
+    ohlcv_db_path: Path,
+    price_behavior_snapshot: dict[str, str] | None,
+    market: str | None,
+) -> str:
+    moving_average_as_of_date = getattr(args, "moving_average_as_of_date", None)
+    if moving_average_as_of_date:
+        return moving_average_as_of_date
+    if price_behavior_snapshot is not None:
+        price_behavior_as_of_date = price_behavior_snapshot.get("price_behavior_as_of_date", "")
+        if price_behavior_as_of_date:
+            return price_behavior_as_of_date
+    latest_valid_close_date = _fetch_latest_valid_close_date_for_moving_average(ohlcv_db_path, ticker, market)
+    if latest_valid_close_date is None:
+        raise RuntimeError(f"MOVING_AVERAGE_AS_OF_DATE_NOT_FOUND:{ticker}")
+    return latest_valid_close_date
+
+
+def _load_moving_average_snapshot(
+    args: argparse.Namespace,
+    ticker: str,
+    ohlcv_db_path: Path,
+    price_behavior_snapshot: dict[str, str] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    market = _resolve_moving_average_market(args, ticker)
+    as_of_date = _derive_moving_average_as_of_date(args, ticker, ohlcv_db_path, price_behavior_snapshot, market)
+    return read_moving_average_raw_export(
+        osakedata_db_path=str(ohlcv_db_path),
+        ticker=ticker,
+        as_of_date=as_of_date,
+        market=market,
+        recent_window_trading_days=getattr(args, "moving_average_recent_window_trading_days", 60),
+        ma_short_window=getattr(args, "moving_average_short_window", 50),
+        ma_long_window=getattr(args, "moving_average_long_window", 200),
+        benchmark_ticker=getattr(args, "moving_average_benchmark_ticker", "^GSPC"),
+        benchmark_market=getattr(args, "moving_average_benchmark_market", "usa"),
+    ).to_dict()
+
+
 def main() -> None:
     args = parse_args()
     db_path = resolve_db_path(args.db)
@@ -1236,6 +1365,7 @@ def main() -> None:
     dow_structure_snapshot_enabled = getattr(args, "dow_structure_snapshot", False)
     candlestick_snapshot_enabled = getattr(args, "candlestick_snapshot", False)
     divergence_snapshot_enabled = getattr(args, "divergence_snapshot", False)
+    moving_average_snapshot_enabled = getattr(args, "moving_average_snapshot", False)
     with sqlite3.connect(str(db_path)) as conn:
         matrix_rows = build_snapshot_matrix(
             conn=conn,
@@ -1251,7 +1381,7 @@ def main() -> None:
         ohlcv_db_path = resolve_db_path(args.ohlcv_db)
         latest_quarter_date = matrix_rows[-1]["quarter"]
         price_behavior_snapshot = load_price_behavior_snapshot(ohlcv_db_path, ticker, latest_quarter_date)
-    elif dow_structure_snapshot_enabled or candlestick_snapshot_enabled or divergence_snapshot_enabled:
+    elif dow_structure_snapshot_enabled or candlestick_snapshot_enabled or divergence_snapshot_enabled or moving_average_snapshot_enabled:
         ohlcv_db_path = resolve_db_path(args.ohlcv_db)
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None
     if dow_structure_snapshot_enabled:
@@ -1268,6 +1398,11 @@ def main() -> None:
         if ohlcv_db_path is None:
             ohlcv_db_path = resolve_db_path(args.ohlcv_db)
         divergence_snapshot = _load_divergence_snapshot(args, ticker, ohlcv_db_path, price_behavior_snapshot)
+    moving_average_snapshot: dict[str, list[dict[str, Any]]] | None = None
+    if moving_average_snapshot_enabled:
+        if ohlcv_db_path is None:
+            ohlcv_db_path = resolve_db_path(args.ohlcv_db)
+        moving_average_snapshot = _load_moving_average_snapshot(args, ticker, ohlcv_db_path, price_behavior_snapshot)
     ensure_snapshot_csv_written(
         matrix_rows,
         ticker,
@@ -1277,6 +1412,7 @@ def main() -> None:
         dow_structure_snapshot,
         candlestick_snapshot,
         divergence_snapshot,
+        moving_average_snapshot,
     )
     print(
         format_snapshot_matrix(
@@ -1286,6 +1422,7 @@ def main() -> None:
             dow_structure_snapshot,
             candlestick_snapshot,
             divergence_snapshot,
+            moving_average_snapshot,
         )
     )
 

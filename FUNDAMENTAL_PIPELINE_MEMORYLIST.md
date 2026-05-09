@@ -4,6 +4,7 @@ This is an updated practical memory list for the current fundamentals pipeline i
 
 It reflects the current CLI and reader behavior in code, including:
 - ticker-level fundamentals pipeline
+- quarter-state driven single-ticker update flow
 - market-level practical batch flows
 - percentile scoring as a separate cross-sectional step
 - current ticker snapshot behavior, including optional technical append sections
@@ -71,7 +72,42 @@ This step is date-specific and market-specific:
 
 This is the step that must exist before the ticker snapshot can read stored percentile rows directly.
 
-## 3. Ticker snapshot build
+## 3. Quarter-state driven ticker update flow
+
+There is also a separate operational CLI for updating one ticker after quarter detection has already happened:
+
+- `swingmaster/cli/run_fundamental_quarter_update.py`
+
+This CLI is important when:
+
+- `rc_fundamental_quarter_state` is already maintained by another program
+- `new_quarter_available = 1` already marks the ticker as needing refresh
+- you want the repository to perform the actual refresh and downstream rebuild to score
+
+Important implementation facts:
+
+- this CLI reads only rows from `rc_fundamental_quarter_state` where `new_quarter_available = 1`
+- it can be filtered by `--market` and `--ticker`
+- it is the current practical single-ticker update path when quarter-state is already available
+
+For USA tickers, the flow is:
+
+1. read `detected_source_period_end_date` from `rc_fundamental_quarter_state`
+2. check whether current `rc_fundamental_quarterly` already satisfies that detected quarter
+3. if not, run SEC raw bootstrap and quarterly rebuild
+4. run Yahoo fallback enrichment
+5. run TTM rebuild
+6. run lifecycle classification
+7. run fundamental scoring
+8. acknowledge the quarter-state row unless `--skip-ack` is used
+
+Important boundary:
+
+- this CLI does not itself detect that a new quarter has appeared
+- it assumes that a separate program has already updated `rc_fundamental_quarter_state`
+- it still does not compute percentile scores; percentile remains a separate explicit step
+
+## 4. Ticker snapshot build
 
 Ticker snapshot output is built by:
 
@@ -87,7 +123,7 @@ The current snapshot builder combines:
 The core builder is:
 - `build_snapshot_matrix(...)`
 
-## 4. Optional snapshot append sections
+## 5. Optional snapshot append sections
 
 The ticker snapshot CLI can optionally append raw technical sections at the end of the snapshot output:
 
@@ -126,7 +162,7 @@ The ticker snapshot CLI can optionally append raw technical sections at the end 
 These are raw append sections only.
 They do not add recommendation, confidence, score, or interpretation layers.
 
-## 5. Current snapshot output behavior
+## 6. Current snapshot output behavior
 
 Current behavior is:
 
@@ -151,7 +187,7 @@ Ticker parsing currently supports:
 - space-separated tickers
 - mixed comma and whitespace input
 
-## 6. Practical CLI map by stage
+## 7. Practical CLI map by stage
 
 The main current CLIs by stage are:
 
@@ -175,13 +211,16 @@ The main current CLIs by stage are:
 - score:
   - `run_fundamental_score.py`
 
+- quarter-state driven ticker update:
+  - `run_fundamental_quarter_update.py`
+
 - percentile:
   - `run_fundamental_score_percentile.py`
 
 - ticker snapshot:
   - `run_fundamental_ticker_snapshot.py`
 
-## 7. Practical command examples
+## 8. Practical command examples
 
 ### 7.1 One USA ticker from SEC raw to score
 
@@ -194,7 +233,53 @@ PYTHONPATH=. python3 swingmaster/cli/run_fundamental_pipeline.py \
   --retrieved-at-utc 2026-05-09T00:00:00Z
 ```
 
-### 7.2 One USA ticker snapshot after percentile rows already exist
+### 8.2 One USA ticker using quarter-state driven update to score
+
+Use this when:
+
+- `rc_fundamental_quarter_state` is already up to date
+- the ticker already has `new_quarter_available = 1`
+- you want the repository to perform the actual refresh and rebuild
+
+Example:
+
+```bash
+PYTHONPATH=. python3 swingmaster/cli/run_fundamental_quarter_update.py \
+  --db /home/kalle/projects/swingmaster/fundamentals_usa.db \
+  --run-id USA_QUPDATE_2026Q2 \
+  --market usa \
+  --ticker AAPL
+```
+
+This is currently the most operational single-ticker USA update path in the repo when quarter-state is already maintained elsewhere.
+
+In that workflow, you do not need to run `run_fundamental_pipeline.py` for the same ticker update.
+
+Useful variants:
+
+Preview only:
+
+```bash
+PYTHONPATH=. python3 swingmaster/cli/run_fundamental_quarter_update.py \
+  --db /home/kalle/projects/swingmaster/fundamentals_usa.db \
+  --run-id USA_QUPDATE_2026Q2 \
+  --market usa \
+  --ticker AAPL \
+  --dry-run
+```
+
+Do not acknowledge the state row yet:
+
+```bash
+PYTHONPATH=. python3 swingmaster/cli/run_fundamental_quarter_update.py \
+  --db /home/kalle/projects/swingmaster/fundamentals_usa.db \
+  --run-id USA_QUPDATE_2026Q2 \
+  --market usa \
+  --ticker AAPL \
+  --skip-ack
+```
+
+### 8.3 One USA ticker snapshot after percentile rows already exist
 
 ```bash
 PYTHONPATH=. python3 swingmaster/cli/run_fundamental_ticker_snapshot.py \
@@ -203,7 +288,35 @@ PYTHONPATH=. python3 swingmaster/cli/run_fundamental_ticker_snapshot.py \
   --quarters 4
 ```
 
-### 7.3 One USA ticker snapshot with all optional technical sections
+### 8.4 USA market to percentile score
+
+If `rc_fundamental_quarter_state` is already maintained elsewhere and you want to process the whole USA market to score first and percentile after that, use:
+
+```bash
+PYTHONPATH=. python3 swingmaster/cli/run_fundamental_quarter_update.py \
+  --db /home/kalle/projects/swingmaster/fundamentals_usa.db \
+  --run-id USA_UPDATE_2026Q2 \
+  --market usa
+```
+
+Then compute percentile rows:
+
+```bash
+PYTHONPATH=. python3 swingmaster/cli/run_fundamental_score_percentile.py \
+  --db /home/kalle/projects/swingmaster/fundamentals_usa.db \
+  --osakedata-db /home/kalle/projects/rawcandle/data/osakedata.db \
+  --market usa \
+  --as-of-date 2026-05-08 \
+  --run-id USA_PCT_2026-05-08
+```
+
+This is the practical current whole-market USA path when:
+
+- quarter-state already tells which tickers need refresh
+- you want the repository to execute refresh through score
+- percentile is then computed as a separate final step
+
+### 8.5 One USA ticker snapshot with all optional technical sections
 
 ```bash
 PYTHONPATH=. python3 swingmaster/cli/run_fundamental_ticker_snapshot.py \
@@ -221,11 +334,11 @@ PYTHONPATH=. python3 swingmaster/cli/run_fundamental_ticker_snapshot.py \
   --moving-average-snapshot
 ```
 
-## 8. Market-level examples to percentile score
+## 9. Market-level examples to percentile score
 
 These are practical examples for running one market up to percentile scoring.
 
-### 8.1 USA market: practical path to percentile score
+### 9.1 USA market: practical path to percentile score
 
 This is the practical current USA batch path:
 
@@ -261,7 +374,7 @@ Notes:
 - this is the cleanest current market-scoped path in the repo
 - percentile scoring is still its own explicit final step
 
-### 8.2 USA market: rebuild from already normalized quarterly rows to percentile score
+### 9.2 USA market: rebuild from already normalized quarterly rows to percentile score
 
 If `rc_fundamental_quarterly` is already populated and you want to rebuild downstream rows:
 
@@ -298,7 +411,7 @@ Important note:
 - `run_fundamental_lifecycle.py` and `run_fundamental_score.py` are not market-filtered CLIs
 - if your DB contains multiple markets, those commands operate on all eligible rows unless you use more targeted flows
 
-### 8.3 OMXH market to percentile score
+### 9.3 OMXH market to percentile score
 
 For OMXH, the current batch path already goes through score:
 
@@ -321,15 +434,15 @@ PYTHONPATH=. python3 swingmaster/cli/run_fundamental_score_percentile.py \
   --run-id OMXH_PCT_2026-05-08
 ```
 
-## 9. Short memory version
+## 10. Short memory version
 
 If you want the shortest operational memory list:
 
 1. Raw facts or raw statements in
-2. Quarterly normalized rows build
-3. TTM rows build
-4. Lifecycle classification
-5. Fundamental score
-6. Percentile score in a separate market/date step
-7. Ticker snapshot reads those stored rows and optionally appends raw technical sections
-
+2. Optional quarter-state driven ticker update if new quarter detection already exists elsewhere
+3. Quarterly normalized rows build
+4. TTM rows build
+5. Lifecycle classification
+6. Fundamental score
+7. Percentile score in a separate market/date step
+8. Ticker snapshot reads those stored rows and optionally appends raw technical sections

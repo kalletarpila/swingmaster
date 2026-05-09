@@ -7,8 +7,9 @@ The goal is to help an external reader understand:
 1. what each section means
 2. which metrics are absolute vs relative
 3. how the metrics are calculated at a high level
-4. how the snapshot can be used as a BUY background-check tool
-5. the exact calculation rules currently used in code
+4. which optional technical append sections exist now
+5. how the snapshot can be used as a BUY background-check tool
+6. the exact calculation rules currently used in code
 
 This document intentionally corrects several earlier misunderstandings:
 
@@ -30,11 +31,18 @@ This document intentionally corrects several earlier misunderstandings:
 
 # 1. What the Snapshot Is
 
-The ticker snapshot combines three layers:
+The ticker snapshot combines three layers by default:
 
 1. a multi-quarter fundamental history controlled by `--quarters`
 2. an optional latest price-behavior snapshot
 3. a latest valuation snapshot based on the most recent stored valuation row for the ticker
+
+It can also append optional raw technical row sets:
+
+4. Dow structure context and event rows
+5. candlestick event rows
+6. divergence context and event rows
+7. moving-average stock and benchmark rows
 
 It is not a price target model.
 
@@ -64,6 +72,12 @@ The report currently has these sections, in this order:
 11. sector and industry ranks
 12. optional `price_behavior_snapshot` block
 13. latest `valuation_snapshot` block
+14. optional `section;dow_context_snapshot`
+15. optional `section;dow_recent_events_60td`
+16. optional `section;candlestick_events_60td`
+17. optional `section;divergence_context_snapshot`
+18. optional `section;divergence_signals_60td`
+19. optional `section;moving_averages_60td`
 
 The first 11 sections are quarter-column based.
 
@@ -72,6 +86,18 @@ The number of displayed quarter columns is controlled by `--quarters`. It is oft
 The optional `price_behavior_snapshot` block is a single latest snapshot, one value per row.
 
 The `valuation_snapshot` block is also a single latest snapshot, one value per row. It does not use the displayed quarter columns.
+
+All technical append sections after `valuation_snapshot` are export-style row blocks.
+
+They are included only when their corresponding CLI flags are enabled.
+
+The CLI also supports multiple tickers in one run.
+
+In that case:
+
+- each ticker gets its own full snapshot
+- the snapshots are printed in the same ticker order given by the user
+- there is exactly one blank line between ticker snapshots
 
 ---
 
@@ -1243,7 +1269,239 @@ It only reads the latest already-stored valuation row from `rc_fundamental_valua
 
 ---
 
-# 19. Recommended Reading Order
+# 19. Dow Structure Snapshot
+
+These sections appear only when `--dow-structure-snapshot` is enabled together with:
+
+- `--dow-analysis-db`
+- `--ohlcv-db`
+
+The output sections are:
+
+- `section;dow_context_snapshot`
+- `section;dow_recent_events_60td`
+
+Important implementation facts:
+
+- this is raw Dow structure data only
+- event availability uses `confirmed_as_of_date <= as_of_date`
+- `event_date <= as_of_date` alone is not sufficient
+- freshness comes from `stock_dow_structure_status.calculated_through_date`
+- freshness is compared against the latest valid close date where `close IS NOT NULL`
+- this block does not produce a recommendation, confidence score, or technical verdict
+
+`dow_context_snapshot` is a one-row context output for the ticker and analysis date.
+
+It includes:
+
+- identity fields like `ticker`, `market`, `as_of_date`, `price_source`, `pivot_radius`
+- coverage fields like `coverage_status`, `coverage_reason`, `calculated_through_date`
+- latest confirmed event fields like `latest_event_type`, `latest_event_date`, `latest_confirmed_as_of_date`
+- raw structure fields copied from the latest confirmed event
+- warning flags in `dow_warning_flags`
+
+`dow_recent_events_60td` is an event-sequence export.
+
+It contains one row per Dow event inside the recent ticker-specific 60 valid trading-day window.
+
+The rows are ordered by:
+
+- `confirmed_as_of_date ASC`
+- `id ASC`
+
+This block answers:
+
+- what was the latest confirmed Dow structure context?
+- what exact event sequence led into the current structure state?
+
+It does not answer:
+
+- whether the stock is a buy
+- whether the trend is strong enough by itself
+- whether the setup is confirmed by other tools
+
+---
+
+# 20. Candlestick Snapshot
+
+This section appears only when `--candlestick-snapshot` is enabled together with:
+
+- `--candlestick-analysis-db`
+- `--ohlcv-db`
+
+The output section is:
+
+- `section;candlestick_events_60td`
+
+Important implementation facts:
+
+- the source table is `analysis_findings`
+- this is an event table, not a coverage table
+- the reader includes only the allowed basic candlestick patterns in V1
+- BullDiv combo patterns are excluded
+- divergence-based combo patterns are excluded
+- no-lookahead uses `date <= as_of_date`
+
+The section contains one row per basic candlestick finding inside the recent ticker-specific 60 valid trading-day window.
+
+Current raw columns are:
+
+- identity and window metadata
+- `finding_id`
+- `signal_date`
+- `pattern`
+- `pattern_group`
+- `signal_strength`
+- `rsi14`
+- `created_at`
+
+`pattern_group` is a raw grouping only:
+
+- `BULLISH_CANDLE`
+- `BEARISH_CANDLE`
+
+This section answers:
+
+- which basic candlestick events occurred recently?
+- on which dates did they occur?
+
+It does not answer:
+
+- whether those events form a combined setup
+- whether divergence confirmed them
+- whether they imply a buy or sell decision
+
+---
+
+# 21. Divergence Snapshot
+
+These sections appear only when `--divergence-snapshot` is enabled together with:
+
+- `--divergence-analysis-db`
+- `--ohlcv-db`
+
+The output sections are:
+
+- `section;divergence_context_snapshot`
+- `section;divergence_signals_60td`
+
+Important implementation facts:
+
+- the source table is `divergence_data`
+- `divergence_data` stores one processed row per ticker/date, not only event rows
+- coverage is based on latest daily `divergence_data.date` versus latest valid close date
+- signal availability uses `divergence_data.date <= as_of_date`
+- `pivot2_date_r2` and `pivot2_date_r3` are not signal availability dates
+- `divergence_signals_60td` includes only confirmed R2/R3 event rows
+- strength-only rows do not appear in `divergence_signals_60td`
+
+`divergence_context_snapshot` is a one-row context output for the ticker and analysis date.
+
+It includes:
+
+- window metadata
+- coverage fields like `divergence_coverage_status`
+- latest daily divergence row fields
+- latest R2/R3 event fields like:
+  - `latest_signal_date`
+  - `latest_signal_pattern`
+  - `latest_signal_group`
+  - `latest_signal_variant`
+  - `latest_signal_direction`
+  - `latest_signal_radius`
+  - `latest_signal_source_flag`
+
+`divergence_signals_60td` is event-style output.
+
+One row means one actual R2/R3 divergence event.
+
+If one daily `divergence_data` row contains multiple R2/R3 flags, the export contains multiple rows for that date.
+
+Current raw event fields are:
+
+- `signal_date`
+- `divergence_pattern`
+- `divergence_group`
+- `divergence_variant`
+- `divergence_direction`
+- `divergence_radius`
+- `signal_strength`
+- `rsi`
+- `pivot_gap`
+- `pivot_drop_pct`
+- `pivot2_date`
+- `source_flag`
+
+This block answers:
+
+- what was the latest confirmed divergence event?
+- what exact divergence events occurred during the recent 60 trading-day window?
+
+It does not answer:
+
+- whether the divergence is enough by itself
+- whether it aligns with fundamentals
+- whether it should be traded automatically
+
+---
+
+# 22. Moving Average Snapshot
+
+This section appears only when `--moving-average-snapshot` is enabled together with:
+
+- `--ohlcv-db`
+
+The output section is:
+
+- `section;moving_averages_60td`
+
+Important implementation facts:
+
+- the source database is only `osakedata.db`
+- stock output uses the latest 60 valid stock close rows on or before `as_of_date`
+- stock moving averages use only stock close rows where `pvm <= trade_date`
+- benchmark data defaults to:
+  - `benchmark_ticker = ^GSPC`
+  - `benchmark_market = usa`
+- benchmark close on each stock date uses:
+  - same-date `^GSPC` close if available
+  - otherwise latest valid `^GSPC` close on or before that stock trade date
+- all moving averages are simple moving averages, not exponential
+- only `close IS NOT NULL` rows are used
+
+Current raw columns are:
+
+- identity and window metadata
+- `trade_date`
+- `stock_close`
+- `stock_volume`
+- `stock_ma50`
+- `stock_ma200`
+- `benchmark_ticker`
+- `benchmark_trade_date`
+- `benchmark_close`
+- `benchmark_ma50`
+- `benchmark_ma200`
+
+This section is raw stock and index context only.
+
+It does not compute:
+
+- trend labels
+- crossover labels
+- price-above/below flags
+- distance from moving averages
+- relative strength versus index
+
+This section answers:
+
+- what were the latest 60 valid stock trading days?
+- what were stock close, stock volume, stock MA50 and MA200 on those days?
+- what were the matching S&P 500 close, MA50 and MA200 values on those same dates?
+
+---
+
+# 23. Recommended Reading Order
 
 A practical reading sequence is:
 
@@ -1255,6 +1513,7 @@ A practical reading sequence is:
 6. `sector_rank_position` and `industry_rank_position`
 7. `price_behavior_snapshot`
 8. `valuation_snapshot`
+9. optional Dow / candlestick / divergence / moving-average append blocks, if enabled
 
 This gives:
 
@@ -1264,10 +1523,11 @@ This gives:
 - trend
 - market confirmation
 - current valuation context
+- raw technical context when explicitly requested
 
 ---
 
-# 20. Bottom Line
+# 24. Bottom Line
 
 The snapshot is best understood as a layered decision-support report:
 
@@ -1276,6 +1536,7 @@ The snapshot is best understood as a layered decision-support report:
 3. time-direction signals
 4. optional market-confirmation signals
 5. latest stored valuation context
+6. optional raw technical append context
 
 The highest-conviction situations are usually those where:
 
@@ -1284,3 +1545,5 @@ The highest-conviction situations are usually those where:
 - QoQ / 4Q momentum is improving
 - price behavior does not contradict the fundamental picture
 - valuation context is at least understandable and not driven by missing-core-input failures
+
+If technical append sections are enabled, they should be read as additional raw context, not as automatic decision outputs.

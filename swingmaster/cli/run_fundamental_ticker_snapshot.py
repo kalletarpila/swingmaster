@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 import re
+import sys
 from typing import Any
 
 from analysis.candlestick_signal_reader import read_candlestick_signal_raw_export
@@ -1474,14 +1475,21 @@ def main() -> None:
     output_dir_arg = getattr(args, "output_dir", None)
     if len(ticker_list) > 1 and not output_dir_arg:
         raise SystemExit("--output-dir is required when --ticker contains multiple tickers")
-    if output_dir_arg:
-        output_dir = _resolve_output_dir(output_dir_arg)
-        output_date = resolve_output_date()
-        for ticker in ticker_list:
-            snapshot_output = _build_ticker_snapshot_output(args, ticker)
-            _write_snapshot_output_file(output_dir, ticker, output_date, snapshot_output)
-        return
-    print(_build_ticker_snapshot_output(args, ticker_list[0]))
+    try:
+        if output_dir_arg:
+            output_dir = _resolve_output_dir(output_dir_arg)
+            output_date = resolve_output_date()
+            for ticker in ticker_list:
+                try:
+                    snapshot_output = _build_ticker_snapshot_output(args, ticker)
+                except RuntimeError as exc:
+                    print(f"ERROR ticker={ticker} message={exc}", file=sys.stderr)
+                    continue
+                _write_snapshot_output_file(output_dir, ticker, output_date, snapshot_output)
+            return
+        print(_build_ticker_snapshot_output(args, ticker_list[0]))
+    except RuntimeError as exc:
+        raise SystemExit(str(exc))
 
 
 if __name__ == "__main__":

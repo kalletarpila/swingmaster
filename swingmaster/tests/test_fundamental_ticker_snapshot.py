@@ -642,18 +642,20 @@ def test_multi_ticker_uses_explicit_as_of_date_for_all_tickers(monkeypatch, caps
     assert ";usa;2026-04-15;" in (output_dir / "MSFT_2026-04-27.csv").read_text(encoding="utf-8")
 
 
-def test_multi_ticker_failure_is_not_silently_skipped(monkeypatch, tmp_path: Path) -> None:
+def test_multi_ticker_failure_continues_to_next_ticker(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ticker_snapshot_multi_fail.db"
+    output_dir = tmp_path / "snapshots"
     run_migration(db_path)
     _insert_minimal_snapshot_rows(db_path, ticker="AMZN", as_of_date="2026-03-31")
+    _insert_minimal_snapshot_rows(db_path, ticker="MSFT", as_of_date="2026-03-31")
 
     monkeypatch.setattr(
         run_fundamental_ticker_snapshot,
         "parse_args",
         lambda: SimpleNamespace(
             db=str(db_path),
-            ticker=["AMZN", "MISSING"],
-            output_dir=str(tmp_path / "snapshots"),
+            ticker=["AMZN", "MISSING", "MSFT"],
+            output_dir=str(output_dir),
             quarters=1,
             rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
             percentile_target_date=None,
@@ -665,8 +667,36 @@ def test_multi_ticker_failure_is_not_silently_skipped(monkeypatch, tmp_path: Pat
             moving_average_snapshot=False,
         ),
     )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
 
-    with pytest.raises(RuntimeError):
+    ticker_snapshot_main()
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert "ERROR ticker=MISSING message=FUNDAMENTAL_TTM_NOT_FOUND:MISSING" in captured.err
+    assert (output_dir / "AMZN_2026-04-27.csv").exists()
+    assert (output_dir / "MSFT_2026-04-27.csv").exists()
+
+
+def test_missing_ticker_exits_cleanly_without_traceback(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_missing.db"
+    run_migration(db_path)
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="KALMAR.HE",
+            quarters=4,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+        ),
+    )
+
+    with pytest.raises(SystemExit, match="FUNDAMENTAL_TTM_NOT_FOUND:KALMAR\\.HE"):
         ticker_snapshot_main()
 
 
@@ -686,7 +716,7 @@ def test_price_behavior_snapshot_requires_ohlcv_db(monkeypatch, tmp_path: Path) 
             price_behavior_snapshot=True,
         ),
     )
-    with pytest.raises(RuntimeError, match="PRICE_BEHAVIOR_SNAPSHOT_REQUIRES_OHLCV_DB"):
+    with pytest.raises(SystemExit, match="PRICE_BEHAVIOR_SNAPSHOT_REQUIRES_OHLCV_DB"):
         ticker_snapshot_main()
 
 

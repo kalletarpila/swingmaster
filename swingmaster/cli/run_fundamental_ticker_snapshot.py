@@ -336,6 +336,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Print multi-quarter ticker snapshot with scores and percentiles")
     parser.add_argument("--db", required=True, help="Fundamentals SQLite database path")
     parser.add_argument("--ticker", required=True, nargs="+", help="Ticker symbol or multiple ticker symbols")
+    parser.add_argument("--output-dir", default=None, help="Optional directory for per-ticker snapshot files")
     parser.add_argument("--quarters", type=int, default=4, help="Number of latest quarters to print")
     parser.add_argument(
         "--rule-id",
@@ -432,6 +433,8 @@ def parse_args() -> argparse.Namespace:
     parsed_tickers = _parse_ticker_args(args.ticker)
     if not parsed_tickers:
         parser.error("--ticker must contain at least one ticker")
+    if len(parsed_tickers) > 1 and not args.output_dir:
+        parser.error("--output-dir is required when --ticker contains multiple tickers")
     args.ticker = parsed_tickers
     return args
 
@@ -934,6 +937,33 @@ def resolve_output_date() -> str:
     return datetime.now().astimezone().date().isoformat()
 
 
+def _sanitize_ticker_for_filename(ticker: str) -> str:
+    sanitized = re.sub(r"[/\\\\:\s]+", "_", ticker.strip())
+    if not sanitized:
+        raise RuntimeError(f"FUNDAMENTAL_TICKER_SNAPSHOT_INVALID_FILENAME_TICKER:{ticker}")
+    return sanitized
+
+
+def _resolve_output_dir(output_dir_arg: str) -> Path:
+    output_dir = Path(output_dir_arg).expanduser().resolve()
+    if output_dir.exists() and not output_dir.is_dir():
+        raise RuntimeError(f"FUNDAMENTAL_TICKER_SNAPSHOT_OUTPUT_DIR_NOT_DIRECTORY:{output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def _write_snapshot_output_file(
+    output_dir: Path,
+    ticker: str,
+    output_date: str,
+    snapshot_output: str,
+) -> Path:
+    safe_ticker = _sanitize_ticker_for_filename(ticker.upper())
+    output_path = output_dir / f"{safe_ticker}_{output_date}.csv"
+    output_path.write_text(snapshot_output, encoding="utf-8", newline="\n")
+    return output_path
+
+
 def _format_csv_value(value: str) -> str:
     if value and value.replace(".", "", 1).replace("-", "", 1).isdigit() and value.count(".") == 1:
         return value.replace(".", ",")
@@ -1384,7 +1414,6 @@ def _build_ticker_snapshot_output(
     ticker: str,
 ) -> str:
     db_path = resolve_db_path(args.db)
-    output_date = resolve_output_date()
     if args.price_behavior_snapshot and not args.ohlcv_db:
         raise RuntimeError("PRICE_BEHAVIOR_SNAPSHOT_REQUIRES_OHLCV_DB")
     dow_structure_snapshot_enabled = getattr(args, "dow_structure_snapshot", False)
@@ -1428,17 +1457,6 @@ def _build_ticker_snapshot_output(
         if ohlcv_db_path is None:
             ohlcv_db_path = resolve_db_path(args.ohlcv_db)
         moving_average_snapshot = _load_moving_average_snapshot(args, ticker, ohlcv_db_path, price_behavior_snapshot)
-    ensure_snapshot_csv_written(
-        matrix_rows,
-        ticker,
-        output_date,
-        price_behavior_snapshot,
-        valuation_snapshot,
-        dow_structure_snapshot,
-        candlestick_snapshot,
-        divergence_snapshot,
-        moving_average_snapshot,
-    )
     return format_snapshot_matrix(
         matrix_rows,
         price_behavior_snapshot,
@@ -1453,11 +1471,17 @@ def _build_ticker_snapshot_output(
 def main() -> None:
     args = parse_args()
     ticker_list = _parse_ticker_args(args.ticker)
-    outputs = [
-        _build_ticker_snapshot_output(args, ticker)
-        for ticker in ticker_list
-    ]
-    print("\n\n".join(outputs))
+    output_dir_arg = getattr(args, "output_dir", None)
+    if len(ticker_list) > 1 and not output_dir_arg:
+        raise SystemExit("--output-dir is required when --ticker contains multiple tickers")
+    if output_dir_arg:
+        output_dir = _resolve_output_dir(output_dir_arg)
+        output_date = resolve_output_date()
+        for ticker in ticker_list:
+            snapshot_output = _build_ticker_snapshot_output(args, ticker)
+            _write_snapshot_output_file(output_dir, ticker, output_date, snapshot_output)
+        return
+    print(_build_ticker_snapshot_output(args, ticker_list[0]))
 
 
 if __name__ == "__main__":

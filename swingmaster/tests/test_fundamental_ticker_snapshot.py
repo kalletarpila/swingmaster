@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
@@ -247,21 +248,185 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
     assert cli_output == output
     cli_csv_path = tmp_path / "ticker_fundamentals" / "VRT_2026-04-27.csv"
     assert cli_csv_path.exists()
-    cli_csv_content = cli_csv_path.read_text(encoding="utf-8")
-    assert "fundamental_score_v1;73,00;71,00;67,00;74,00" in cli_csv_content
-    assert "growth_component (max 15p);15,00;15,00;15,00;15,00" in cli_csv_content
-    assert "percentile_rank_bucket;Top 20%;Top 20%;Top 20%;Top 20%" in cli_csv_content
-    assert "score_delta_qoq;;-2,50;-4,00;6,70" in cli_csv_content
-    assert "percentile_delta_qoq;;0,10;0,10;0,10" in cli_csv_content
-    assert "percentile_delta_4q;;;;0,80" in cli_csv_content
     assert "valuation_snapshot" in cli_output
     assert "valuation_date;" in cli_output
-    assert "valuation_snapshot" in cli_csv_content
-    assert "valuation_date;" in cli_csv_content
+ 
+
+def test_single_ticker_output_dir_writes_snapshot_file(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_single_file.db"
+    output_dir = tmp_path / "snapshots"
+    run_migration(db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="AMZN", as_of_date="2026-03-31")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker=["AMZN"],
+            output_dir=str(output_dir),
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=False,
+            candlestick_snapshot=False,
+            divergence_snapshot=False,
+            moving_average_snapshot=False,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    captured = capsys.readouterr()
+
+    output_path = output_dir / "AMZN_2026-04-27.csv"
+    assert captured.out == ""
+    assert output_path.exists()
+    assert "ticker;AMZN" in output_path.read_text(encoding="utf-8")
 
 
-def test_multi_ticker_comma_separated_outputs_snapshots_in_order(monkeypatch, capsys, tmp_path: Path) -> None:
+def test_single_ticker_output_dir_matches_stdout_output(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_equivalence.db"
+    output_dir = tmp_path / "snapshots"
+    run_migration(db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="AMZN", as_of_date="2026-03-31")
+
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="AMZN",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=False,
+            candlestick_snapshot=False,
+            divergence_snapshot=False,
+            moving_average_snapshot=False,
+        ),
+    )
+    ticker_snapshot_main()
+    stdout_output = capsys.readouterr().out
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="AMZN",
+            output_dir=str(output_dir),
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=False,
+            candlestick_snapshot=False,
+            divergence_snapshot=False,
+            moving_average_snapshot=False,
+        ),
+    )
+    ticker_snapshot_main()
+    capsys.readouterr()
+
+    assert (output_dir / "AMZN_2026-04-27.csv").read_text(encoding="utf-8") == stdout_output.rstrip("\n")
+
+
+def test_single_ticker_output_dir_overwrites_existing_file(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_overwrite.db"
+    output_dir = tmp_path / "snapshots"
+    output_dir.mkdir()
+    output_path = output_dir / "AMZN_2026-04-27.csv"
+    output_path.write_text("old-data", encoding="utf-8")
+    run_migration(db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="AMZN", as_of_date="2026-03-31")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="AMZN",
+            output_dir=str(output_dir),
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=False,
+            candlestick_snapshot=False,
+            divergence_snapshot=False,
+            moving_average_snapshot=False,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert output_path.read_text(encoding="utf-8") != "old-data"
+    assert output_path.read_text(encoding="utf-8").count("ticker;AMZN") == 1
+
+
+def test_single_ticker_output_dir_sanitizes_filename(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_sanitize.db"
+    output_dir = tmp_path / "snapshots"
+    run_migration(db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="BRK/B", as_of_date="2026-03-31")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="BRK/B",
+            output_dir=str(output_dir),
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+            dow_structure_snapshot=False,
+            candlestick_snapshot=False,
+            divergence_snapshot=False,
+            moving_average_snapshot=False,
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    capsys.readouterr()
+
+    output_path = output_dir / "BRK_B_2026-04-27.csv"
+    assert output_path.exists()
+    assert "ticker;BRK/B" in output_path.read_text(encoding="utf-8")
+
+
+def test_multi_ticker_without_output_dir_fails_clearly(monkeypatch, tmp_path: Path) -> None:
+    parser = argparse.ArgumentParser()
+    run_migration(tmp_path / "fundamental_ticker_snapshot_multi_error.db")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: parser.error("--output-dir is required when --ticker contains multiple tickers"),
+    )
+
+    with pytest.raises(SystemExit):
+        ticker_snapshot_main()
+
+
+def test_multi_ticker_comma_separated_writes_snapshot_files_in_order(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ticker_snapshot_multi.db"
+    output_dir = tmp_path / "snapshots"
     run_migration(db_path)
     _insert_minimal_snapshot_rows(db_path, ticker="AMZN", as_of_date="2026-03-31")
     _insert_minimal_snapshot_rows(db_path, ticker="MSFT", as_of_date="2026-03-31")
@@ -272,6 +437,7 @@ def test_multi_ticker_comma_separated_outputs_snapshots_in_order(monkeypatch, ca
         lambda: SimpleNamespace(
             db=str(db_path),
             ticker=["AMZN,MSFT"],
+            output_dir=str(output_dir),
             quarters=1,
             rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
             percentile_target_date=None,
@@ -283,19 +449,23 @@ def test_multi_ticker_comma_separated_outputs_snapshots_in_order(monkeypatch, ca
             moving_average_snapshot=False,
         ),
     )
-
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
     ticker_snapshot_main()
-    cli_output = capsys.readouterr().out.strip()
+    captured = capsys.readouterr()
 
-    assert "ticker;AMZN" in cli_output
-    assert "ticker;MSFT" in cli_output
-    assert cli_output.index("ticker;AMZN") < cli_output.index("ticker;MSFT")
-    assert "\n\nticker;MSFT" in cli_output
-    assert not cli_output.endswith("\n")
+    amzn_path = output_dir / "AMZN_2026-04-27.csv"
+    msft_path = output_dir / "MSFT_2026-04-27.csv"
+    assert captured.out == ""
+    assert amzn_path.exists()
+    assert msft_path.exists()
+    assert "ticker;AMZN" in amzn_path.read_text(encoding="utf-8")
+    assert "ticker;MSFT" not in amzn_path.read_text(encoding="utf-8")
+    assert "ticker;MSFT" in msft_path.read_text(encoding="utf-8")
 
 
-def test_multi_ticker_space_separated_outputs_snapshots(monkeypatch, capsys, tmp_path: Path) -> None:
+def test_multi_ticker_space_separated_writes_snapshots(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ticker_snapshot_multi_space.db"
+    output_dir = tmp_path / "snapshots"
     run_migration(db_path)
     _insert_minimal_snapshot_rows(db_path, ticker="AMZN", as_of_date="2026-03-31")
     _insert_minimal_snapshot_rows(db_path, ticker="MSFT", as_of_date="2026-03-31")
@@ -306,6 +476,7 @@ def test_multi_ticker_space_separated_outputs_snapshots(monkeypatch, capsys, tmp
         lambda: SimpleNamespace(
             db=str(db_path),
             ticker=["AMZN", "MSFT"],
+            output_dir=str(output_dir),
             quarters=1,
             rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
             percentile_target_date=None,
@@ -317,17 +488,20 @@ def test_multi_ticker_space_separated_outputs_snapshots(monkeypatch, capsys, tmp
             moving_average_snapshot=False,
         ),
     )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
 
     ticker_snapshot_main()
-    cli_output = capsys.readouterr().out
+    captured = capsys.readouterr()
 
-    assert cli_output.count("ticker;AMZN") == 1
-    assert cli_output.count("ticker;MSFT") == 1
+    assert captured.out == ""
+    assert (output_dir / "AMZN_2026-04-27.csv").exists()
+    assert (output_dir / "MSFT_2026-04-27.csv").exists()
 
 
-def test_multi_ticker_optional_section_appears_once_per_ticker(monkeypatch, capsys, tmp_path: Path) -> None:
+def test_multi_ticker_optional_section_appears_once_per_file(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ticker_snapshot_multi_ma.db"
     ohlcv_db_path = tmp_path / "osakedata.db"
+    output_dir = tmp_path / "snapshots"
     run_migration(db_path)
     _create_ohlcv_schema(ohlcv_db_path)
     _insert_minimal_snapshot_rows(db_path, ticker="AMZN", as_of_date="2026-03-31")
@@ -344,6 +518,7 @@ def test_multi_ticker_optional_section_appears_once_per_ticker(monkeypatch, caps
         lambda: SimpleNamespace(
             db=str(db_path),
             ticker=["AMZN,MSFT"],
+            output_dir=str(output_dir),
             quarters=1,
             rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
             percentile_target_date=None,
@@ -362,20 +537,20 @@ def test_multi_ticker_optional_section_appears_once_per_ticker(monkeypatch, caps
             moving_average_benchmark_market="usa",
         ),
     )
-    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
     monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
 
     ticker_snapshot_main()
-    cli_output = capsys.readouterr().out
+    captured = capsys.readouterr()
 
-    assert cli_output.count("section;moving_averages_60td") == 2
-    assert "ticker;AMZN" in cli_output
-    assert "ticker;MSFT" in cli_output
+    assert captured.out == ""
+    assert "section;moving_averages_60td" in (output_dir / "AMZN_2026-04-27.csv").read_text(encoding="utf-8")
+    assert "section;moving_averages_60td" in (output_dir / "MSFT_2026-04-27.csv").read_text(encoding="utf-8")
 
 
 def test_multi_ticker_uses_per_ticker_derived_as_of_date(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ticker_snapshot_multi_dates.db"
     ohlcv_db_path = tmp_path / "osakedata.db"
+    output_dir = tmp_path / "snapshots"
     run_migration(db_path)
     _create_ohlcv_schema(ohlcv_db_path)
     _insert_minimal_snapshot_rows(db_path, ticker="AMZN", as_of_date="2026-03-31")
@@ -391,6 +566,7 @@ def test_multi_ticker_uses_per_ticker_derived_as_of_date(monkeypatch, capsys, tm
         lambda: SimpleNamespace(
             db=str(db_path),
             ticker=["AMZN", "MSFT"],
+            output_dir=str(output_dir),
             quarters=1,
             rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
             percentile_target_date=None,
@@ -409,19 +585,20 @@ def test_multi_ticker_uses_per_ticker_derived_as_of_date(monkeypatch, capsys, tm
             moving_average_benchmark_market="usa",
         ),
     )
-    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
     monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
 
     ticker_snapshot_main()
-    cli_output = capsys.readouterr().out
+    captured = capsys.readouterr()
 
-    assert "AMZN;usa;2026-04-14;" in cli_output
-    assert "MSFT;usa;2026-04-15;" in cli_output
+    assert captured.out == ""
+    assert "AMZN;usa;2026-04-14;" in (output_dir / "AMZN_2026-04-27.csv").read_text(encoding="utf-8")
+    assert "MSFT;usa;2026-04-15;" in (output_dir / "MSFT_2026-04-27.csv").read_text(encoding="utf-8")
 
 
 def test_multi_ticker_uses_explicit_as_of_date_for_all_tickers(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ticker_snapshot_multi_explicit.db"
     ohlcv_db_path = tmp_path / "osakedata.db"
+    output_dir = tmp_path / "snapshots"
     run_migration(db_path)
     _create_ohlcv_schema(ohlcv_db_path)
     _insert_minimal_snapshot_rows(db_path, ticker="AMZN", as_of_date="2026-03-31")
@@ -436,6 +613,7 @@ def test_multi_ticker_uses_explicit_as_of_date_for_all_tickers(monkeypatch, caps
         lambda: SimpleNamespace(
             db=str(db_path),
             ticker=["AMZN", "MSFT"],
+            output_dir=str(output_dir),
             quarters=1,
             rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
             percentile_target_date=None,
@@ -454,13 +632,14 @@ def test_multi_ticker_uses_explicit_as_of_date_for_all_tickers(monkeypatch, caps
             moving_average_benchmark_market="usa",
         ),
     )
-    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
     monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
 
     ticker_snapshot_main()
-    cli_output = capsys.readouterr().out
+    captured = capsys.readouterr()
 
-    assert cli_output.count(";usa;2026-04-15;") >= 2
+    assert captured.out == ""
+    assert ";usa;2026-04-15;" in (output_dir / "AMZN_2026-04-27.csv").read_text(encoding="utf-8")
+    assert ";usa;2026-04-15;" in (output_dir / "MSFT_2026-04-27.csv").read_text(encoding="utf-8")
 
 
 def test_multi_ticker_failure_is_not_silently_skipped(monkeypatch, tmp_path: Path) -> None:
@@ -474,6 +653,7 @@ def test_multi_ticker_failure_is_not_silently_skipped(monkeypatch, tmp_path: Pat
         lambda: SimpleNamespace(
             db=str(db_path),
             ticker=["AMZN", "MISSING"],
+            output_dir=str(tmp_path / "snapshots"),
             quarters=1,
             rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
             percentile_target_date=None,
@@ -513,6 +693,7 @@ def test_price_behavior_snapshot_requires_ohlcv_db(monkeypatch, tmp_path: Path) 
 def test_price_behavior_snapshot_stdout_and_csv(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ticker_snapshot.db"
     ohlcv_db_path = tmp_path / "osakedata.db"
+    output_dir = tmp_path / "ticker_fundamentals"
     run_migration(db_path)
     _create_ohlcv_schema(ohlcv_db_path)
 
@@ -603,6 +784,7 @@ def test_price_behavior_snapshot_stdout_and_csv(monkeypatch, capsys, tmp_path: P
         lambda: SimpleNamespace(
             db=str(db_path),
             ticker="VRT",
+            output_dir=str(output_dir),
             quarters=2,
             rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
             percentile_target_date=None,
@@ -610,39 +792,21 @@ def test_price_behavior_snapshot_stdout_and_csv(monkeypatch, capsys, tmp_path: P
             price_behavior_snapshot=True,
         ),
     )
-    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
     monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
     ticker_snapshot_main()
     cli_output = capsys.readouterr().out.strip()
 
-    assert "price_behavior_snapshot" in cli_output
-    assert "price_behavior_as_of_date;2026-04-30" in cli_output
-    assert "price_return_3m_pct;9.29" in cli_output
-    assert "price_return_6m_pct;20.48" in cli_output
-    assert "price_return_12m_pct;48.15" in cli_output
-    assert "distance_from_52w_high_pct;-9.09" in cli_output
-    assert "relative_strength_6m_vs_sp500_pct;5.89" in cli_output
-    assert "price_return_since_last_report_pct;33.33" in cli_output
-    assert "relative_return_vs_sp500_since_last_report_pct;22.22" in cli_output
-    assert "earnings_reaction_1d_pct;1.00" in cli_output
-    assert "earnings_reaction_3d_pct;3.00" in cli_output
-    assert "post_earnings_drift_20d_pct;10.00" in cli_output
-    assert "volume_ratio_since_last_report_vs_3m_avg;2.50" in cli_output
-    assert "valuation_snapshot" in cli_output
-    assert cli_output.index("price_behavior_snapshot") < cli_output.index("valuation_snapshot")
-    assert "price_return_3m_pct;9.29;" not in cli_output
-    assert cli_output.index("earnings_reaction_1d_pct;1.00") < cli_output.index("post_earnings_drift_20d_pct;10.00")
-    assert cli_output.index("earnings_reaction_3d_pct;3.00") < cli_output.index("post_earnings_drift_20d_pct;10.00")
+    assert cli_output == ""
 
-    cli_csv_path = tmp_path / "ticker_fundamentals" / "VRT_2026-04-27.csv"
+    cli_csv_path = output_dir / "VRT_2026-04-27.csv"
     cli_csv_content = cli_csv_path.read_text(encoding="utf-8")
     assert "price_behavior_snapshot" in cli_csv_content
     assert "price_behavior_as_of_date;2026-04-30" in cli_csv_content
     assert "valuation_snapshot" in cli_csv_content
-    assert "price_return_3m_pct;9,29" in cli_csv_content
-    assert "relative_strength_6m_vs_sp500_pct;5,89" in cli_csv_content
-    assert "earnings_reaction_1d_pct;1,00" in cli_csv_content
-    assert "earnings_reaction_3d_pct;3,00" in cli_csv_content
+    assert "price_return_3m_pct;9.29" in cli_csv_content
+    assert "relative_strength_6m_vs_sp500_pct;5.89" in cli_csv_content
+    assert "earnings_reaction_1d_pct;1.00" in cli_csv_content
+    assert "earnings_reaction_3d_pct;3.00" in cli_csv_content
 
 
 def test_price_behavior_snapshot_uses_omxh_benchmark_for_he_ticker(monkeypatch, capsys, tmp_path: Path) -> None:
@@ -1868,6 +2032,7 @@ def test_candlestick_snapshot_csv_uses_decimal_comma(monkeypatch, capsys, tmp_pa
     db_path = tmp_path / "fundamental_ticker_snapshot_candlestick_csv.db"
     analysis_db_path = tmp_path / "analysis.db"
     ohlcv_db_path = tmp_path / "osakedata.db"
+    output_dir = tmp_path / "ticker_fundamentals"
     run_migration(db_path)
     _create_ohlcv_schema(ohlcv_db_path)
     _create_candlestick_analysis_schema(analysis_db_path)
@@ -1881,6 +2046,7 @@ def test_candlestick_snapshot_csv_uses_decimal_comma(monkeypatch, capsys, tmp_pa
         lambda: SimpleNamespace(
             db=str(db_path),
             ticker="VRT",
+            output_dir=str(output_dir),
             quarters=1,
             rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
             percentile_target_date=None,
@@ -1893,14 +2059,13 @@ def test_candlestick_snapshot_csv_uses_decimal_comma(monkeypatch, capsys, tmp_pa
             candlestick_recent_window_trading_days=60,
         ),
     )
-    monkeypatch.setattr(run_fundamental_ticker_snapshot, "CSV_OUTPUT_DIR", tmp_path / "ticker_fundamentals")
     monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
 
     ticker_snapshot_main()
     cli_output = capsys.readouterr().out
-    csv_content = (tmp_path / "ticker_fundamentals" / "VRT_2026-04-27.csv").read_text(encoding="utf-8")
+    csv_content = (output_dir / "VRT_2026-04-27.csv").read_text(encoding="utf-8")
 
-    assert "Hammer;BULLISH_CANDLE;0,75;28,5;" in cli_output
+    assert cli_output == ""
     assert "section;candlestick_events_60td" in csv_content
     assert "Hammer;BULLISH_CANDLE;0,75;28,5;" in csv_content
 

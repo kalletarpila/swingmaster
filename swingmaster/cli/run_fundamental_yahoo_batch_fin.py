@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from swingmaster.cli.run_fundamental_quarterly_to_ttm import run_quarterly_to_ttm
+from swingmaster.cli.run_fundamental_valuation import run_fundamental_valuation
 from swingmaster.cli.run_fundamental_yahoo_audit import run_yahoo_audit
 from swingmaster.cli.run_fundamental_yahoo_quarterly_write import run_yahoo_quarterly_write
 from swingmaster.cli.run_fundamental_yahoo_to_quarterly import run_yahoo_to_quarterly
@@ -61,6 +62,22 @@ def load_omxh_ticker_universe(osakedata_db_path: Path) -> list[str]:
             (UNIVERSE_MARKET,),
         ).fetchall()
     return [str(row[0]) for row in rows]
+
+
+def resolve_latest_close_as_of_date(osakedata_db_path: Path, market: str) -> str:
+    with sqlite3.connect(str(osakedata_db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT MAX(pvm)
+            FROM osakedata
+            WHERE market = ?
+              AND close IS NOT NULL
+            """,
+            (market,),
+        ).fetchone()
+    if row is None or row[0] is None:
+        raise RuntimeError(f"FUNDAMENTAL_YAHOO_BATCH_VALUATION_AS_OF_DATE_NOT_FOUND:{market}")
+    return str(row[0])
 
 
 def run_lifecycle_step(db_path: Path, ticker: str, dry_run: bool) -> int:
@@ -193,6 +210,19 @@ def run_yahoo_batch_fin(
     if failure_lines:
         failure_log_path.write_text("\n".join(failure_lines) + "\n", encoding="utf-8")
 
+    valuation_as_of_date = resolve_latest_close_as_of_date(osakedata_db_path, DEFAULT_MARKET)
+    valuation_summary = run_fundamental_valuation(
+        db_path=db_path,
+        osakedata_db_path=osakedata_db_path,
+        market=DEFAULT_MARKET,
+        as_of_date=valuation_as_of_date,
+        ticker=None,
+        run_id=f"{run_id}__VALUATION",
+        dry_run=dry_run,
+        replace=True,
+    )
+    valuation_rows_written = int(valuation_summary["rows_written"])
+
     return {
         "market": DEFAULT_MARKET,
         "universe_size": len(universe),
@@ -203,6 +233,8 @@ def run_yahoo_batch_fin(
         "ttm_rows_written_total": ttm_rows_written_total,
         "lifecycle_rows_written_total": lifecycle_rows_written_total,
         "score_rows_written_total": score_rows_written_total,
+        "valuation_as_of_date": valuation_as_of_date,
+        "valuation_rows_written": valuation_rows_written,
         "dry_run": "true" if dry_run else "false",
         "run_id": run_id,
     }
@@ -227,6 +259,8 @@ def main() -> None:
     _summary(ttm_rows_written_total=summary["ttm_rows_written_total"])
     _summary(lifecycle_rows_written_total=summary["lifecycle_rows_written_total"])
     _summary(score_rows_written_total=summary["score_rows_written_total"])
+    _summary(valuation_as_of_date=summary["valuation_as_of_date"])
+    _summary(valuation_rows_written=summary["valuation_rows_written"])
     _summary(dry_run=summary["dry_run"])
     _summary(run_id=summary["run_id"])
 

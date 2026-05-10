@@ -10,6 +10,7 @@ from swingmaster.cli.run_fundamental_bootstrap_sec_raw import SEC_USER_AGENT, ru
 from swingmaster.fundamentals.build_quarterly import build_and_insert_quarterly_rows
 from swingmaster.cli.run_fundamental_quarter_state import acknowledge_ingested, load_latest_quarter_rows
 from swingmaster.cli.run_fundamental_quarterly_to_ttm import run_quarterly_to_ttm
+from swingmaster.cli.run_fundamental_valuation import run_fundamental_valuation
 from swingmaster.cli.run_fundamental_yahoo_audit import run_yahoo_audit
 from swingmaster.cli.run_fundamental_yahoo_fallback_enrich import run_yahoo_fallback_enrich
 from swingmaster.cli.run_fundamental_yahoo_quarterly_write import run_yahoo_quarterly_write
@@ -27,6 +28,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--market", default=None, help="Optional market filter")
     parser.add_argument("--ticker", default=None, help="Optional single ticker filter")
     parser.add_argument("--limit", type=int, default=None, help="Optional ticker limit after deterministic ordering")
+    parser.add_argument(
+        "--osakedata-db",
+        default=None,
+        help="OHLCV SQLite database path used for final USA valuation step (required when market is usa or omitted)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Read-only preview without running write paths")
     parser.add_argument("--skip-ack", action="store_true", help="Run steps but do not acknowledge quarter state")
     return parser.parse_args()
@@ -41,6 +47,12 @@ def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
 
+def resolve_optional_db_path(db_arg: str | None) -> Path | None:
+    if db_arg is None:
+        return None
+    return Path(db_arg).expanduser().resolve()
+
+
 def derive_child_run_ids(base_run_id: str) -> dict[str, str]:
     return {
         "raw": f"{base_run_id}__RAW",
@@ -51,9 +63,32 @@ def derive_child_run_ids(base_run_id: str) -> dict[str, str]:
         "ttm": f"{base_run_id}__TTM",
         "lifecycle": f"{base_run_id}__LIFECYCLE",
         "score": f"{base_run_id}__SCORE",
+        "valuation": f"{base_run_id}__VALUATION",
         "ack": f"{base_run_id}__ACK",
         "enrich": f"{base_run_id}__ENRICH",
     }
+
+
+def resolve_latest_close_as_of_date(osakedata_db_path: Path, market: str) -> str:
+    with sqlite3.connect(str(osakedata_db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT MAX(pvm)
+            FROM osakedata
+            WHERE market = ?
+              AND close IS NOT NULL
+            """,
+            (market,),
+        ).fetchone()
+    if row is None or row[0] is None:
+        raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VALUATION_AS_OF_DATE_NOT_FOUND:{market}")
+    return str(row[0])
+
+
+def should_run_usa_valuation(market: str | None) -> bool:
+    if market is None:
+        return True
+    return market.strip().lower() == "usa"
 
 
 def load_eligible_rows(
@@ -398,6 +433,7 @@ def process_ticker(
 
 def run_fundamental_quarter_update(
     db_path: Path,
+    osakedata_db_path: Path | None,
     run_id: str,
     market: str | None,
     ticker: str | None,
@@ -468,6 +504,25 @@ def run_fundamental_quarter_update(
             continue
         tickers_succeeded += 1
 
+    valuation_as_of_date = ""
+    valuation_rows_written = 0
+    if should_run_usa_valuation(market):
+        if osakedata_db_path is None:
+            raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_OSAKEDATA_DB_REQUIRED_FOR_USA_VALUATION")
+        valuation_as_of_date = resolve_latest_close_as_of_date(osakedata_db_path, market="usa")
+        valuation_summary = run_fundamental_valuation(
+            db_path=db_path,
+            osakedata_db_path=osakedata_db_path,
+            market="usa",
+            as_of_date=valuation_as_of_date,
+            ticker=None,
+            run_id=child_run_ids["valuation"],
+            dry_run=False,
+            replace=True,
+        )
+        valuation_rows_written = int(valuation_summary["rows_written"])
+        print(f"STEP valuation=OK as_of_date={valuation_as_of_date} rows_written={valuation_rows_written}")
+
     summary = {
         "tickers_total": len(rows),
         "tickers_processed": tickers_processed,
@@ -476,6 +531,8 @@ def run_fundamental_quarter_update(
         "market": market_label,
         "dry_run": 0,
         "skip_ack": 1 if skip_ack else 0,
+        "valuation_as_of_date": valuation_as_of_date,
+        "valuation_rows_written": valuation_rows_written,
         "run_id": run_id,
     }
     _summary(**summary)
@@ -487,9 +544,11 @@ def run_fundamental_quarter_update(
 def main() -> None:
     args = parse_args()
     db_path = resolve_db_path(args.db)
+    osakedata_db_path = resolve_optional_db_path(args.osakedata_db)
     try:
         run_fundamental_quarter_update(
             db_path=db_path,
+            osakedata_db_path=osakedata_db_path,
             run_id=args.run_id,
             market=args.market,
             ticker=args.ticker,

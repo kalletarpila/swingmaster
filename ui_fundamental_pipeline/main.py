@@ -88,20 +88,37 @@ class SwingMasterApp:
             on_lock=self._lock_ui,
         )
 
+        # Create tabs
+        self.usa_tab = ft.Tab(label="USA MARKET")
+        self.fin_tab = ft.Tab(label="FIN MARKET")
+        
         self.tabs = ft.Tabs(
+            content=ft.Row(
+                controls=[self.usa_tab, self.fin_tab],
+                spacing=0,
+            ),
+            length=2,
             selected_index=0,
-            tabs=[
-                ft.Tab(
-                    text="USA MARKET",
-                    content=ft.Container(content=self.usa_panel.container, padding=10),
-                ),
-                ft.Tab(
-                    text="FIN MARKET",
-                    content=ft.Container(content=self.fin_panel.container, padding=10),
-                ),
-            ],
-            expand=False,
         )
+        
+        # Create tab content panels
+        usa_content = ft.Container(content=self.usa_panel.container, padding=10)
+        fin_content = ft.Container(content=self.fin_panel.container, padding=10)
+        
+        # Store content references for dynamic switching
+        self.tab_contents = [usa_content, fin_content]
+        
+        # Initialize tab content area with first tab
+        self.tab_content_area = ft.Container(
+            content=self.tab_contents[0],
+            expand=True,
+        )
+        
+        # Create tab change callback
+        def on_tab_change(e):
+            self.tab_content_area.content = self.tab_contents[self.tabs.selected_index]
+        
+        self.tabs.on_change = on_tab_change
 
         self.overlay = ft.Container(
             content=ft.Column(
@@ -114,7 +131,7 @@ class SwingMasterApp:
                 alignment=ft.MainAxisAlignment.CENTER,
             ),
             bgcolor="#AA000000",
-            alignment=ft.alignment.center,
+            alignment=ft.Alignment(0, 0),
             visible=False,
             expand=True,
         )
@@ -123,6 +140,7 @@ class SwingMasterApp:
             controls=[
                 ft.Text(WINDOW_TITLE, size=24, weight="bold"),
                 self.tabs,
+                self.tab_content_area,
                 ft.Row([self.progress_text], alignment=ft.MainAxisAlignment.START),
                 self.progress_bar,
                 ft.Divider(),

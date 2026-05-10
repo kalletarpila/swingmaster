@@ -29,6 +29,8 @@ CLI_TICKER_SNAPSHOT = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_ti
 WINDOW_TITLE = "Swing Master"
 WINDOW_WIDTH = 1400
 WINDOW_HEIGHT = 900
+WEB_HOST = "127.0.0.1"
+WEB_PORT = 8550
 
 # Execution settings
 PROCESS_TIMEOUT_SECONDS = 7200  # 2 hours

@@ -25,9 +25,8 @@ class ExecutionOutputPanel:
         self.log_output = ft.Text(
             value="",
             size=11,
-            family="monospace",
+            style=ft.TextStyle(font_family="monospace"),
             selectable=True,
-            min_height=300,
         )
 
         self.log_container = ft.Column(
@@ -37,18 +36,18 @@ class ExecutionOutputPanel:
             height=300,
         )
 
-        self.clear_btn = ft.ElevatedButton(
-            text="Clear",
+        self.clear_btn = ft.Button(
+            content=ft.Text("Clear"),
             on_click=self._on_clear_click,
         )
 
-        self.stop_btn = ft.ElevatedButton(
-            text="Stop",
+        self.stop_btn = ft.Button(
+            content=ft.Text("Stop"),
             on_click=self._on_stop_click,
         )
 
-        self.export_btn = ft.ElevatedButton(
-            text="Export Log",
+        self.export_btn = ft.Button(
+            content=ft.Text("Export Log"),
             on_click=self._on_export_click,
             disabled=True,
         )
@@ -57,8 +56,7 @@ class ExecutionOutputPanel:
         self.summary_text = ft.Text(
             value="",
             size=10,
-            family="monospace",
-            min_height=100,
+            style=ft.TextStyle(font_family="monospace"),
         )
 
         self.container = ft.Column(
@@ -112,6 +110,12 @@ class ExecutionOutputPanel:
         self.clear_btn.disabled = running
         self.stop_btn.disabled = not running
         self.export_btn.disabled = running
+        # Update page if available
+        try:
+            if hasattr(self, 'page') and self.page:
+                self.page.update()
+        except:
+            pass
 
     def _on_clear_click(self, e):
         """Clear button handler."""

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python"
+
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "Error: Python executable not found at $PYTHON_BIN" >&2
+  echo "Create the virtual environment first." >&2
+  exit 1
+fi
+
+cd "$SCRIPT_DIR"
+echo "Starting Swing Master in browser mode at http://127.0.0.1:8550"
+exec "$PYTHON_BIN" -m ui_fundamental_pipeline.main

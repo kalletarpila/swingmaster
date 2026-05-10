@@ -45,22 +45,22 @@ class MarketPanel:
         # UI elements
         self.ticker_input = ft.TextField(
             label="Tickers (comma/space separated)",
-            min_width=300,
+            width=300,
             multiline=False,
         )
 
-        self.quarter_update_btn = ft.ElevatedButton(
-            text=f"▶ Run {self.market.upper()} Quarter Update",
+        self.quarter_update_btn = ft.Button(
+            content=ft.Text(f"▶ Run {self.market.upper()} Quarter Update"),
             on_click=self._on_quarter_update_click,
         )
 
-        self.percentile_btn = ft.ElevatedButton(
-            text=f"▶ Run {self.market.upper()} Score Percentile",
+        self.percentile_btn = ft.Button(
+            content=ft.Text(f"▶ Run {self.market.upper()} Score Percentile"),
             on_click=self._on_percentile_click,
         )
 
-        self.snapshot_btn = ft.ElevatedButton(
-            text=f"▶ Generate {self.market.upper()} Snapshots",
+        self.snapshot_btn = ft.Button(
+            content=ft.Text(f"▶ Generate {self.market.upper()} Snapshots"),
             on_click=self._on_snapshot_click,
         )
 
@@ -73,14 +73,14 @@ class MarketPanel:
                 ft.Divider(),
                 ft.Text("1. DATABASE UPDATE", weight="bold", size=13),
                 self.quarter_update_btn,
-                ft.SizedBox(height=10),
+                ft.Container(height=10),
                 ft.Text("2. PERCENTILE CALCULATION", weight="bold", size=13),
                 self.percentile_btn,
-                ft.SizedBox(height=10),
+                ft.Container(height=10),
                 ft.Text("3. SNAPSHOT GENERATION", weight="bold", size=13),
                 self.ticker_input,
                 self.snapshot_btn,
-                ft.SizedBox(height=10),
+                ft.Container(height=10),
                 self.status_badge,
             ],
             spacing=5,

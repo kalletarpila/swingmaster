@@ -20,6 +20,8 @@ try:
     from .config import (
         DATETIME_FORMAT,
         WINDOW_HEIGHT,
+        WEB_HOST,
+        WEB_PORT,
         WINDOW_TITLE,
         WINDOW_WIDTH,
         get_missing_paths,
@@ -42,6 +44,8 @@ except ImportError:  # pragma: no cover
     from config import (
         DATETIME_FORMAT,
         WINDOW_HEIGHT,
+        WEB_HOST,
+        WEB_PORT,
         WINDOW_TITLE,
         WINDOW_WIDTH,
         get_missing_paths,
@@ -270,4 +274,4 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.run(main, host=WEB_HOST, port=WEB_PORT, view=ft.AppView.WEB_BROWSER)

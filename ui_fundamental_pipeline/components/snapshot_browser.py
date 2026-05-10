@@ -25,18 +25,18 @@ class SnapshotBrowser:
             height=200,
         )
 
-        self.refresh_btn = ft.ElevatedButton(
-            text="Refresh List",
+        self.refresh_btn = ft.Button(
+            content=ft.Text("Refresh List"),
             on_click=self._on_refresh_click,
         )
 
-        self.open_folder_btn = ft.ElevatedButton(
-            text="Open Snapshots Folder",
+        self.open_folder_btn = ft.Button(
+            content=ft.Text("Open Snapshots Folder"),
             on_click=self._on_open_folder_click,
         )
 
-        self.download_all_btn = ft.ElevatedButton(
-            text="Download All as ZIP",
+        self.download_all_btn = ft.Button(
+            content=ft.Text("Download All as ZIP"),
             on_click=self._on_download_all_click,
         )
 
@@ -91,7 +91,7 @@ class SnapshotBrowser:
                             color="gray",
                         ),
                         ft.IconButton(
-                            icon=ft.icons.DOWNLOAD,
+                            icon=ft.icons.Icons.CLOUD_DOWNLOAD,
                             icon_size=16,
                             on_click=lambda e, f=csv_file: self._on_download_single(f),
                             tooltip="Download",

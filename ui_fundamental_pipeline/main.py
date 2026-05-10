@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-import threading
 from typing import Optional
 
 import flet as ft
@@ -188,9 +187,17 @@ class SwingMasterApp:
         self.page.update()
 
     def _run_in_background(self, target) -> None:
+        """Run target function in background thread using Flet's thread pool."""
         self.stop_requested = False
-        self.current_worker = threading.Thread(target=target, daemon=True)
-        self.current_worker.start()
+        self.page.run_thread(target)
+
+    def _ui_callback(self, func):
+        """Create callback that executes func and updates page."""
+        def callback(*args, **kwargs):
+            result = func(*args, **kwargs)
+            self.page.update()
+            return result
+        return callback
 
     def _stop_current_run(self) -> None:
         self.stop_requested = True
@@ -199,19 +206,19 @@ class SwingMasterApp:
 
     def _execute_single_command(self, command: list[str], status_prefix: str, market: str) -> None:
         self.output_panel.clear_output()
-        self.page.call_from_thread(self._set_progress, 0, 1, status_prefix)
+        self._set_progress(0, 1, status_prefix)
 
         exit_code, _ = self.executor.execute(
             command=command,
-            on_output=lambda line: self.page.call_from_thread(self.output_panel.add_line, line),
-            on_summary=lambda summary: self.page.call_from_thread(self.output_panel.set_summary, summary),
+            on_output=self._ui_callback(self.output_panel.add_line),
+            on_summary=self._ui_callback(self.output_panel.set_summary),
         )
 
         color = "green" if exit_code == 0 else "red"
         target_panel = self.usa_panel if market == "usa" else self.fin_panel
-        self.page.call_from_thread(target_panel.set_status, f"{status_prefix}: exit={exit_code}", color)
-        self.page.call_from_thread(self._set_progress, 1, 1, status_prefix)
-        self.page.call_from_thread(self._lock_ui, False)
+        target_panel.set_status(f"{status_prefix}: exit={exit_code}", color)
+        self._set_progress(1, 1, status_prefix)
+        self._lock_ui(False)
 
     def _execute_snapshot_batch(self, market: str, tickers: list[str]) -> None:
         self.output_panel.clear_output()
@@ -221,16 +228,15 @@ class SwingMasterApp:
 
         for idx, ticker in enumerate(tickers, start=1):
             if self.stop_requested:
-                self.page.call_from_thread(self._log, "Snapshot run stopped by user.")
+                self._log("Snapshot run stopped by user.")
                 break
 
-            self.page.call_from_thread(
-                self._set_progress,
+            self._set_progress(
                 idx - 1,
                 total,
                 f"Generating {market.upper()} snapshots",
             )
-            self.page.call_from_thread(self._log, f"Running snapshot for {ticker}")
+            self._log(f"Running snapshot for {ticker}")
 
             command = build_single_ticker_snapshot_command(
                 market=market,
@@ -239,24 +245,23 @@ class SwingMasterApp:
             )
             exit_code, _ = self.executor.execute(
                 command=command,
-                on_output=lambda line: self.page.call_from_thread(self.output_panel.add_line, line),
-                on_summary=lambda summary: self.page.call_from_thread(self.output_panel.set_summary, summary),
+                on_output=self._ui_callback(self.output_panel.add_line),
+                on_summary=self._ui_callback(self.output_panel.set_summary),
             )
 
             if exit_code != 0:
-                self.page.call_from_thread(self._log, f"ERROR: Snapshot failed for {ticker} (exit={exit_code})")
+                self._log(f"ERROR: Snapshot failed for {ticker} (exit={exit_code})")
             else:
-                self.page.call_from_thread(self._log, f"OK: Snapshot generated for {ticker}")
+                self._log(f"OK: Snapshot generated for {ticker}")
 
-            self.page.call_from_thread(
-                self._set_progress,
+            self._set_progress(
                 idx,
                 total,
                 f"Generating {market.upper()} snapshots",
             )
 
-        self.page.call_from_thread(self.snapshot_browser.refresh_file_list)
-        self.page.call_from_thread(self._lock_ui, False)
+        self.snapshot_browser.refresh_file_list()
+        self._lock_ui(False)
 
     def _run_usa_update(self) -> None:
         run_id = get_run_id_usa()

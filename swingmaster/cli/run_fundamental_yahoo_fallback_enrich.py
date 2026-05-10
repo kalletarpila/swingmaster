@@ -20,6 +20,21 @@ ALLOWED_FIELDS = (
     "total_debt",
     "shares_outstanding",
 )
+QUARTERLY_INSERT_FIELDS = (
+    "revenue",
+    "gross_profit",
+    "operating_income",
+    "ebit",
+    "ebitda",
+    "net_income",
+    "operating_cashflow",
+    "capex",
+    "free_cashflow",
+    "cash",
+    "total_debt",
+    "shares_outstanding",
+    "currency",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -111,8 +126,39 @@ def load_yahoo_rows(conn: sqlite3.Connection, market: str, ticker: str) -> dict[
     return {str(row["period_end_date"]): row for row in rows}
 
 
+def load_yahoo_quarterly_columns(conn: sqlite3.Connection) -> set[str]:
+    rows = conn.execute("PRAGMA table_info(rc_fundamental_yahoo_quarterly)").fetchall()
+    return {str(row[1]) for row in rows}
+
+
 def _calendar_quarter(value: date) -> int:
     return ((value.month - 1) // 3) + 1
+
+
+def quarterly_satisfies_detected(conn: sqlite3.Connection, ticker: str, detected_source_period_end_date: str) -> bool:
+    detected_date = date.fromisoformat(detected_source_period_end_date)
+    detected_quarter = _calendar_quarter(detected_date)
+    rows = conn.execute(
+        """
+        SELECT period_end_date
+        FROM rc_fundamental_quarterly
+        WHERE ticker = ?
+        ORDER BY period_end_date ASC
+        """,
+        (ticker.upper(),),
+    ).fetchall()
+    for row in rows:
+        period_end_date = row[0]
+        if period_end_date is None:
+            continue
+        quarter_date = date.fromisoformat(str(period_end_date))
+        if quarter_date.year != detected_date.year:
+            continue
+        if _calendar_quarter(quarter_date) != detected_quarter:
+            continue
+        if abs((quarter_date - detected_date).days) <= 7:
+            return True
+    return False
 
 
 def resolve_yahoo_match(
@@ -175,6 +221,56 @@ def build_field_updates(
             }
         )
     return updates, audit_rows
+
+
+def insert_missing_quarterly_row_from_yahoo(
+    conn: sqlite3.Connection,
+    market: str,
+    ticker: str,
+    detected_source_period_end_date: str | None,
+    run_id: str,
+) -> int:
+    if detected_source_period_end_date is None:
+        return 0
+    if quarterly_satisfies_detected(conn, ticker, detected_source_period_end_date):
+        return 0
+
+    yahoo_rows_by_period = load_yahoo_rows(conn, market, ticker)
+    matched_yahoo_row, _match_method = resolve_yahoo_match(yahoo_rows_by_period, detected_source_period_end_date)
+    if matched_yahoo_row is None:
+        return 0
+
+    matched_period_end_date = str(matched_yahoo_row["period_end_date"])
+    existing_row = conn.execute(
+        """
+        SELECT 1
+        FROM rc_fundamental_quarterly
+        WHERE ticker = ?
+          AND period_end_date = ?
+        """,
+        (ticker.upper(), matched_period_end_date),
+    ).fetchone()
+    if existing_row is not None:
+        return 0
+
+    yahoo_columns = load_yahoo_quarterly_columns(conn)
+    insert_columns = ["ticker", "period_end_date", *QUARTERLY_INSERT_FIELDS, "run_id"]
+    placeholders = ", ".join("?" for _ in insert_columns)
+    values: list[object] = [ticker.upper(), matched_period_end_date]
+    for field_name in QUARTERLY_INSERT_FIELDS:
+        if field_name in yahoo_columns and field_name in matched_yahoo_row.keys():
+            values.append(matched_yahoo_row[field_name])
+        else:
+            values.append(None)
+    values.append(run_id)
+    conn.execute(
+        f"""
+        INSERT INTO rc_fundamental_quarterly ({", ".join(insert_columns)})
+        VALUES ({placeholders})
+        """,
+        values,
+    )
+    return 1
 
 
 def replace_audit_rows_for_run(conn: sqlite3.Connection, run_id: str) -> int:
@@ -259,6 +355,7 @@ def run_yahoo_fallback_enrich(
     run_id: str,
     dry_run: bool,
     replace_audit_for_run: bool,
+    detected_source_period_end_date: str | None = None,
 ) -> dict[str, Any]:
     created_at_utc = resolve_created_at_utc()
     filled_per_field = {field_name: 0 for field_name in ALLOWED_FIELDS}
@@ -271,6 +368,7 @@ def run_yahoo_fallback_enrich(
     no_match_count = 0
     exact_matches = 0
     quarter_aligned_matches = 0
+    rows_inserted = 0
     pending_updates: list[tuple[str, str, dict[str, float]]] = []
     pending_audit_rows: list[dict[str, Any]] = []
 
@@ -278,6 +376,14 @@ def run_yahoo_fallback_enrich(
         tickers = load_tickers(conn, market, ticker)
         tickers_processed = len(tickers)
         for current_ticker in tickers:
+            if detected_source_period_end_date is not None and not dry_run:
+                rows_inserted += insert_missing_quarterly_row_from_yahoo(
+                    conn=conn,
+                    market=market,
+                    ticker=current_ticker,
+                    detected_source_period_end_date=detected_source_period_end_date,
+                    run_id=run_id,
+                )
             quarterly_rows = load_quarterly_rows(conn, current_ticker)
             yahoo_rows_by_period = load_yahoo_rows(conn, market, current_ticker)
             for quarterly_row in quarterly_rows:
@@ -319,6 +425,7 @@ def run_yahoo_fallback_enrich(
         "fields_checked": fields_checked,
         "fields_filled": fields_filled,
         "rows_updated": rows_updated,
+        "rows_inserted": rows_inserted,
         "no_match_count": no_match_count,
         "exact_matches": exact_matches,
         "quarter_aligned_matches": quarter_aligned_matches,
@@ -347,6 +454,7 @@ def main() -> None:
     _summary(fields_checked=summary["fields_checked"])
     _summary(fields_filled=summary["fields_filled"])
     _summary(rows_updated=summary["rows_updated"])
+    _summary(rows_inserted=summary["rows_inserted"])
     _summary(no_match_count=summary["no_match_count"])
     _summary(exact_matches=summary["exact_matches"])
     _summary(quarter_aligned_matches=summary["quarter_aligned_matches"])

@@ -127,6 +127,40 @@ def latest_quarter_meets_detected(conn: sqlite3.Connection, ticker: str, detecte
     return str(row[0]) >= detected_source_period_end_date
 
 
+def latest_quarter_period_end_date(conn: sqlite3.Connection, ticker: str) -> str | None:
+    row = conn.execute(
+        """
+        SELECT MAX(period_end_date)
+        FROM rc_fundamental_quarterly
+        WHERE ticker = ?
+        """,
+        (ticker.upper(),),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return str(row[0])
+
+
+def _build_sec_missing_detected_message(ticker: str, detected_source_period_end_date: str, latest_quarter: str | None) -> str:
+    return (
+        "FUNDAMENTAL_QUARTER_UPDATE_SEC_REFRESH_MISSING_DETECTED:"
+        f"{ticker}:expected_detected_period={detected_source_period_end_date}:"
+        f"latest_quarter_after_sec_refresh={latest_quarter or 'NONE'}"
+    )
+
+
+def _build_enrich_missing_detected_message(
+    ticker: str,
+    detected_source_period_end_date: str,
+    latest_quarter: str | None,
+) -> str:
+    return (
+        "FUNDAMENTAL_QUARTER_UPDATE_ENRICH_MISSING_DETECTED:"
+        f"{ticker}:expected_detected_period={detected_source_period_end_date}:"
+        f"latest_quarter_after_enrich={latest_quarter or 'NONE'}"
+    )
+
+
 def _calendar_quarter(value: date) -> int:
     return ((value.month - 1) // 3) + 1
 
@@ -226,7 +260,11 @@ def run_quarterly_refresh(
             }
             with sqlite3.connect(str(db_path)) as conn:
                 if not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date):
-                    raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_SEC_REFRESH_MISSING_DETECTED:{ticker}")
+                    latest_quarter = latest_quarter_period_end_date(conn, ticker)
+                    print(
+                        f"WARN ticker={ticker.upper()} step=quarterly_refresh_sec "
+                        f"message={_build_sec_missing_detected_message(ticker, detected_source_period_end_date, latest_quarter)}"
+                    )
 
         enrich_summary = run_yahoo_fallback_enrich(
             db_path=db_path,
@@ -235,7 +273,14 @@ def run_quarterly_refresh(
             run_id=child_run_ids["enrich"],
             dry_run=False,
             replace_audit_for_run=False,
+            detected_source_period_end_date=detected_source_period_end_date,
         )
+        with sqlite3.connect(str(db_path)) as conn:
+            if not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date):
+                latest_quarter = latest_quarter_period_end_date(conn, ticker)
+                raise RuntimeError(
+                    _build_enrich_missing_detected_message(ticker, detected_source_period_end_date, latest_quarter)
+                )
         return {
             "mode": "enrich",
             "sec_refresh_required": sec_refresh_required,
@@ -362,6 +407,7 @@ def run_fundamental_quarter_update(
 ) -> dict[str, object]:
     rows = load_eligible_rows(db_path, market, ticker, limit)
     market_label = market.strip().lower() if market is not None else "ALL"
+    strict_single_ticker_mode = ticker is not None
     if dry_run:
         for row in rows:
             print(
@@ -371,6 +417,8 @@ def run_fundamental_quarter_update(
         summary = {
             "tickers_total": len(rows),
             "tickers_processed": 0,
+            "tickers_succeeded": 0,
+            "tickers_failed": 0,
             "market": market_label,
             "dry_run": 1,
             "skip_ack": 1 if skip_ack else 0,
@@ -381,8 +429,11 @@ def run_fundamental_quarter_update(
 
     child_run_ids = derive_child_run_ids(run_id)
     tickers_processed = 0
+    tickers_succeeded = 0
+    tickers_failed = 0
     for row in rows:
         current_ticker = str(row["ticker"]).upper()
+        tickers_processed += 1
         try:
             process_ticker(
                 db_path=db_path,
@@ -410,19 +461,26 @@ def run_fundamental_quarter_update(
             elif "YAHOO" in message or "ENRICH" in message:
                 step_name = "quarterly_refresh"
             print(f"TICKER {current_ticker}=FAILED")
-            print(f"ERROR ticker={current_ticker} step={step_name}")
-            raise
-        tickers_processed += 1
+            print(f"ERROR ticker={current_ticker} step={step_name} message={message}")
+            tickers_failed += 1
+            if strict_single_ticker_mode:
+                raise
+            continue
+        tickers_succeeded += 1
 
     summary = {
         "tickers_total": len(rows),
         "tickers_processed": tickers_processed,
+        "tickers_succeeded": tickers_succeeded,
+        "tickers_failed": tickers_failed,
         "market": market_label,
         "dry_run": 0,
         "skip_ack": 1 if skip_ack else 0,
         "run_id": run_id,
     }
     _summary(**summary)
+    if not strict_single_ticker_mode and tickers_failed > 0:
+        raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_BATCH_FAILED:tickers_failed={tickers_failed}")
     return summary
 
 

@@ -31,11 +31,11 @@ This document intentionally corrects several earlier misunderstandings:
 
 # 1. What the Snapshot Is
 
-The ticker snapshot combines three layers by default:
+The ticker snapshot combines these layers:
 
-1. a multi-quarter fundamental history controlled by `--quarters`
-2. an optional latest price-behavior snapshot
-3. a latest valuation snapshot based on the most recent stored valuation row for the ticker
+1. a multi-quarter fundamental history controlled by `--quarters` (always included)
+2. a latest valuation snapshot based on the most recent stored valuation row for the ticker (always included)
+3. an optional latest price-behavior snapshot
 
 It can also append optional raw technical row sets:
 
@@ -43,6 +43,14 @@ It can also append optional raw technical row sets:
 5. candlestick event rows
 6. divergence context and event rows
 7. moving-average stock and benchmark rows
+
+When `--output-dir` is used, each ticker snapshot is written to:
+
+- `{TICKER}_{print-date}_{print-date}.csv`
+
+Example:
+
+- `FORTUM.HE_2026-05-10_2026-05-10.csv`
 
 It is not a price target model.
 
@@ -477,6 +485,22 @@ Important current market logic:
 - for `.HE` tickers, the lookup uses `market='omxh'` with benchmark `^OMXH25`
 
 So the field names still say `...vs_sp500...`, but for OMXH tickers the implemented benchmark is currently `^OMXH25`
+
+---
+
+# 14.1 Moving Average Benchmark Default Logic
+
+The `moving_averages_60td` section appears only when `--moving-average-snapshot` is enabled.
+
+Current default benchmark behavior:
+
+- for `.HE` tickers: benchmark defaults to `^OMXH25` with market `omxh`
+- for other tickers: benchmark defaults to `^GSPC` with market `usa`
+
+Override behavior:
+
+- if `--moving-average-benchmark-ticker` and/or `--moving-average-benchmark-market` is provided, explicit values override defaults
+- if only one of them is provided, the other side is inferred by current CLI fallback rules
 
 ---
 

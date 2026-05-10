@@ -414,8 +414,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--moving-average-short-window", type=int, default=50, help="Short moving average window")
     parser.add_argument("--moving-average-long-window", type=int, default=200, help="Long moving average window")
-    parser.add_argument("--moving-average-benchmark-ticker", default="^GSPC", help="Benchmark ticker for moving average snapshot")
-    parser.add_argument("--moving-average-benchmark-market", default="usa", help="Benchmark market for moving average snapshot")
+    parser.add_argument(
+        "--moving-average-benchmark-ticker",
+        default=None,
+        help="Benchmark ticker for moving average snapshot (defaults by ticker market: .HE -> ^OMXH25, else ^GSPC)",
+    )
+    parser.add_argument(
+        "--moving-average-benchmark-market",
+        default=None,
+        help="Benchmark market for moving average snapshot (defaults by ticker market: .HE -> omxh, else usa)",
+    )
     args = parser.parse_args()
     if args.dow_structure_snapshot and not args.dow_analysis_db:
         parser.error("--dow-analysis-db is required when --dow-structure-snapshot is used")
@@ -960,7 +968,8 @@ def _write_snapshot_output_file(
     snapshot_output: str,
 ) -> Path:
     safe_ticker = _sanitize_ticker_for_filename(ticker.upper())
-    output_path = output_dir / f"{safe_ticker}_{output_date}.csv"
+    print_date = resolve_output_date()
+    output_path = output_dir / f"{safe_ticker}_{output_date}_{print_date}.csv"
     output_path.write_text(snapshot_output, encoding="utf-8", newline="\n")
     return output_path
 
@@ -983,7 +992,8 @@ def write_snapshot_csv(
     moving_average_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
     CSV_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}.csv"
+    print_date = resolve_output_date()
+    output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}_{print_date}.csv"
     with output_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, delimiter=";")
         for metric in SECTIONED_METRICS:
@@ -1395,6 +1405,21 @@ def _load_moving_average_snapshot(
     ohlcv_db_path: Path,
     price_behavior_snapshot: dict[str, str] | None,
 ) -> dict[str, list[dict[str, Any]]]:
+    benchmark_ticker = getattr(args, "moving_average_benchmark_ticker", None)
+    benchmark_market = getattr(args, "moving_average_benchmark_market", None)
+    if benchmark_ticker is None and benchmark_market is None:
+        inferred_market = _resolve_market_for_ticker(ticker)
+        if inferred_market == "omxh":
+            benchmark_ticker = "^OMXH25"
+            benchmark_market = "omxh"
+        else:
+            benchmark_ticker = "^GSPC"
+            benchmark_market = "usa"
+    elif benchmark_ticker is None:
+        benchmark_ticker = "^OMXH25" if benchmark_market == "omxh" else "^GSPC"
+    elif benchmark_market is None:
+        benchmark_market = "omxh" if benchmark_ticker.upper() == "^OMXH25" else "usa"
+
     market = _resolve_moving_average_market(args, ticker)
     as_of_date = _derive_moving_average_as_of_date(args, ticker, ohlcv_db_path, price_behavior_snapshot, market)
     return read_moving_average_raw_export(
@@ -1405,8 +1430,8 @@ def _load_moving_average_snapshot(
         recent_window_trading_days=getattr(args, "moving_average_recent_window_trading_days", 60),
         ma_short_window=getattr(args, "moving_average_short_window", 50),
         ma_long_window=getattr(args, "moving_average_long_window", 200),
-        benchmark_ticker=getattr(args, "moving_average_benchmark_ticker", "^GSPC"),
-        benchmark_market=getattr(args, "moving_average_benchmark_market", "usa"),
+        benchmark_ticker=benchmark_ticker,
+        benchmark_market=benchmark_market,
     ).to_dict()
 
 

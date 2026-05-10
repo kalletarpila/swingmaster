@@ -54,6 +54,57 @@ class TestSwingMasterApp(unittest.TestCase):
         self.assertIsNotNone(app.tabs)
         self.assertEqual(app.tabs.selected_index, 0)
 
+    def test_market_selector_is_clear_and_present(self):
+        """Test that market selector header exists and labels are explicit."""
+        app = SwingMasterApp(self.mock_page)
+
+        self.assertIsNotNone(app.market_selector_header)
+        self.assertEqual(app.usa_tab.label, "USA (NYSE/NASDAQ)")
+        self.assertEqual(app.fin_tab.label, "FIN (OMXH)")
+
+    def test_market_tab_switch_updates_visible_content(self):
+        """Test that changing selected tab updates content container."""
+        app = SwingMasterApp(self.mock_page)
+
+        # Default view should point to first tab content.
+        self.assertIs(app.tab_content_area.content, app.tab_contents[0])
+
+        # Switch to FIN tab and trigger change handler.
+        app.tabs.selected_index = 1
+        app.tabs.on_change(None)
+        self.assertIs(app.tab_content_area.content, app.tab_contents[1])
+
+        # Switch back to USA tab.
+        app.tabs.selected_index = 0
+        app.tabs.on_change(None)
+        self.assertIs(app.tab_content_area.content, app.tab_contents[0])
+
+    def test_fin_market_buttons_trigger_handlers(self):
+        """Test FIN panel buttons trigger their assigned callbacks."""
+        app = SwingMasterApp(self.mock_page)
+
+        fin_update = Mock()
+        fin_percentile = Mock()
+        fin_snapshot = Mock()
+
+        app.fin_panel.on_quarter_update = fin_update
+        app.fin_panel.on_score_percentile = fin_percentile
+        app.fin_panel.on_snapshot = fin_snapshot
+
+        # Quarter update button
+        app.fin_panel._on_quarter_update_click(None)
+        fin_update.assert_called_once()
+
+        # Percentile button
+        app.fin_panel._on_percentile_click(None)
+        fin_percentile.assert_called_once()
+
+        # Snapshot button requires ticker parsing path
+        app.fin_panel.ticker_input.value = "TYRES.HE"
+        with patch.object(app.fin_panel, "_parse_and_validate_tickers", return_value=["TYRES.HE"]):
+            app.fin_panel._on_snapshot_click(None)
+        fin_snapshot.assert_called_once_with(["TYRES.HE"])
+
     def test_output_panel_initialization(self):
         """Test execution output panel is properly initialized."""
         app = SwingMasterApp(self.mock_page)

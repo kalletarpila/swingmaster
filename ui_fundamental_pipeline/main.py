@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import threading
 from typing import Optional
 
 import flet as ft
@@ -87,9 +88,9 @@ class SwingMasterApp:
             on_lock=self._lock_ui,
         )
 
-        # Create tabs
-        self.usa_tab = ft.Tab(label="USA MARKET")
-        self.fin_tab = ft.Tab(label="FIN MARKET")
+        # Create tabs with explicit market labels to reduce confusion.
+        self.usa_tab = ft.Tab(label="USA (NYSE/NASDAQ)")
+        self.fin_tab = ft.Tab(label="FIN (OMXH)")
         
         self.tabs = ft.Tabs(
             content=ft.Row(
@@ -98,6 +99,19 @@ class SwingMasterApp:
             ),
             length=2,
             selected_index=0,
+        )
+
+        self.market_selector_header = ft.Container(
+            content=ft.Column(
+                controls=[
+                    ft.Text("MARKET SELECTION", weight="bold", size=13),
+                    ft.Text("Choose the market workflow to run", size=11, color="gray"),
+                ],
+                spacing=2,
+            ),
+            bgcolor="#F4F6F8",
+            border_radius=8,
+            padding=10,
         )
         
         # Create tab content panels
@@ -138,6 +152,7 @@ class SwingMasterApp:
         self.main_content = ft.Column(
             controls=[
                 ft.Text(WINDOW_TITLE, size=24, weight="bold"),
+                self.market_selector_header,
                 self.tabs,
                 self.tab_content_area,
                 ft.Row([self.progress_text], alignment=ft.MainAxisAlignment.START),

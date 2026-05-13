@@ -1,10 +1,11 @@
 """
 Snapshot browser component for displaying and downloading CSV files.
 """
-from typing import Callable
+import inspect
 from pathlib import Path
 import zipfile
 from datetime import datetime
+from urllib.parse import quote
 import flet as ft
 
 try:
@@ -16,8 +17,9 @@ except ImportError:  # pragma: no cover
 class SnapshotBrowser:
     """Browse and download generated snapshot CSV files."""
 
-    def __init__(self):
+    def __init__(self, page: ft.Page | None = None):
         """Initialize snapshot browser."""
+        self.page = page
 
         self.file_list = ft.ListView(
             expand=True,
@@ -65,8 +67,12 @@ class SnapshotBrowser:
         if not SNAPSHOTS_DIR.exists():
             SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Find all CSV files
-        csv_files = sorted(SNAPSHOTS_DIR.glob("*.csv"))
+        # Find all CSV files ordered by mtime (newest first)
+        csv_files = sorted(
+            SNAPSHOTS_DIR.glob("*.csv"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
 
         self._snapshot_files = csv_files
         self.file_list.controls.clear()
@@ -101,6 +107,25 @@ class SnapshotBrowser:
                 )
                 self.file_list.controls.append(row)
 
+    def _file_download_url(self, file_path: Path) -> str:
+        """Return browser URL for downloading an asset file."""
+        return f"/{quote(file_path.name)}"
+
+    def _launch_download_url(self, url: str):
+        """Launch a browser download URL and await when API returns awaitable."""
+        if not self.page:
+            return
+
+        result = self.page.launch_url(url)
+
+        # In some Flet runtimes this may return an awaitable even though
+        # launch_url is not marked as coroutine function.
+        if inspect.isawaitable(result):
+            async def _await_launch():
+                await result
+
+            self.page.run_task(_await_launch)
+
     def _on_refresh_click(self, e):
         """Refresh file list."""
         self.refresh_file_list()
@@ -123,16 +148,8 @@ class SnapshotBrowser:
 
     def _on_download_single(self, file_path: Path):
         """Download single snapshot file."""
-        import subprocess
-        import platform
-
         try:
-            if platform.system() == "Linux":
-                subprocess.Popen(["xdg-open", str(file_path)])
-            elif platform.system() == "Darwin":
-                subprocess.Popen(["open", str(file_path)])
-            elif platform.system() == "Windows":
-                subprocess.Popen(["start", str(file_path)])
+            self._launch_download_url(self._file_download_url(file_path))
         except Exception:
             pass
 
@@ -143,22 +160,13 @@ class SnapshotBrowser:
 
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-            zip_path = PROJECT_ROOT / f"snapshots_{timestamp}.zip"
+            zip_path = SNAPSHOTS_DIR / f"snapshots_{timestamp}.zip"
 
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                 for csv_file in self._snapshot_files:
                     zf.write(csv_file, arcname=csv_file.name)
 
-            # Open the ZIP file
-            import subprocess
-            import platform
-
-            if platform.system() == "Linux":
-                subprocess.Popen(["xdg-open", str(zip_path.parent)])
-            elif platform.system() == "Darwin":
-                subprocess.Popen(["open", str(zip_path.parent)])
-            elif platform.system() == "Windows":
-                subprocess.Popen(["explorer", str(zip_path.parent)])
+            self._launch_download_url(self._file_download_url(zip_path))
 
         except Exception:
             pass

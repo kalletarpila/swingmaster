@@ -19,6 +19,7 @@ try:
     from .components.snapshot_browser import SnapshotBrowser
     from .config import (
         DATETIME_FORMAT,
+        SNAPSHOTS_DIR,
         WINDOW_HEIGHT,
         WEB_HOST,
         WEB_PORT,
@@ -43,6 +44,7 @@ except ImportError:  # pragma: no cover
     from components.snapshot_browser import SnapshotBrowser
     from config import (
         DATETIME_FORMAT,
+        SNAPSHOTS_DIR,
         WINDOW_HEIGHT,
         WEB_HOST,
         WEB_PORT,
@@ -69,7 +71,7 @@ class SwingMasterApp:
         self._setup_page()
 
         self.output_panel = ExecutionOutputPanel(on_stop=self._stop_current_run)
-        self.snapshot_browser = SnapshotBrowser()
+        self.snapshot_browser = SnapshotBrowser(page=self.page)
         self.progress_text = ft.Text("Idle", size=12, color="gray")
         self.progress_bar = ft.ProgressBar(width=600, value=0)
 
@@ -88,17 +90,25 @@ class SwingMasterApp:
             on_lock=self._lock_ui,
         )
 
-        # Create tabs with explicit market labels to reduce confusion.
-        self.usa_tab = ft.Tab(label="USA (NYSE/NASDAQ)")
-        self.fin_tab = ft.Tab(label="FIN (OMXH)")
-        
-        self.tabs = ft.Tabs(
-            content=ft.Row(
-                controls=[self.usa_tab, self.fin_tab],
-                spacing=0,
-            ),
-            length=2,
-            selected_index=0,
+        self.active_market = "usa"
+
+        self.usa_market_btn = ft.Button(
+            content=ft.Text("USA (NYSE/NASDAQ)", weight="bold"),
+            on_click=lambda e: self._select_market("usa"),
+            height=52,
+            width=260,
+        )
+        self.fin_market_btn = ft.Button(
+            content=ft.Text("FIN (OMXH)", weight="bold"),
+            on_click=lambda e: self._select_market("fin"),
+            height=52,
+            width=220,
+        )
+
+        self.market_selector_buttons = ft.Row(
+            controls=[self.usa_market_btn, self.fin_market_btn],
+            spacing=12,
+            wrap=True,
         )
 
         self.market_selector_header = ft.Container(
@@ -106,8 +116,9 @@ class SwingMasterApp:
                 controls=[
                     ft.Text("MARKET SELECTION", weight="bold", size=13),
                     ft.Text("Choose the market workflow to run", size=11, color="gray"),
+                    self.market_selector_buttons,
                 ],
-                spacing=2,
+                spacing=8,
             ),
             bgcolor="#F4F6F8",
             border_radius=8,
@@ -119,19 +130,18 @@ class SwingMasterApp:
         fin_content = ft.Container(content=self.fin_panel.container, padding=10)
         
         # Store content references for dynamic switching
-        self.tab_contents = [usa_content, fin_content]
-        
-        # Initialize tab content area with first tab
+        self.tab_contents = {
+            "usa": usa_content,
+            "fin": fin_content,
+        }
+
+        # Initialize tab content area with first market
         self.tab_content_area = ft.Container(
-            content=self.tab_contents[0],
+            content=self.tab_contents[self.active_market],
             expand=True,
         )
-        
-        # Create tab change callback
-        def on_tab_change(e):
-            self.tab_content_area.content = self.tab_contents[self.tabs.selected_index]
-        
-        self.tabs.on_change = on_tab_change
+
+        self._update_market_selector_visuals()
 
         self.overlay = ft.Container(
             content=ft.Column(
@@ -153,7 +163,6 @@ class SwingMasterApp:
             controls=[
                 ft.Text(WINDOW_TITLE, size=24, weight="bold"),
                 self.market_selector_header,
-                self.tabs,
                 self.tab_content_area,
                 ft.Row([self.progress_text], alignment=ft.MainAxisAlignment.START),
                 self.progress_bar,
@@ -187,9 +196,32 @@ class SwingMasterApp:
     def _lock_ui(self, locked: bool) -> None:
         self.usa_panel.disable_buttons(locked)
         self.fin_panel.disable_buttons(locked)
-        self.tabs.disabled = locked
+        self.usa_market_btn.disabled = locked
+        self.fin_market_btn.disabled = locked
         self.overlay.visible = locked
         self.output_panel.set_running(locked)
+        self.page.update()
+
+    def _update_market_selector_visuals(self) -> None:
+        """Highlight active market button and keep inactive one neutral."""
+        if self.active_market == "usa":
+            self.usa_market_btn.bgcolor = "#0B5FFF"
+            self.usa_market_btn.color = "white"
+            self.fin_market_btn.bgcolor = "#E5E7EB"
+            self.fin_market_btn.color = "black"
+        else:
+            self.fin_market_btn.bgcolor = "#0B5FFF"
+            self.fin_market_btn.color = "white"
+            self.usa_market_btn.bgcolor = "#E5E7EB"
+            self.usa_market_btn.color = "black"
+
+    def _select_market(self, market: str) -> None:
+        """Switch visible market panel."""
+        if market not in self.tab_contents:
+            return
+        self.active_market = market
+        self.tab_content_area.content = self.tab_contents[market]
+        self._update_market_selector_visuals()
         self.page.update()
 
     def _set_progress(self, current: int, total: int, label: str) -> None:
@@ -312,4 +344,10 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    ft.run(main, host=WEB_HOST, port=WEB_PORT, view=ft.AppView.WEB_BROWSER)
+    ft.run(
+        main,
+        host=WEB_HOST,
+        port=WEB_PORT,
+        view=ft.AppView.WEB_BROWSER,
+        assets_dir=str(SNAPSHOTS_DIR),
+    )

@@ -14,6 +14,7 @@ from analysis.candlestick_signal_reader import read_candlestick_signal_raw_expor
 from analysis.divergence_signal_reader import read_divergence_signal_raw_export
 from analysis.moving_average_reader import read_moving_average_raw_export
 from analysis.stock_dow_structure_reader import read_stock_dow_structure_raw_export
+from analysis.technical_signal_relevance_reader import read_technical_signal_relevance_raw_export
 from swingmaster.fundamentals.price_behavior_snapshot import load_price_behavior_snapshot
 from swingmaster.fundamentals.price_behavior_snapshot import _resolve_market_for_ticker
 from swingmaster.fundamentals.score_percentile import FUND_SCORE_PERCENTILE_V2_PRE, compute_percentiles
@@ -331,6 +332,26 @@ MOVING_AVERAGE_COLUMNS: tuple[str, ...] = (
     "benchmark_ma50",
     "benchmark_ma200",
 )
+TECHNICAL_RELEVANCE_CONTEXT_COLUMNS: tuple[str, ...] = (
+    "ticker",
+    "timeframe",
+    "signal_date",
+    "signal_confirmed_as_of_date",
+    "signal_name",
+    "signal_source_type",
+    "signal_source_id",
+    "relevance_class",
+    "relevance_reason",
+    "dow_context_state",
+    "latest_bos_direction",
+    "latest_reset_reason",
+    "bars_since_latest_bos",
+    "bars_since_latest_reset",
+    "near_latest_pivot",
+    "near_active_bos_level",
+    "is_trend_aligned",
+    "is_counter_trend",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -424,6 +445,20 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Benchmark market for moving average snapshot (defaults by ticker market: .HE -> omxh, else usa)",
     )
+    parser.add_argument(
+        "--technical-relevance-snapshot",
+        action="store_true",
+        help="Append contextual technical relevance rows using external analysis.db",
+    )
+    parser.add_argument(
+        "--technical-relevance-analysis-db",
+        default=None,
+        help="Analysis SQLite database path for technical relevance reader",
+    )
+    parser.add_argument("--technical-relevance-run-id", default=None, help="Exact technical relevance run_id")
+    parser.add_argument("--technical-relevance-as-of-date", default=None, help="Explicit as-of date for technical relevance snapshot")
+    parser.add_argument("--technical-relevance-lookback-days", type=int, default=45, help="Lookback days for technical relevance snapshot")
+    parser.add_argument("--technical-relevance-timeframe", default="1d", help="Timeframe for technical relevance snapshot")
     args = parser.parse_args()
     if args.dow_structure_snapshot and not args.dow_analysis_db:
         parser.error("--dow-analysis-db is required when --dow-structure-snapshot is used")
@@ -439,6 +474,21 @@ def parse_args() -> argparse.Namespace:
         parser.error("--ohlcv-db is required when --divergence-snapshot is used")
     if args.moving_average_snapshot and not args.ohlcv_db:
         parser.error("--ohlcv-db is required when --moving-average-snapshot is used")
+    if args.technical_relevance_snapshot and not args.technical_relevance_analysis_db:
+        parser.error("--technical-relevance-analysis-db is required when --technical-relevance-snapshot is used")
+    if args.technical_relevance_snapshot and not args.technical_relevance_run_id:
+        parser.error("--technical-relevance-run-id is required when --technical-relevance-snapshot is used")
+    if args.technical_relevance_snapshot and args.technical_relevance_lookback_days < 0:
+        parser.error("--technical-relevance-lookback-days must be >= 0")
+    if args.technical_relevance_snapshot and not args.technical_relevance_timeframe.strip():
+        parser.error("--technical-relevance-timeframe must be non-empty when --technical-relevance-snapshot is used")
+    if args.technical_relevance_snapshot and args.technical_relevance_as_of_date:
+        try:
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.technical_relevance_as_of_date) is None:
+                raise ValueError("invalid date format")
+            datetime.fromisoformat(args.technical_relevance_as_of_date)
+        except ValueError:
+            parser.error("--technical-relevance-as-of-date must be a valid YYYY-MM-DD string")
     parsed_tickers = _parse_ticker_args(args.ticker)
     if not parsed_tickers:
         parser.error("--ticker must contain at least one ticker")
@@ -912,6 +962,7 @@ def format_snapshot_matrix(
     candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     divergence_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     moving_average_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    technical_relevance_snapshot: dict[str, Any] | None = None,
 ) -> str:
     lines: list[str] = []
     for metric in SECTIONED_METRICS:
@@ -939,6 +990,8 @@ def format_snapshot_matrix(
         lines.extend(_format_divergence_snapshot_lines(divergence_snapshot))
     if moving_average_snapshot is not None:
         lines.extend(_format_moving_average_snapshot_lines(moving_average_snapshot))
+    if technical_relevance_snapshot is not None:
+        lines.extend(_format_technical_relevance_snapshot_lines(technical_relevance_snapshot))
     return "\n".join(lines)
 
 
@@ -989,6 +1042,7 @@ def write_snapshot_csv(
     candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     divergence_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     moving_average_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    technical_relevance_snapshot: dict[str, Any] | None = None,
 ) -> Path:
     CSV_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}.csv"
@@ -1018,6 +1072,8 @@ def write_snapshot_csv(
             _write_divergence_snapshot_csv(writer, divergence_snapshot)
         if moving_average_snapshot is not None:
             _write_moving_average_snapshot_csv(writer, moving_average_snapshot)
+        if technical_relevance_snapshot is not None:
+            _write_technical_relevance_snapshot_csv(writer, technical_relevance_snapshot)
     return output_path
 
 
@@ -1031,6 +1087,7 @@ def ensure_snapshot_csv_written(
     candlestick_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     divergence_snapshot: dict[str, list[dict[str, Any]]] | None = None,
     moving_average_snapshot: dict[str, list[dict[str, Any]]] | None = None,
+    technical_relevance_snapshot: dict[str, Any] | None = None,
 ) -> Path:
     output_path = write_snapshot_csv(
         matrix_rows,
@@ -1042,6 +1099,7 @@ def ensure_snapshot_csv_written(
         candlestick_snapshot,
         divergence_snapshot,
         moving_average_snapshot,
+        technical_relevance_snapshot,
     )
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
@@ -1055,6 +1113,7 @@ def ensure_snapshot_csv_written(
         candlestick_snapshot,
         divergence_snapshot,
         moving_average_snapshot,
+        technical_relevance_snapshot,
     )
     if output_path.exists() and output_path.stat().st_size > 0:
         return output_path
@@ -1084,6 +1143,10 @@ def _format_divergence_row_values(row: dict[str, Any], columns: tuple[str, ...])
 
 
 def _format_moving_average_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> list[str]:
+    return [_format_csv_value(_format_dow_export_value(row.get(column))) for column in columns]
+
+
+def _format_technical_relevance_row_values(row: dict[str, Any], columns: tuple[str, ...]) -> list[str]:
     return [_format_csv_value(_format_dow_export_value(row.get(column))) for column in columns]
 
 
@@ -1181,6 +1244,36 @@ def _write_moving_average_snapshot_csv(
         writer.writerow([_format_csv_value(value) for value in _format_moving_average_row_values(row, MOVING_AVERAGE_COLUMNS)])
 
 
+def _format_technical_relevance_snapshot_lines(technical_relevance_snapshot: dict[str, Any]) -> list[str]:
+    lines = [
+        "",
+        "section;technical_relevance_context",
+        f"section;technical_relevance_run_id;{technical_relevance_snapshot.get('run_id', '')}",
+        f"section;technical_relevance_as_of_date;{technical_relevance_snapshot.get('as_of_date', '')}",
+        f"section;technical_relevance_lookback_days;{technical_relevance_snapshot.get('lookback_days', '')}",
+        f"section;technical_relevance_timeframe;{technical_relevance_snapshot.get('timeframe', '')}",
+        ";".join(("section", *TECHNICAL_RELEVANCE_CONTEXT_COLUMNS)),
+    ]
+    for row in technical_relevance_snapshot.get("rows", []):
+        lines.append(";".join(("technical_relevance_context", *_format_technical_relevance_row_values(row, TECHNICAL_RELEVANCE_CONTEXT_COLUMNS))))
+    return lines
+
+
+def _write_technical_relevance_snapshot_csv(
+    writer: csv.writer,
+    technical_relevance_snapshot: dict[str, Any],
+) -> None:
+    writer.writerow([])
+    writer.writerow(["section", "technical_relevance_context"])
+    writer.writerow(["section", "technical_relevance_run_id", _format_csv_value(_format_dow_export_value(technical_relevance_snapshot.get("run_id", "")))])
+    writer.writerow(["section", "technical_relevance_as_of_date", _format_csv_value(_format_dow_export_value(technical_relevance_snapshot.get("as_of_date", "")))])
+    writer.writerow(["section", "technical_relevance_lookback_days", _format_csv_value(_format_dow_export_value(technical_relevance_snapshot.get("lookback_days", "")))])
+    writer.writerow(["section", "technical_relevance_timeframe", _format_csv_value(_format_dow_export_value(technical_relevance_snapshot.get("timeframe", "")))])
+    writer.writerow(["section", *TECHNICAL_RELEVANCE_CONTEXT_COLUMNS])
+    for row in technical_relevance_snapshot.get("rows", []):
+        writer.writerow(["technical_relevance_context", *_format_technical_relevance_row_values(row, TECHNICAL_RELEVANCE_CONTEXT_COLUMNS)])
+
+
 def _resolve_dow_market(args: argparse.Namespace, ticker: str) -> str | None:
     dow_market = getattr(args, "dow_market", None)
     if dow_market is not None:
@@ -1232,6 +1325,12 @@ def _fetch_latest_valid_close_date_for_moving_average(
     market: str | None,
 ) -> str | None:
     return _fetch_latest_valid_close_date_for_dow(ohlcv_db_path, ticker, market)
+
+
+def _resolve_technical_relevance_market(args: argparse.Namespace, ticker: str) -> str | None:
+    if getattr(args, "price_behavior_snapshot", False):
+        return _resolve_market_for_ticker(ticker)
+    return None
 
 
 def _derive_dow_as_of_date(
@@ -1397,6 +1496,28 @@ def _derive_moving_average_as_of_date(
     return latest_valid_close_date
 
 
+def _derive_technical_relevance_as_of_date(
+    args: argparse.Namespace,
+    ticker: str,
+    ohlcv_db_path: Path | None,
+    price_behavior_snapshot: dict[str, str] | None,
+) -> str:
+    technical_relevance_as_of_date = getattr(args, "technical_relevance_as_of_date", None)
+    if technical_relevance_as_of_date:
+        return technical_relevance_as_of_date
+    if price_behavior_snapshot is not None:
+        price_behavior_as_of_date = price_behavior_snapshot.get("price_behavior_as_of_date", "")
+        if price_behavior_as_of_date:
+            return price_behavior_as_of_date
+    if ohlcv_db_path is None:
+        raise RuntimeError(f"TECHNICAL_RELEVANCE_AS_OF_DATE_NOT_FOUND:{ticker}")
+    market = _resolve_technical_relevance_market(args, ticker)
+    latest_valid_close_date = _fetch_latest_valid_close_date_for_dow(ohlcv_db_path, ticker, market)
+    if latest_valid_close_date is None:
+        raise RuntimeError(f"TECHNICAL_RELEVANCE_AS_OF_DATE_NOT_FOUND:{ticker}")
+    return latest_valid_close_date
+
+
 def _load_moving_average_snapshot(
     args: argparse.Namespace,
     ticker: str,
@@ -1433,6 +1554,23 @@ def _load_moving_average_snapshot(
     ).to_dict()
 
 
+def _load_technical_relevance_snapshot(
+    args: argparse.Namespace,
+    ticker: str,
+    ohlcv_db_path: Path | None,
+    price_behavior_snapshot: dict[str, str] | None,
+) -> dict[str, Any]:
+    as_of_date = _derive_technical_relevance_as_of_date(args, ticker, ohlcv_db_path, price_behavior_snapshot)
+    return read_technical_signal_relevance_raw_export(
+        analysis_db_path=str(resolve_db_path(args.technical_relevance_analysis_db)),
+        ticker=ticker,
+        run_id=args.technical_relevance_run_id,
+        as_of_date=as_of_date,
+        lookback_days=args.technical_relevance_lookback_days,
+        timeframe=args.technical_relevance_timeframe,
+    ).to_dict()
+
+
 def _build_ticker_snapshot_output(
     args: argparse.Namespace,
     ticker: str,
@@ -1444,6 +1582,7 @@ def _build_ticker_snapshot_output(
     candlestick_snapshot_enabled = getattr(args, "candlestick_snapshot", False)
     divergence_snapshot_enabled = getattr(args, "divergence_snapshot", False)
     moving_average_snapshot_enabled = getattr(args, "moving_average_snapshot", False)
+    technical_relevance_snapshot_enabled = getattr(args, "technical_relevance_snapshot", False)
     with sqlite3.connect(str(db_path)) as conn:
         matrix_rows = build_snapshot_matrix(
             conn=conn,
@@ -1459,7 +1598,7 @@ def _build_ticker_snapshot_output(
         ohlcv_db_path = resolve_db_path(args.ohlcv_db)
         latest_quarter_date = matrix_rows[-1]["quarter"]
         price_behavior_snapshot = load_price_behavior_snapshot(ohlcv_db_path, ticker, latest_quarter_date)
-    elif dow_structure_snapshot_enabled or candlestick_snapshot_enabled or divergence_snapshot_enabled or moving_average_snapshot_enabled:
+    elif (dow_structure_snapshot_enabled or candlestick_snapshot_enabled or divergence_snapshot_enabled or moving_average_snapshot_enabled or technical_relevance_snapshot_enabled) and args.ohlcv_db:
         ohlcv_db_path = resolve_db_path(args.ohlcv_db)
     dow_structure_snapshot: dict[str, list[dict[str, Any]]] | None = None
     if dow_structure_snapshot_enabled:
@@ -1481,6 +1620,11 @@ def _build_ticker_snapshot_output(
         if ohlcv_db_path is None:
             ohlcv_db_path = resolve_db_path(args.ohlcv_db)
         moving_average_snapshot = _load_moving_average_snapshot(args, ticker, ohlcv_db_path, price_behavior_snapshot)
+    technical_relevance_snapshot: dict[str, Any] | None = None
+    if technical_relevance_snapshot_enabled:
+        if ohlcv_db_path is None and args.ohlcv_db:
+            ohlcv_db_path = resolve_db_path(args.ohlcv_db)
+        technical_relevance_snapshot = _load_technical_relevance_snapshot(args, ticker, ohlcv_db_path, price_behavior_snapshot)
     return format_snapshot_matrix(
         matrix_rows,
         price_behavior_snapshot,
@@ -1489,6 +1633,7 @@ def _build_ticker_snapshot_output(
         candlestick_snapshot,
         divergence_snapshot,
         moving_average_snapshot,
+        technical_relevance_snapshot,
     )
 
 

@@ -2982,6 +2982,534 @@ def test_moving_average_snapshot_does_not_write_to_ohlcv_db(monkeypatch, tmp_pat
     assert _count_rows(ohlcv_db_path, "osakedata") == before_ohlcv
 
 
+def test_technical_relevance_snapshot_validation_requires_analysis_db(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_fundamental_ticker_snapshot.py",
+            "--db",
+            "fund.db",
+            "--ticker",
+            "VRT",
+            "--technical-relevance-snapshot",
+            "--technical-relevance-run-id",
+            "RUN_A",
+        ],
+    )
+    with pytest.raises(SystemExit, match="2"):
+        run_fundamental_ticker_snapshot.parse_args()
+
+
+def test_technical_relevance_snapshot_validation_requires_run_id(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_fundamental_ticker_snapshot.py",
+            "--db",
+            "fund.db",
+            "--ticker",
+            "VRT",
+            "--technical-relevance-snapshot",
+            "--technical-relevance-analysis-db",
+            "analysis.db",
+        ],
+    )
+    with pytest.raises(SystemExit, match="2"):
+        run_fundamental_ticker_snapshot.parse_args()
+
+
+def test_technical_relevance_snapshot_negative_lookback_fails(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_fundamental_ticker_snapshot.py",
+            "--db",
+            "fund.db",
+            "--ticker",
+            "VRT",
+            "--technical-relevance-snapshot",
+            "--technical-relevance-analysis-db",
+            "analysis.db",
+            "--technical-relevance-run-id",
+            "RUN_A",
+            "--technical-relevance-lookback-days",
+            "-1",
+        ],
+    )
+    with pytest.raises(SystemExit, match="2"):
+        run_fundamental_ticker_snapshot.parse_args()
+
+
+def test_technical_relevance_snapshot_blank_timeframe_fails(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_fundamental_ticker_snapshot.py",
+            "--db",
+            "fund.db",
+            "--ticker",
+            "VRT",
+            "--technical-relevance-snapshot",
+            "--technical-relevance-analysis-db",
+            "analysis.db",
+            "--technical-relevance-run-id",
+            "RUN_A",
+            "--technical-relevance-timeframe",
+            "   ",
+        ],
+    )
+    with pytest.raises(SystemExit, match="2"):
+        run_fundamental_ticker_snapshot.parse_args()
+
+
+def test_backward_compatibility_without_technical_relevance_flag(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_no_technical_relevance.db"
+    run_migration(db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+            technical_relevance_snapshot=False,
+        ),
+    )
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out.strip()
+
+    assert "section;technical_relevance_context" not in cli_output
+
+
+def test_technical_relevance_snapshot_appends_section_and_rows(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_technical_relevance.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    run_migration(db_path)
+    _create_technical_relevance_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_A",
+        ticker="VRT",
+        timeframe="1d",
+        signal_date="2026-04-30",
+        signal_confirmed_as_of_date="2026-04-30",
+        signal_name="Hammer",
+        signal_source_type="CANDLE",
+        signal_source_id="sig-1",
+        relevance_class="RELEVANT",
+        relevance_reason="TEST_REASON",
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+            technical_relevance_snapshot=True,
+            technical_relevance_analysis_db=str(analysis_db_path),
+            technical_relevance_run_id="RUN_A",
+            technical_relevance_as_of_date="2026-04-30",
+            technical_relevance_lookback_days=45,
+            technical_relevance_timeframe="1d",
+        ),
+    )
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "section;technical_relevance_context" in cli_output
+    assert "section;technical_relevance_run_id;RUN_A" in cli_output
+    assert "section;technical_relevance_as_of_date;2026-04-30" in cli_output
+    assert "section;technical_relevance_lookback_days;45" in cli_output
+    assert "section;technical_relevance_timeframe;1d" in cli_output
+    assert "section;ticker;timeframe;signal_date;signal_confirmed_as_of_date;signal_name;signal_source_type;signal_source_id;relevance_class;relevance_reason;dow_context_state;latest_bos_direction;latest_reset_reason;bars_since_latest_bos;bars_since_latest_reset;near_latest_pivot;near_active_bos_level;is_trend_aligned;is_counter_trend" in cli_output
+    assert "technical_relevance_context;VRT;1d;2026-04-30;2026-04-30;Hammer;CANDLE;sig-1;RELEVANT;TEST_REASON;AFTER_BOS;BOS_UP;RESET;3;5;1;0;1;0" in cli_output
+
+
+def test_technical_relevance_snapshot_empty_result_still_outputs_metadata_and_header(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_technical_relevance_empty.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    run_migration(db_path)
+    _create_technical_relevance_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+            technical_relevance_snapshot=True,
+            technical_relevance_analysis_db=str(analysis_db_path),
+            technical_relevance_run_id="RUN_A",
+            technical_relevance_as_of_date="2026-04-30",
+            technical_relevance_lookback_days=45,
+            technical_relevance_timeframe="1d",
+        ),
+    )
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "section;technical_relevance_context" in cli_output
+    assert "section;technical_relevance_run_id;RUN_A" in cli_output
+    assert "section;ticker;timeframe;signal_date;signal_confirmed_as_of_date;signal_name;signal_source_type;signal_source_id;relevance_class;relevance_reason;dow_context_state;latest_bos_direction;latest_reset_reason;bars_since_latest_bos;bars_since_latest_reset;near_latest_pivot;near_active_bos_level;is_trend_aligned;is_counter_trend" in cli_output
+    assert "technical_relevance_context;" not in cli_output
+
+
+def test_technical_relevance_snapshot_filters_rows_for_output(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_technical_relevance_filter.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    run_migration(db_path)
+    _create_technical_relevance_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_A",
+        ticker="VRT",
+        timeframe="1d",
+        signal_date="2026-04-30",
+        signal_confirmed_as_of_date="2026-04-30",
+        signal_name="Included Signal",
+        signal_source_id="include-me",
+    )
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_B",
+        ticker="VRT",
+        timeframe="1d",
+        signal_date="2026-04-30",
+        signal_confirmed_as_of_date="2026-04-30",
+        signal_name="Other Run",
+        signal_source_id="other-run",
+    )
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_A",
+        ticker="OTHER",
+        timeframe="1d",
+        signal_date="2026-04-30",
+        signal_confirmed_as_of_date="2026-04-30",
+        signal_name="Other Ticker",
+        signal_source_id="other-ticker",
+    )
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_A",
+        ticker="VRT",
+        timeframe="1wk",
+        signal_date="2026-04-30",
+        signal_confirmed_as_of_date="2026-04-30",
+        signal_name="Other Timeframe",
+        signal_source_id="other-timeframe",
+    )
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_A",
+        ticker="VRT",
+        timeframe="1d",
+        signal_date="2026-05-02",
+        signal_confirmed_as_of_date="2026-05-02",
+        signal_name="Future Signal",
+        signal_source_id="future-signal",
+    )
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_A",
+        ticker="VRT",
+        timeframe="1d",
+        signal_date="2026-03-01",
+        signal_confirmed_as_of_date="2026-03-01",
+        signal_name="Old Signal",
+        signal_source_id="old-signal",
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+            technical_relevance_snapshot=True,
+            technical_relevance_analysis_db=str(analysis_db_path),
+            technical_relevance_run_id="RUN_A",
+            technical_relevance_as_of_date="2026-04-30",
+            technical_relevance_lookback_days=45,
+            technical_relevance_timeframe="1d",
+        ),
+    )
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "include-me" in cli_output
+    assert "other-run" not in cli_output
+    assert "other-ticker" not in cli_output
+    assert "other-timeframe" not in cli_output
+    assert "future-signal" not in cli_output
+    assert "old-signal" not in cli_output
+
+
+def test_technical_relevance_snapshot_explicit_as_of_date_is_used(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_technical_relevance_explicit.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_technical_relevance_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_A",
+        ticker="VRT",
+        timeframe="1d",
+        signal_date="2026-04-20",
+        signal_confirmed_as_of_date="2026-04-20",
+        signal_name="Excluded By Explicit Date",
+        signal_source_id="late-row",
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            technical_relevance_snapshot=True,
+            technical_relevance_analysis_db=str(analysis_db_path),
+            technical_relevance_run_id="RUN_A",
+            technical_relevance_as_of_date="2026-04-15",
+            technical_relevance_lookback_days=45,
+            technical_relevance_timeframe="1d",
+        ),
+    )
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "section;technical_relevance_as_of_date;2026-04-15" in cli_output
+    assert "late-row" not in cli_output
+
+
+def test_technical_relevance_as_of_date_derives_from_price_behavior_snapshot(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_technical_relevance_pb.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_technical_relevance_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "VRT",
+        260,
+        anchor_close=400.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=300.0,
+        close_1_after_report=303.0,
+        close_3_after_report=309.0,
+        close_20_after_report=330.0,
+    )
+    _insert_ohlcv_series(
+        ohlcv_db_path,
+        "^GSPC",
+        260,
+        anchor_close=200.0,
+        anchor_date="2026-04-30",
+        report_date="2026-03-31",
+        report_day_close=180.0,
+        close_1_after_report=181.0,
+        close_3_after_report=183.0,
+        close_20_after_report=190.0,
+        return_6m_pct=14.59,
+    )
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_A",
+        ticker="VRT",
+        timeframe="1d",
+        signal_date="2026-04-30",
+        signal_confirmed_as_of_date="2026-04-30",
+        signal_name="PB Signal",
+        signal_source_id="pb-row",
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=True,
+            technical_relevance_snapshot=True,
+            technical_relevance_analysis_db=str(analysis_db_path),
+            technical_relevance_run_id="RUN_A",
+            technical_relevance_as_of_date=None,
+            technical_relevance_lookback_days=45,
+            technical_relevance_timeframe="1d",
+        ),
+    )
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "price_behavior_as_of_date;2026-04-30" in cli_output
+    assert "section;technical_relevance_as_of_date;2026-04-30" in cli_output
+    assert "pb-row" in cli_output
+
+
+def test_technical_relevance_as_of_date_falls_back_to_latest_valid_close_date(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_technical_relevance_close.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    ohlcv_db_path = tmp_path / "osakedata.db"
+    run_migration(db_path)
+    _create_ohlcv_schema(ohlcv_db_path)
+    _create_technical_relevance_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="VRT", as_of_date="2026-03-31")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-29", 390.0, "usa")
+    _insert_ohlcv_close(ohlcv_db_path, "VRT", "2026-04-30", 400.0, "usa")
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_A",
+        ticker="VRT",
+        timeframe="1d",
+        signal_date="2026-04-30",
+        signal_confirmed_as_of_date="2026-04-30",
+        signal_name="Close Signal",
+        signal_source_id="close-row",
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker="VRT",
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=str(ohlcv_db_path),
+            price_behavior_snapshot=False,
+            technical_relevance_snapshot=True,
+            technical_relevance_analysis_db=str(analysis_db_path),
+            technical_relevance_run_id="RUN_A",
+            technical_relevance_as_of_date=None,
+            technical_relevance_lookback_days=45,
+            technical_relevance_timeframe="1d",
+        ),
+    )
+
+    ticker_snapshot_main()
+    cli_output = capsys.readouterr().out
+
+    assert "section;technical_relevance_as_of_date;2026-04-30" in cli_output
+    assert "close-row" in cli_output
+
+
+def test_multi_ticker_technical_relevance_rows_are_isolated_per_file(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ticker_snapshot_technical_relevance_multi.db"
+    analysis_db_path = tmp_path / "analysis.db"
+    output_dir = tmp_path / "snapshots"
+    run_migration(db_path)
+    _create_technical_relevance_analysis_schema(analysis_db_path)
+    _insert_minimal_snapshot_rows(db_path, ticker="AMZN", as_of_date="2026-03-31")
+    _insert_minimal_snapshot_rows(db_path, ticker="MSFT", as_of_date="2026-03-31")
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_A",
+        ticker="AMZN",
+        timeframe="1d",
+        signal_date="2026-04-30",
+        signal_confirmed_as_of_date="2026-04-30",
+        signal_name="AMZN Signal",
+        signal_source_id="amzn-row",
+    )
+    _insert_technical_relevance_row(
+        analysis_db_path,
+        run_id="RUN_A",
+        ticker="MSFT",
+        timeframe="1d",
+        signal_date="2026-04-30",
+        signal_confirmed_as_of_date="2026-04-30",
+        signal_name="MSFT Signal",
+        signal_source_id="msft-row",
+    )
+
+    monkeypatch.setattr(
+        run_fundamental_ticker_snapshot,
+        "parse_args",
+        lambda: SimpleNamespace(
+            db=str(db_path),
+            ticker=["AMZN", "MSFT"],
+            output_dir=str(output_dir),
+            quarters=1,
+            rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+            percentile_target_date=None,
+            ohlcv_db=None,
+            price_behavior_snapshot=False,
+            technical_relevance_snapshot=True,
+            technical_relevance_analysis_db=str(analysis_db_path),
+            technical_relevance_run_id="RUN_A",
+            technical_relevance_as_of_date="2026-04-30",
+            technical_relevance_lookback_days=45,
+            technical_relevance_timeframe="1d",
+        ),
+    )
+    monkeypatch.setattr(run_fundamental_ticker_snapshot, "resolve_output_date", lambda: "2026-04-27")
+
+    ticker_snapshot_main()
+    captured = capsys.readouterr()
+    amzn_content = (output_dir / "AMZN_2026-04-27.csv").read_text(encoding="utf-8")
+    msft_content = (output_dir / "MSFT_2026-04-27.csv").read_text(encoding="utf-8")
+
+    assert captured.out == ""
+    assert amzn_content.count("section;technical_relevance_context") == 1
+    assert msft_content.count("section;technical_relevance_context") == 1
+    assert "amzn-row" in amzn_content
+    assert "msft-row" not in amzn_content
+    assert "msft-row" in msft_content
+    assert "amzn-row" not in msft_content
+
+
 def _insert_ttm_row(
     conn: sqlite3.Connection,
     ticker: str,
@@ -3141,6 +3669,65 @@ def _create_dow_analysis_schema(db_path: Path) -> None:
                 created_at_utc TEXT
             )
             """
+        )
+        conn.commit()
+
+
+def _create_technical_relevance_analysis_schema(db_path: Path) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE technical_signal_relevance_runs (
+                run_id TEXT PRIMARY KEY NOT NULL,
+                relevance_rule_version TEXT NOT NULL,
+                mapping_version TEXT NOT NULL,
+                reason_version TEXT NOT NULL,
+                config_snapshot_json TEXT NOT NULL,
+                created_at_utc TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE technical_signal_relevance (
+                ticker TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                signal_date TEXT NOT NULL,
+                signal_confirmed_as_of_date TEXT NOT NULL,
+                signal_name TEXT NOT NULL,
+                signal_close_price REAL NULL,
+                signal_direction TEXT NULL,
+                signal_family TEXT NULL,
+                signal_source_type TEXT NOT NULL,
+                signal_source_id TEXT NOT NULL,
+                dow_trend_state TEXT NULL,
+                dow_context_state TEXT NULL,
+                latest_bos_direction TEXT NULL,
+                bars_since_latest_bos INTEGER NULL,
+                latest_reset_reason TEXT NULL,
+                bars_since_latest_reset INTEGER NULL,
+                near_latest_pivot INTEGER NOT NULL,
+                near_active_bos_level INTEGER NOT NULL,
+                is_trend_aligned INTEGER NOT NULL,
+                is_counter_trend INTEGER NOT NULL,
+                relevance_class TEXT NOT NULL,
+                relevance_reason TEXT NOT NULL,
+                relevance_rule_version TEXT NOT NULL,
+                mapping_version TEXT NOT NULL,
+                reason_version TEXT NOT NULL,
+                rule_trace TEXT NULL,
+                created_at_utc TEXT NOT NULL,
+                run_id TEXT NOT NULL
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO technical_signal_relevance_runs (
+                run_id, relevance_rule_version, mapping_version, reason_version, config_snapshot_json, created_at_utc
+            ) VALUES (?, 'RULE_V1', 'MAP_V1', 'REASON_V1', '{}', '2026-05-20T00:00:00Z')
+            """,
+            [("RUN_A",), ("RUN_B",)],
         )
         conn.commit()
 
@@ -3380,6 +3967,66 @@ def _insert_divergence_test_row(
                 hidden_pivot_gap_r3,
                 hidden_pivot_drop_pct_r3,
                 pivot2_date_r3,
+            ),
+        )
+        conn.commit()
+
+
+def _insert_technical_relevance_row(
+    db_path: Path,
+    *,
+    run_id: str,
+    ticker: str,
+    timeframe: str = "1d",
+    signal_date: str = "2026-04-30",
+    signal_confirmed_as_of_date: str = "2026-04-30",
+    signal_name: str = "Signal",
+    signal_source_type: str = "CANDLE",
+    signal_source_id: str = "sig-1",
+    relevance_class: str = "RELEVANT",
+    relevance_reason: str = "TEST_REASON",
+) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO technical_signal_relevance (
+                ticker, timeframe, signal_date, signal_confirmed_as_of_date, signal_name,
+                signal_close_price, signal_direction, signal_family, signal_source_type, signal_source_id,
+                dow_trend_state, dow_context_state, latest_bos_direction, bars_since_latest_bos,
+                latest_reset_reason, bars_since_latest_reset, near_latest_pivot, near_active_bos_level,
+                is_trend_aligned, is_counter_trend, relevance_class, relevance_reason,
+                relevance_rule_version, mapping_version, reason_version, rule_trace, created_at_utc, run_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ticker,
+                timeframe,
+                signal_date,
+                signal_confirmed_as_of_date,
+                signal_name,
+                100.0,
+                "BULLISH",
+                "STRUCTURAL_PATTERN",
+                signal_source_type,
+                signal_source_id,
+                "UP",
+                "AFTER_BOS",
+                "BOS_UP",
+                3,
+                "RESET",
+                5,
+                1,
+                0,
+                1,
+                0,
+                relevance_class,
+                relevance_reason,
+                "RULE_V1",
+                "MAP_V1",
+                "REASON_V1",
+                '["trace"]',
+                "2026-05-20T00:00:00Z",
+                run_id,
             ),
         )
         conn.commit()

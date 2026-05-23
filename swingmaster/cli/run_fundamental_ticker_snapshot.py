@@ -968,8 +968,7 @@ def _write_snapshot_output_file(
     snapshot_output: str,
 ) -> Path:
     safe_ticker = _sanitize_ticker_for_filename(ticker.upper())
-    print_date = resolve_output_date()
-    output_path = output_dir / f"{safe_ticker}_{output_date}_{print_date}.csv"
+    output_path = output_dir / f"{safe_ticker}_{output_date}.csv"
     output_path.write_text(snapshot_output, encoding="utf-8", newline="\n")
     return output_path
 
@@ -992,8 +991,7 @@ def write_snapshot_csv(
     moving_average_snapshot: dict[str, list[dict[str, Any]]] | None = None,
 ) -> Path:
     CSV_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print_date = resolve_output_date()
-    output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}_{print_date}.csv"
+    output_path = CSV_OUTPUT_DIR / f"{ticker.upper()}_{output_date}.csv"
     with output_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, delimiter=";")
         for metric in SECTIONED_METRICS:

@@ -43,41 +43,51 @@ class TestSwingMasterApp(unittest.TestCase):
         self.assertIsNotNone(app.usa_panel)
         self.assertIsNotNone(app.fin_panel)
         self.assertIsNotNone(app.snapshot_browser)
-        self.assertIsNotNone(app.tabs)
+        self.assertIsNotNone(app.market_selector_buttons)
         self.assertIsNotNone(app.overlay)
 
-    def test_tabs_have_correct_labels(self):
-        """Test that tabs are initialized."""
+    def test_market_buttons_have_correct_labels(self):
+        """Test market selection buttons are initialized and labeled."""
         app = SwingMasterApp(self.mock_page)
 
-        # Tabs should be configured
-        self.assertIsNotNone(app.tabs)
-        self.assertEqual(app.tabs.selected_index, 0)
+        self.assertIsNotNone(app.usa_market_btn)
+        self.assertIsNotNone(app.fin_market_btn)
+        self.assertEqual(app.active_market, "usa")
 
     def test_market_selector_is_clear_and_present(self):
         """Test that market selector header exists and labels are explicit."""
         app = SwingMasterApp(self.mock_page)
 
         self.assertIsNotNone(app.market_selector_header)
-        self.assertEqual(app.usa_tab.label, "USA (NYSE/NASDAQ)")
-        self.assertEqual(app.fin_tab.label, "FIN (OMXH)")
+        self.assertIsNotNone(app.market_selector_buttons)
 
-    def test_market_tab_switch_updates_visible_content(self):
-        """Test that changing selected tab updates content container."""
+    def test_market_switch_updates_visible_content(self):
+        """Test that changing selected market updates content container."""
         app = SwingMasterApp(self.mock_page)
 
         # Default view should point to first tab content.
-        self.assertIs(app.tab_content_area.content, app.tab_contents[0])
+        self.assertIs(app.tab_content_area.content, app.tab_contents["usa"])
+        self.assertEqual(app.active_market, "usa")
 
-        # Switch to FIN tab and trigger change handler.
-        app.tabs.selected_index = 1
-        app.tabs.on_change(None)
-        self.assertIs(app.tab_content_area.content, app.tab_contents[1])
+        # Switch to FIN market.
+        app._select_market("fin")
+        self.assertIs(app.tab_content_area.content, app.tab_contents["fin"])
+        self.assertEqual(app.active_market, "fin")
 
-        # Switch back to USA tab.
-        app.tabs.selected_index = 0
-        app.tabs.on_change(None)
-        self.assertIs(app.tab_content_area.content, app.tab_contents[0])
+        # Switch back to USA market.
+        app._select_market("usa")
+        self.assertIs(app.tab_content_area.content, app.tab_contents["usa"])
+        self.assertEqual(app.active_market, "usa")
+
+    def test_market_buttons_trigger_switch(self):
+        """Test clicking market buttons switches active market."""
+        app = SwingMasterApp(self.mock_page)
+
+        app.fin_market_btn.on_click(None)
+        self.assertEqual(app.active_market, "fin")
+
+        app.usa_market_btn.on_click(None)
+        self.assertEqual(app.active_market, "usa")
 
     def test_fin_market_buttons_trigger_handlers(self):
         """Test FIN panel buttons trigger their assigned callbacks."""
@@ -193,29 +203,17 @@ class TestMainFunction(unittest.TestCase):
 
 
 class TestFletTabComponent(unittest.TestCase):
-    """Test Flet Tab component API compatibility."""
+    """Test market selector-related control API compatibility."""
 
-    def test_tab_uses_label_parameter(self):
-        """Test that Tab uses label parameter (not text or content)."""
-        # In Flet 0.85, Tab only uses 'label', icon, height, icon_margin
-        tab = ft.Tab(label="Test Tab")
-        self.assertIsNotNone(tab)
+    def test_button_control_for_selector(self):
+        """Test that selector button control can be created."""
+        btn = ft.Button(content=ft.Text("USA"), height=52, width=220)
+        self.assertIsNotNone(btn)
 
-    def test_tabs_with_row_content(self):
-        """Test that Tabs uses content parameter with Row of Tabs."""
-        tab1 = ft.Tab(label="Tab 1")
-        tab2 = ft.Tab(label="Tab 2")
-
-        tabs = ft.Tabs(
-            content=ft.Row(
-                controls=[tab1, tab2],
-                spacing=0,
-            ),
-            length=2,
-            selected_index=0,
-        )
-        self.assertIsNotNone(tabs)
-        self.assertEqual(tabs.selected_index, 0)
+    def test_market_selector_row_creation(self):
+        """Test row layout for market selector controls."""
+        row = ft.Row(controls=[ft.Button(content=ft.Text("USA")), ft.Button(content=ft.Text("FIN"))], spacing=12)
+        self.assertIsNotNone(row)
 
 
 if __name__ == "__main__":

@@ -43,6 +43,21 @@ def _insert_classification_row(
     )
 
 
+def test_migration_creates_missing_period_recovery_check_table(tmp_path: Path) -> None:
+    db_path = tmp_path / "recovery_migration.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table' AND name='rc_fundamental_missing_period_recovery_check'
+            """
+        ).fetchone()
+    assert row == ("rc_fundamental_missing_period_recovery_check",)
+
+
 def test_missing_period_found_in_yahoo(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "recovery_found.db"
     run_migration(db_path)
@@ -206,6 +221,9 @@ def test_cli_csv_output_contains_required_fields_and_summary(monkeypatch, capsys
             output=str(output_path),
             format="csv",
             limit=5,
+            write_db=False,
+            run_id=None,
+            write_mode="insert",
         ),
     )
     monkeypatch.setattr(
@@ -265,6 +283,7 @@ def test_cli_csv_output_contains_required_fields_and_summary(monkeypatch, capsys
     assert "SUMMARY found_in_yahoo_count=1" in out
     assert "SUMMARY output_path=" in out
     assert "SUMMARY limit=5" in out
+    assert "SUMMARY write_db=0" in out
 
 
 def test_limit_applies_to_classification_rows_checked(tmp_path: Path, monkeypatch) -> None:
@@ -303,3 +322,224 @@ def test_limit_applies_to_classification_rows_checked(tmp_path: Path, monkeypatc
     assert len(rows) == 1
     assert rows[0]["ticker"] == "A.HE"
     assert summary["classification_rows_checked"] == 1
+
+
+def test_cli_write_db_insert_writes_recovery_rows(monkeypatch, capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "recovery_write_insert.db"
+    run_migration(db_path)
+    monkeypatch.setattr(
+        run_fundamental_missing_period_recovery_check,
+        "parse_args",
+        lambda: Namespace(
+            db=str(db_path),
+            market="omxh",
+            classification_run_id="RF_RUN_1",
+            output=None,
+            format="text",
+            limit=None,
+            write_db=True,
+            run_id="RECOVERY_RUN_1",
+            write_mode="insert",
+        ),
+    )
+    monkeypatch.setattr(
+        run_fundamental_missing_period_recovery_check,
+        "build_recovery_rows",
+        lambda **kwargs: (
+            [
+                {
+                    "ticker": "A.HE",
+                    "market": "omxh",
+                    "classification_run_id": "RF_RUN_1",
+                    "classification_as_of_date": "2026-05-29",
+                    "missing_period_end_date": "2025-09-30",
+                    "recovery_status": "FOUND_IN_YAHOO",
+                    "has_core_fields": 1,
+                    "found_period_end_dates": "2025-09-30",
+                    "reason": "MISSING_PERIOD_FOUND_IN_YAHOO",
+                    "checked_at_utc": "2026-05-29T12:00:00+00:00",
+                },
+                {
+                    "ticker": "B.HE",
+                    "market": "omxh",
+                    "classification_run_id": "RF_RUN_1",
+                    "classification_as_of_date": "2026-05-29",
+                    "missing_period_end_date": "2025-09-30",
+                    "recovery_status": "FOUND_IN_YAHOO_INCOMPLETE",
+                    "has_core_fields": 0,
+                    "found_period_end_dates": "2025-09-30",
+                    "reason": "MISSING_PERIOD_FOUND_BUT_INCOMPLETE",
+                    "checked_at_utc": "2026-05-29T12:00:00+00:00",
+                },
+                {
+                    "ticker": "C.HE",
+                    "market": "omxh",
+                    "classification_run_id": "RF_RUN_1",
+                    "classification_as_of_date": "2026-05-29",
+                    "missing_period_end_date": "2025-09-30",
+                    "recovery_status": "STILL_MISSING",
+                    "has_core_fields": 0,
+                    "found_period_end_dates": "2025-06-30,2025-12-31",
+                    "reason": "MISSING_PERIOD_STILL_MISSING",
+                    "checked_at_utc": "2026-05-29T12:00:00+00:00",
+                },
+            ],
+            {
+                "market": "omxh",
+                "classification_run_id": "RF_RUN_1",
+                "classification_rows_checked": 3,
+                "missing_periods_checked": 3,
+                "found_in_yahoo_count": 1,
+                "found_in_yahoo_incomplete_count": 1,
+                "still_missing_count": 1,
+                "fetch_failed_count": 0,
+                "parse_failed_count": 0,
+                "no_missing_periods_count": 0,
+            },
+        ),
+    )
+
+    run_fundamental_missing_period_recovery_check.main()
+    out = capsys.readouterr().out
+
+    assert "SUMMARY write_db=1" in out
+    assert "SUMMARY write_mode=insert" in out
+    assert "SUMMARY rows_written=3" in out
+    assert "SUMMARY run_id=RECOVERY_RUN_1" in out
+
+    with sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT ticker, recovery_status, run_id
+            FROM rc_fundamental_missing_period_recovery_check
+            ORDER BY ticker
+            """
+        ).fetchall()
+    assert rows == [
+        ("A.HE", "FOUND_IN_YAHOO", "RECOVERY_RUN_1"),
+        ("B.HE", "FOUND_IN_YAHOO_INCOMPLETE", "RECOVERY_RUN_1"),
+        ("C.HE", "STILL_MISSING", "RECOVERY_RUN_1"),
+    ]
+
+
+def test_cli_write_db_replace_run_replaces_only_same_run_id(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "recovery_write_replace.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_missing_period_recovery_check (
+                ticker, market, classification_run_id, classification_as_of_date, missing_period_end_date,
+                recovery_status, has_core_fields, found_period_end_dates, reason, checked_at_utc, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "OLD.HE", "omxh", "RF_RUN_1", "2026-05-29", "2025-09-30",
+                "STILL_MISSING", 0, "", "MISSING_PERIOD_STILL_MISSING",
+                "2026-05-29T12:00:00+00:00", "RECOVERY_REPLACE", "2026-05-29T12:00:00+00:00",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_missing_period_recovery_check (
+                ticker, market, classification_run_id, classification_as_of_date, missing_period_end_date,
+                recovery_status, has_core_fields, found_period_end_dates, reason, checked_at_utc, run_id, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "KEEP.HE", "omxh", "RF_RUN_1", "2026-05-29", "2025-09-30",
+                "STILL_MISSING", 0, "", "MISSING_PERIOD_STILL_MISSING",
+                "2026-05-29T12:00:00+00:00", "RECOVERY_KEEP", "2026-05-29T12:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    monkeypatch.setattr(
+        run_fundamental_missing_period_recovery_check,
+        "parse_args",
+        lambda: Namespace(
+            db=str(db_path),
+            market="omxh",
+            classification_run_id="RF_RUN_1",
+            output=None,
+            format="text",
+            limit=1,
+            write_db=True,
+            run_id="RECOVERY_REPLACE",
+            write_mode="replace-run",
+        ),
+    )
+    monkeypatch.setattr(
+        run_fundamental_missing_period_recovery_check,
+        "build_recovery_rows",
+        lambda **kwargs: (
+            [
+                {
+                    "ticker": "NEW.HE",
+                    "market": "omxh",
+                    "classification_run_id": "RF_RUN_1",
+                    "classification_as_of_date": "2026-05-29",
+                    "missing_period_end_date": "2025-09-30",
+                    "recovery_status": "STILL_MISSING",
+                    "has_core_fields": 0,
+                    "found_period_end_dates": "",
+                    "reason": "MISSING_PERIOD_STILL_MISSING",
+                    "checked_at_utc": "2026-05-29T12:00:00+00:00",
+                }
+            ],
+            {
+                "market": "omxh",
+                "classification_run_id": "RF_RUN_1",
+                "classification_rows_checked": 1,
+                "missing_periods_checked": 1,
+                "found_in_yahoo_count": 0,
+                "found_in_yahoo_incomplete_count": 0,
+                "still_missing_count": 1,
+                "fetch_failed_count": 0,
+                "parse_failed_count": 0,
+                "no_missing_periods_count": 0,
+            },
+        ),
+    )
+
+    run_fundamental_missing_period_recovery_check.main()
+
+    with sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT ticker, run_id
+            FROM rc_fundamental_missing_period_recovery_check
+            ORDER BY run_id, ticker
+            """
+        ).fetchall()
+    assert rows == [
+        ("KEEP.HE", "RECOVERY_KEEP"),
+        ("NEW.HE", "RECOVERY_REPLACE"),
+    ]
+
+
+def test_write_db_requires_run_id(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "recovery_write_requires_run_id.db"
+    run_migration(db_path)
+    monkeypatch.setattr(
+        run_fundamental_missing_period_recovery_check,
+        "parse_args",
+        lambda: Namespace(
+            db=str(db_path),
+            market="omxh",
+            classification_run_id="RF_RUN_1",
+            output=None,
+            format="text",
+            limit=None,
+            write_db=True,
+            run_id=None,
+            write_mode="insert",
+        ),
+    )
+
+    try:
+        run_fundamental_missing_period_recovery_check.main()
+    except SystemExit as exc:
+        assert str(exc) == "FUNDAMENTAL_MISSING_PERIOD_RECOVERY_CHECK_RUN_ID_REQUIRED"
+    else:
+        raise AssertionError("expected SystemExit for missing run_id")

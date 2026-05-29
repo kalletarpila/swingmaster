@@ -37,6 +37,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default=None, help="Optional CSV output path")
     parser.add_argument("--format", choices=("csv", "text"), default="text", help="Output format")
     parser.add_argument("--limit", type=int, default=None, help="Optional limit after deterministic sorting")
+    parser.add_argument("--write-db", action="store_true", help="Write recovery-check rows to SQLite table")
+    parser.add_argument("--run-id", default=None, help="Deterministic write run identifier")
+    parser.add_argument("--write-mode", choices=("insert", "replace-run"), default="insert", help="DB write mode")
     return parser.parse_args()
 
 
@@ -57,6 +60,17 @@ def resolve_output_path(output_arg: str | None) -> Path | None:
 
 def resolve_checked_at_utc() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def resolve_created_at_utc() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def validate_write_args(args: argparse.Namespace) -> None:
+    if not getattr(args, "write_db", False):
+        return
+    if args.run_id is None:
+        raise SystemExit("FUNDAMENTAL_MISSING_PERIOD_RECOVERY_CHECK_RUN_ID_REQUIRED")
 
 
 def load_classification_rows(
@@ -246,6 +260,61 @@ def build_recovery_rows(
     return recovery_rows, summary
 
 
+def delete_rows_for_run_id(conn: sqlite3.Connection, run_id: str) -> int:
+    cursor = conn.execute(
+        """
+        DELETE FROM rc_fundamental_missing_period_recovery_check
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    )
+    return int(cursor.rowcount)
+
+
+def insert_recovery_rows(
+    conn: sqlite3.Connection,
+    rows: list[dict[str, object]],
+    run_id: str,
+    created_at_utc: str,
+) -> int:
+    conn.executemany(
+        """
+        INSERT INTO rc_fundamental_missing_period_recovery_check (
+            ticker,
+            market,
+            classification_run_id,
+            classification_as_of_date,
+            missing_period_end_date,
+            recovery_status,
+            has_core_fields,
+            found_period_end_dates,
+            reason,
+            checked_at_utc,
+            run_id,
+            created_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                row["ticker"],
+                row["market"],
+                row["classification_run_id"],
+                row["classification_as_of_date"],
+                row["missing_period_end_date"],
+                row["recovery_status"],
+                row["has_core_fields"],
+                row["found_period_end_dates"],
+                row["reason"],
+                row["checked_at_utc"],
+                run_id,
+                created_at_utc,
+            )
+            for row in rows
+        ],
+    )
+    return len(rows)
+
+
 def write_csv_rows(rows: list[dict[str, object]], output_path: Path | None) -> None:
     if output_path is None:
         import sys
@@ -284,6 +353,7 @@ def print_text_rows(rows: list[dict[str, object]]) -> None:
 
 def main() -> None:
     args = parse_args()
+    validate_write_args(args)
     db_path = resolve_db_path(args.db)
     output_path = resolve_output_path(args.output)
     rows, summary = build_recovery_rows(
@@ -292,6 +362,7 @@ def main() -> None:
         classification_run_id=args.classification_run_id,
         limit=args.limit,
     )
+    rows_written = 0
 
     if args.format == "csv":
         write_csv_rows(rows, output_path)
@@ -299,6 +370,19 @@ def main() -> None:
         print_text_rows(rows)
         if output_path is not None:
             write_csv_rows(rows, output_path)
+
+    if args.write_db:
+        created_at_utc = resolve_created_at_utc()
+        with sqlite3.connect(str(db_path)) as conn:
+            if args.write_mode == "replace-run":
+                delete_rows_for_run_id(conn, str(args.run_id))
+            rows_written = insert_recovery_rows(
+                conn=conn,
+                rows=rows,
+                run_id=str(args.run_id),
+                created_at_utc=created_at_utc,
+            )
+            conn.commit()
 
     _summary(market=summary["market"])
     _summary(classification_run_id=summary["classification_run_id"])
@@ -312,6 +396,11 @@ def main() -> None:
     _summary(no_missing_periods_count=summary["no_missing_periods_count"])
     _summary(output_path="" if output_path is None else str(output_path))
     _summary(limit="" if args.limit is None else args.limit)
+    _summary(write_db=1 if args.write_db else 0)
+    if args.write_db:
+        _summary(write_mode=args.write_mode)
+        _summary(rows_written=rows_written)
+        _summary(run_id=str(args.run_id))
 
 
 if __name__ == "__main__":

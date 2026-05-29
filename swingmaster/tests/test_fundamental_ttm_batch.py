@@ -49,6 +49,39 @@ def _insert_quarterly_missing_source_periods(conn: sqlite3.Connection, ticker: s
         _insert_quarterly_row(conn, ticker, period_end_date)
 
 
+def _insert_reporting_frequency_classification_row(
+    conn: sqlite3.Connection,
+    ticker: str,
+    market: str,
+    reporting_frequency_class: str,
+    run_id: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO rc_fundamental_reporting_frequency_classification (
+            ticker,
+            market,
+            as_of_date,
+            lookback_months,
+            reporting_frequency_class,
+            inferred_reporting_frequency,
+            has_valid_ttm_coverage,
+            reason,
+            period_count_in_lookback,
+            observed_period_end_dates,
+            expected_period_end_dates,
+            missing_period_end_dates,
+            missing_period_count,
+            source_data_max_period_end_date,
+            classifier_version,
+            run_id,
+            created_at_utc
+        ) VALUES (?, ?, '2026-05-29', 30, ?, 'QUARTERLY', 1, 'TEST', 4, '', '', '', 0, '2025-12-31', 'reporting_frequency_v1', ?, '2026-05-29T00:00:00+00:00')
+        """,
+        (ticker, market, reporting_frequency_class, run_id),
+    )
+
+
 def test_loads_deterministic_ticker_universe_from_quarterly(tmp_path: Path) -> None:
     db_path = tmp_path / "ttm_batch_universe.db"
     run_migration(db_path)
@@ -172,6 +205,7 @@ def test_successful_rebuild_calls_existing_ttm_logic_and_writes_rows(
         db_path=db_path,
         run_id="BASE",
         market=None,
+        classification_run_id=None,
         ticker=None,
         tickers_arg=None,
         limit=None,
@@ -205,6 +239,7 @@ def test_omxh_quarterly_ticker_is_allowed_to_proceed(
         db_path=db_path,
         run_id="BASE",
         market="omxh",
+        classification_run_id=None,
         ticker=None,
         tickers_arg=None,
         limit=None,
@@ -236,6 +271,7 @@ def test_omxh_true_semiannual_ticker_is_skipped(
         db_path=db_path,
         run_id="BASE",
         market="omxh",
+        classification_run_id=None,
         ticker=None,
         tickers_arg=None,
         limit=None,
@@ -268,6 +304,7 @@ def test_omxh_quarterly_missing_source_period_ticker_is_skipped(
         db_path=db_path,
         run_id="BASE",
         market="omxh",
+        classification_run_id=None,
         ticker=None,
         tickers_arg=None,
         limit=None,
@@ -302,6 +339,7 @@ def test_omxh_malformed_dates_are_skipped(
         db_path=db_path,
         run_id="BASE",
         market="omxh",
+        classification_run_id=None,
         ticker=None,
         tickers_arg=None,
         limit=None,
@@ -336,6 +374,7 @@ def test_usa_behavior_is_not_blocked_by_reporting_frequency_gate(
         db_path=db_path,
         run_id="BASE",
         market="usa",
+        classification_run_id=None,
         ticker=None,
         tickers_arg=None,
         limit=None,
@@ -369,6 +408,7 @@ def test_insufficient_rows_does_not_fail_batch(
         db_path=db_path,
         run_id="BASE",
         market=None,
+        classification_run_id=None,
         ticker=None,
         tickers_arg=None,
         limit=None,
@@ -408,6 +448,7 @@ def test_unexpected_ttm_error_fails_batch_immediately(
             db_path=db_path,
             run_id="BASE",
             market=None,
+            classification_run_id=None,
             ticker=None,
             tickers_arg=None,
             limit=None,
@@ -419,6 +460,180 @@ def test_unexpected_ttm_error_fails_batch_immediately(
     assert calls == ["AAPL"]
     assert "TICKER AAPL=FAILED" in out
     assert "ERROR ticker=AAPL step=ttm" in out
+
+
+def test_omxh_with_persisted_quarterly_classification_proceeds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "ttm_batch_omxh_persisted_quarterly.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_four_quarters(conn, "NOKIA.HE")
+        _insert_reporting_frequency_classification_row(conn, "NOKIA.HE", "omxh", "QUARTERLY", "RF_RUN_1")
+        conn.commit()
+
+    calls: list[str] = []
+
+    def _fake_run_quarterly_to_ttm(**kwargs):
+        calls.append(kwargs["ticker"])
+        return {"rows_written": 1}
+
+    monkeypatch.setattr(run_fundamental_ttm_batch, "run_quarterly_to_ttm", _fake_run_quarterly_to_ttm)
+
+    summary = run_fundamental_ttm_batch.run_fundamental_ttm_batch(
+        db_path=db_path,
+        run_id="BASE",
+        market="omxh",
+        classification_run_id="RF_RUN_1",
+        ticker=None,
+        tickers_arg=None,
+        limit=None,
+        replace_ticker=False,
+        dry_run=False,
+    )
+
+    assert calls == ["NOKIA.HE"]
+    assert summary["reporting_frequency_source"] == "persisted"
+    assert summary["classification_run_id"] == "RF_RUN_1"
+    assert summary["reporting_frequency_quarterly_count"] == 1
+
+
+def test_omxh_with_persisted_true_semiannual_classification_skips(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    db_path = tmp_path / "ttm_batch_omxh_persisted_semiannual.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_true_semiannual_periods(conn, "PUUILO.HE")
+        _insert_reporting_frequency_classification_row(conn, "PUUILO.HE", "omxh", "TRUE_SEMIANNUAL", "RF_RUN_1")
+        conn.commit()
+
+    monkeypatch.setattr(
+        run_fundamental_ttm_batch,
+        "run_quarterly_to_ttm",
+        lambda **kwargs: pytest.fail("quarterly TTM should not run for persisted TRUE_SEMIANNUAL"),
+    )
+
+    summary = run_fundamental_ttm_batch.run_fundamental_ttm_batch(
+        db_path=db_path,
+        run_id="BASE",
+        market="omxh",
+        classification_run_id="RF_RUN_1",
+        ticker=None,
+        tickers_arg=None,
+        limit=None,
+        replace_ticker=False,
+        dry_run=False,
+    )
+    out = capsys.readouterr().out
+
+    assert "STEP ttm=SKIPPED_SEMIANNUAL_TTM_NOT_IMPLEMENTED" in out
+    assert summary["reporting_frequency_true_semiannual_skipped_count"] == 1
+
+
+def test_omxh_with_persisted_quarterly_missing_source_period_skips(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    db_path = tmp_path / "ttm_batch_omxh_persisted_missing_source.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_quarterly_missing_source_periods(conn, "TIETO.HE")
+        _insert_reporting_frequency_classification_row(
+            conn,
+            "TIETO.HE",
+            "omxh",
+            "QUARTERLY_MISSING_SOURCE_PERIOD",
+            "RF_RUN_1",
+        )
+        conn.commit()
+
+    monkeypatch.setattr(
+        run_fundamental_ttm_batch,
+        "run_quarterly_to_ttm",
+        lambda **kwargs: pytest.fail("quarterly TTM should not run for persisted QUARTERLY_MISSING_SOURCE_PERIOD"),
+    )
+
+    summary = run_fundamental_ttm_batch.run_fundamental_ttm_batch(
+        db_path=db_path,
+        run_id="BASE",
+        market="omxh",
+        classification_run_id="RF_RUN_1",
+        ticker=None,
+        tickers_arg=None,
+        limit=None,
+        replace_ticker=False,
+        dry_run=False,
+    )
+    out = capsys.readouterr().out
+
+    assert "STEP ttm=SKIPPED_QUARTERLY_MISSING_SOURCE_PERIOD" in out
+    assert summary["reporting_frequency_quarterly_missing_source_period_skipped_count"] == 1
+
+
+def test_omxh_with_persisted_missing_snapshot_row_skips(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    db_path = tmp_path / "ttm_batch_omxh_persisted_missing_snapshot.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_four_quarters(conn, "NOKIA.HE")
+        conn.commit()
+
+    monkeypatch.setattr(
+        run_fundamental_ttm_batch,
+        "run_quarterly_to_ttm",
+        lambda **kwargs: pytest.fail("quarterly TTM should not run without persisted classification row"),
+    )
+
+    summary = run_fundamental_ttm_batch.run_fundamental_ttm_batch(
+        db_path=db_path,
+        run_id="BASE",
+        market="omxh",
+        classification_run_id="RF_RUN_1",
+        ticker=None,
+        tickers_arg=None,
+        limit=None,
+        replace_ticker=False,
+        dry_run=False,
+    )
+    out = capsys.readouterr().out
+
+    assert "STEP ttm=SKIPPED_REPORTING_FREQUENCY_CLASSIFICATION_MISSING" in out
+    assert summary["reporting_frequency_classification_missing_count"] == 1
+
+
+def test_omxh_without_classification_run_id_keeps_computed_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "ttm_batch_omxh_computed_fallback.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_four_quarters(conn, "NOKIA.HE")
+        conn.commit()
+
+    calls: list[str] = []
+
+    def _fake_run_quarterly_to_ttm(**kwargs):
+        calls.append(kwargs["ticker"])
+        return {"rows_written": 1}
+
+    monkeypatch.setattr(run_fundamental_ttm_batch, "run_quarterly_to_ttm", _fake_run_quarterly_to_ttm)
+
+    summary = run_fundamental_ttm_batch.run_fundamental_ttm_batch(
+        db_path=db_path,
+        run_id="BASE",
+        market="omxh",
+        classification_run_id=None,
+        ticker=None,
+        tickers_arg=None,
+        limit=None,
+        replace_ticker=False,
+        dry_run=False,
+    )
+
+    assert calls == ["NOKIA.HE"]
+    assert summary["reporting_frequency_source"] == "computed"
+    assert summary["classification_run_id"] == ""
 
 
 def test_dry_run_writes_nothing_and_disables_replace_delete(
@@ -442,6 +657,7 @@ def test_dry_run_writes_nothing_and_disables_replace_delete(
         db_path=db_path,
         run_id="BASE",
         market=None,
+        classification_run_id=None,
         ticker=None,
         tickers_arg=None,
         limit=None,
@@ -479,6 +695,7 @@ def test_replace_ticker_is_passed_through_correctly(
         db_path=db_path,
         run_id="BASE",
         market=None,
+        classification_run_id=None,
         ticker=None,
         tickers_arg=None,
         limit=None,

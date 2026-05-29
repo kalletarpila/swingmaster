@@ -13,6 +13,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", required=True, help="SQLite database path")
     parser.add_argument("--run-id", required=True, help="Deterministic base run identifier")
     parser.add_argument("--market", default=None, help="Optional market filter")
+    parser.add_argument(
+        "--classification-run-id",
+        default=None,
+        help="Optional persisted reporting-frequency classification snapshot run id for OMXH gating",
+    )
     parser.add_argument("--ticker", default=None, help="Optional single ticker override")
     parser.add_argument("--tickers", default=None, help="Optional comma-separated ticker list")
     parser.add_argument("--limit", type=int, default=None, help="Optional ticker limit after sorting")
@@ -98,13 +103,35 @@ def resolve_ttm_skip_reason(reporting_frequency_class: str) -> str | None:
         return "QUARTERLY_MISSING_SOURCE_PERIOD"
     if reporting_frequency_class in {"ANNUAL_ONLY", "OTHER_INSUFFICIENT", "UNKNOWN"}:
         return reporting_frequency_class
+    if reporting_frequency_class == "REPORTING_FREQUENCY_CLASSIFICATION_MISSING":
+        return reporting_frequency_class
+    if reporting_frequency_class != "QUARTERLY":
+        return "UNKNOWN_REPORTING_FREQUENCY_CLASS"
     return None
+
+
+def _load_reporting_frequency_classification_by_run_id(
+    conn: sqlite3.Connection,
+    market: str,
+    run_id: str,
+) -> dict[str, str]:
+    rows = conn.execute(
+        """
+        SELECT ticker, reporting_frequency_class
+        FROM rc_fundamental_reporting_frequency_classification
+        WHERE market = ? AND run_id = ?
+        ORDER BY ticker ASC
+        """,
+        (market.strip().lower(), run_id),
+    ).fetchall()
+    return {str(row[0]).upper(): str(row[1]) for row in rows}
 
 
 def run_fundamental_ttm_batch(
     db_path: Path,
     run_id: str,
     market: str | None,
+    classification_run_id: str | None,
     ticker: str | None,
     tickers_arg: str | None,
     limit: int | None,
@@ -126,21 +153,44 @@ def run_fundamental_ttm_batch(
     reporting_frequency_true_semiannual_skipped_count = 0
     reporting_frequency_quarterly_missing_source_period_skipped_count = 0
     reporting_frequency_other_skipped_count = 0
+    reporting_frequency_classification_missing_count = 0
     rows_written = 0
+    normalized_market = market.strip().lower() if market is not None else None
+    reporting_frequency_source = "not_applicable"
 
     with sqlite3.connect(str(db_path)) as conn:
+        persisted_reporting_frequency_by_ticker: dict[str, str] = {}
+        if normalized_market == "omxh" and classification_run_id is not None:
+            persisted_reporting_frequency_by_ticker = _load_reporting_frequency_classification_by_run_id(
+                conn=conn,
+                market="omxh",
+                run_id=classification_run_id,
+            )
+            reporting_frequency_source = "persisted"
+        elif normalized_market == "omxh":
+            reporting_frequency_source = "computed"
+
         for symbol in tickers:
             print(f"TICKER {symbol}")
             if market_matches_ticker("omxh", symbol):
-                classification = classify_ticker_reporting_frequency(conn=conn, ticker=symbol)
-                skip_reason = resolve_ttm_skip_reason(classification.reporting_frequency_class)
+                if normalized_market == "omxh" and classification_run_id is not None:
+                    reporting_frequency_class = persisted_reporting_frequency_by_ticker.get(
+                        symbol,
+                        "REPORTING_FREQUENCY_CLASSIFICATION_MISSING",
+                    )
+                else:
+                    classification = classify_ticker_reporting_frequency(conn=conn, ticker=symbol)
+                    reporting_frequency_class = classification.reporting_frequency_class
+                skip_reason = resolve_ttm_skip_reason(reporting_frequency_class)
                 if skip_reason is not None:
                     print(f"STEP ttm=SKIPPED_{skip_reason}")
                     tickers_processed += 1
-                    if classification.reporting_frequency_class == "TRUE_SEMIANNUAL":
+                    if reporting_frequency_class == "TRUE_SEMIANNUAL":
                         reporting_frequency_true_semiannual_skipped_count += 1
-                    elif classification.reporting_frequency_class == "QUARTERLY_MISSING_SOURCE_PERIOD":
+                    elif reporting_frequency_class == "QUARTERLY_MISSING_SOURCE_PERIOD":
                         reporting_frequency_quarterly_missing_source_period_skipped_count += 1
+                    elif reporting_frequency_class == "REPORTING_FREQUENCY_CLASSIFICATION_MISSING":
+                        reporting_frequency_classification_missing_count += 1
                     else:
                         reporting_frequency_other_skipped_count += 1
                     continue
@@ -180,8 +230,11 @@ def run_fundamental_ttm_batch(
             reporting_frequency_quarterly_missing_source_period_skipped_count
         ),
         "reporting_frequency_other_skipped_count": reporting_frequency_other_skipped_count,
+        "reporting_frequency_source": reporting_frequency_source,
+        "classification_run_id": classification_run_id or "",
+        "reporting_frequency_classification_missing_count": reporting_frequency_classification_missing_count,
         "rows_written": rows_written,
-        "market": market.strip().lower() if market is not None else "ALL",
+        "market": normalized_market if normalized_market is not None else "ALL",
         "dry_run": 1 if dry_run else 0,
         "replace_ticker": 1 if replace_ticker else 0,
         "run_id": run_id,
@@ -197,6 +250,7 @@ def main() -> None:
         db_path=db_path,
         run_id=args.run_id,
         market=args.market,
+        classification_run_id=args.classification_run_id,
         ticker=args.ticker,
         tickers_arg=args.tickers,
         limit=args.limit,

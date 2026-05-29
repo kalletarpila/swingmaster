@@ -19,6 +19,7 @@ OUTPUT_FIELDS = (
     "market",
     "period_count_in_lookback",
     "period_end_dates",
+    "reporting_frequency_class",
     "inferred_reporting_frequency",
     "has_valid_ttm_coverage",
     "reason",
@@ -27,6 +28,7 @@ OUTPUT_FIELDS = (
 
 @dataclass(frozen=True)
 class ReportingFrequencyClassification:
+    reporting_frequency_class: str
     inferred_reporting_frequency: str
     has_valid_ttm_coverage: int
     reason: str
@@ -82,25 +84,25 @@ def parse_period_date(value: str) -> date:
 
 def classify_reporting_frequency(period_end_dates: list[str]) -> ReportingFrequencyClassification:
     if not period_end_dates:
-        return ReportingFrequencyClassification("INSUFFICIENT", 0, "NO_PERIOD_ROWS")
+        return ReportingFrequencyClassification("OTHER_INSUFFICIENT", "INSUFFICIENT", 0, "NO_PERIOD_ROWS")
 
     try:
         parsed_dates = sorted({parse_period_date(value) for value in period_end_dates})
     except ValueError:
-        return ReportingFrequencyClassification("UNKNOWN", 0, "MALFORMED_PERIOD_DATES")
+        return ReportingFrequencyClassification("UNKNOWN", "UNKNOWN", 0, "MALFORMED_PERIOD_DATES")
 
     if not parsed_dates:
-        return ReportingFrequencyClassification("INSUFFICIENT", 0, "NO_PERIOD_ROWS")
+        return ReportingFrequencyClassification("OTHER_INSUFFICIENT", "INSUFFICIENT", 0, "NO_PERIOD_ROWS")
 
     latest_date = parsed_dates[-1]
     recent_dates = [value for value in parsed_dates if (latest_date - value).days <= RECENT_WINDOW_DAYS]
     recent_count = len(recent_dates)
     if recent_count == 0:
-        return ReportingFrequencyClassification("INSUFFICIENT", 0, "INSUFFICIENT_RECENT_PERIODS")
+        return ReportingFrequencyClassification("OTHER_INSUFFICIENT", "INSUFFICIENT", 0, "OTHER_INSUFFICIENT_RECENT_PERIODS")
     if recent_count == 1 and len(parsed_dates) == 1:
-        return ReportingFrequencyClassification("ANNUAL_ONLY", 0, "ONLY_ONE_RECENT_PERIOD")
+        return ReportingFrequencyClassification("ANNUAL_ONLY", "ANNUAL_ONLY", 0, "ONLY_ONE_RECENT_PERIOD")
     if recent_count == 1:
-        return ReportingFrequencyClassification("INSUFFICIENT", 0, "INSUFFICIENT_RECENT_PERIODS")
+        return ReportingFrequencyClassification("OTHER_INSUFFICIENT", "INSUFFICIENT", 0, "OTHER_INSUFFICIENT_RECENT_PERIODS")
 
     recent_gaps = [(right - left).days for left, right in zip(recent_dates, recent_dates[1:])]
     latest_two_gap = recent_gaps[-1]
@@ -109,12 +111,30 @@ def classify_reporting_frequency(period_end_dates: list[str]) -> ReportingFreque
         latest_four_dates = recent_dates[-4:]
         latest_four_gaps = [(right - left).days for left, right in zip(latest_four_dates, latest_four_dates[1:])]
         if all(QUARTER_MIN_GAP_DAYS <= gap <= QUARTER_MAX_GAP_DAYS for gap in latest_four_gaps):
-            return ReportingFrequencyClassification("QUARTERLY", 1, "ENOUGH_RECENT_QUARTERS")
+            return ReportingFrequencyClassification("QUARTERLY", "QUARTERLY", 1, "ENOUGH_RECENT_QUARTERS")
 
-    if recent_count >= 2 and HALF_YEAR_MIN_GAP_DAYS <= latest_two_gap <= HALF_YEAR_MAX_GAP_DAYS:
-        return ReportingFrequencyClassification("SEMIANNUAL", 1, "ENOUGH_RECENT_HALF_YEAR_PERIODS")
+    if recent_count >= 5:
+        latest_five_dates = recent_dates[-5:]
+        latest_five_gaps = [(right - left).days for left, right in zip(latest_five_dates, latest_five_dates[1:])]
+        quarterly_like_gap_count = sum(1 for gap in latest_five_gaps if QUARTER_MIN_GAP_DAYS <= gap <= QUARTER_MAX_GAP_DAYS)
+        missing_period_gap_count = sum(1 for gap in latest_five_gaps if HALF_YEAR_MIN_GAP_DAYS <= gap <= HALF_YEAR_MAX_GAP_DAYS)
+        if quarterly_like_gap_count == 3 and missing_period_gap_count == 1:
+            return ReportingFrequencyClassification(
+                "QUARTERLY_MISSING_SOURCE_PERIOD",
+                "INSUFFICIENT",
+                0,
+                "QUARTERLY_PATTERN_WITH_MISSING_RECENT_PERIOD",
+            )
 
-    return ReportingFrequencyClassification("INSUFFICIENT", 0, "INSUFFICIENT_RECENT_PERIODS")
+    if (
+        recent_count >= 2
+        and recent_count <= 3
+        and HALF_YEAR_MIN_GAP_DAYS <= latest_two_gap <= HALF_YEAR_MAX_GAP_DAYS
+        and all(HALF_YEAR_MIN_GAP_DAYS <= gap <= HALF_YEAR_MAX_GAP_DAYS for gap in recent_gaps)
+    ):
+        return ReportingFrequencyClassification("TRUE_SEMIANNUAL", "SEMIANNUAL", 1, "CONSISTENT_HALF_YEAR_PERIODS")
+
+    return ReportingFrequencyClassification("OTHER_INSUFFICIENT", "INSUFFICIENT", 0, "OTHER_INSUFFICIENT_RECENT_PERIODS")
 
 
 def load_reporting_frequency_rows(db_path: Path, market: str, lookback_months: int) -> list[dict[str, object]]:
@@ -154,6 +174,7 @@ def load_reporting_frequency_rows(db_path: Path, market: str, lookback_months: i
                 "market": normalized_market,
                 "period_count_in_lookback": len(filtered_period_end_dates),
                 "period_end_dates": ",".join(filtered_period_end_dates),
+                "reporting_frequency_class": classification.reporting_frequency_class,
                 "inferred_reporting_frequency": classification.inferred_reporting_frequency,
                 "has_valid_ttm_coverage": classification.has_valid_ttm_coverage,
                 "reason": classification.reason,
@@ -187,6 +208,7 @@ def print_text_rows(rows: list[dict[str, object]]) -> None:
                     f"market={row['market']}",
                     f"period_count_in_lookback={row['period_count_in_lookback']}",
                     f"period_end_dates={row['period_end_dates']}",
+                    f"reporting_frequency_class={row['reporting_frequency_class']}",
                     f"inferred_reporting_frequency={row['inferred_reporting_frequency']}",
                     f"has_valid_ttm_coverage={row['has_valid_ttm_coverage']}",
                     f"reason={row['reason']}",
@@ -196,18 +218,26 @@ def print_text_rows(rows: list[dict[str, object]]) -> None:
 
 
 def build_summary(rows: list[dict[str, object]], market: str, output_path: Path | None) -> dict[str, object]:
-    quarterly_count = sum(1 for row in rows if row["inferred_reporting_frequency"] == "QUARTERLY")
+    quarterly_count = sum(1 for row in rows if row["reporting_frequency_class"] == "QUARTERLY")
+    true_semiannual_count = sum(1 for row in rows if row["reporting_frequency_class"] == "TRUE_SEMIANNUAL")
+    quarterly_missing_source_period_count = sum(
+        1 for row in rows if row["reporting_frequency_class"] == "QUARTERLY_MISSING_SOURCE_PERIOD"
+    )
+    annual_only_count = sum(1 for row in rows if row["reporting_frequency_class"] == "ANNUAL_ONLY")
+    other_insufficient_count = sum(1 for row in rows if row["reporting_frequency_class"] == "OTHER_INSUFFICIENT")
+    unknown_count = sum(1 for row in rows if row["reporting_frequency_class"] == "UNKNOWN")
     semiannual_count = sum(1 for row in rows if row["inferred_reporting_frequency"] == "SEMIANNUAL")
-    annual_only_count = sum(1 for row in rows if row["inferred_reporting_frequency"] == "ANNUAL_ONLY")
     insufficient_count = sum(1 for row in rows if row["inferred_reporting_frequency"] == "INSUFFICIENT")
-    unknown_count = sum(1 for row in rows if row["inferred_reporting_frequency"] == "UNKNOWN")
     valid_ttm_coverage_count = sum(int(row["has_valid_ttm_coverage"]) for row in rows)
     return {
         "market": market.strip().lower(),
         "tickers_total": len(rows),
         "quarterly_count": quarterly_count,
+        "true_semiannual_count": true_semiannual_count,
+        "quarterly_missing_source_period_count": quarterly_missing_source_period_count,
         "semiannual_count": semiannual_count,
         "annual_only_count": annual_only_count,
+        "other_insufficient_count": other_insufficient_count,
         "insufficient_count": insufficient_count,
         "unknown_count": unknown_count,
         "valid_ttm_coverage_count": valid_ttm_coverage_count,
@@ -237,8 +267,11 @@ def main() -> None:
         _summary(market=summary["market"])
         _summary(tickers_total=summary["tickers_total"])
         _summary(quarterly_count=summary["quarterly_count"])
+        _summary(true_semiannual_count=summary["true_semiannual_count"])
+        _summary(quarterly_missing_source_period_count=summary["quarterly_missing_source_period_count"])
         _summary(semiannual_count=summary["semiannual_count"])
         _summary(annual_only_count=summary["annual_only_count"])
+        _summary(other_insufficient_count=summary["other_insufficient_count"])
         _summary(insufficient_count=summary["insufficient_count"])
         _summary(unknown_count=summary["unknown_count"])
         _summary(valid_ttm_coverage_count=summary["valid_ttm_coverage_count"])

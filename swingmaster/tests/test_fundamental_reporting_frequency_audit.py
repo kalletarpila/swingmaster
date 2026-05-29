@@ -7,6 +7,7 @@ from pathlib import Path
 
 from swingmaster.cli import run_fundamental_reporting_frequency_audit
 from swingmaster.cli.run_fundamental_migrations import run_migration
+from swingmaster.fundamentals import reporting_frequency
 
 
 def _insert_quarterly_row(conn: sqlite3.Connection, ticker: str, period_end_date: str) -> None:
@@ -23,7 +24,7 @@ def _insert_quarterly_row(conn: sqlite3.Connection, ticker: str, period_end_date
 
 
 def test_classify_quarterly_dates() -> None:
-    classification = run_fundamental_reporting_frequency_audit.classify_reporting_frequency(
+    classification = reporting_frequency.classify_reporting_frequency(
         ["2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31"]
     )
     assert classification.reporting_frequency_class == "QUARTERLY"
@@ -33,7 +34,7 @@ def test_classify_quarterly_dates() -> None:
 
 
 def test_classify_semiannual_dates() -> None:
-    classification = run_fundamental_reporting_frequency_audit.classify_reporting_frequency(
+    classification = reporting_frequency.classify_reporting_frequency(
         ["2025-01-31", "2025-07-31"]
     )
     assert classification.reporting_frequency_class == "TRUE_SEMIANNUAL"
@@ -43,7 +44,7 @@ def test_classify_semiannual_dates() -> None:
 
 
 def test_classify_quarterly_missing_source_period_dates() -> None:
-    classification = run_fundamental_reporting_frequency_audit.classify_reporting_frequency(
+    classification = reporting_frequency.classify_reporting_frequency(
         ["2024-12-31", "2025-03-31", "2025-06-30", "2025-12-31", "2026-03-31"]
     )
     assert classification.reporting_frequency_class == "QUARTERLY_MISSING_SOURCE_PERIOD"
@@ -53,7 +54,7 @@ def test_classify_quarterly_missing_source_period_dates() -> None:
 
 
 def test_classify_four_period_quarterly_missing_source_period_regression() -> None:
-    classification = run_fundamental_reporting_frequency_audit.classify_reporting_frequency(
+    classification = reporting_frequency.classify_reporting_frequency(
         ["2024-12-31", "2025-03-31", "2025-06-30", "2025-12-31"]
     )
     assert classification.reporting_frequency_class == "QUARTERLY_MISSING_SOURCE_PERIOD"
@@ -63,7 +64,7 @@ def test_classify_four_period_quarterly_missing_source_period_regression() -> No
 
 
 def test_classify_annual_only_dates() -> None:
-    classification = run_fundamental_reporting_frequency_audit.classify_reporting_frequency(["2025-12-31"])
+    classification = reporting_frequency.classify_reporting_frequency(["2025-12-31"])
     assert classification.reporting_frequency_class == "ANNUAL_ONLY"
     assert classification.inferred_reporting_frequency == "ANNUAL_ONLY"
     assert classification.has_valid_ttm_coverage == 0
@@ -71,7 +72,7 @@ def test_classify_annual_only_dates() -> None:
 
 
 def test_classify_sparse_dates_as_other_insufficient() -> None:
-    classification = run_fundamental_reporting_frequency_audit.classify_reporting_frequency(
+    classification = reporting_frequency.classify_reporting_frequency(
         ["2025-03-31", "2025-12-31"]
     )
     assert classification.reporting_frequency_class == "OTHER_INSUFFICIENT"
@@ -81,7 +82,7 @@ def test_classify_sparse_dates_as_other_insufficient() -> None:
 
 
 def test_classify_malformed_dates_as_unknown() -> None:
-    classification = run_fundamental_reporting_frequency_audit.classify_reporting_frequency(
+    classification = reporting_frequency.classify_reporting_frequency(
         ["2025-12-31", "bad-date"]
     )
     assert classification.reporting_frequency_class == "UNKNOWN"

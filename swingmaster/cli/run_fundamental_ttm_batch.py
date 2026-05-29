@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from swingmaster.cli.run_fundamental_quarterly_to_ttm import run_quarterly_to_ttm
+from swingmaster.fundamentals.reporting_frequency import classify_ticker_reporting_frequency, market_matches_ticker
 
 
 def parse_args() -> argparse.Namespace:
@@ -41,16 +42,6 @@ def normalize_tickers(tickers_arg: str | None) -> list[str]:
     if tickers_arg is None or not tickers_arg.strip():
         return []
     return sorted({ticker.strip().upper() for ticker in tickers_arg.split(",") if ticker.strip()})
-
-
-def market_matches_ticker(market: str, ticker: str) -> bool:
-    normalized_market = market.strip().lower()
-    normalized_ticker = ticker.upper()
-    if normalized_market == "usa":
-        return not normalized_ticker.endswith(".HE")
-    if normalized_market == "omxh":
-        return normalized_ticker.endswith(".HE")
-    return True
 
 
 def apply_market_filter(tickers: list[str], market: str | None) -> list[str]:
@@ -100,6 +91,16 @@ def resolve_ticker_universe(
     return resolved
 
 
+def resolve_ttm_skip_reason(reporting_frequency_class: str) -> str | None:
+    if reporting_frequency_class == "TRUE_SEMIANNUAL":
+        return "SEMIANNUAL_TTM_NOT_IMPLEMENTED"
+    if reporting_frequency_class == "QUARTERLY_MISSING_SOURCE_PERIOD":
+        return "QUARTERLY_MISSING_SOURCE_PERIOD"
+    if reporting_frequency_class in {"ANNUAL_ONLY", "OTHER_INSUFFICIENT", "UNKNOWN"}:
+        return reporting_frequency_class
+    return None
+
+
 def run_fundamental_ttm_batch(
     db_path: Path,
     run_id: str,
@@ -121,38 +122,64 @@ def run_fundamental_ttm_batch(
     tickers_processed = 0
     tickers_succeeded = 0
     tickers_skipped_insufficient_rows = 0
+    reporting_frequency_quarterly_count = 0
+    reporting_frequency_true_semiannual_skipped_count = 0
+    reporting_frequency_quarterly_missing_source_period_skipped_count = 0
+    reporting_frequency_other_skipped_count = 0
     rows_written = 0
 
-    for symbol in tickers:
-        print(f"TICKER {symbol}")
-        try:
-            summary = run_quarterly_to_ttm(
-                db_path=db_path,
-                ticker=symbol,
-                run_id=child_run_id,
-                dry_run=dry_run,
-                replace_ticker=False if dry_run else replace_ticker,
-            )
-        except RuntimeError as exc:
-            if str(exc) == f"FUNDAMENTAL_TTM_INSUFFICIENT_ROWS:{symbol}":
-                print("STEP ttm=SKIPPED_INSUFFICIENT_ROWS")
-                tickers_processed += 1
-                tickers_skipped_insufficient_rows += 1
-                continue
-            print(f"TICKER {symbol}=FAILED")
-            print(f"ERROR ticker={symbol} step=ttm")
-            raise
+    with sqlite3.connect(str(db_path)) as conn:
+        for symbol in tickers:
+            print(f"TICKER {symbol}")
+            if market_matches_ticker("omxh", symbol):
+                classification = classify_ticker_reporting_frequency(conn=conn, ticker=symbol)
+                skip_reason = resolve_ttm_skip_reason(classification.reporting_frequency_class)
+                if skip_reason is not None:
+                    print(f"STEP ttm=SKIPPED_{skip_reason}")
+                    tickers_processed += 1
+                    if classification.reporting_frequency_class == "TRUE_SEMIANNUAL":
+                        reporting_frequency_true_semiannual_skipped_count += 1
+                    elif classification.reporting_frequency_class == "QUARTERLY_MISSING_SOURCE_PERIOD":
+                        reporting_frequency_quarterly_missing_source_period_skipped_count += 1
+                    else:
+                        reporting_frequency_other_skipped_count += 1
+                    continue
+                reporting_frequency_quarterly_count += 1
 
-        print("STEP ttm=OK")
-        tickers_processed += 1
-        tickers_succeeded += 1
-        rows_written += int(summary["rows_written"])
+            try:
+                summary = run_quarterly_to_ttm(
+                    db_path=db_path,
+                    ticker=symbol,
+                    run_id=child_run_id,
+                    dry_run=dry_run,
+                    replace_ticker=False if dry_run else replace_ticker,
+                )
+            except RuntimeError as exc:
+                if str(exc) == f"FUNDAMENTAL_TTM_INSUFFICIENT_ROWS:{symbol}":
+                    print("STEP ttm=SKIPPED_INSUFFICIENT_ROWS")
+                    tickers_processed += 1
+                    tickers_skipped_insufficient_rows += 1
+                    continue
+                print(f"TICKER {symbol}=FAILED")
+                print(f"ERROR ticker={symbol} step=ttm")
+                raise
+
+            print("STEP ttm=OK")
+            tickers_processed += 1
+            tickers_succeeded += 1
+            rows_written += int(summary["rows_written"])
 
     summary = {
         "tickers_total": len(tickers),
         "tickers_processed": tickers_processed,
         "tickers_succeeded": tickers_succeeded,
         "tickers_skipped_insufficient_rows": tickers_skipped_insufficient_rows,
+        "reporting_frequency_quarterly_count": reporting_frequency_quarterly_count,
+        "reporting_frequency_true_semiannual_skipped_count": reporting_frequency_true_semiannual_skipped_count,
+        "reporting_frequency_quarterly_missing_source_period_skipped_count": (
+            reporting_frequency_quarterly_missing_source_period_skipped_count
+        ),
+        "reporting_frequency_other_skipped_count": reporting_frequency_other_skipped_count,
         "rows_written": rows_written,
         "market": market.strip().lower() if market is not None else "ALL",
         "dry_run": 1 if dry_run else 0,

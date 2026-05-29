@@ -39,6 +39,16 @@ def _insert_four_quarters(conn: sqlite3.Connection, ticker: str) -> None:
         _insert_quarterly_row(conn, ticker, period_end_date)
 
 
+def _insert_true_semiannual_periods(conn: sqlite3.Connection, ticker: str) -> None:
+    for period_end_date in ("2025-01-31", "2025-07-31"):
+        _insert_quarterly_row(conn, ticker, period_end_date)
+
+
+def _insert_quarterly_missing_source_periods(conn: sqlite3.Connection, ticker: str) -> None:
+    for period_end_date in ("2024-12-31", "2025-03-31", "2025-06-30", "2025-12-31", "2026-03-31"):
+        _insert_quarterly_row(conn, ticker, period_end_date)
+
+
 def test_loads_deterministic_ticker_universe_from_quarterly(tmp_path: Path) -> None:
     db_path = tmp_path / "ttm_batch_universe.db"
     run_migration(db_path)
@@ -172,6 +182,170 @@ def test_successful_rebuild_calls_existing_ttm_logic_and_writes_rows(
     assert calls == [("AAPL", False, True, "BASE__TTM")]
     assert summary["tickers_succeeded"] == 1
     assert summary["rows_written"] == 2
+
+
+def test_omxh_quarterly_ticker_is_allowed_to_proceed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "ttm_batch_omxh_quarterly_ok.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_four_quarters(conn, "NOKIA.HE")
+        conn.commit()
+
+    calls: list[str] = []
+
+    def _fake_run_quarterly_to_ttm(**kwargs):
+        calls.append(kwargs["ticker"])
+        return {"rows_written": 1}
+
+    monkeypatch.setattr(run_fundamental_ttm_batch, "run_quarterly_to_ttm", _fake_run_quarterly_to_ttm)
+
+    summary = run_fundamental_ttm_batch.run_fundamental_ttm_batch(
+        db_path=db_path,
+        run_id="BASE",
+        market="omxh",
+        ticker=None,
+        tickers_arg=None,
+        limit=None,
+        replace_ticker=False,
+        dry_run=False,
+    )
+
+    assert calls == ["NOKIA.HE"]
+    assert summary["reporting_frequency_quarterly_count"] == 1
+    assert summary["tickers_succeeded"] == 1
+
+
+def test_omxh_true_semiannual_ticker_is_skipped(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    db_path = tmp_path / "ttm_batch_omxh_semiannual_skip.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_true_semiannual_periods(conn, "PUUILO.HE")
+        conn.commit()
+
+    monkeypatch.setattr(
+        run_fundamental_ttm_batch,
+        "run_quarterly_to_ttm",
+        lambda **kwargs: pytest.fail("quarterly TTM should not run for TRUE_SEMIANNUAL"),
+    )
+
+    summary = run_fundamental_ttm_batch.run_fundamental_ttm_batch(
+        db_path=db_path,
+        run_id="BASE",
+        market="omxh",
+        ticker=None,
+        tickers_arg=None,
+        limit=None,
+        replace_ticker=False,
+        dry_run=False,
+    )
+    out = capsys.readouterr().out
+
+    assert "STEP ttm=SKIPPED_SEMIANNUAL_TTM_NOT_IMPLEMENTED" in out
+    assert summary["reporting_frequency_true_semiannual_skipped_count"] == 1
+    assert summary["tickers_succeeded"] == 0
+
+
+def test_omxh_quarterly_missing_source_period_ticker_is_skipped(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    db_path = tmp_path / "ttm_batch_omxh_missing_source_skip.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_quarterly_missing_source_periods(conn, "TIETO.HE")
+        conn.commit()
+
+    monkeypatch.setattr(
+        run_fundamental_ttm_batch,
+        "run_quarterly_to_ttm",
+        lambda **kwargs: pytest.fail("quarterly TTM should not run for QUARTERLY_MISSING_SOURCE_PERIOD"),
+    )
+
+    summary = run_fundamental_ttm_batch.run_fundamental_ttm_batch(
+        db_path=db_path,
+        run_id="BASE",
+        market="omxh",
+        ticker=None,
+        tickers_arg=None,
+        limit=None,
+        replace_ticker=False,
+        dry_run=False,
+    )
+    out = capsys.readouterr().out
+
+    assert "STEP ttm=SKIPPED_QUARTERLY_MISSING_SOURCE_PERIOD" in out
+    assert summary["reporting_frequency_quarterly_missing_source_period_skipped_count"] == 1
+    assert summary["tickers_succeeded"] == 0
+
+
+def test_omxh_malformed_dates_are_skipped(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    db_path = tmp_path / "ttm_batch_omxh_unknown_skip.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_quarterly_row(conn, "BROKE.HE", "2025-03-31")
+        _insert_quarterly_row(conn, "BROKE.HE", "2025-06-30")
+        _insert_quarterly_row(conn, "BROKE.HE", "bad-date")
+        conn.commit()
+
+    monkeypatch.setattr(
+        run_fundamental_ttm_batch,
+        "run_quarterly_to_ttm",
+        lambda **kwargs: pytest.fail("quarterly TTM should not run for UNKNOWN"),
+    )
+
+    summary = run_fundamental_ttm_batch.run_fundamental_ttm_batch(
+        db_path=db_path,
+        run_id="BASE",
+        market="omxh",
+        ticker=None,
+        tickers_arg=None,
+        limit=None,
+        replace_ticker=False,
+        dry_run=False,
+    )
+    out = capsys.readouterr().out
+
+    assert "STEP ttm=SKIPPED_UNKNOWN" in out
+    assert summary["reporting_frequency_other_skipped_count"] == 1
+    assert summary["tickers_succeeded"] == 0
+
+
+def test_usa_behavior_is_not_blocked_by_reporting_frequency_gate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "ttm_batch_usa_gate_noop.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_four_quarters(conn, "AAPL")
+        conn.commit()
+
+    calls: list[str] = []
+
+    def _fake_run_quarterly_to_ttm(**kwargs):
+        calls.append(kwargs["ticker"])
+        return {"rows_written": 2}
+
+    monkeypatch.setattr(run_fundamental_ttm_batch, "run_quarterly_to_ttm", _fake_run_quarterly_to_ttm)
+
+    summary = run_fundamental_ttm_batch.run_fundamental_ttm_batch(
+        db_path=db_path,
+        run_id="BASE",
+        market="usa",
+        ticker=None,
+        tickers_arg=None,
+        limit=None,
+        replace_ticker=False,
+        dry_run=False,
+    )
+
+    assert calls == ["AAPL"]
+    assert summary["reporting_frequency_quarterly_count"] == 0
+    assert summary["tickers_succeeded"] == 1
 
 
 def test_insufficient_rows_does_not_fail_batch(

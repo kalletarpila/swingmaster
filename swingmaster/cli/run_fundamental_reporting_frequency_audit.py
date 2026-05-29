@@ -126,6 +126,21 @@ def classify_reporting_frequency(period_end_dates: list[str]) -> ReportingFreque
                 "QUARTERLY_PATTERN_WITH_MISSING_RECENT_PERIOD",
             )
 
+    if recent_count >= 4:
+        latest_four_dates = recent_dates[-4:]
+        latest_four_gaps = [(right - left).days for left, right in zip(latest_four_dates, latest_four_dates[1:])]
+        if (
+            QUARTER_MIN_GAP_DAYS <= latest_four_gaps[0] <= QUARTER_MAX_GAP_DAYS
+            and QUARTER_MIN_GAP_DAYS <= latest_four_gaps[1] <= QUARTER_MAX_GAP_DAYS
+            and HALF_YEAR_MIN_GAP_DAYS <= latest_four_gaps[2] <= HALF_YEAR_MAX_GAP_DAYS
+        ):
+            return ReportingFrequencyClassification(
+                "QUARTERLY_MISSING_SOURCE_PERIOD",
+                "INSUFFICIENT",
+                0,
+                "QUARTERLY_PATTERN_WITH_MISSING_RECENT_PERIOD",
+            )
+
     if (
         recent_count >= 2
         and recent_count <= 3

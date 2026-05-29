@@ -52,6 +52,16 @@ def test_classify_quarterly_missing_source_period_dates() -> None:
     assert classification.reason == "QUARTERLY_PATTERN_WITH_MISSING_RECENT_PERIOD"
 
 
+def test_classify_four_period_quarterly_missing_source_period_regression() -> None:
+    classification = run_fundamental_reporting_frequency_audit.classify_reporting_frequency(
+        ["2024-12-31", "2025-03-31", "2025-06-30", "2025-12-31"]
+    )
+    assert classification.reporting_frequency_class == "QUARTERLY_MISSING_SOURCE_PERIOD"
+    assert classification.inferred_reporting_frequency == "INSUFFICIENT"
+    assert classification.has_valid_ttm_coverage == 0
+    assert classification.reason == "QUARTERLY_PATTERN_WITH_MISSING_RECENT_PERIOD"
+
+
 def test_classify_annual_only_dates() -> None:
     classification = run_fundamental_reporting_frequency_audit.classify_reporting_frequency(["2025-12-31"])
     assert classification.reporting_frequency_class == "ANNUAL_ONLY"

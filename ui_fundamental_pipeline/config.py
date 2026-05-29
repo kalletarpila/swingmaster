@@ -15,6 +15,7 @@ ANALYSIS_DB = Path("/home/kalle/projects/rawcandle/data/analysis.db")
 
 # Output and snapshots
 SNAPSHOTS_DIR = PROJECT_ROOT / "snapshots"
+TEMP_DIR = PROJECT_ROOT / "temp"
 
 # Python venv executable
 PYTHON_EXECUTABLE = PROJECT_ROOT / ".venv" / "bin" / "python"
@@ -22,6 +23,9 @@ PYTHON_EXECUTABLE = PROJECT_ROOT / ".venv" / "bin" / "python"
 # CLI scripts
 CLI_QUARTER_UPDATE = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_quarter_update.py"
 CLI_YAHOO_BATCH_FIN = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_yahoo_batch_fin.py"
+CLI_REPORTING_FREQUENCY_AUDIT = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_reporting_frequency_audit.py"
+CLI_TTM_BATCH = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_ttm_batch.py"
+CLI_MISSING_PERIOD_RECOVERY_CHECK = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_missing_period_recovery_check.py"
 CLI_SCORE_PERCENTILE = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_score_percentile.py"
 CLI_TICKER_SNAPSHOT = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_ticker_snapshot.py"
 
@@ -58,6 +62,26 @@ def get_run_id_fin() -> str:
     return f"FIN_YAHOO_BATCH_{datetime.now().strftime(DATE_FORMAT)}"
 
 
+def get_fin_chain_as_of_date() -> str:
+    """Generate FIN classification chain as-of date in YYYY-MM-DD format."""
+    return datetime.now().strftime(DATE_FORMAT)
+
+
+def get_run_id_fin_classification() -> str:
+    """Generate FIN classification snapshot run ID."""
+    return f"OMXH_REPORTING_FREQ_{datetime.now().strftime('%Y_%m_%d')}"
+
+
+def get_run_id_fin_ttm() -> str:
+    """Generate FIN TTM run ID."""
+    return f"OMXH_TTM_{datetime.now().strftime('%Y_%m_%d')}"
+
+
+def get_run_id_fin_recovery() -> str:
+    """Generate FIN missing-period recovery run ID."""
+    return f"OMXH_MISSING_PERIOD_RECOVERY_{datetime.now().strftime('%Y_%m_%d')}"
+
+
 def validate_config() -> bool:
     """Validate that all required paths exist."""
     required = [
@@ -68,6 +92,9 @@ def validate_config() -> bool:
         PYTHON_EXECUTABLE,
         CLI_QUARTER_UPDATE,
         CLI_YAHOO_BATCH_FIN,
+        CLI_REPORTING_FREQUENCY_AUDIT,
+        CLI_TTM_BATCH,
+        CLI_MISSING_PERIOD_RECOVERY_CHECK,
         CLI_SCORE_PERCENTILE,
         CLI_TICKER_SNAPSHOT,
     ]
@@ -84,6 +111,9 @@ def get_missing_paths() -> list:
         PYTHON_EXECUTABLE,
         CLI_QUARTER_UPDATE,
         CLI_YAHOO_BATCH_FIN,
+        CLI_REPORTING_FREQUENCY_AUDIT,
+        CLI_TTM_BATCH,
+        CLI_MISSING_PERIOD_RECOVERY_CHECK,
         CLI_SCORE_PERCENTILE,
         CLI_TICKER_SNAPSHOT,
     ]

@@ -22,6 +22,8 @@ class MarketPanel:
         on_score_percentile: Callable[[], None],
         on_snapshot: Callable[[list], None],
         on_lock: Callable[[bool], None],
+        on_secondary_action: Callable[[], None] | None = None,
+        secondary_action_label: str | None = None,
     ):
         """
         Initialize market panel.
@@ -38,6 +40,7 @@ class MarketPanel:
         self.on_score_percentile = on_score_percentile
         self.on_snapshot = on_snapshot
         self.on_lock = on_lock
+        self.on_secondary_action = on_secondary_action
 
         # Load valid tickers from database
         self.valid_tickers = self._load_valid_tickers()
@@ -59,6 +62,13 @@ class MarketPanel:
             on_click=self._on_percentile_click,
         )
 
+        self.secondary_action_btn = None
+        if self.on_secondary_action is not None and secondary_action_label is not None:
+            self.secondary_action_btn = ft.Button(
+                content=ft.Text(f"▶ {secondary_action_label}"),
+                on_click=self._on_secondary_action_click,
+            )
+
         self.snapshot_btn = ft.Button(
             content=ft.Text(f"▶ Generate {self.market.upper()} Snapshots"),
             on_click=self._on_snapshot_click,
@@ -67,12 +77,21 @@ class MarketPanel:
         self.status_badge = ft.Text("Ready", size=12, color="gray")
 
         # Container
-        self.container = ft.Column(
-            controls=[
-                ft.Text(f"{self.market.upper()} MARKET", weight="bold", size=16),
-                ft.Divider(),
-                ft.Text("1. DATABASE UPDATE", weight="bold", size=13),
-                self.quarter_update_btn,
+        controls = [
+            ft.Text(f"{self.market.upper()} MARKET", weight="bold", size=16),
+            ft.Divider(),
+            ft.Text("1. DATABASE UPDATE", weight="bold", size=13),
+            self.quarter_update_btn,
+        ]
+        if self.secondary_action_btn is not None:
+            controls.extend(
+                [
+                    ft.Container(height=8),
+                    self.secondary_action_btn,
+                ]
+            )
+        controls.extend(
+            [
                 ft.Container(height=10),
                 ft.Text("2. PERCENTILE CALCULATION", weight="bold", size=13),
                 self.percentile_btn,
@@ -82,9 +101,9 @@ class MarketPanel:
                 self.snapshot_btn,
                 ft.Container(height=10),
                 self.status_badge,
-            ],
-            spacing=5,
+            ]
         )
+        self.container = ft.Column(controls=controls, spacing=5)
 
     def _load_valid_tickers(self) -> Set[str]:
         """Load valid tickers from database."""
@@ -109,6 +128,13 @@ class MarketPanel:
         """Handle percentile button click."""
         self.on_lock(True)
         self.on_score_percentile()
+
+    def _on_secondary_action_click(self, e):
+        """Handle secondary action button click."""
+        if self.on_secondary_action is None:
+            return
+        self.on_lock(True)
+        self.on_secondary_action()
 
     def _on_snapshot_click(self, e):
         """Handle snapshot button click."""
@@ -150,6 +176,8 @@ class MarketPanel:
         """Disable/enable all action buttons."""
         self.quarter_update_btn.disabled = disable
         self.percentile_btn.disabled = disable
+        if self.secondary_action_btn is not None:
+            self.secondary_action_btn.disabled = disable
         self.snapshot_btn.disabled = disable
         self.ticker_input.disabled = disable
 

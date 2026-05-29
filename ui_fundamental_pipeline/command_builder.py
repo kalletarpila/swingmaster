@@ -4,8 +4,11 @@ from typing import Iterable
 
 try:
     from .config import (
+        CLI_MISSING_PERIOD_RECOVERY_CHECK,
         CLI_QUARTER_UPDATE,
+        CLI_REPORTING_FREQUENCY_AUDIT,
         CLI_SCORE_PERCENTILE,
+        CLI_TTM_BATCH,
         CLI_TICKER_SNAPSHOT,
         CLI_YAHOO_BATCH_FIN,
         FUNDAMENTALS_FIN_DB,
@@ -14,11 +17,15 @@ try:
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
         SNAPSHOTS_DIR,
+        TEMP_DIR,
     )
 except ImportError:  # pragma: no cover
     from config import (
+        CLI_MISSING_PERIOD_RECOVERY_CHECK,
         CLI_QUARTER_UPDATE,
+        CLI_REPORTING_FREQUENCY_AUDIT,
         CLI_SCORE_PERCENTILE,
+        CLI_TTM_BATCH,
         CLI_TICKER_SNAPSHOT,
         CLI_YAHOO_BATCH_FIN,
         FUNDAMENTALS_FIN_DB,
@@ -27,6 +34,7 @@ except ImportError:  # pragma: no cover
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
         SNAPSHOTS_DIR,
+        TEMP_DIR,
     )
 
 
@@ -58,6 +66,66 @@ def build_fin_update_command(run_id: str) -> list[str]:
         "--market",
         "omxh",
     ]
+
+
+def build_fin_classification_ttm_commands(
+    as_of_date: str,
+    classification_run_id: str,
+    ttm_run_id: str,
+    recovery_run_id: str,
+) -> list[list[str]]:
+    recovery_output_path = TEMP_DIR / f"omxh_missing_period_recovery_{as_of_date.replace('-', '_')}.csv"
+    classification_command = [
+        str(PYTHON_EXECUTABLE),
+        str(CLI_REPORTING_FREQUENCY_AUDIT),
+        "--db",
+        str(FUNDAMENTALS_FIN_DB),
+        "--market",
+        "omxh",
+        "--lookback-months",
+        "30",
+        "--write-db",
+        "--as-of-date",
+        as_of_date,
+        "--run-id",
+        classification_run_id,
+        "--write-mode",
+        "replace-run",
+        "--format",
+        "text",
+    ]
+    ttm_command = [
+        str(PYTHON_EXECUTABLE),
+        str(CLI_TTM_BATCH),
+        "--db",
+        str(FUNDAMENTALS_FIN_DB),
+        "--market",
+        "omxh",
+        "--classification-run-id",
+        classification_run_id,
+        "--run-id",
+        ttm_run_id,
+    ]
+    recovery_command = [
+        str(PYTHON_EXECUTABLE),
+        str(CLI_MISSING_PERIOD_RECOVERY_CHECK),
+        "--db",
+        str(FUNDAMENTALS_FIN_DB),
+        "--market",
+        "omxh",
+        "--classification-run-id",
+        classification_run_id,
+        "--format",
+        "csv",
+        "--output",
+        str(recovery_output_path),
+        "--write-db",
+        "--run-id",
+        recovery_run_id,
+        "--write-mode",
+        "replace-run",
+    ]
+    return [classification_command, ttm_command, recovery_command]
 
 
 def build_score_percentile_command(market: str, run_id: str, as_of_date: str) -> list[str]:

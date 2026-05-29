@@ -9,6 +9,7 @@ import flet as ft
 
 try:
     from .command_builder import (
+        build_fin_classification_ttm_commands,
         build_fin_update_command,
         build_score_percentile_command,
         build_single_ticker_snapshot_command,
@@ -25,7 +26,11 @@ try:
         WEB_PORT,
         WINDOW_TITLE,
         WINDOW_WIDTH,
+        get_fin_chain_as_of_date,
         get_missing_paths,
+        get_run_id_fin_classification,
+        get_run_id_fin_recovery,
+        get_run_id_fin_ttm,
         get_run_id_fin,
         get_run_id_usa,
         validate_config,
@@ -34,6 +39,7 @@ try:
     from .executor import ProcessExecutor
 except ImportError:  # pragma: no cover
     from command_builder import (
+        build_fin_classification_ttm_commands,
         build_fin_update_command,
         build_score_percentile_command,
         build_single_ticker_snapshot_command,
@@ -50,7 +56,11 @@ except ImportError:  # pragma: no cover
         WEB_PORT,
         WINDOW_TITLE,
         WINDOW_WIDTH,
+        get_fin_chain_as_of_date,
         get_missing_paths,
+        get_run_id_fin_classification,
+        get_run_id_fin_recovery,
+        get_run_id_fin_ttm,
         get_run_id_fin,
         get_run_id_usa,
         validate_config,
@@ -88,6 +98,8 @@ class SwingMasterApp:
             on_score_percentile=self._run_fin_percentile,
             on_snapshot=self._run_fin_snapshots,
             on_lock=self._lock_ui,
+            on_secondary_action=self._run_fin_classification_ttm,
+            secondary_action_label="Run FIN Classification + TTM",
         )
 
         self.active_market = "usa"
@@ -267,6 +279,33 @@ class SwingMasterApp:
         self._set_progress(1, 1, status_prefix)
         self._lock_ui(False)
 
+    def _execute_command_chain(self, commands: list[list[str]], status_prefix: str, market: str) -> None:
+        self.output_panel.clear_output()
+        total = len(commands)
+        self._set_progress(0, total, status_prefix)
+
+        for idx, command in enumerate(commands, start=1):
+            if self.stop_requested:
+                self._log("Run stopped by user.")
+                break
+            self._set_progress(idx - 1, total, status_prefix)
+            exit_code, _ = self.executor.execute(
+                command=command,
+                on_output=self._ui_callback(self.output_panel.add_line),
+                on_summary=self._ui_callback(self.output_panel.set_summary),
+            )
+            if exit_code != 0:
+                target_panel = self.usa_panel if market == "usa" else self.fin_panel
+                target_panel.set_status(f"{status_prefix}: exit={exit_code}", "red")
+                self._set_progress(idx, total, status_prefix)
+                self._lock_ui(False)
+                return
+            self._set_progress(idx, total, status_prefix)
+
+        target_panel = self.usa_panel if market == "usa" else self.fin_panel
+        target_panel.set_status(f"{status_prefix}: exit=0", "green")
+        self._lock_ui(False)
+
     def _execute_snapshot_batch(self, market: str, tickers: list[str]) -> None:
         self.output_panel.clear_output()
         total = len(tickers)
@@ -319,6 +358,21 @@ class SwingMasterApp:
         run_id = get_run_id_fin()
         command = build_fin_update_command(run_id=run_id)
         self._run_in_background(lambda: self._execute_single_command(command, "FIN Quarter Update", "fin"))
+
+    def _run_fin_classification_ttm(self) -> None:
+        as_of_date = get_fin_chain_as_of_date()
+        classification_run_id = get_run_id_fin_classification()
+        ttm_run_id = get_run_id_fin_ttm()
+        recovery_run_id = get_run_id_fin_recovery()
+        commands = build_fin_classification_ttm_commands(
+            as_of_date=as_of_date,
+            classification_run_id=classification_run_id,
+            ttm_run_id=ttm_run_id,
+            recovery_run_id=recovery_run_id,
+        )
+        self._run_in_background(
+            lambda: self._execute_command_chain(commands, "FIN Classification + TTM", "fin")
+        )
 
     def _run_usa_percentile(self) -> None:
         as_of_date = resolve_latest_close_as_of_date("usa")

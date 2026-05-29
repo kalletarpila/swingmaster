@@ -4,7 +4,7 @@ from typing import Iterable
 
 try:
     from .config import (
-        CLI_QUARTER_UPDATE_USA,
+        CLI_QUARTER_UPDATE,
         CLI_SCORE_PERCENTILE,
         CLI_TICKER_SNAPSHOT,
         CLI_YAHOO_BATCH_FIN,
@@ -17,7 +17,7 @@ try:
     )
 except ImportError:  # pragma: no cover
     from config import (
-        CLI_QUARTER_UPDATE_USA,
+        CLI_QUARTER_UPDATE,
         CLI_SCORE_PERCENTILE,
         CLI_TICKER_SNAPSHOT,
         CLI_YAHOO_BATCH_FIN,
@@ -33,7 +33,7 @@ except ImportError:  # pragma: no cover
 def build_usa_update_command(run_id: str) -> list[str]:
     return [
         str(PYTHON_EXECUTABLE),
-        str(CLI_QUARTER_UPDATE_USA),
+        str(CLI_QUARTER_UPDATE),
         "--db",
         str(FUNDAMENTALS_USA_DB),
         "--osakedata-db",
@@ -48,14 +48,15 @@ def build_usa_update_command(run_id: str) -> list[str]:
 def build_fin_update_command(run_id: str) -> list[str]:
     return [
         str(PYTHON_EXECUTABLE),
-        str(CLI_YAHOO_BATCH_FIN),
+        str(CLI_QUARTER_UPDATE),
         "--db",
         str(FUNDAMENTALS_FIN_DB),
         "--osakedata-db",
         str(OSAKEDATA_DB),
         "--run-id",
         run_id,
-        "--replace-symbol",
+        "--market",
+        "omxh",
     ]
 
 

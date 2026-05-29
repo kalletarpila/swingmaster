@@ -318,7 +318,7 @@ class SwingMasterApp:
     def _run_fin_update(self) -> None:
         run_id = get_run_id_fin()
         command = build_fin_update_command(run_id=run_id)
-        self._run_in_background(lambda: self._execute_single_command(command, "FIN Batch Update", "fin"))
+        self._run_in_background(lambda: self._execute_single_command(command, "FIN Quarter Update", "fin"))
 
     def _run_usa_percentile(self) -> None:
         as_of_date = resolve_latest_close_as_of_date("usa")

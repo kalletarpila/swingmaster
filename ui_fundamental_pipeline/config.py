@@ -20,7 +20,7 @@ SNAPSHOTS_DIR = PROJECT_ROOT / "snapshots"
 PYTHON_EXECUTABLE = PROJECT_ROOT / ".venv" / "bin" / "python"
 
 # CLI scripts
-CLI_QUARTER_UPDATE_USA = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_quarter_update.py"
+CLI_QUARTER_UPDATE = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_quarter_update.py"
 CLI_YAHOO_BATCH_FIN = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_yahoo_batch_fin.py"
 CLI_SCORE_PERCENTILE = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_score_percentile.py"
 CLI_TICKER_SNAPSHOT = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_ticker_snapshot.py"
@@ -66,7 +66,7 @@ def validate_config() -> bool:
         OSAKEDATA_DB,
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
-        CLI_QUARTER_UPDATE_USA,
+        CLI_QUARTER_UPDATE,
         CLI_YAHOO_BATCH_FIN,
         CLI_SCORE_PERCENTILE,
         CLI_TICKER_SNAPSHOT,
@@ -82,7 +82,7 @@ def get_missing_paths() -> list:
         OSAKEDATA_DB,
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
-        CLI_QUARTER_UPDATE_USA,
+        CLI_QUARTER_UPDATE,
         CLI_YAHOO_BATCH_FIN,
         CLI_SCORE_PERCENTILE,
         CLI_TICKER_SNAPSHOT,

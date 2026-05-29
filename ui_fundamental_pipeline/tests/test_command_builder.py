@@ -17,8 +17,14 @@ class TestCommandBuilder(unittest.TestCase):
 
     def test_build_fin_update_command(self):
         command = build_fin_update_command("FIN_YAHOO_BATCH_2026-05-10")
-        self.assertIn("--replace-symbol", command)
         self.assertIn("--osakedata-db", command)
+        self.assertIn("--market", command)
+        self.assertIn("omxh", command)
+        self.assertIn("fundamentals_fin.db", " ".join(command))
+        self.assertIn("osakedata.db", " ".join(command))
+        self.assertIn("run_fundamental_quarter_update.py", " ".join(command))
+        self.assertNotIn("--replace-symbol", command)
+        self.assertNotIn("run_fundamental_yahoo_batch_fin.py", " ".join(command))
 
     def test_build_percentile_command_usa(self):
         command = build_score_percentile_command("usa", "USA_PERCENTILE_2026-05-08", "2026-05-08")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from swingmaster.fundamentals.reporting_frequency import (
@@ -19,6 +20,12 @@ OUTPUT_FIELDS = (
     "market",
     "period_count_in_lookback",
     "period_end_dates",
+    "observed_period_end_dates",
+    "expected_period_end_dates",
+    "missing_period_end_dates",
+    "missing_period_count",
+    "source_data_max_period_end_date",
+    "classifier_version",
     "reporting_frequency_class",
     "inferred_reporting_frequency",
     "has_valid_ttm_coverage",
@@ -33,6 +40,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lookback-months", type=int, default=LOOKBACK_MONTHS_DEFAULT, help="Lookback window in months")
     parser.add_argument("--output", default=None, help="Optional CSV output path")
     parser.add_argument("--format", choices=("csv", "text"), default="text", help="Output format")
+    parser.add_argument("--write-db", action="store_true", help="Write classification rows to SQLite snapshot table")
+    parser.add_argument("--as-of-date", default=None, help="Snapshot as_of_date in YYYY-MM-DD format")
+    parser.add_argument("--run-id", default=None, help="Deterministic write run identifier")
+    parser.add_argument("--write-mode", choices=("insert", "replace-run"), default="insert", help="DB write mode")
     return parser.parse_args()
 
 
@@ -49,6 +60,20 @@ def resolve_output_path(output_arg: str | None) -> Path | None:
     if output_arg is None:
         return None
     return Path(output_arg).expanduser().resolve()
+
+
+def resolve_created_at_utc() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def validate_write_args(args: argparse.Namespace) -> None:
+    if not getattr(args, "write_db", False):
+        return
+    if args.as_of_date is None:
+        raise SystemExit("FUNDAMENTAL_REPORTING_FREQUENCY_AUDIT_AS_OF_DATE_REQUIRED")
+    if args.run_id is None:
+        raise SystemExit("FUNDAMENTAL_REPORTING_FREQUENCY_AUDIT_RUN_ID_REQUIRED")
+    parse_period_date(args.as_of_date)
 
 
 def load_reporting_frequency_rows(db_path: Path, market: str, lookback_months: int) -> list[dict[str, object]]:
@@ -88,6 +113,12 @@ def load_reporting_frequency_rows(db_path: Path, market: str, lookback_months: i
                 "market": normalized_market,
                 "period_count_in_lookback": len(filtered_period_end_dates),
                 "period_end_dates": ",".join(filtered_period_end_dates),
+                "observed_period_end_dates": ",".join(classification.observed_period_end_dates),
+                "expected_period_end_dates": ",".join(classification.expected_period_end_dates),
+                "missing_period_end_dates": ",".join(classification.missing_period_end_dates),
+                "missing_period_count": classification.missing_period_count,
+                "source_data_max_period_end_date": classification.source_data_max_period_end_date,
+                "classifier_version": classification.classifier_version,
                 "reporting_frequency_class": classification.reporting_frequency_class,
                 "inferred_reporting_frequency": classification.inferred_reporting_frequency,
                 "has_valid_ttm_coverage": classification.has_valid_ttm_coverage,
@@ -125,10 +156,79 @@ def print_text_rows(rows: list[dict[str, object]]) -> None:
                     f"reporting_frequency_class={row['reporting_frequency_class']}",
                     f"inferred_reporting_frequency={row['inferred_reporting_frequency']}",
                     f"has_valid_ttm_coverage={row['has_valid_ttm_coverage']}",
+                    f"missing_period_end_dates={row['missing_period_end_dates']}",
+                    f"missing_period_count={row['missing_period_count']}",
                     f"reason={row['reason']}",
                 ]
             )
         )
+
+
+def delete_rows_for_run_id(conn: sqlite3.Connection, run_id: str) -> int:
+    cursor = conn.execute(
+        """
+        DELETE FROM rc_fundamental_reporting_frequency_classification
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    )
+    return int(cursor.rowcount)
+
+
+def insert_classification_rows(
+    conn: sqlite3.Connection,
+    rows: list[dict[str, object]],
+    as_of_date: str,
+    lookback_months: int,
+    run_id: str,
+    created_at_utc: str,
+) -> int:
+    conn.executemany(
+        """
+        INSERT INTO rc_fundamental_reporting_frequency_classification (
+            ticker,
+            market,
+            as_of_date,
+            lookback_months,
+            reporting_frequency_class,
+            inferred_reporting_frequency,
+            has_valid_ttm_coverage,
+            reason,
+            period_count_in_lookback,
+            observed_period_end_dates,
+            expected_period_end_dates,
+            missing_period_end_dates,
+            missing_period_count,
+            source_data_max_period_end_date,
+            classifier_version,
+            run_id,
+            created_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                row["ticker"],
+                row["market"],
+                as_of_date,
+                lookback_months,
+                row["reporting_frequency_class"],
+                row["inferred_reporting_frequency"],
+                row["has_valid_ttm_coverage"],
+                row["reason"],
+                row["period_count_in_lookback"],
+                row["observed_period_end_dates"],
+                row["expected_period_end_dates"],
+                row["missing_period_end_dates"],
+                row["missing_period_count"],
+                row["source_data_max_period_end_date"],
+                row["classifier_version"],
+                run_id,
+                created_at_utc,
+            )
+            for row in rows
+        ],
+    )
+    return len(rows)
 
 
 def build_summary(rows: list[dict[str, object]], market: str, output_path: Path | None) -> dict[str, object]:
@@ -161,6 +261,7 @@ def build_summary(rows: list[dict[str, object]], market: str, output_path: Path 
 
 def main() -> None:
     args = parse_args()
+    validate_write_args(args)
     db_path = resolve_db_path(args.db)
     output_path = resolve_output_path(args.output)
     rows = load_reporting_frequency_rows(
@@ -168,6 +269,7 @@ def main() -> None:
         market=args.market,
         lookback_months=args.lookback_months,
     )
+    rows_written = 0
 
     if args.format == "csv":
         write_csv_rows(rows, output_path)
@@ -176,7 +278,22 @@ def main() -> None:
         if output_path is not None:
             write_csv_rows(rows, output_path)
 
-    if args.format == "text":
+    if args.write_db:
+        created_at_utc = resolve_created_at_utc()
+        with sqlite3.connect(str(db_path)) as conn:
+            if args.write_mode == "replace-run":
+                delete_rows_for_run_id(conn, str(args.run_id))
+            rows_written = insert_classification_rows(
+                conn=conn,
+                rows=rows,
+                as_of_date=str(args.as_of_date),
+                lookback_months=int(args.lookback_months),
+                run_id=str(args.run_id),
+                created_at_utc=created_at_utc,
+            )
+            conn.commit()
+
+    if args.format == "text" or args.write_db:
         summary = build_summary(rows, market=args.market, output_path=output_path)
         _summary(market=summary["market"])
         _summary(tickers_total=summary["tickers_total"])
@@ -190,6 +307,12 @@ def main() -> None:
         _summary(unknown_count=summary["unknown_count"])
         _summary(valid_ttm_coverage_count=summary["valid_ttm_coverage_count"])
         _summary(output_path=summary["output_path"])
+        _summary(write_db=1 if args.write_db else 0)
+        if args.write_db:
+            _summary(write_mode=args.write_mode)
+            _summary(rows_written=rows_written)
+            _summary(as_of_date=str(args.as_of_date))
+            _summary(run_id=str(args.run_id))
 
 
 if __name__ == "__main__":

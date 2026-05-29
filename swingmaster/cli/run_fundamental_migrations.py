@@ -18,6 +18,7 @@ REQUIRED_TABLES = (
     "rc_fundamental_yahoo_raw",
     "rc_fundamental_yahoo_quarterly",
     "rc_fundamental_valuation",
+    "rc_fundamental_reporting_frequency_classification",
 )
 SCHEMA_VERSION = 1
 TTM_COMPONENT_COLUMNS = (
@@ -127,6 +128,16 @@ def get_quarter_state_migration_file_path() -> Path:
     return Path(__file__).resolve().parent.parent / "infra" / "sqlite" / "migrations" / "025_rc_fundamental_quarter_state.sql"
 
 
+def get_reporting_frequency_classification_migration_file_path() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent
+        / "infra"
+        / "sqlite"
+        / "migrations"
+        / "026_rc_fundamental_reporting_frequency_classification.sql"
+    )
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -144,6 +155,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_quarterly_enrichment_audit_migration_file_path(),
         get_quarterly_enrichment_audit_v2_migration_file_path(),
         get_quarter_state_migration_file_path(),
+        get_reporting_frequency_classification_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")

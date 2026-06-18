@@ -8,6 +8,8 @@ It does not inspect the neighboring RawCandle repository or external production 
 
 This is a current-state investigation, not an implementation plan. Statements about providers use wording such as "code indicates" and "repo evidence suggests" unless the behavior is also locked in by tests.
 
+Follow-up architecture mapping: [SwingMaster Fundamentals ESS Readiness Phase 1](swingmaster_fundamentals_ess_readiness_phase1.md) classifies the current fundamentals tables, code paths, and snapshot sections against the future ESS-ready target classes.
+
 ## High-level current picture
 
 Repo evidence suggests the current USA fundamentals path is centered on:

@@ -92,6 +92,33 @@ def test_mark_detected_period_sets_flag(tmp_path: Path) -> None:
     assert row == ("AAPL", "2025-12-28", "2026-03-29", 1, "DETECT1")
 
 
+def test_mark_detected_period_uses_explicit_market_override(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_state_market_override.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        rows_updated = run_fundamental_quarter_state.mark_detected_period(
+            conn,
+            ticker="nok",
+            market="omxh",
+            detected_period_end_date="2026-03-31",
+            run_id="DETECT_MARKET",
+            updated_at_utc="2026-05-05T01:00:00+00:00",
+        )
+        conn.commit()
+
+    assert rows_updated == 1
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT ticker, market, primary_source, detected_source_period_end_date, new_quarter_available
+            FROM rc_fundamental_quarter_state
+            WHERE ticker='NOK'
+            """
+        ).fetchone()
+    assert row == ("NOK", "omxh", "yahoo", "2026-03-31", 1)
+
+
 def test_acknowledge_ingested_updates_latest_date_and_clears_flag(tmp_path: Path) -> None:
     db_path = tmp_path / "quarter_state_ack.db"
     run_migration(db_path)

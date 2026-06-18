@@ -50,6 +50,34 @@ def test_latest_snapshot_selection_uses_latest_row_at_or_before_target_date(tmp_
         ]
 
 
+def test_latest_snapshot_metadata_lookup_is_scoped_by_market(tmp_path: Path) -> None:
+    fundamentals_db_path = tmp_path / "fundamentals_market_meta.db"
+    osakedata_db_path = tmp_path / "osakedata_market_meta.db"
+    run_migration(fundamentals_db_path)
+    _create_osakedata_db(osakedata_db_path)
+
+    with sqlite3.connect(str(fundamentals_db_path)) as fundamentals_conn, sqlite3.connect(str(osakedata_db_path)) as osakedata_conn:
+        _insert_meta_row(osakedata_conn, "NOKIA.HE", "omxh", "Industrials", "Equipment")
+        _insert_percentile_ttm_row(fundamentals_conn, "NOKIA.HE", "2025-12-31", 0.10, 0.10, 0.10, 0.10, 1.0, 0.01, 8.0, 70.0)
+        fundamentals_conn.commit()
+
+        usa_rows = load_latest_percentile_snapshot(
+            fundamentals_conn=fundamentals_conn,
+            osakedata_conn=osakedata_conn,
+            target_date="2025-12-31",
+            market="usa",
+        )
+        omxh_rows = load_latest_percentile_snapshot(
+            fundamentals_conn=fundamentals_conn,
+            osakedata_conn=osakedata_conn,
+            target_date="2025-12-31",
+            market="omxh",
+        )
+
+    assert [(row.ticker, row.sector, row.industry) for row in usa_rows] == [("NOKIA.HE", None, None)]
+    assert [(row.ticker, row.sector, row.industry) for row in omxh_rows] == [("NOKIA.HE", "Industrials", "Equipment")]
+
+
 def test_global_percentile_higher_is_better_ranks_correctly() -> None:
     percentiles = compute_percentiles(
         values=[("LOW", 1.0), ("MID", 2.0), ("HIGH", 3.0)],

@@ -83,6 +83,8 @@ Visible ambiguity:
 - `.HE` suffix inference is a convention, not a formally documented DB constraint.
 - There is no persisted provider mapping table for ticker to CIK or ticker to Yahoo symbol.
 
+Phase 2 follow-up: [SwingMaster Ticker Identity Contract Phase 2](swingmaster_ticker_identity_contract_phase2.md) documents the current `market + ticker` contract, repo evidence, risks, and targeted guardrail tests.
+
 ## 5. Point-in-time readiness gaps
 
 | Concept | Target class | Why ESS/backtest needs it | Current repo evidence | Likely later phase |
@@ -113,7 +115,7 @@ Visible ambiguity:
 | Phase | Goal | Likely files/modules | DB/migration impact | Test strategy | Explicit non-goals | Acceptance criteria |
 | --- | --- | --- | --- | --- | --- | --- |
 | Phase 1 | Classification / ESS-readiness documentation. Current task. | `docs/swingmaster_fundamentals_ess_readiness_phase1.md`, current-state doc reference. | None. | `git diff --check`; no Python tests if only docs change. | No runtime, tests, providers, DB, migrations, UI, scheduler, or ESS implementation. | New doc exists, current-state doc links it, commit is made. |
-| Phase 2 | Ticker identity contract hardening/audit. Verify and document `market + ticker` consistency between fundamentals and osakedata valuation paths. | `run_fundamental_valuation.py`, `score_percentile.py`, `run_fundamental_quarter_state.py`, UI command builder, tests/docs. | Prefer none; only schema proposal if audit proves unavoidable. | Read-only or temp-DB tests for normalization/join assumptions. | No company/security-master, provider calls, schema changes by default. | Explicit identity contract doc/test coverage for ticker normalization and market joins. |
+| Phase 2 | Ticker identity contract hardening/audit. Verify and document `market + ticker` consistency between fundamentals and osakedata valuation paths. See [SwingMaster Ticker Identity Contract Phase 2](swingmaster_ticker_identity_contract_phase2.md). | `run_fundamental_valuation.py`, `score_percentile.py`, `run_fundamental_quarter_state.py`, UI command builder, tests/docs. | Prefer none; only schema proposal if audit proves unavoidable. | Read-only or temp-DB tests for normalization/join assumptions. | No company/security-master, provider calls, schema changes by default. | Explicit identity contract doc/test coverage for ticker normalization and market joins. |
 | Phase 3 | Read-only ESS readiness preflight using existing tables only. | New CLI or doc-driven query module, likely under fundamentals/cli if later approved. | None; no DB writes. | Temp fixture DB and read-only behavior tests. | No provider calls, refresh jobs, migrations, ESS integration. | Preflight reports missing PIT fields and table readiness without modifying data. |
 | Phase 4 | Reported fundamentals point-in-time/vintage hardening. | Migrations and provider persistence paths after separate design. | Add `available_at`, vintage/restatement metadata only after migration design. | Migration tests, SEC/Yahoo fixture tests, backfill safety tests. | No scoring/valuation changes except reading stable inputs. | Reported rows can represent multiple vintages without lookahead. |
 | Phase 5 | Derived metrics lineage. | `build_ttm.py`, `lifecycle.py`, `score.py`, related CLIs/tests. | Add lineage/config/input-vintage metadata after design. | Deterministic fixture tests for config and input hashes. | No provider behavior or valuation changes. | TTM/growth/lifecycle/score rows identify inputs and rules. |

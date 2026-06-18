@@ -105,6 +105,19 @@ def _insert_yahoo_quarterly_row(
         conn.commit()
 
 
+def _mock_usa_valuation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "resolve_latest_close_as_of_date",
+        lambda *_args, **_kwargs: "2026-05-08",
+    )
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_fundamental_valuation",
+        lambda **_kwargs: {"rows_written": 0},
+    )
+
+
 def test_loads_only_flagged_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "quarter_update_flags.db"
     run_migration(db_path)
@@ -157,6 +170,7 @@ def test_dry_run_runs_nothing_and_writes_nothing(
 
     summary = run_fundamental_quarter_update.run_fundamental_quarter_update(
         db_path=db_path,
+        osakedata_db_path=None,
         run_id="BASE",
         market=None,
         ticker=None,
@@ -207,11 +221,13 @@ def test_successful_run_executes_usa_steps_in_order_and_acknowledges(
         "acknowledge_ticker",
         lambda **kwargs: calls.append("ack") or 1,
     )
+    _mock_usa_valuation(monkeypatch)
 
     summary = run_fundamental_quarter_update.run_fundamental_quarter_update(
         db_path=db_path,
+        osakedata_db_path=tmp_path / "osakedata.db",
         run_id="BASE",
-        market=None,
+        market="usa",
         ticker=None,
         limit=None,
         dry_run=False,
@@ -237,8 +253,9 @@ def test_skip_ack_leaves_state_unchanged(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
     run_fundamental_quarter_update.run_fundamental_quarter_update(
         db_path=db_path,
+        osakedata_db_path=None,
         run_id="BASE",
-        market=None,
+        market="omxh",
         ticker=None,
         limit=None,
         dry_run=False,
@@ -280,6 +297,7 @@ def test_single_ticker_failure_stops_processing_and_leaves_state_unchanged(
     with pytest.raises(RuntimeError, match="FUNDAMENTAL_TTM_BROKE"):
         run_fundamental_quarter_update.run_fundamental_quarter_update(
             db_path=db_path,
+            osakedata_db_path=None,
             run_id="BASE",
             market=None,
             ticker="AAPL",
@@ -318,12 +336,14 @@ def test_batch_failure_continues_to_next_ticker_and_raises_final_batch_error(
         return {"score_rows_written": 1}
 
     monkeypatch.setattr(run_fundamental_quarter_update, "process_ticker", _fake_process_ticker)
+    _mock_usa_valuation(monkeypatch)
 
     with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_BATCH_FAILED:tickers_failed=1"):
         run_fundamental_quarter_update.run_fundamental_quarter_update(
             db_path=db_path,
+            osakedata_db_path=tmp_path / "osakedata.db",
             run_id="BASE",
-            market=None,
+            market="usa",
             ticker=None,
             limit=None,
             dry_run=False,
@@ -357,11 +377,13 @@ def test_batch_all_success_exits_cleanly_with_summary_counts(
         return {"score_rows_written": 1}
 
     monkeypatch.setattr(run_fundamental_quarter_update, "process_ticker", _fake_process_ticker)
+    _mock_usa_valuation(monkeypatch)
 
     summary = run_fundamental_quarter_update.run_fundamental_quarter_update(
         db_path=db_path,
+        osakedata_db_path=tmp_path / "osakedata.db",
         run_id="BASE",
-        market=None,
+        market="usa",
         ticker=None,
         limit=None,
         dry_run=False,
@@ -393,12 +415,14 @@ def test_batch_multiple_failures_preserve_deterministic_processing_order(
         return {"score_rows_written": 1}
 
     monkeypatch.setattr(run_fundamental_quarter_update, "process_ticker", _fake_process_ticker)
+    _mock_usa_valuation(monkeypatch)
 
     with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_BATCH_FAILED:tickers_failed=2"):
         run_fundamental_quarter_update.run_fundamental_quarter_update(
             db_path=db_path,
+            osakedata_db_path=tmp_path / "osakedata.db",
             run_id="BASE",
-            market=None,
+            market="usa",
             ticker=None,
             limit=None,
             dry_run=False,
@@ -420,6 +444,7 @@ def test_child_run_id_derivation_is_correct() -> None:
         "ttm": "USA_QUARTER_UPDATE_20260505__TTM",
         "lifecycle": "USA_QUARTER_UPDATE_20260505__LIFECYCLE",
         "score": "USA_QUARTER_UPDATE_20260505__SCORE",
+        "valuation": "USA_QUARTER_UPDATE_20260505__VALUATION",
         "ack": "USA_QUARTER_UPDATE_20260505__ACK",
         "enrich": "USA_QUARTER_UPDATE_20260505__ENRICH",
         "sec_raw": "USA_QUARTER_UPDATE_20260505__SEC_RAW",
@@ -435,6 +460,7 @@ def test_invalid_state_missing_detected_date_fails(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_DETECTED_DATE_MISSING:AAPL"):
         run_fundamental_quarter_update.run_fundamental_quarter_update(
             db_path=db_path,
+            osakedata_db_path=None,
             run_id="BASE",
             market=None,
             ticker="AAPL",
@@ -463,8 +489,9 @@ def test_non_usa_processing_uses_quarterly_refresh(monkeypatch: pytest.MonkeyPat
 
     run_fundamental_quarter_update.run_fundamental_quarter_update(
         db_path=db_path,
+        osakedata_db_path=None,
         run_id="BASE",
-        market=None,
+        market="omxh",
         ticker=None,
         limit=None,
         dry_run=False,
@@ -549,6 +576,7 @@ def test_quarterly_refresh_failure_stops_processing_immediately(
     with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_RAW_NOT_USABLE:NOKIA.HE"):
         run_fundamental_quarter_update.run_fundamental_quarter_update(
             db_path=db_path,
+            osakedata_db_path=None,
             run_id="BASE",
             market=None,
             ticker="NOKIA.HE",
@@ -577,6 +605,7 @@ def test_ack_safety_rule_still_fails_if_quarterly_max_date_below_detected(
     with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_ACK_PERIOD_MISMATCH:NOKIA.HE"):
         run_fundamental_quarter_update.run_fundamental_quarter_update(
             db_path=db_path,
+            osakedata_db_path=None,
             run_id="BASE",
             market=None,
             ticker="NOKIA.HE",
@@ -969,6 +998,7 @@ def test_quarterly_refresh_enrich_missing_maps_to_quarterly_refresh_step(
     with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_ENRICH_MISSING_DETECTED:AAPL"):
         run_fundamental_quarter_update.run_fundamental_quarter_update(
             db_path=db_path,
+            osakedata_db_path=None,
             run_id="BASE",
             market=None,
             ticker="AAPL",

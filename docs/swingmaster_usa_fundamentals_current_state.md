@@ -849,3 +849,49 @@ PYTHONPATH=. pytest -q swingmaster/tests/test_fundamental_sec_raw_bootstrap.py s
 Repo evidence indicates that SwingMaster currently treats USA fundamentals as a hybrid SEC-first plus Yahoo-fallback system, persisted in a dedicated fundamentals DB and consumed downstream by TTM scoring, percentile ranking, valuation, snapshots, and a UI wrapper.
 
 The strongest current operational path is `run_fundamental_quarter_update.py --market usa`, not the older single-ticker pipeline alone. The biggest practical current-state issues are orchestration/test drift, uneven auditability across providers, and dependence on external quarter-state maintenance plus external market-data DBs.
+
+## 12. Stabilization status after test-parity update
+
+The previously observed drift in `test_fundamental_quarter_update.py` has been aligned with current code behavior:
+
+- tests now pass the current `osakedata_db_path` argument
+- USA success/batch paths mock the valuation dependency instead of touching production `osakedata.db`
+- expected child run ids include the current `valuation` child run id
+- non-USA orchestration tests are market-scoped to avoid accidental USA valuation requirements
+
+The Yahoo fallback CLI summary test has been aligned with the current summary shape:
+
+- `rows_inserted` is included in the mocked summary and expected CLI output
+- fallback semantics tests still verify that Yahoo fills missing values only and does not overwrite existing SEC values
+
+Schema parity is now covered by a temporary-DB migration test:
+
+- `test_run_migration_creates_reporting_frequency_and_recovery_tables`
+- verifies that `REQUIRED_TABLES` and the migrated temp schema include `rc_fundamental_reporting_frequency_classification`
+- verifies that `REQUIRED_TABLES` and the migrated temp schema include `rc_fundamental_missing_period_recovery_check`
+- does not inspect or modify the real `fundamentals_usa.db`
+
+Verification commands run for this stabilization:
+
+```bash
+PYTHONPATH=. pytest -q \
+  swingmaster/tests/test_fundamental_quarter_update.py \
+  swingmaster/tests/test_fundamental_yahoo_fallback_enrich.py \
+  swingmaster/tests/test_fundamental_migrations.py
+```
+
+Result: `47 passed`.
+
+```bash
+PYTHONPATH=. pytest -q \
+  swingmaster/tests/test_fundamental_sec_raw_bootstrap.py \
+  swingmaster/tests/test_fundamental_sec_reconstruct_quarterly.py \
+  swingmaster/tests/test_fundamental_yahoo_fallback_enrich.py \
+  swingmaster/tests/test_fundamental_quarter_update.py \
+  swingmaster/tests/test_fundamental_pipeline.py \
+  swingmaster/tests/test_fundamental_score_percentile.py \
+  ui_fundamental_pipeline/tests/test_command_builder.py \
+  swingmaster/tests/test_fundamental_migrations.py
+```
+
+Result: `139 passed`.

@@ -104,6 +104,28 @@ def test_run_migration_creates_required_tables_and_is_idempotent(tmp_path: Path)
         assert quarter_state_row == ("rc_fundamental_quarter_state",)
 
 
+def test_run_migration_creates_reporting_frequency_and_recovery_tables(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_schema_parity.db"
+
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        table_names = {
+            str(row[0])
+            for row in conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type='table'
+                """
+            )
+        }
+        assert "rc_fundamental_reporting_frequency_classification" in REQUIRED_TABLES
+        assert "rc_fundamental_missing_period_recovery_check" in REQUIRED_TABLES
+        assert "rc_fundamental_reporting_frequency_classification" in table_names
+        assert "rc_fundamental_missing_period_recovery_check" in table_names
+
+
 def test_run_migration_adds_missing_ttm_component_columns_to_existing_db(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamentals_existing.db"
     with sqlite3.connect(str(db_path)) as conn:

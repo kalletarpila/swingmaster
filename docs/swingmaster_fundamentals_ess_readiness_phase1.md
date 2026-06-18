@@ -40,7 +40,7 @@ Technical price structure must remain external. Current snapshot code can append
 | `rc_fundamental_ttm` | `derived_fundamental_metrics` | Migration `001` stores TTM, growth, margin, leverage, lifecycle and score fields. `build_ttm.py` derives rows from quarterly rows only. | Derived metrics and score storage. | Quarterly-to-TTM, lifecycle, scoring. | `as_of_date` is period-derived; no computed time, config hash, input vintage hash, or source quarterly vintage id. | Phase 5 |
 | `rc_fundamental_score_percentile` | `cross_sectional_fundamental_ranks` | Migration `001` stores target date, sector/industry, universe/sector/industry sizes, percentiles and ranks. | Cross-sectional rank output. | Percentile command. | Uses current `ticker_meta` for sector/industry; no universe version/hash or frozen peer membership. | Phase 7 |
 | `rc_fundamental_valuation` | `market_valuation_metrics` | Migration `019` creates valuation table; migration runner adds V2 fields used by `run_fundamental_valuation.py`, including valuation model, fundamental as-of date, staleness, assumed cash/debt flags. | Valuation output. | Valuation command and USA quarter update final step. | `as_of_date` is valuation date but not named `market_date`; no explicit price source id or price-match status. | Phase 6 |
-| `rc_fundamental_quarter_state` | `ticker_identity_contract` / operational state | Migration `025` stores ticker, market, primary source, latest DB period, detected source period and ingest run IDs. | Operational state. | Quarter state sync/detection/ack. | Primary key is `ticker`, not `(market, ticker)`; enough for current repo assumption but weak for multi-market symbol collisions. | Phase 2 |
+| `rc_fundamental_quarter_state` | `ticker_identity_contract` / operational state | Migration `025` stores ticker, market, primary source, latest DB period, detected source period and ingest run IDs. | Operational state. | Quarter state sync/detection/ack. | Primary key is `ticker`, not `(market, ticker)`; acceptable under the current rule that `.HE` is always OMXH and the same canonical ticker is not expected on two markets. | Phase 2 |
 | `rc_fundamental_reporting_frequency_classification` | `derived_fundamental_metrics` / operational audit | Migration `026` stores reporting frequency class, coverage, observed/missing period dates, classifier version, run. | Derived audit/classification. | Reporting-frequency audit. | Mostly FIN-oriented by current UI command evidence; no global PIT vintage contract. | Phase 5 |
 | `rc_fundamental_missing_period_recovery_check` | `reported_fundamentals` / operational audit | Migration `027` stores missing period recovery status and found dates. | Audit/recovery check. | Missing-period recovery check. | Recovery status is useful, but not integrated into reported-fundamental vintage metadata. | Phase 4 |
 | `run_fundamental_quarter_update.py` | Orchestration across reported, derived, valuation, and operational state | Code indicates USA branch can call SEC raw bootstrap, quarterly build, Yahoo fallback enrich, TTM, lifecycle, score, ack, and USA valuation. | Operational CLI/orchestrator. | New-quarter state rows. | Mixes several target classes in one path; future ESS adapter should read outputs, not call this. | Phase 2, Phase 6, Phase 10 |
@@ -62,7 +62,8 @@ Current agreed identity model:
 - The current key is `market + ticker`.
 - `osakedata.db` and fundamentals are expected to join with the same ticker symbol.
 - Current fundamentals code frequently normalizes tickers with `.upper()`.
-- USA tickers are inferred when a ticker does not end with `.HE`; OMXH tickers are inferred when they end with `.HE`.
+- USA tickers are inferred when a ticker does not end with `.HE`; a ticker ending in `.HE` is always OMXH in the current contract.
+- The same canonical stock ticker is not expected to exist on two markets.
 - CIK and Yahoo symbols are provider mappings.
 - No company/security-master is implemented in this phase.
 - A future company/security-master remains an open option only if repo evidence or ESS needs show that `market + ticker` is insufficient.
@@ -80,10 +81,10 @@ Visible ambiguity:
 
 - `rc_fundamental_quarter_state` has primary key `ticker`, not `(market, ticker)`.
 - Several core tables do not have a `market` column.
-- `.HE` suffix inference is a convention, not a formally documented DB constraint.
+- `.HE` suffix handling is a domain rule in code, not a DB constraint.
 - There is no persisted provider mapping table for ticker to CIK or ticker to Yahoo symbol.
 
-Phase 2 follow-up: [SwingMaster Ticker Identity Contract Phase 2](swingmaster_ticker_identity_contract_phase2.md) documents the current `market + ticker` contract, repo evidence, risks, and targeted guardrail tests.
+Phase 2 follow-up: [SwingMaster Ticker Identity Contract Phase 2](swingmaster_ticker_identity_contract_phase2.md) documents the current `market + ticker` contract, including the rule that `.HE` tickers are OMXH and the same canonical ticker is not expected on two markets.
 
 ## 5. Point-in-time readiness gaps
 

@@ -12,6 +12,8 @@ This phase does not backfill data, write the real DB, call providers, run refres
 
 Phase 4F3 later documented a full real DB read-only dry-run using `live_safe_legacy_baseline`: [Reported Vintage Full Real DB Dry Run Phase 4F3](swingmaster_reported_vintage_full_realdb_dry_run_phase4f3.md).
 
+Phase 4G1 documents `live_safe_legacy_baseline` as the planned Phase 4G2 apply policy unless the user chooses externally verified availability first: [Reported Vintage Backfill Apply Plan Phase 4G1](swingmaster_reported_vintage_backfill_apply_plan_phase4g1.md).
+
 ## Policy Modes
 
 | CLI value | Quality | `available_at_utc` source | Status impact |

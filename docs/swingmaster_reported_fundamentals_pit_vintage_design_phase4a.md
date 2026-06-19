@@ -26,6 +26,8 @@ Phase 4F2 status: [Reported Vintage Legacy Availability Policy Phase 4F2](swingm
 
 Phase 4F3 status: [Reported Vintage Full Real DB Dry Run Phase 4F3](swingmaster_reported_vintage_full_realdb_dry_run_phase4f3.md) documents a full read-only dry-run against the USA fundamentals DB using `live_safe_legacy_baseline`. It found `155331` planned vintage rows and `1306388` planned provenance rows, with no DB row-count changes.
 
+Phase 4G1 status: [Reported Vintage Backfill Apply Plan Phase 4G1](swingmaster_reported_vintage_backfill_apply_plan_phase4g1.md) defines the guarded real DB apply plan for a later phase. It is documentation-only and does not run the backfill.
+
 Target class covered here:
 
 - `reported_fundamentals`

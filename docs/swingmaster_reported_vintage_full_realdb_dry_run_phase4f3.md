@@ -170,3 +170,5 @@ Phase 4G1: guarded real DB backfill apply plan, no execution yet
 ```
 
 That phase should design the write plan, transaction boundaries, pre/post verification, rollback plan, operational limits, and explicit approval gate before any real DB backfill is executed.
+
+Phase 4G1 apply planning is documented in [Reported Vintage Backfill Apply Plan Phase 4G1](swingmaster_reported_vintage_backfill_apply_plan_phase4g1.md). It remains a plan only and does not execute a backfill.

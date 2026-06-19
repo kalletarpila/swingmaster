@@ -28,6 +28,8 @@ Phase 4F3 status: [Reported Vintage Full Real DB Dry Run Phase 4F3](swingmaster_
 
 Phase 4G1 status: [Reported Vintage Backfill Apply Plan Phase 4G1](swingmaster_reported_vintage_backfill_apply_plan_phase4g1.md) defines the guarded real DB apply plan for a later phase. It is documentation-only and does not run the backfill.
 
+Phase 4G2 status: [Reported Vintage Backfill Apply Phase 4G2](swingmaster_reported_vintage_backfill_apply_phase4g2.md) applies the guarded legacy baseline backfill to the real USA fundamentals DB. It inserts `155331` vintage rows and `1306388` field provenance rows using `live_safe_legacy_baseline`; current latest/core tables remain unchanged.
+
 Target class covered here:
 
 - `reported_fundamentals`

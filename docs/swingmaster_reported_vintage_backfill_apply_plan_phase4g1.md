@@ -227,3 +227,5 @@ Do not add provider integration yet.
 Do not add ESS integration yet.
 
 Do not wire production dual-write until the legacy baseline is safely loaded or intentionally skipped.
+
+Phase 4G2 result: the guarded legacy baseline backfill was applied and documented in [Reported Vintage Backfill Apply Phase 4G2](swingmaster_reported_vintage_backfill_apply_phase4g2.md). The apply inserted `155331` vintage rows and `1306388` provenance rows.

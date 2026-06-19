@@ -254,3 +254,9 @@ Phase 4H2 remains a controlled integration primitive for later provider-specific
 Phase 4H3 adds a pure/test-only SEC metadata contract in `reported_sec_vintage_metadata.py`, documented in [Reported Vintage SEC Metadata Contract Phase 4H3](swingmaster_reported_vintage_sec_metadata_contract_phase4h3.md).
 
 The helper defines deterministic SEC source-hash and statement-vintage-id policies, extracts date-only SEC `filed` metadata when encoded in current raw fact names, and builds SEC field-source maps for non-null normalized fields. It still requires caller-provided `available_at_utc`; provider paths, refresh jobs, quarter-update orchestration, readers, UI, and ESS remain unwired.
+
+## Phase 4H4 Status
+
+Phase 4H4 adds a pure/test-only Yahoo/fallback metadata contract in `reported_yahoo_vintage_metadata.py`, documented in [Reported Vintage Yahoo Metadata Contract Phase 4H4](swingmaster_reported_vintage_yahoo_metadata_contract_phase4h4.md).
+
+The helper defines deterministic Yahoo source-hash and statement-vintage-id policies for Yahoo staging, Yahoo-to-generic bridge, Yahoo fallback enrichment, and Yahoo missing-quarter insert modes. It builds Yahoo-only and fallback-fill field provenance maps from explicit fixture/stored metadata. It still requires caller-provided `available_at_utc`; Yahoo/provider/fallback/refresh/quarter-update production paths remain unwired.

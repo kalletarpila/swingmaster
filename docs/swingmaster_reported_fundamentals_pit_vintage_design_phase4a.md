@@ -38,6 +38,8 @@ Phase 4H2 status: `write_normalized_quarterly_rows_with_optional_vintage` adds a
 
 Phase 4H3 status: [Reported Vintage SEC Metadata Contract Phase 4H3](swingmaster_reported_vintage_sec_metadata_contract_phase4h3.md) adds pure/test-only SEC metadata helpers for deterministic source hashes, statement vintage ids, date-only filed metadata, and SEC field provenance maps. `available_at_utc` remains explicit input and no SEC/provider production path is wired.
 
+Phase 4H4 status: [Reported Vintage Yahoo Metadata Contract Phase 4H4](swingmaster_reported_vintage_yahoo_metadata_contract_phase4h4.md) adds pure/test-only Yahoo/fallback metadata helpers for deterministic source hashes, statement vintage ids, explicit availability, Yahoo-only provenance, and fallback-fill provenance. Yahoo/provider/fallback/refresh/quarter-update production paths remain unwired.
+
 Target class covered here:
 
 - `reported_fundamentals`

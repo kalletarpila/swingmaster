@@ -14,6 +14,8 @@ Phase 4C2 status: `reported_vintage_reader.py` now provides read-only helpers fo
 
 Phase 4C3 status: `reported_quarterly_dual_write.py` now provides a test-only adapter that can write a normalized quarterly row to the current latest table plus the vintage/provenance tables in temp DBs. It is not wired into provider or refresh paths. The latest table remains compatible with current overwrite semantics, while the vintage table preserves PIT/history through plain inserts.
 
+Phase 4D status: `preflight_reported_vintage_backfill.py` now provides a read-only backfill/preflight report for estimating legacy latest-row conversion into vintage rows. It does not implement actual backfill, does not write real DBs, and leaves real DB write/backfill as a later backup-confirmed task.
+
 Target class covered here:
 
 - `reported_fundamentals`
@@ -412,6 +414,26 @@ Explicit non-goals:
 - no backfill behavior
 - no reader switch from `rc_fundamental_quarterly`
 
+### Phase 4D: read-only legacy backfill preflight
+
+Goal:
+
+- Add a read-only report for estimating whether existing `rc_fundamental_quarterly` rows could later be converted into synthetic legacy vintage rows.
+
+Implemented files:
+
+- `swingmaster/cli/preflight_reported_vintage_backfill.py`
+- `swingmaster/tests/test_preflight_reported_vintage_backfill.py`
+- `docs/swingmaster_reported_vintage_backfill_preflight_phase4d.md`
+
+Explicit non-goals:
+
+- no real DB writes
+- no migration
+- no actual backfill
+- no provider calls
+- no production write-path or reader wiring
+
 ### Later Phase 4C: write-path dual-write or sidecar-write implementation with mocked tests
 
 Goal:
@@ -503,4 +525,4 @@ The recommended path is additive:
 1. keep `rc_fundamental_quarterly` compatible for current readers
 2. use the Phase 4B vintage table as the future statement-vintage storage foundation
 3. use the Phase 4B field-level provenance table for future mixed SEC/Yahoo lineage
-4. use the Phase 4C1 writer, Phase 4C2 reader, and Phase 4C3 adapter as future primitives, but add production reader wiring, provider-path dual-write, and backfill behavior only in later, separately approved phases
+4. use the Phase 4C1 writer, Phase 4C2 reader, Phase 4C3 adapter, and Phase 4D preflight as future primitives, but add production reader wiring, provider-path dual-write, and actual backfill behavior only in later, separately approved phases

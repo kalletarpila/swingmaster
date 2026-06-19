@@ -30,6 +30,8 @@ Phase 4G1 status: [Reported Vintage Backfill Apply Plan Phase 4G1](swingmaster_r
 
 Phase 4G2 status: [Reported Vintage Backfill Apply Phase 4G2](swingmaster_reported_vintage_backfill_apply_phase4g2.md) applies the guarded legacy baseline backfill to the real USA fundamentals DB. It inserts `155331` vintage rows and `1306388` field provenance rows using `live_safe_legacy_baseline`; current latest/core tables remain unchanged.
 
+Phase 4G3 status: [Reported Vintage Post-Backfill Verification Phase 4G3](swingmaster_reported_vintage_post_backfill_verification_phase4g3.md) verifies the loaded baseline read-only. Coverage parity, value parity, provenance sanity, metadata policy, PIT samples, and post-backfill dry-run no-op checks all pass.
+
 Target class covered here:
 
 - `reported_fundamentals`

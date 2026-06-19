@@ -258,6 +258,8 @@ Do not manually delete vintage/provenance rows as first-line rollback unless a s
 
 The backup, DB, WAL/SHM sidecars, logs, and temp files were not staged.
 
+Phase 4G3 post-backfill verification is documented in [Reported Vintage Post-Backfill Verification Phase 4G3](swingmaster_reported_vintage_post_backfill_verification_phase4g3.md). It verified coverage parity, value parity, provenance sanity, metadata policy, and PIT sample behavior read-only.
+
 ## Next Recommendation
 
 Recommended next phase:

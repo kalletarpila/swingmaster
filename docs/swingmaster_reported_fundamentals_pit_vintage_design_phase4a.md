@@ -16,6 +16,8 @@ Phase 4C3 status: `reported_quarterly_dual_write.py` now provides a test-only ad
 
 Phase 4D status: `preflight_reported_vintage_backfill.py` now provides a read-only backfill/preflight report for estimating legacy latest-row conversion into vintage rows. It does not implement actual backfill, does not write real DBs, and leaves real DB write/backfill as a later backup-confirmed task.
 
+Phase 4D2 status: the read-only backfill preflight was run against the current USA fundamentals DB and documented in [Reported Vintage Backfill Real DB Preflight Phase 4D2](swingmaster_reported_vintage_backfill_realdb_preflight_phase4d2.md). No DB writes or backfill were performed; next action depends on the documented `overall_status`.
+
 Target class covered here:
 
 - `reported_fundamentals`

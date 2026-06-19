@@ -4,6 +4,8 @@
 
 Phase 4D adds a read-only preflight for estimating how existing `rc_fundamental_quarterly` latest rows could later be converted into `rc_fundamental_quarterly_vintage` rows.
 
+Phase 4D2 real DB result: [SwingMaster Reported Vintage Backfill Real DB Preflight Phase 4D2](swingmaster_reported_vintage_backfill_realdb_preflight_phase4d2.md) documents a read-only run against `/home/kalle/projects/swingmaster/fundamentals_usa.db`.
+
 It answers:
 
 - whether the fundamentals DB has the required latest, vintage, and provenance tables

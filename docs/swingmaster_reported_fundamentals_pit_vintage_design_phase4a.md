@@ -12,6 +12,8 @@ Phase 4C1 status: `reported_vintage_writer.py` now provides a small helper layer
 
 Phase 4C2 status: `reported_vintage_reader.py` now provides read-only helpers for listing vintages, selecting latest vintages, selecting PIT-valid vintages with `available_at_utc <= decision_cutoff_utc`, and reading field provenance. It is not wired into current readers or production flows, and `rc_fundamental_quarterly` remains the current latest/read-compatible table.
 
+Phase 4C3 status: `reported_quarterly_dual_write.py` now provides a test-only adapter that can write a normalized quarterly row to the current latest table plus the vintage/provenance tables in temp DBs. It is not wired into provider or refresh paths. The latest table remains compatible with current overwrite semantics, while the vintage table preserves PIT/history through plain inserts.
+
 Target class covered here:
 
 - `reported_fundamentals`
@@ -387,6 +389,29 @@ Explicit non-goals:
 - no dual-write/backfill behavior
 - no reader switch from `rc_fundamental_quarterly`
 
+### Phase 4C3: dual-write adapter with temp-DB tests only
+
+Goal:
+
+- Add a deterministic adapter that maps normalized quarterly rows to `rc_fundamental_quarterly`, `rc_fundamental_quarterly_vintage`, and field provenance writes in controlled tests.
+
+Implemented files:
+
+- `swingmaster/fundamentals/reported_quarterly_dual_write.py`
+- `swingmaster/tests/test_reported_quarterly_dual_write.py`
+
+Compatibility note:
+
+- `rc_fundamental_quarterly` still uses the existing latest-table compatibility behavior via `INSERT OR REPLACE`.
+- `rc_fundamental_quarterly_vintage` uses plain inserts through the vintage writer, so duplicate vintage identities raise SQLite integrity errors instead of overwriting history.
+
+Explicit non-goals:
+
+- no provider calls
+- no production write-path wiring
+- no backfill behavior
+- no reader switch from `rc_fundamental_quarterly`
+
 ### Later Phase 4C: write-path dual-write or sidecar-write implementation with mocked tests
 
 Goal:
@@ -478,4 +503,4 @@ The recommended path is additive:
 1. keep `rc_fundamental_quarterly` compatible for current readers
 2. use the Phase 4B vintage table as the future statement-vintage storage foundation
 3. use the Phase 4B field-level provenance table for future mixed SEC/Yahoo lineage
-4. use the Phase 4C1 writer and Phase 4C2 reader as future primitives, but add production reader wiring, dual-write, and backfill behavior only in later, separately approved phases
+4. use the Phase 4C1 writer, Phase 4C2 reader, and Phase 4C3 adapter as future primitives, but add production reader wiring, provider-path dual-write, and backfill behavior only in later, separately approved phases

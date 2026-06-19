@@ -8,6 +8,8 @@ The design is based only on current repo evidence. If a behavior is not visible 
 
 Phase 4B status: an additive migration now creates `rc_fundamental_quarterly_vintage` and `rc_fundamental_quarterly_field_provenance` as a schema foundation for later PIT/vintage work. Current write paths do not populate these tables yet, and current readers continue to use the existing `rc_fundamental_quarterly` latest-value table.
 
+Phase 4C1 status: `reported_vintage_writer.py` now provides a small helper layer for inserting vintage and field-provenance rows with temp-DB tests covering insert semantics and validation. No provider, refresh, dual-write, or backfill path uses the helper yet, and `rc_fundamental_quarterly` remains the current latest/read-compatible table.
+
 Target class covered here:
 
 - `reported_fundamentals`
@@ -347,7 +349,25 @@ Rollback/safety:
 
 - migration must be additive and reversible by restoring DB backup; do not alter current primary keys in 4B.
 
-### Phase 4C: write-path dual-write or sidecar-write implementation with mocked tests
+### Phase 4C1: helper-layer implementation with temp-DB tests only
+
+Goal:
+
+- Add deterministic helper functions for inserting `rc_fundamental_quarterly_vintage` and `rc_fundamental_quarterly_field_provenance` rows.
+
+Implemented files:
+
+- `swingmaster/fundamentals/reported_vintage_writer.py`
+- `swingmaster/tests/test_reported_vintage_writer.py`
+
+Explicit non-goals:
+
+- no provider calls
+- no production write-path wiring
+- no dual-write/backfill behavior
+- no reader switch from `rc_fundamental_quarterly`
+
+### Later Phase 4C: write-path dual-write or sidecar-write implementation with mocked tests
 
 Goal:
 
@@ -438,4 +458,4 @@ The recommended path is additive:
 1. keep `rc_fundamental_quarterly` compatible for current readers
 2. use the Phase 4B vintage table as the future statement-vintage storage foundation
 3. use the Phase 4B field-level provenance table for future mixed SEC/Yahoo lineage
-4. add dual-write/backfill behavior only in later, separately approved phases
+4. use the Phase 4C1 helper as a future write primitive, but add dual-write/backfill behavior only in later, separately approved phases

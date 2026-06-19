@@ -20,6 +20,8 @@ Phase 4D2 status: the read-only backfill preflight was run against the current U
 
 Phase 4E1 status: [Reported Vintage Real DB Migration Readiness Phase 4E1](swingmaster_reported_vintage_realdb_migration_readiness_phase4e1.md) documents the backup, pre-check, migration-apply, post-check, and rollback plan for adding the existing vintage schema to the real USA DB later. No real DB migration or backfill has been run yet.
 
+Phase 4F1 status: [Reported Vintage Backfill Dry Run Phase 4F1](swingmaster_reported_vintage_backfill_dry_run_phase4f1.md) adds a read-only dry-run planner for legacy latest-row conversion into reported-vintage candidates. It does not run a real backfill and keeps `available_at_utc` as a required policy decision for legacy rows.
+
 Target class covered here:
 
 - `reported_fundamentals`

@@ -209,6 +209,12 @@ Unavailable metadata reported by the preflight:
 - `supersedes_vintage_id`
 - `availability_quality`
 
+## Phase 4F1 Follow-Up
+
+Phase 4F1 adds a read-only reported-vintage backfill dry-run planner documented in [Reported Vintage Backfill Dry Run Phase 4F1](swingmaster_reported_vintage_backfill_dry_run_phase4f1.md).
+
+The dry-run can inspect the real USA fundamentals DB with `mode=ro` and `PRAGMA query_only=ON`, but it does not insert into the new vintage or provenance tables and does not run an actual backfill.
+
 ## Safety And Rollback
 
 Rollback source:

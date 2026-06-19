@@ -40,6 +40,8 @@ Phase 4H3 status: [Reported Vintage SEC Metadata Contract Phase 4H3](swingmaster
 
 Phase 4H4 status: [Reported Vintage Yahoo Metadata Contract Phase 4H4](swingmaster_reported_vintage_yahoo_metadata_contract_phase4h4.md) adds pure/test-only Yahoo/fallback metadata helpers for deterministic source hashes, statement vintage ids, explicit availability, Yahoo-only provenance, and fallback-fill provenance. Yahoo/provider/fallback/refresh/quarter-update production paths remain unwired.
 
+Phase 4H5 status: [Reported Vintage Metadata Integration Phase 4H5](swingmaster_reported_vintage_metadata_integration_phase4h5.md) verifies with temp-DB tests that SEC-only, Yahoo bridge, and mixed SEC + Yahoo fallback metadata can feed the opt-in write adapter and PIT reader. Production provider paths remain unwired.
+
 Target class covered here:
 
 - `reported_fundamentals`

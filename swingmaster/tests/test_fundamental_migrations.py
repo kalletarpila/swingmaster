@@ -5,10 +5,12 @@ from pathlib import Path
 
 from swingmaster.cli.run_fundamental_migrations import (
     PERCENTILE_LIFECYCLE_COLUMNS,
+    QUARTERLY_FIELD_PROVENANCE_REQUIRED_COLUMNS,
     REQUIRED_TABLES,
     SCHEMA_VERSION,
     TTM_COMPONENT_COLUMNS,
     QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS,
+    QUARTERLY_VINTAGE_REQUIRED_COLUMNS,
     VALUATION_V2_COLUMNS,
     VALUATION_V21_COLUMNS,
     VALUATION_V22_COLUMNS,
@@ -434,3 +436,233 @@ def test_run_migration_adds_missing_percentile_lifecycle_columns_to_existing_db(
         }
         for column_name, _column_type in PERCENTILE_LIFECYCLE_COLUMNS:
             assert column_name in percentile_columns
+
+
+def test_run_migration_creates_quarterly_vintage_and_field_provenance_tables(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_vintage.db"
+
+    run_migration(db_path)
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        table_names = {
+            str(row[0])
+            for row in conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type='table'
+                """
+            )
+        }
+        assert "rc_fundamental_quarterly_vintage" in REQUIRED_TABLES
+        assert "rc_fundamental_quarterly_field_provenance" in REQUIRED_TABLES
+        assert "rc_fundamental_quarterly_vintage" in table_names
+        assert "rc_fundamental_quarterly_field_provenance" in table_names
+        assert "rc_fundamental_quarterly" in table_names
+
+        vintage_columns = {
+            str(row[1])
+            for row in conn.execute(
+                """
+                PRAGMA table_info(rc_fundamental_quarterly_vintage)
+                """
+            )
+        }
+        field_provenance_columns = {
+            str(row[1])
+            for row in conn.execute(
+                """
+                PRAGMA table_info(rc_fundamental_quarterly_field_provenance)
+                """
+            )
+        }
+        for column_name in QUARTERLY_VINTAGE_REQUIRED_COLUMNS:
+            assert column_name in vintage_columns
+        for column_name in QUARTERLY_FIELD_PROVENANCE_REQUIRED_COLUMNS:
+            assert column_name in field_provenance_columns
+
+
+def test_quarterly_vintage_primary_key_blocks_duplicate_vintage_identity(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_vintage_pk.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_quarterly_vintage(conn, statement_vintage_id="AAPL_2026Q1_V1")
+        try:
+            _insert_quarterly_vintage(conn, statement_vintage_id="AAPL_2026Q1_V1")
+        except sqlite3.IntegrityError:
+            duplicate_blocked = True
+        else:
+            duplicate_blocked = False
+
+    assert duplicate_blocked is True
+
+
+def test_quarterly_vintage_allows_multiple_vintages_for_same_ticker_period(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_vintage_multi.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_quarterly_vintage(conn, statement_vintage_id="AAPL_2026Q1_V1", revision_number=1)
+        _insert_quarterly_vintage(conn, statement_vintage_id="AAPL_2026Q1_V2", revision_number=2)
+        rows = conn.execute(
+            """
+            SELECT statement_vintage_id, revision_number
+            FROM rc_fundamental_quarterly_vintage
+            WHERE ticker = 'AAPL' AND period_end_date = '2026-03-31'
+            ORDER BY statement_vintage_id
+            """
+        ).fetchall()
+
+    assert rows == [("AAPL_2026Q1_V1", 1), ("AAPL_2026Q1_V2", 2)]
+
+
+def test_field_provenance_allows_primary_and_fallback_rows_for_same_field_vintage(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_field_provenance.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_field_provenance(
+            conn,
+            source_provider="sec_edgar",
+            provenance_role="PRIMARY",
+            merge_action="RETAINED_PRIMARY",
+            field_value=100.0,
+        )
+        _insert_field_provenance(
+            conn,
+            source_provider="yahoo",
+            provenance_role="FALLBACK_FILL",
+            merge_action="FILLED_MISSING",
+            field_value=100.0,
+        )
+        rows = conn.execute(
+            """
+            SELECT source_provider, provenance_role, merge_action
+            FROM rc_fundamental_quarterly_field_provenance
+            WHERE ticker = 'AAPL'
+              AND period_end_date = '2026-03-31'
+              AND statement_vintage_id = 'AAPL_2026Q1_V1'
+              AND field_name = 'revenue'
+            ORDER BY source_provider
+            """
+        ).fetchall()
+
+    assert rows == [
+        ("sec_edgar", "PRIMARY", "RETAINED_PRIMARY"),
+        ("yahoo", "FALLBACK_FILL", "FILLED_MISSING"),
+    ]
+
+
+def test_quarterly_vintage_indexes_exist(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_vintage_indexes.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        vintage_indexes = {
+            str(row[1])
+            for row in conn.execute(
+                """
+                PRAGMA index_list(rc_fundamental_quarterly_vintage)
+                """
+            )
+        }
+        field_provenance_indexes = {
+            str(row[1])
+            for row in conn.execute(
+                """
+                PRAGMA index_list(rc_fundamental_quarterly_field_provenance)
+                """
+            )
+        }
+
+    assert "idx_fundamental_quarterly_vintage_ticker_period" in vintage_indexes
+    assert "idx_fundamental_quarterly_vintage_ticker_available" in vintage_indexes
+    assert "idx_fundamental_quarterly_vintage_ticker_period_available" in vintage_indexes
+    assert "idx_fundamental_quarterly_field_prov_vintage" in field_provenance_indexes
+    assert "idx_fundamental_quarterly_field_prov_run_id" in field_provenance_indexes
+
+
+def _insert_quarterly_vintage(
+    conn: sqlite3.Connection,
+    *,
+    statement_vintage_id: str,
+    revision_number: int = 1,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO rc_fundamental_quarterly_vintage (
+            ticker,
+            market,
+            period_end_date,
+            statement_vintage_id,
+            source_provider,
+            source_hash,
+            revision_number,
+            available_at_utc,
+            ingested_at_utc,
+            revenue,
+            created_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "AAPL",
+            "usa",
+            "2026-03-31",
+            statement_vintage_id,
+            "sec_edgar",
+            "hash1",
+            revision_number,
+            "2026-04-30T00:00:00Z",
+            "2026-04-30T01:00:00Z",
+            100.0,
+            "2026-04-30T01:00:00Z",
+        ),
+    )
+
+
+def _insert_field_provenance(
+    conn: sqlite3.Connection,
+    *,
+    source_provider: str,
+    provenance_role: str,
+    merge_action: str,
+    field_value: float,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO rc_fundamental_quarterly_field_provenance (
+            ticker,
+            market,
+            period_end_date,
+            statement_vintage_id,
+            field_name,
+            field_value,
+            source_provider,
+            source_table,
+            source_hash,
+            provenance_role,
+            merge_action,
+            available_at_utc,
+            created_at_utc,
+            run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "AAPL",
+            "usa",
+            "2026-03-31",
+            "AAPL_2026Q1_V1",
+            "revenue",
+            field_value,
+            source_provider,
+            "fixture",
+            f"{source_provider}_hash",
+            provenance_role,
+            merge_action,
+            "2026-04-30T00:00:00Z",
+            "2026-04-30T01:00:00Z",
+            "RUN1",
+        ),
+    )

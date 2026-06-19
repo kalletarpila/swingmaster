@@ -6,6 +6,8 @@ Phase 4A is a design phase for making `reported_fundamentals` point-in-time and 
 
 The design is based only on current repo evidence. If a behavior is not visible in the repo, it is marked as unclear.
 
+Phase 4B status: an additive migration now creates `rc_fundamental_quarterly_vintage` and `rc_fundamental_quarterly_field_provenance` as a schema foundation for later PIT/vintage work. Current write paths do not populate these tables yet, and current readers continue to use the existing `rc_fundamental_quarterly` latest-value table.
+
 Target class covered here:
 
 - `reported_fundamentals`
@@ -434,6 +436,6 @@ Current reported-fundamentals storage is good enough for current operational lat
 The recommended path is additive:
 
 1. keep `rc_fundamental_quarterly` compatible for current readers
-2. add a vintage table later
-3. add field-level provenance for mixed SEC/Yahoo rows
-4. backfill conservatively and only after a separate approved migration/backfill plan
+2. use the Phase 4B vintage table as the future statement-vintage storage foundation
+3. use the Phase 4B field-level provenance table for future mixed SEC/Yahoo lineage
+4. add dual-write/backfill behavior only in later, separately approved phases

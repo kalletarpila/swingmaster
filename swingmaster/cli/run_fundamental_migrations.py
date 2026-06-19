@@ -20,6 +20,8 @@ REQUIRED_TABLES = (
     "rc_fundamental_valuation",
     "rc_fundamental_reporting_frequency_classification",
     "rc_fundamental_missing_period_recovery_check",
+    "rc_fundamental_quarterly_vintage",
+    "rc_fundamental_quarterly_field_provenance",
 )
 SCHEMA_VERSION = 1
 TTM_COMPONENT_COLUMNS = (
@@ -71,6 +73,63 @@ VALUATION_V22_COLUMNS = (
 QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS = (
     ("matched_yahoo_period_end_date", "TEXT"),
     ("match_method", "TEXT"),
+)
+QUARTERLY_VINTAGE_REQUIRED_COLUMNS = (
+    "ticker",
+    "market",
+    "period_end_date",
+    "statement_vintage_id",
+    "source_provider",
+    "source_document_id",
+    "source_hash",
+    "revision_number",
+    "is_restated",
+    "supersedes_vintage_id",
+    "availability_quality",
+    "filed_at_utc",
+    "available_at_utc",
+    "ingested_at_utc",
+    "provider_observed_at_utc",
+    "run_id",
+    "provider_run_id",
+    "normalization_run_id",
+    "enrichment_run_id",
+    "revenue",
+    "gross_profit",
+    "operating_income",
+    "ebit",
+    "ebitda",
+    "net_income",
+    "operating_cashflow",
+    "capex",
+    "free_cashflow",
+    "cash",
+    "total_debt",
+    "shares_outstanding",
+    "currency",
+    "created_at_utc",
+    "updated_at_utc",
+)
+QUARTERLY_FIELD_PROVENANCE_REQUIRED_COLUMNS = (
+    "ticker",
+    "market",
+    "period_end_date",
+    "statement_vintage_id",
+    "field_name",
+    "field_value",
+    "source_provider",
+    "source_table",
+    "source_row_ref",
+    "source_document_id",
+    "source_hash",
+    "provenance_role",
+    "merge_action",
+    "old_value",
+    "new_value",
+    "available_at_utc",
+    "created_at_utc",
+    "run_id",
+    "enrichment_run_id",
 )
 
 
@@ -149,6 +208,16 @@ def get_missing_period_recovery_check_migration_file_path() -> Path:
     )
 
 
+def get_quarterly_vintage_migration_file_path() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent
+        / "infra"
+        / "sqlite"
+        / "migrations"
+        / "028_rc_fundamental_quarterly_vintage.sql"
+    )
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -168,6 +237,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_quarter_state_migration_file_path(),
         get_reporting_frequency_classification_migration_file_path(),
         get_missing_period_recovery_check_migration_file_path(),
+        get_quarterly_vintage_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")
@@ -374,6 +444,42 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
         raise RuntimeError(
             "FUNDAMENTAL_QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS_MISSING:"
             + ",".join(missing_quarterly_enrichment_audit_v2_columns)
+        )
+
+    quarterly_vintage_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_quarterly_vintage)
+            """
+        )
+    }
+    missing_quarterly_vintage_columns = [
+        column_name for column_name in QUARTERLY_VINTAGE_REQUIRED_COLUMNS if column_name not in quarterly_vintage_columns
+    ]
+    if missing_quarterly_vintage_columns:
+        raise RuntimeError(
+            "FUNDAMENTAL_QUARTERLY_VINTAGE_COLUMNS_MISSING:"
+            + ",".join(missing_quarterly_vintage_columns)
+        )
+
+    field_provenance_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_quarterly_field_provenance)
+            """
+        )
+    }
+    missing_field_provenance_columns = [
+        column_name
+        for column_name in QUARTERLY_FIELD_PROVENANCE_REQUIRED_COLUMNS
+        if column_name not in field_provenance_columns
+    ]
+    if missing_field_provenance_columns:
+        raise RuntimeError(
+            "FUNDAMENTAL_QUARTERLY_FIELD_PROVENANCE_COLUMNS_MISSING:"
+            + ",".join(missing_field_provenance_columns)
         )
 
     return len(REQUIRED_TABLES)

@@ -73,6 +73,94 @@ REQUIRED_VINTAGE_METADATA_FIELDS = (
     "created_at_utc",
     "run_id",
 )
+ADAPTER_REQUIRED_VINTAGE_METADATA_FIELDS = (
+    "market",
+    "statement_vintage_id",
+    "source_provider",
+    "source_hash",
+    "available_at_utc",
+    "ingested_at_utc",
+    "run_id",
+    "revision_number",
+    "is_restated",
+    "availability_quality",
+    "created_at_utc",
+)
+
+
+def write_normalized_quarterly_rows_with_optional_vintage(
+    conn: sqlite3.Connection,
+    rows: list[Mapping[str, Any]],
+    *,
+    write_latest: bool = True,
+    write_vintage: bool = False,
+    vintage_metadata_by_key: Mapping[tuple[Any, ...], Mapping[str, Any]] | None = None,
+    field_source_map_by_key: Mapping[tuple[Any, ...], Mapping[str, Any]] | None = None,
+) -> dict[str, int]:
+    """Opt-in adapter for normalized quarterly latest/vintage writes.
+
+    This adapter is intentionally not called by provider CLIs. Future callers
+    must pass explicit PIT/source metadata when enabling vintage writes.
+    """
+    if not write_latest and not write_vintage:
+        return {
+            "latest_rows_written": 0,
+            "vintage_rows_written": 0,
+            "field_provenance_rows_written": 0,
+        }
+
+    latest_rows_written = 0
+    vintage_rows_written = 0
+    field_provenance_rows_written = 0
+
+    if write_latest and not write_vintage:
+        latest_rows_written = insert_quarterly_rows(conn, list(rows))
+        return {
+            "latest_rows_written": latest_rows_written,
+            "vintage_rows_written": 0,
+            "field_provenance_rows_written": 0,
+        }
+
+    if vintage_metadata_by_key is None:
+        raise ValueError("REPORTED_QUARTERLY_WRITE_ADAPTER_METADATA_REQUIRED")
+
+    rows_with_metadata: list[tuple[Mapping[str, Any], tuple[Any, ...], Mapping[str, Any]]] = []
+    for row in rows:
+        metadata_key, metadata = _resolve_metadata_for_row(row, vintage_metadata_by_key)
+        _require_fields(metadata, ADAPTER_REQUIRED_VINTAGE_METADATA_FIELDS)
+        _require_matching_market(row, metadata)
+        rows_with_metadata.append((row, metadata_key, metadata))
+
+    for row, metadata_key, metadata in rows_with_metadata:
+        field_source_map = None
+        if field_source_map_by_key is not None:
+            field_source_map = field_source_map_by_key.get(metadata_key)
+            if field_source_map is None:
+                field_source_map = field_source_map_by_key.get(_ticker_period_key(row))
+
+        if write_latest:
+            result = write_quarterly_latest_and_vintage(conn, row, metadata, field_source_map=field_source_map)
+            latest_rows_written += result["latest_rows_written"]
+            vintage_rows_written += result["vintage_rows_written"]
+            field_provenance_rows_written += result["field_provenance_rows_written"]
+            continue
+
+        vintage_row = build_quarterly_vintage_row_from_latest(row, metadata)
+        provenance_rows = build_field_provenance_rows(
+            str(vintage_row["statement_vintage_id"]),
+            vintage_row,
+            str(vintage_row["source_provider"]),
+            field_source_map=field_source_map,
+            run_id=str(vintage_row["run_id"]),
+        )
+        vintage_rows_written += insert_quarterly_vintage_row(conn, vintage_row)
+        field_provenance_rows_written += insert_quarterly_field_provenance_rows(conn, provenance_rows)
+
+    return {
+        "latest_rows_written": latest_rows_written,
+        "vintage_rows_written": vintage_rows_written,
+        "field_provenance_rows_written": field_provenance_rows_written,
+    }
 
 
 def build_quarterly_vintage_row_from_latest(
@@ -191,6 +279,73 @@ def _build_latest_row(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> di
     return latest_row
 
 
+def _resolve_metadata_for_row(
+    row: Mapping[str, Any],
+    vintage_metadata_by_key: Mapping[tuple[Any, ...], Mapping[str, Any]],
+) -> tuple[tuple[Any, ...], Mapping[str, Any]]:
+    for key in _metadata_key_candidates(row):
+        metadata = vintage_metadata_by_key.get(key)
+        if metadata is not None:
+            return key, metadata
+    metadata_matches = _market_metadata_matches(row, vintage_metadata_by_key)
+    if len(metadata_matches) == 1:
+        return metadata_matches[0]
+    if len(metadata_matches) > 1:
+        raise ValueError("REPORTED_QUARTERLY_WRITE_ADAPTER_METADATA_AMBIGUOUS:" + _key_display(row))
+    raise ValueError("REPORTED_QUARTERLY_WRITE_ADAPTER_METADATA_MISSING:" + _key_display(row))
+
+
+def _metadata_key_candidates(row: Mapping[str, Any]) -> tuple[tuple[Any, ...], ...]:
+    ticker_period_key = _ticker_period_key(row)
+    market = row.get("market")
+    if not _is_missing(market):
+        return ((_normalize_market(market), *ticker_period_key), ticker_period_key)
+    return (ticker_period_key,)
+
+
+def _ticker_period_key(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    _require_fields(row, ("ticker", "period_end_date"))
+    normalized_ticker = _normalize_ticker(row.get("ticker"))
+    if normalized_ticker is None:
+        raise ValueError("REPORTED_QUARTERLY_DUAL_WRITE_REQUIRED_FIELDS_MISSING:ticker")
+    return (normalized_ticker, row.get("period_end_date"))
+
+
+def _market_metadata_matches(
+    row: Mapping[str, Any],
+    vintage_metadata_by_key: Mapping[tuple[Any, ...], Mapping[str, Any]],
+) -> list[tuple[tuple[Any, ...], Mapping[str, Any]]]:
+    ticker, period_end_date = _ticker_period_key(row)
+    matches: list[tuple[tuple[Any, ...], Mapping[str, Any]]] = []
+    for key, metadata in vintage_metadata_by_key.items():
+        if len(key) != 3:
+            continue
+        key_market, key_ticker, key_period_end_date = key
+        if _normalize_market(key_market) is None:
+            continue
+        if _normalize_ticker(key_ticker) == ticker and key_period_end_date == period_end_date:
+            matches.append(((key_market, key_ticker, key_period_end_date), metadata))
+    return matches
+
+
+def _key_display(row: Mapping[str, Any]) -> str:
+    ticker = _normalize_ticker(row.get("ticker"))
+    period_end_date = row.get("period_end_date")
+    market = row.get("market")
+    if _is_missing(market):
+        return f"{ticker},{period_end_date}"
+    return f"{_normalize_market(market)},{ticker},{period_end_date}"
+
+
+def _require_matching_market(row: Mapping[str, Any], metadata: Mapping[str, Any]) -> None:
+    row_market = row.get("market")
+    if _is_missing(row_market):
+        return
+    metadata_market = metadata.get("market")
+    if _normalize_market(row_market) != _normalize_market(metadata_market):
+        raise ValueError("REPORTED_QUARTERLY_WRITE_ADAPTER_MARKET_MISMATCH")
+
+
 def _field_source_info(
     field_source_map: Mapping[str, Any] | None,
     field_name: str,
@@ -226,6 +381,15 @@ def _normalize_ticker(value: Any) -> str | None:
     if not ticker:
         return None
     return ticker
+
+
+def _normalize_market(value: Any) -> str | None:
+    if value is None:
+        return None
+    market = str(value).strip().lower()
+    if not market:
+        return None
+    return market
 
 
 def _is_missing(value: Any) -> bool:

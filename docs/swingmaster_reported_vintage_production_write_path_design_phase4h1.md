@@ -234,3 +234,17 @@ After Phase 4H2:
 Proceed to Phase 4H2 with a small, opt-in/test-only builder-level dual-write implementation.
 
 Keep production provider paths unchanged until SEC/Yahoo availability and source-hash policies are explicit and tested.
+
+## Phase 4H2 Status
+
+Phase 4H2 adds `write_normalized_quarterly_rows_with_optional_vintage` in `reported_quarterly_dual_write.py` as an opt-in builder-level adapter for normalized quarterly rows.
+
+Current default production paths are not wired to this adapter. `insert_quarterly_rows`, provider CLIs, refresh jobs, fallback enrichment, quarter-update orchestration, TTM, scoring, valuation, UI, and ESS behavior remain unchanged.
+
+The adapter preserves latest-table compatibility by default. With `write_vintage=False`, it delegates to the existing latest-compatible `rc_fundamental_quarterly` insert behavior and does not write vintage or field-provenance rows.
+
+Vintage writes are explicit. With `write_vintage=True`, every row must have metadata keyed by ticker and period, or by market/ticker/period when the row provides market. Required metadata includes `market`, `statement_vintage_id`, `source_provider`, `source_hash`, `available_at_utc`, `ingested_at_utc`, `run_id`, `revision_number`, `is_restated`, `availability_quality`, and `created_at_utc`. The adapter does not invent availability timestamps, vintage ids, source hashes, or provider metadata.
+
+Vintage rows continue to use plain insert semantics through the vintage writer. Duplicate `statement_vintage_id` values raise SQLite integrity errors instead of replacing history. Field provenance is generated for non-null financial fields and can represent mixed SEC/Yahoo lineage through `field_source_map_by_key`.
+
+Phase 4H2 remains a controlled integration primitive for later provider-specific phases. SEC/Yahoo source-hash policy, available-at policy, provider-path wiring, quarter-update wiring, and reader migration remain later work.

@@ -34,6 +34,8 @@ Phase 4G3 status: [Reported Vintage Post-Backfill Verification Phase 4G3](swingm
 
 Phase 4H1 status: [Reported Vintage Production Write Path Design Phase 4H1](swingmaster_reported_vintage_production_write_path_design_phase4h1.md) documents how future reported-fundamentals write paths should create vintage rows and field provenance. Provider paths are not wired yet.
 
+Phase 4H2 status: `write_normalized_quarterly_rows_with_optional_vintage` adds an opt-in/test-only builder-level adapter for normalized quarterly rows. It keeps latest-only behavior as the default, requires explicit vintage metadata for every vintage write, and still does not wire provider, refresh, fallback, quarter-update, reader, or ESS paths.
+
 Target class covered here:
 
 - `reported_fundamentals`

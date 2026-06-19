@@ -42,6 +42,8 @@ Phase 4H4 status: [Reported Vintage Yahoo Metadata Contract Phase 4H4](swingmast
 
 Phase 4H5 status: [Reported Vintage Metadata Integration Phase 4H5](swingmaster_reported_vintage_metadata_integration_phase4h5.md) verifies with temp-DB tests that SEC-only, Yahoo bridge, and mixed SEC + Yahoo fallback metadata can feed the opt-in write adapter and PIT reader. Production provider paths remain unwired.
 
+Phase 4H6 status: [Reported Vintage SEC Dual-Write Scaffold Phase 4H6](swingmaster_reported_vintage_sec_dual_write_scaffold_phase4h6.md) adds a default-off SEC helper that can write normalized SEC rows through the opt-in adapter when explicit availability metadata and contributing facts are supplied. SEC production CLIs and quarter-update remain unwired.
+
 Target class covered here:
 
 - `reported_fundamentals`

@@ -266,3 +266,9 @@ The helper defines deterministic Yahoo source-hash and statement-vintage-id poli
 Phase 4H5 adds temp-DB integration tests documenting that the SEC and Yahoo metadata contracts can feed the opt-in reported-vintage write adapter: [Reported Vintage Metadata Integration Phase 4H5](swingmaster_reported_vintage_metadata_integration_phase4h5.md).
 
 The tests cover SEC-only, Yahoo bridge, and mixed SEC + Yahoo fallback provenance with PIT reader checks. Production SEC/Yahoo/provider/fallback/refresh/quarter-update paths remain unwired.
+
+## Phase 4H6 Status
+
+Phase 4H6 adds an explicit SEC opt-in dual-write scaffold in `reported_sec_dual_write_adapter.py`, documented in [Reported Vintage SEC Dual-Write Scaffold Phase 4H6](swingmaster_reported_vintage_sec_dual_write_scaffold_phase4h6.md).
+
+The scaffold can write normalized SEC rows through the opt-in vintage adapter when caller-provided SEC contributing facts and explicit availability metadata are supplied. Default production behavior remains unchanged, and full SEC provider/quarter-update wiring is still not done.

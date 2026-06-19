@@ -124,6 +124,8 @@ Because `overall_status` is `BLOCKED_MISSING_SCHEMA`, the next action should be 
 
 Phase 4E1 readiness plan: [SwingMaster Reported Vintage Real DB Migration Readiness Phase 4E1](swingmaster_reported_vintage_realdb_migration_readiness_phase4e1.md) documents the schema source of truth, backup requirements, pre-checks, post-checks, and rollback plan for that later migration step.
 
+Phase 4E2 schema apply: [SwingMaster Reported Vintage Real DB Migration Apply Phase 4E2](swingmaster_reported_vintage_realdb_migration_apply_phase4e2.md) documents the later schema-only migration result. After that apply, the read-only preflight status moved to `PARTIAL_METADATA_REQUIRED`.
+
 Do not proceed directly to backfill. A later step should first verify that applying the existing additive vintage schema to this DB is safe, explicitly backed up, and reviewed.
 
 ## Safety Note

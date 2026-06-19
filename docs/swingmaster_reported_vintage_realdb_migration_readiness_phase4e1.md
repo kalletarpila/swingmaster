@@ -4,6 +4,8 @@
 
 This is a readiness and backup plan for a later real DB schema migration.
 
+Phase 4E2 status: [SwingMaster Reported Vintage Real DB Migration Apply Phase 4E2](swingmaster_reported_vintage_realdb_migration_apply_phase4e2.md) documents the later schema-only apply result. The vintage/provenance tables were created, no backfill was run, and post-checks passed.
+
 - No real DB writes were done.
 - No migration was applied to `/home/kalle/projects/swingmaster/fundamentals_usa.db`.
 - No backfill was run.

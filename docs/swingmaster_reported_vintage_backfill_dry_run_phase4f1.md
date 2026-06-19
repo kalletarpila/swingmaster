@@ -74,6 +74,8 @@ Supported policies:
 
 `externally_verified_release_date` is the preferred historical/PIT direction, but Phase 4F2 only reads a local CSV/JSONL file. It does not fetch EDGAR, Yahoo, paid-provider, or other network data.
 
+Phase 4F3 note: the full real DB read-only dry-run using `live_safe_legacy_baseline` is documented in [Reported Vintage Full Real DB Dry Run Phase 4F3](swingmaster_reported_vintage_full_realdb_dry_run_phase4f3.md).
+
 ## Read-Only Guarantees
 
 The CLI opens SQLite with:

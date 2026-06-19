@@ -248,3 +248,9 @@ Vintage writes are explicit. With `write_vintage=True`, every row must have meta
 Vintage rows continue to use plain insert semantics through the vintage writer. Duplicate `statement_vintage_id` values raise SQLite integrity errors instead of replacing history. Field provenance is generated for non-null financial fields and can represent mixed SEC/Yahoo lineage through `field_source_map_by_key`.
 
 Phase 4H2 remains a controlled integration primitive for later provider-specific phases. SEC/Yahoo source-hash policy, available-at policy, provider-path wiring, quarter-update wiring, and reader migration remain later work.
+
+## Phase 4H3 Status
+
+Phase 4H3 adds a pure/test-only SEC metadata contract in `reported_sec_vintage_metadata.py`, documented in [Reported Vintage SEC Metadata Contract Phase 4H3](swingmaster_reported_vintage_sec_metadata_contract_phase4h3.md).
+
+The helper defines deterministic SEC source-hash and statement-vintage-id policies, extracts date-only SEC `filed` metadata when encoded in current raw fact names, and builds SEC field-source maps for non-null normalized fields. It still requires caller-provided `available_at_utc`; provider paths, refresh jobs, quarter-update orchestration, readers, UI, and ESS remain unwired.

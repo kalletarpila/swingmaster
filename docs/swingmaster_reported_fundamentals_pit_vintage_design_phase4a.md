@@ -36,6 +36,8 @@ Phase 4H1 status: [Reported Vintage Production Write Path Design Phase 4H1](swin
 
 Phase 4H2 status: `write_normalized_quarterly_rows_with_optional_vintage` adds an opt-in/test-only builder-level adapter for normalized quarterly rows. It keeps latest-only behavior as the default, requires explicit vintage metadata for every vintage write, and still does not wire provider, refresh, fallback, quarter-update, reader, or ESS paths.
 
+Phase 4H3 status: [Reported Vintage SEC Metadata Contract Phase 4H3](swingmaster_reported_vintage_sec_metadata_contract_phase4h3.md) adds pure/test-only SEC metadata helpers for deterministic source hashes, statement vintage ids, date-only filed metadata, and SEC field provenance maps. `available_at_utc` remains explicit input and no SEC/provider production path is wired.
+
 Target class covered here:
 
 - `reported_fundamentals`

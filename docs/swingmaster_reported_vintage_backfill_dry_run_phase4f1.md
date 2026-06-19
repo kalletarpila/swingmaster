@@ -48,6 +48,31 @@ Useful options:
 - `--include-sample-rows 5` includes candidate previews.
 - `--format json` emits machine-readable output.
 - `--fail-if-blocked` exits nonzero when required schema is missing.
+- `--legacy-availability-policy` selects the Phase 4F2 legacy availability policy.
+- `--legacy-available-at-utc` is required by `live_safe_legacy_baseline`.
+- `--legacy-availability-lag-days` is required by `research_estimated_legacy`.
+- `--verified-availability-file` is required by `externally_verified_release_date`.
+
+## Phase 4F2 Availability Policies
+
+Phase 4F2 keeps `policy_required` as the default. The dry-run must not silently invent `available_at_utc` from `period_end_date`.
+
+Supported policies:
+
+| CLI value | Availability behavior | Intended use | Main risk |
+| --- | --- | --- | --- |
+| `policy_required` | Leaves `available_at_utc` null and requires a policy decision. | Safest default before any write. | Not ready for backfill apply. |
+| `live_safe_legacy_baseline` | Uses explicit `--legacy-available-at-utc`. | Live/forward baseline from a backfill timestamp. | Historical backtests before that timestamp will not see legacy vintages. |
+| `research_estimated_legacy` | Uses `period_end_date + --legacy-availability-lag-days`. | Exploratory historical research. | Estimated and not audit-grade. |
+| `externally_verified_release_date` | Uses a local verified availability file. | Best historical PIT target when verified source metadata exists. | Requires curated/verified local release-date data. |
+
+`period_end_date` is a fiscal period boundary, not a publication or data-availability timestamp. It must not be used directly as `available_at_utc`.
+
+`live_safe_legacy_baseline` is conservative for live/forward use because rows become available only from the explicit backfill timestamp onward.
+
+`research_estimated_legacy` can use lag choices such as 45, 60, 90, or 120 days, but the CLI intentionally has no default lag. The user must choose one explicitly.
+
+`externally_verified_release_date` is the preferred historical/PIT direction, but Phase 4F2 only reads a local CSV/JSONL file. It does not fetch EDGAR, Yahoo, paid-provider, or other network data.
 
 ## Read-Only Guarantees
 

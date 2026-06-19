@@ -182,6 +182,10 @@ def test_fail_if_blocked_returns_nonzero(monkeypatch: pytest.MonkeyPatch, tmp_pa
             format="json",
             include_sample_rows=0,
             fail_if_blocked=True,
+            legacy_availability_policy="policy_required",
+            legacy_available_at_utc=None,
+            legacy_availability_lag_days=None,
+            verified_availability_file=None,
         ),
     )
 
@@ -214,8 +218,193 @@ def test_availability_policy_is_explicitly_policy_required(tmp_path: Path) -> No
     report = dry_run.run_dry_run(db_path, market="usa", as_of_date="2026-06-19", include_sample_rows=1)
 
     assert report["policy"]["availability_policy"]["status"] == "REQUIRES_POLICY_DECISION"
+    assert report["policy"]["selected_policy"] == "policy_required"
+    assert report["summary"]["overall_status"] == "DRY_RUN_PARTIAL_POLICY_REQUIRED"
     assert report["candidate_samples"][0]["available_at_utc"] is None
     assert report["candidate_samples"][0]["availability_quality"] == "LEGACY_ESTIMATED"
+
+
+def test_live_safe_legacy_baseline_requires_available_at_utc() -> None:
+    with pytest.raises(ValueError, match="--legacy-available-at-utc is required"):
+        dry_run.build_availability_policy_context(policy="live_safe_legacy_baseline")
+
+
+def test_live_safe_legacy_baseline_sets_available_at_and_quality(tmp_path: Path) -> None:
+    db_path = tmp_path / "live_safe.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_latest_row(conn, "AAPL", "2026-03-31")
+        conn.commit()
+
+    report = dry_run.run_dry_run(
+        db_path,
+        market="usa",
+        as_of_date="2026-06-19",
+        include_sample_rows=1,
+        legacy_availability_policy="live_safe_legacy_baseline",
+        legacy_available_at_utc="2026-06-19T00:00:00Z",
+    )
+
+    sample = report["candidate_samples"][0]
+    assert report["summary"]["overall_status"] == "DRY_RUN_READY"
+    assert report["policy"]["selected_policy"] == "live_safe_legacy_baseline"
+    assert report["policy"]["legacy_available_at_utc"] == "2026-06-19T00:00:00Z"
+    assert sample["available_at_utc"] == "2026-06-19T00:00:00Z"
+    assert sample["availability_quality"] == "LEGACY_BASELINE_AVAILABLE_FROM_BACKFILL"
+    assert sample["requires_policy_decision"] is False
+    assert "HISTORICAL_BACKTESTS_BEFORE_BACKFILL_TIMESTAMP_WILL_NOT_SEE_THESE_VINTAGES" in sample["warnings"]
+
+
+def test_research_estimated_legacy_requires_lag_days() -> None:
+    with pytest.raises(ValueError, match="--legacy-availability-lag-days is required"):
+        dry_run.build_availability_policy_context(policy="research_estimated_legacy")
+
+
+@pytest.mark.parametrize("lag_days", [0, -1])
+def test_research_estimated_legacy_rejects_zero_or_negative_lag(lag_days: int) -> None:
+    with pytest.raises(ValueError, match="--legacy-availability-lag-days must be >= 1"):
+        dry_run.build_availability_policy_context(
+            policy="research_estimated_legacy",
+            legacy_availability_lag_days=lag_days,
+        )
+
+
+def test_research_estimated_legacy_calculates_available_at_from_period_plus_lag(tmp_path: Path) -> None:
+    db_path = tmp_path / "research.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_latest_row(conn, "AAPL", "2026-03-31")
+        conn.commit()
+
+    report = dry_run.run_dry_run(
+        db_path,
+        market="usa",
+        as_of_date="2026-06-19",
+        include_sample_rows=1,
+        legacy_availability_policy="research_estimated_legacy",
+        legacy_availability_lag_days=45,
+    )
+
+    sample = report["candidate_samples"][0]
+    assert report["summary"]["overall_status"] == "DRY_RUN_READY"
+    assert report["policy"]["legacy_availability_lag_days"] == 45
+    assert sample["available_at_utc"] == "2026-05-15T00:00:00Z"
+    assert sample["availability_quality"] == "LEGACY_ESTIMATED"
+    assert "RESEARCH_ESTIMATED_AVAILABILITY_NOT_AUDIT_GRADE" in sample["warnings"]
+
+
+def test_externally_verified_release_date_requires_local_file() -> None:
+    with pytest.raises(ValueError, match="--verified-availability-file is required"):
+        dry_run.build_availability_policy_context(policy="externally_verified_release_date")
+
+
+def test_externally_verified_release_date_uses_local_csv_metadata(tmp_path: Path) -> None:
+    db_path = tmp_path / "verified.db"
+    verified_file = tmp_path / "verified.csv"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_latest_row(conn, "aapl", "2026-03-31")
+        conn.commit()
+    _write_verified_csv(verified_file, ticker="AAPL", period_end_date="2026-03-31")
+
+    report = dry_run.run_dry_run(
+        db_path,
+        market="usa",
+        as_of_date="2026-06-19",
+        include_sample_rows=1,
+        legacy_availability_policy="externally_verified_release_date",
+        verified_availability_file=verified_file,
+    )
+
+    sample = report["candidate_samples"][0]
+    assert report["summary"]["overall_status"] == "DRY_RUN_READY"
+    assert report["policy"]["available_at_is_externally_verified"] is True
+    assert report["policy"]["verified_availability_row_count"] == 1
+    assert sample["available_at_utc"] == "2026-04-25T13:30:00Z"
+    assert sample["availability_quality"] == "EXTERNALLY_VERIFIED"
+    assert sample["verification_source"]["source_provider"] == "fixture_verified"
+    assert sample["verification_source"]["source_document_id"] == "DOC-AAPL-2026Q1"
+    assert sample["verification_source"]["source_hash"] == "verified-source-hash"
+    assert sample["verification_source"]["verified_at_utc"] == "2026-06-18T00:00:00Z"
+    assert "NO_PROVIDER_DATA_FETCHED" in sample["warnings"]
+
+
+def test_externally_verified_missing_row_keeps_candidate_policy_incomplete(tmp_path: Path) -> None:
+    db_path = tmp_path / "verified_missing.db"
+    verified_file = tmp_path / "verified.csv"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_latest_row(conn, "AAPL", "2026-03-31")
+        conn.commit()
+    _write_verified_csv(verified_file, ticker="MSFT", period_end_date="2026-03-31")
+
+    report = dry_run.run_dry_run(
+        db_path,
+        market="usa",
+        as_of_date="2026-06-19",
+        include_sample_rows=1,
+        legacy_availability_policy="externally_verified_release_date",
+        verified_availability_file=verified_file,
+    )
+
+    sample = report["candidate_samples"][0]
+    assert report["summary"]["overall_status"] == "DRY_RUN_PARTIAL_POLICY_REQUIRED"
+    assert sample["available_at_utc"] is None
+    assert sample["requires_policy_decision"] is True
+    assert "REQUIRES_VERIFIED_AVAILABILITY" in sample["warnings"]
+
+
+def test_externally_verified_duplicate_rows_fail_clearly(tmp_path: Path) -> None:
+    verified_file = tmp_path / "verified.csv"
+    _write_verified_csv(verified_file, ticker="AAPL", period_end_date="2026-03-31", duplicate=True)
+
+    with pytest.raises(ValueError, match="duplicate verified availability row"):
+        dry_run.load_verified_availability_file(verified_file)
+
+
+def test_policy_warnings_appear_in_json_output(tmp_path: Path) -> None:
+    db_path = tmp_path / "json_policy_warnings.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_latest_row(conn, "AAPL", "2026-03-31")
+        conn.commit()
+
+    report = dry_run.run_dry_run(
+        db_path,
+        market="usa",
+        as_of_date="2026-06-19",
+        include_sample_rows=1,
+        legacy_availability_policy="research_estimated_legacy",
+        legacy_availability_lag_days=60,
+    )
+    parsed = json.loads(dry_run.render_json(report))
+
+    assert parsed["policy"]["selected_policy"] == "research_estimated_legacy"
+    assert "RESEARCH_ESTIMATED_AVAILABILITY_NOT_AUDIT_GRADE" in parsed["candidate_samples"][0]["warnings"]
+
+
+def test_statement_vintage_id_and_source_hash_are_policy_independent(tmp_path: Path) -> None:
+    db_path = tmp_path / "policy_independent_hash.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_latest_row(conn, "AAPL", "2026-03-31")
+        conn.commit()
+
+    policy_required = dry_run.run_dry_run(db_path, market="usa", as_of_date="2026-06-19", include_sample_rows=1)
+    live_safe = dry_run.run_dry_run(
+        db_path,
+        market="usa",
+        as_of_date="2026-06-19",
+        include_sample_rows=1,
+        legacy_availability_policy="live_safe_legacy_baseline",
+        legacy_available_at_utc="2026-06-19T00:00:00Z",
+    )
+
+    assert policy_required["candidate_samples"][0]["source_hash"] == live_safe["candidate_samples"][0]["source_hash"]
+    assert (
+        policy_required["candidate_samples"][0]["statement_vintage_id"]
+        == live_safe["candidate_samples"][0]["statement_vintage_id"]
+    )
 
 
 def _create_latest_only_db(db_path: Path) -> None:
@@ -318,3 +507,39 @@ def _vintage_row(ticker: str, period_end_date: str) -> dict[str, object]:
         "created_at_utc": "2026-06-19T00:00:00Z",
         "updated_at_utc": None,
     }
+
+
+def _write_verified_csv(
+    file_path: Path,
+    ticker: str,
+    period_end_date: str,
+    duplicate: bool = False,
+) -> None:
+    row = (
+        "usa,"
+        f"{ticker},"
+        f"{period_end_date},"
+        "2026-04-25T13:30:00Z,"
+        "fixture_verified,"
+        f"DOC-{ticker}-{period_end_date[:4]}Q1,"
+        "verified-source-hash,"
+        "2026-06-18T00:00:00Z,"
+        "2026-04-25T13:00:00Z,"
+        "fixture-ref,"
+        "high,"
+        "fixture notes"
+    )
+    rows = [row, row] if duplicate else [row]
+    file_path.write_text(
+        "\n".join(
+            [
+                (
+                    "market,ticker,period_end_date,available_at_utc,source_provider,"
+                    "source_document_id,source_hash,verified_at_utc,filed_at_utc,"
+                    "source_url_or_ref,source_confidence,notes"
+                ),
+                *rows,
+            ]
+        ),
+        encoding="utf-8",
+    )

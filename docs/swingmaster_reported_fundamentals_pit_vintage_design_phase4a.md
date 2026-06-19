@@ -22,6 +22,8 @@ Phase 4E1 status: [Reported Vintage Real DB Migration Readiness Phase 4E1](swing
 
 Phase 4F1 status: [Reported Vintage Backfill Dry Run Phase 4F1](swingmaster_reported_vintage_backfill_dry_run_phase4f1.md) adds a read-only dry-run planner for legacy latest-row conversion into reported-vintage candidates. It does not run a real backfill and keeps `available_at_utc` as a required policy decision for legacy rows.
 
+Phase 4F2 status: [Reported Vintage Legacy Availability Policy Phase 4F2](swingmaster_reported_vintage_legacy_availability_policy_phase4f2.md) adds explicit dry-run availability policy modes for legacy candidate rows. The default remains policy-required, while live-safe, research-estimated, and local externally verified modes are opt-in and still do not write data.
+
 Target class covered here:
 
 - `reported_fundamentals`

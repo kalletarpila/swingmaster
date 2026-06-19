@@ -98,7 +98,7 @@ The preflight reports schema support for the following future ESS concepts:
 
 These gaps are expected at Phase 3. They do not mean the preflight failed; they identify what later phases must design explicitly.
 
-Phase 4A design follow-up: [Reported Fundamentals PIT/Vintage Design Phase 4A](swingmaster_reported_fundamentals_pit_vintage_design_phase4a.md) defines the proposed plan for addressing reported-fundamentals availability, vintage, source-hash, and restatement gaps. Phase 4B adds additive vintage/provenance tables and Phase 4C1 adds an isolated helper writer, but this Phase 3 preflight still uses the existing read model unless it is separately enhanced later.
+Phase 4A design follow-up: [Reported Fundamentals PIT/Vintage Design Phase 4A](swingmaster_reported_fundamentals_pit_vintage_design_phase4a.md) defines the proposed plan for addressing reported-fundamentals availability, vintage, source-hash, and restatement gaps. Phase 4B adds additive vintage/provenance tables, Phase 4C1 adds an isolated helper writer, and Phase 4C2 adds an isolated read-only helper, but this Phase 3 preflight still uses the existing read model unless it is separately enhanced later.
 
 ## How To Interpret Results
 
@@ -119,7 +119,7 @@ The schema gap section should be treated as a roadmap signal, not as a data-qual
 
 ## Phase 4 Direction
 
-Phase 4A addresses `reported_fundamentals` point-in-time and vintage design, Phase 4B adds additive schema tables, and Phase 4C1 adds a helper writer without changing current write paths or readers. The highest-value concepts are:
+Phase 4A addresses `reported_fundamentals` point-in-time and vintage design, Phase 4B adds additive schema tables, Phase 4C1 adds a helper writer, and Phase 4C2 adds a read-only helper without changing current write paths or readers. The highest-value concepts are:
 
 - `available_at_utc`
 - first-class `filed_at_utc`
@@ -127,4 +127,4 @@ Phase 4A addresses `reported_fundamentals` point-in-time and vintage design, Pha
 - `source_hash`
 - restatement/revision metadata
 
-Those changes now have a Phase 4B schema foundation and Phase 4C1 helper layer, but provider writes, dual-write behavior, backfill, preflight population checks, and reader changes should still be implemented only in later, separately approved phases.
+Those changes now have a Phase 4B schema foundation plus Phase 4C1/4C2 helper layers, but provider writes, dual-write behavior, backfill, preflight population checks, and reader changes should still be implemented only in later, separately approved phases.

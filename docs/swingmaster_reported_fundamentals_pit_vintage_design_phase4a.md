@@ -10,6 +10,8 @@ Phase 4B status: an additive migration now creates `rc_fundamental_quarterly_vin
 
 Phase 4C1 status: `reported_vintage_writer.py` now provides a small helper layer for inserting vintage and field-provenance rows with temp-DB tests covering insert semantics and validation. No provider, refresh, dual-write, or backfill path uses the helper yet, and `rc_fundamental_quarterly` remains the current latest/read-compatible table.
 
+Phase 4C2 status: `reported_vintage_reader.py` now provides read-only helpers for listing vintages, selecting latest vintages, selecting PIT-valid vintages with `available_at_utc <= decision_cutoff_utc`, and reading field provenance. It is not wired into current readers or production flows, and `rc_fundamental_quarterly` remains the current latest/read-compatible table.
+
 Target class covered here:
 
 - `reported_fundamentals`
@@ -367,6 +369,24 @@ Explicit non-goals:
 - no dual-write/backfill behavior
 - no reader switch from `rc_fundamental_quarterly`
 
+### Phase 4C2: read-only vintage query helper with temp-DB tests only
+
+Goal:
+
+- Add deterministic read helpers for listing vintages, selecting latest/PIT-valid rows, reading provenance rows, and finding latest available period.
+
+Implemented files:
+
+- `swingmaster/fundamentals/reported_vintage_reader.py`
+- `swingmaster/tests/test_reported_vintage_reader.py`
+
+Explicit non-goals:
+
+- no provider calls
+- no production reader wiring
+- no dual-write/backfill behavior
+- no reader switch from `rc_fundamental_quarterly`
+
 ### Later Phase 4C: write-path dual-write or sidecar-write implementation with mocked tests
 
 Goal:
@@ -458,4 +478,4 @@ The recommended path is additive:
 1. keep `rc_fundamental_quarterly` compatible for current readers
 2. use the Phase 4B vintage table as the future statement-vintage storage foundation
 3. use the Phase 4B field-level provenance table for future mixed SEC/Yahoo lineage
-4. use the Phase 4C1 helper as a future write primitive, but add dual-write/backfill behavior only in later, separately approved phases
+4. use the Phase 4C1 writer and Phase 4C2 reader as future primitives, but add production reader wiring, dual-write, and backfill behavior only in later, separately approved phases

@@ -6,6 +6,8 @@ Phase 4D adds a read-only preflight for estimating how existing `rc_fundamental_
 
 Phase 4D2 real DB result: [SwingMaster Reported Vintage Backfill Real DB Preflight Phase 4D2](swingmaster_reported_vintage_backfill_realdb_preflight_phase4d2.md) documents a read-only run against `/home/kalle/projects/swingmaster/fundamentals_usa.db`.
 
+Phase 4E1 readiness plan: [SwingMaster Reported Vintage Real DB Migration Readiness Phase 4E1](swingmaster_reported_vintage_realdb_migration_readiness_phase4e1.md) documents the backup-confirmed schema migration plan required before any real backfill can be considered.
+
 It answers:
 
 - whether the fundamentals DB has the required latest, vintage, and provenance tables

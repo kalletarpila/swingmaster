@@ -122,6 +122,8 @@ The preflight proposes synthetic legacy policy values such as `UNKNOWN_LEGACY` a
 
 Because `overall_status` is `BLOCKED_MISSING_SCHEMA`, the next action should be a separate backup-confirmed real DB migration readiness step before any backfill design or write attempt.
 
+Phase 4E1 readiness plan: [SwingMaster Reported Vintage Real DB Migration Readiness Phase 4E1](swingmaster_reported_vintage_realdb_migration_readiness_phase4e1.md) documents the schema source of truth, backup requirements, pre-checks, post-checks, and rollback plan for that later migration step.
+
 Do not proceed directly to backfill. A later step should first verify that applying the existing additive vintage schema to this DB is safe, explicitly backed up, and reviewed.
 
 ## Safety Note

@@ -18,6 +18,8 @@ Phase 4D status: `preflight_reported_vintage_backfill.py` now provides a read-on
 
 Phase 4D2 status: the read-only backfill preflight was run against the current USA fundamentals DB and documented in [Reported Vintage Backfill Real DB Preflight Phase 4D2](swingmaster_reported_vintage_backfill_realdb_preflight_phase4d2.md). No DB writes or backfill were performed; next action depends on the documented `overall_status`.
 
+Phase 4E1 status: [Reported Vintage Real DB Migration Readiness Phase 4E1](swingmaster_reported_vintage_realdb_migration_readiness_phase4e1.md) documents the backup, pre-check, migration-apply, post-check, and rollback plan for adding the existing vintage schema to the real USA DB later. No real DB migration or backfill has been run yet.
+
 Target class covered here:
 
 - `reported_fundamentals`

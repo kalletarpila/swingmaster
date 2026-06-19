@@ -32,6 +32,8 @@ Phase 4G2 status: [Reported Vintage Backfill Apply Phase 4G2](swingmaster_report
 
 Phase 4G3 status: [Reported Vintage Post-Backfill Verification Phase 4G3](swingmaster_reported_vintage_post_backfill_verification_phase4g3.md) verifies the loaded baseline read-only. Coverage parity, value parity, provenance sanity, metadata policy, PIT samples, and post-backfill dry-run no-op checks all pass.
 
+Phase 4H1 status: [Reported Vintage Production Write Path Design Phase 4H1](swingmaster_reported_vintage_production_write_path_design_phase4h1.md) documents how future reported-fundamentals write paths should create vintage rows and field provenance. Provider paths are not wired yet.
+
 Target class covered here:
 
 - `reported_fundamentals`

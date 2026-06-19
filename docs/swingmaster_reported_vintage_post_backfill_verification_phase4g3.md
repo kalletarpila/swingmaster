@@ -221,3 +221,5 @@ Phase 4H1: reported-vintage read integration planning, no production wiring yet
 ```
 
 Do not add provider integration, ESS integration, or production dual-write wiring until read integration behavior is explicitly planned and reviewed.
+
+Phase 4H1 production write-path design is documented in [Reported Vintage Production Write Path Design Phase 4H1](swingmaster_reported_vintage_production_write_path_design_phase4h1.md). It keeps provider paths unwired and recommends a small opt-in/test-only builder-level dual-write phase next.

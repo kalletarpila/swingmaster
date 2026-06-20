@@ -48,6 +48,8 @@ Phase 4H7 status: [Reported Vintage Yahoo Dual-Write Scaffold Phase 4H7](swingma
 
 Phase 4H8 status: [Reported Vintage SEC Reconstruction Provenance Phase 4H8](swingmaster_reported_vintage_sec_reconstruction_provenance_phase4h8.md) adds a pure/test-only helper for extracting `(ticker, period_end_date) -> normalized_field -> contributing SEC facts` maps from SEC reconstruction fixtures. Current SEC reconstruction output, production CLIs, provider refresh, quarter-update, and vintage production writes remain unchanged.
 
+Phase 4H9 status: [Reported Vintage SEC Reconstruction To Vintage Integration Phase 4H9](swingmaster_reported_vintage_sec_reconstruction_to_vintage_integration_phase4h9.md) adds temp-DB integration coverage for SEC raw fixtures through reconstruction, provenance, metadata, default-off scaffold writes, field provenance, and PIT reads. Production SEC CLIs, provider refresh, real DB writes, and quarter-update remain unwired.
+
 Target class covered here:
 
 - `reported_fundamentals`

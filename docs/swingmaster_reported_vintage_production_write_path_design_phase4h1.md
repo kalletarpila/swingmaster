@@ -286,3 +286,9 @@ For fallback rows, audit-confirmed Yahoo fills receive Yahoo provenance. Non-nul
 Phase 4H8 adds a pure/test-only SEC reconstruction contributing-facts helper in `sec_reconstruction_provenance.py`, documented in [Reported Vintage SEC Reconstruction Provenance Phase 4H8](swingmaster_reported_vintage_sec_reconstruction_provenance_phase4h8.md).
 
 The helper extracts field-level SEC contributing fact maps for current reconstruction fixtures without changing `reconstruct_quarterly_rows(...)` output. Production SEC CLIs, provider refresh, vintage writes, and quarter-update orchestration remain unwired.
+
+## Phase 4H9 Status
+
+Phase 4H9 adds temp-DB integration coverage for the SEC raw/reconstruction/provenance/metadata/scaffold/PIT chain, documented in [Reported Vintage SEC Reconstruction To Vintage Integration Phase 4H9](swingmaster_reported_vintage_sec_reconstruction_to_vintage_integration_phase4h9.md).
+
+The test proves the default-off SEC components can work together end to end with fixture data. Production SEC CLIs, provider refresh, real DB writes, and quarter-update orchestration remain unwired.

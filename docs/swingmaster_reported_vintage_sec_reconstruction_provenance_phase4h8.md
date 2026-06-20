@@ -91,3 +91,9 @@ The next phase can add a narrow, explicitly opt-in SEC CLI experiment if it:
 - requires explicit `available_at_utc`
 - uses temp-DB and fixture tests first
 - does not wire full quarter-update orchestration
+
+## Phase 4H9 Reference
+
+Phase 4H9 adds temp-DB integration coverage for the SEC reconstruction-to-vintage chain, documented in [Reported Vintage SEC Reconstruction To Vintage Integration Phase 4H9](swingmaster_reported_vintage_sec_reconstruction_to_vintage_integration_phase4h9.md).
+
+The integration test proves the Phase 4H8 provenance output can feed SEC metadata, the default-off SEC scaffold, field provenance writes, and PIT reads without production wiring.

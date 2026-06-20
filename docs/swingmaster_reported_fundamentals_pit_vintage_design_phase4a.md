@@ -50,6 +50,8 @@ Phase 4H8 status: [Reported Vintage SEC Reconstruction Provenance Phase 4H8](swi
 
 Phase 4H9 status: [Reported Vintage SEC Reconstruction To Vintage Integration Phase 4H9](swingmaster_reported_vintage_sec_reconstruction_to_vintage_integration_phase4h9.md) adds temp-DB integration coverage for SEC raw fixtures through reconstruction, provenance, metadata, default-off scaffold writes, field provenance, and PIT reads. Production SEC CLIs, provider refresh, real DB writes, and quarter-update remain unwired.
 
+Phase 4H10 status: [Reported Vintage Yahoo Fallback To Vintage Integration Phase 4H10](swingmaster_reported_vintage_yahoo_fallback_to_vintage_integration_phase4h10.md) adds temp-DB integration coverage for Yahoo bridge and Yahoo fallback fixtures through metadata, default-off scaffold writes, field provenance, and PIT reads. Production Yahoo CLIs, provider refresh, fallback production execution, real DB writes, and quarter-update remain unwired.
+
 Target class covered here:
 
 - `reported_fundamentals`

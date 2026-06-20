@@ -111,3 +111,9 @@ The next phase can add a narrow, explicitly opt-in Yahoo CLI experiment if it:
 - carries fallback audit rows and retained-field provenance through the write boundary
 - uses temp-DB and mocked/fixture tests first
 - does not wire full quarter-update orchestration
+
+## Phase 4H10 Reference
+
+Phase 4H10 adds temp-DB integration coverage for the Yahoo bridge and Yahoo fallback-to-vintage chains, documented in [Reported Vintage Yahoo Fallback To Vintage Integration Phase 4H10](swingmaster_reported_vintage_yahoo_fallback_to_vintage_integration_phase4h10.md).
+
+The integration test proves the Phase 4H7 scaffold can write latest, vintage, and field provenance rows from fixture Yahoo source rows and fallback audit rows, with PIT reader checks and without production wiring.

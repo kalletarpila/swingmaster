@@ -292,3 +292,9 @@ The helper extracts field-level SEC contributing fact maps for current reconstru
 Phase 4H9 adds temp-DB integration coverage for the SEC raw/reconstruction/provenance/metadata/scaffold/PIT chain, documented in [Reported Vintage SEC Reconstruction To Vintage Integration Phase 4H9](swingmaster_reported_vintage_sec_reconstruction_to_vintage_integration_phase4h9.md).
 
 The test proves the default-off SEC components can work together end to end with fixture data. Production SEC CLIs, provider refresh, real DB writes, and quarter-update orchestration remain unwired.
+
+## Phase 4H10 Status
+
+Phase 4H10 adds temp-DB integration coverage for the Yahoo bridge and Yahoo fallback metadata/scaffold/PIT chain, documented in [Reported Vintage Yahoo Fallback To Vintage Integration Phase 4H10](swingmaster_reported_vintage_yahoo_fallback_to_vintage_integration_phase4h10.md).
+
+The test proves the default-off Yahoo components can work together end to end with fixture data, including mixed SEC-retained and Yahoo-filled field provenance. Production Yahoo CLIs, provider refresh, fallback production execution, real DB writes, and quarter-update orchestration remain unwired.

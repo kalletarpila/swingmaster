@@ -44,6 +44,8 @@ Phase 4H5 status: [Reported Vintage Metadata Integration Phase 4H5](swingmaster_
 
 Phase 4H6 status: [Reported Vintage SEC Dual-Write Scaffold Phase 4H6](swingmaster_reported_vintage_sec_dual_write_scaffold_phase4h6.md) adds a default-off SEC helper that can write normalized SEC rows through the opt-in adapter when explicit availability metadata and contributing facts are supplied. SEC production CLIs and quarter-update remain unwired.
 
+Phase 4H7 status: [Reported Vintage Yahoo Dual-Write Scaffold Phase 4H7](swingmaster_reported_vintage_yahoo_dual_write_scaffold_phase4h7.md) adds default-off Yahoo bridge and Yahoo fallback helpers that can write through the opt-in adapter when explicit availability metadata and source/audit inputs are supplied. Yahoo/fallback production CLIs and quarter-update remain unwired. Fallback fields without explicit source metadata are marked `unknown`, not silently attributed to Yahoo.
+
 Target class covered here:
 
 - `reported_fundamentals`

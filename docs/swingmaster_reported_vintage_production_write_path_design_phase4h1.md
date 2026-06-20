@@ -272,3 +272,11 @@ The tests cover SEC-only, Yahoo bridge, and mixed SEC + Yahoo fallback provenanc
 Phase 4H6 adds an explicit SEC opt-in dual-write scaffold in `reported_sec_dual_write_adapter.py`, documented in [Reported Vintage SEC Dual-Write Scaffold Phase 4H6](swingmaster_reported_vintage_sec_dual_write_scaffold_phase4h6.md).
 
 The scaffold can write normalized SEC rows through the opt-in vintage adapter when caller-provided SEC contributing facts and explicit availability metadata are supplied. Default production behavior remains unchanged, and full SEC provider/quarter-update wiring is still not done.
+
+## Phase 4H7 Status
+
+Phase 4H7 adds an explicit Yahoo/fallback opt-in dual-write scaffold in `reported_yahoo_dual_write_adapter.py`, documented in [Reported Vintage Yahoo Dual-Write Scaffold Phase 4H7](swingmaster_reported_vintage_yahoo_dual_write_scaffold_phase4h7.md).
+
+The scaffold can write Yahoo bridge rows or Yahoo fallback-enriched rows through the opt-in vintage adapter when caller-provided availability metadata, Yahoo source rows or fallback audit rows, and optional retained-field provenance are supplied. Default production behavior remains unchanged, and Yahoo CLIs, fallback production execution, refresh jobs, quarter-update orchestration, readers, UI, and ESS remain unwired.
+
+For fallback rows, audit-confirmed Yahoo fills receive Yahoo provenance. Non-null fields without explicit source metadata are marked `unknown` rather than silently attributed to Yahoo. Mixed SEC+Yahoo rows must pass explicit retained-field provenance if SEC lineage is required.

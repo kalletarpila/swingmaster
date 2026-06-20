@@ -91,3 +91,9 @@ The next phase can add a narrow, explicitly opt-in SEC CLI experiment if it:
 - passes selected fact lineage through the write boundary
 - uses temp-DB and mocked/fixture tests first
 - does not wire full quarter-update orchestration
+
+## Phase 4H8 Note
+
+Phase 4H8 adds a pure/test-only SEC reconstruction provenance helper, documented in [Reported Vintage SEC Reconstruction Provenance Phase 4H8](swingmaster_reported_vintage_sec_reconstruction_provenance_phase4h8.md).
+
+The helper can produce `(ticker, period_end_date) -> normalized_field -> contributing SEC facts` maps from current reconstruction fixtures. This gives the SEC scaffold a concrete future input shape for field-level provenance, but production SEC CLIs and quarter-update remain unwired.

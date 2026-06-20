@@ -46,6 +46,8 @@ Phase 4H6 status: [Reported Vintage SEC Dual-Write Scaffold Phase 4H6](swingmast
 
 Phase 4H7 status: [Reported Vintage Yahoo Dual-Write Scaffold Phase 4H7](swingmaster_reported_vintage_yahoo_dual_write_scaffold_phase4h7.md) adds default-off Yahoo bridge and Yahoo fallback helpers that can write through the opt-in adapter when explicit availability metadata and source/audit inputs are supplied. Yahoo/fallback production CLIs and quarter-update remain unwired. Fallback fields without explicit source metadata are marked `unknown`, not silently attributed to Yahoo.
 
+Phase 4H8 status: [Reported Vintage SEC Reconstruction Provenance Phase 4H8](swingmaster_reported_vintage_sec_reconstruction_provenance_phase4h8.md) adds a pure/test-only helper for extracting `(ticker, period_end_date) -> normalized_field -> contributing SEC facts` maps from SEC reconstruction fixtures. Current SEC reconstruction output, production CLIs, provider refresh, quarter-update, and vintage production writes remain unchanged.
+
 Target class covered here:
 
 - `reported_fundamentals`

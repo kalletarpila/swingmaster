@@ -107,3 +107,9 @@ The next phase should decide whether quarter_update should write separate provid
 Phase 4I9 documents the combined-mode policy in [Reported Vintage Quarter Update Combined Orchestration Design Phase 4I9](swingmaster_reported_vintage_quarter_update_combined_orchestration_design_phase4i9.md).
 
 The design keeps `yahoo_fallback_only` separate and recommends planning-only combined orchestration before final mixed vintage writes.
+
+## Phase 4I10 Status
+
+Phase 4I10 adds `sec_plus_yahoo_fallback_planning`, documented in [Reported Vintage Quarter Update Combined Planning Phase 4I10](swingmaster_reported_vintage_quarter_update_combined_planning_phase4i10.md).
+
+`yahoo_fallback_only` remains unchanged. The combined planning mode only reports Yahoo fallback planning/request status and does not forward Yahoo fallback vintage metadata to `run_yahoo_fallback_enrich(...)`.

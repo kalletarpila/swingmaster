@@ -356,3 +356,9 @@ Quarter_update can forward validated metadata to Yahoo fallback only when `--wri
 Phase 4I9 is a documentation-only combined SEC + Yahoo fallback orchestration design, documented in [Reported Vintage Quarter Update Combined Orchestration Design Phase 4I9](swingmaster_reported_vintage_quarter_update_combined_orchestration_design_phase4i9.md).
 
 No runtime code, providers, scheduler paths, real DB writes, or production combined vintage execution changed. The design recommends Phase 4I10 add planning-only combined orchestration before final mixed vintage writes.
+
+## Phase 4I10 Status
+
+Phase 4I10 adds a default-off combined planning mode, documented in [Reported Vintage Quarter Update Combined Planning Phase 4I10](swingmaster_reported_vintage_quarter_update_combined_planning_phase4i10.md).
+
+The mode reports a SEC + Yahoo fallback plan only. It does not write vintage rows, create final mixed vintages, forward child vintage metadata, run providers, run schedulers, or touch the real DB.

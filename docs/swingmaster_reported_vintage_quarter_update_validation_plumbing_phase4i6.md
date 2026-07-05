@@ -82,3 +82,9 @@ The `validation_only` behavior remains unchanged. The new `sec_reconstruct_only`
 Phase 4I8 adds default-off Yahoo fallback forwarding, documented in [Reported Vintage Quarter Update Yahoo Fallback Forwarding Phase 4I8](swingmaster_reported_vintage_quarter_update_yahoo_fallback_forwarding_phase4i8.md).
 
 The `validation_only` behavior remains unchanged. The new `yahoo_fallback_only` mode forwards validated metadata only to `run_yahoo_fallback_enrich(...)` and does not forward anything to SEC reconstruct or Yahoo bridge paths.
+
+## Phase 4I10 Status
+
+Phase 4I10 adds a planning-only combined mode, documented in [Reported Vintage Quarter Update Combined Planning Phase 4I10](swingmaster_reported_vintage_quarter_update_combined_planning_phase4i10.md).
+
+The mode validates explicit PIT metadata and marks SEC + Yahoo fallback planning in summary, but does not forward vintage metadata to child paths or write vintage rows.

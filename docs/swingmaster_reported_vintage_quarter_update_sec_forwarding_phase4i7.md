@@ -115,3 +115,9 @@ Phase 4I8 adds default-off Yahoo fallback forwarding, documented in [Reported Vi
 Phase 4I9 documents future combined SEC + Yahoo fallback orchestration in [Reported Vintage Quarter Update Combined Orchestration Design Phase 4I9](swingmaster_reported_vintage_quarter_update_combined_orchestration_design_phase4i9.md).
 
 The design keeps `sec_reconstruct_only` separate and recommends a new planning-only combined mode before any final mixed vintage writes.
+
+## Phase 4I10 Status
+
+Phase 4I10 adds `sec_plus_yahoo_fallback_planning`, documented in [Reported Vintage Quarter Update Combined Planning Phase 4I10](swingmaster_reported_vintage_quarter_update_combined_planning_phase4i10.md).
+
+`sec_reconstruct_only` remains unchanged. The combined planning mode only reports SEC planning/request status and does not forward SEC vintage metadata to `run_sec_reconstruct_step(...)`.

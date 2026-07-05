@@ -232,3 +232,9 @@ Phase 4I10 should test:
 Recommended Phase 4I10: quarter_update combined SEC + Yahoo fallback planning mode, no vintage execution.
 
 Phase 4I10 should use mocked tests only, avoid real DB/provider/scheduler runs, and preserve default quarter_update behavior.
+
+## Phase 4I10 Implementation Reference
+
+Phase 4I10 implements the recommended planning-only combined mode in [Reported Vintage Quarter Update Combined Planning Phase 4I10](swingmaster_reported_vintage_quarter_update_combined_planning_phase4i10.md).
+
+The implementation adds `sec_plus_yahoo_fallback_planning`, validates explicit metadata, and reports combined planning summary fields without forwarding vintage metadata to SEC/Yahoo children or writing final mixed vintage rows.

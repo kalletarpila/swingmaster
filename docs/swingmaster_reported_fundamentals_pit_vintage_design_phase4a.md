@@ -616,3 +616,9 @@ The mode forwards validated PIT metadata only to `run_yahoo_fallback_enrich(...)
 Phase 4I9 documents future combined SEC + Yahoo fallback orchestration. It does not change runtime behavior.
 
 The design recommends one final mixed vintage per affected ticker/period as the eventual production policy, but Phase 4I10 should first implement planning-only combined orchestration with no vintage execution.
+
+## 18. Phase 4I10 Status Note
+
+Phase 4I10 adds default-off `sec_plus_yahoo_fallback_planning` support to quarter_update.
+
+The mode validates explicit PIT metadata and reports combined SEC + Yahoo fallback planning summary fields, but it does not forward vintage metadata to child paths and does not write vintage rows.

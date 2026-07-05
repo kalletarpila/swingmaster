@@ -598,3 +598,9 @@ The design keeps quarter_update vintage execution out of scope for now and recom
 Phase 4I6 adds default-off quarter_update vintage validation and summary plumbing. It does not execute vintage writes.
 
 When requested, quarter_update now validates explicit vintage market, availability timestamp, ingestion timestamp, run id, and `validation_only` mode before any child step. Successful validation reports zero inserted vintage/provenance rows and `vintage_execution_enabled=False`.
+
+## 15. Phase 4I7 Status Note
+
+Phase 4I7 adds a default-off `sec_reconstruct_only` quarter_update mode for mocked SEC-only vintage forwarding.
+
+The mode forwards validated PIT metadata only to the SEC reconstruct helper when explicitly requested. It does not forward metadata to Yahoo fallback, does not create a final mixed SEC/Yahoo vintage, and does not change default quarter_update behavior.

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from swingmaster.cli.run_fundamental_bootstrap_sec_raw import SEC_USER_AGENT, run_sec_raw_bootstrap
+from swingmaster.cli.run_fundamental_sec_reconstruct_quarterly import run_sec_reconstruct_quarterly
 from swingmaster.fundamentals.build_quarterly import build_and_insert_quarterly_rows
 from swingmaster.cli.run_fundamental_quarter_state import acknowledge_ingested, load_latest_quarter_rows
 from swingmaster.cli.run_fundamental_quarterly_to_ttm import run_quarterly_to_ttm
@@ -20,6 +21,8 @@ from swingmaster.fundamentals.score import run_fundamental_scoring
 
 DEFAULT_EXCHANGE = "HE"
 VINTAGE_MODE_VALIDATION_ONLY = "validation_only"
+VINTAGE_MODE_SEC_RECONSTRUCT_ONLY = "sec_reconstruct_only"
+VINTAGE_MODE_CHOICES = [VINTAGE_MODE_VALIDATION_ONLY, VINTAGE_MODE_SEC_RECONSTRUCT_ONLY]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -61,8 +64,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--vintage-mode",
         default=None,
-        choices=[VINTAGE_MODE_VALIDATION_ONLY],
-        help="Phase 4I6 supports validation_only only; no vintage writes are executed",
+        choices=VINTAGE_MODE_CHOICES,
+        help="Vintage mode. Phase 4I7 supports validation_only or sec_reconstruct_only",
     )
     return parser.parse_args(argv)
 
@@ -89,6 +92,8 @@ def validate_vintage_options(
     vintage_mode: str | None,
 ) -> dict[str, object]:
     if not write_vintage:
+        if vintage_mode == VINTAGE_MODE_SEC_RECONSTRUCT_ONLY:
+            raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_WRITE_REQUIRED_FOR_SEC_RECONSTRUCT_ONLY")
         return {}
     if vintage_market is None or vintage_market.strip() == "":
         raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MARKET_REQUIRED")
@@ -100,20 +105,47 @@ def validate_vintage_options(
         raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_RUN_ID_REQUIRED")
     if vintage_mode is None or vintage_mode.strip() == "":
         raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MODE_REQUIRED")
-    if vintage_mode != VINTAGE_MODE_VALIDATION_ONLY:
+    if vintage_mode not in VINTAGE_MODE_CHOICES:
         raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MODE_UNSUPPORTED:{vintage_mode}")
+    execution_enabled = vintage_mode == VINTAGE_MODE_SEC_RECONSTRUCT_ONLY
     _validate_vintage_timestamp(vintage_available_at_utc, "vintage_available_at_utc")
     _validate_vintage_timestamp(vintage_ingested_at_utc, "vintage_ingested_at_utc")
     return {
         "vintage_requested": True,
-        "vintage_mode": VINTAGE_MODE_VALIDATION_ONLY,
-        "vintage_execution_enabled": False,
+        "vintage_mode": vintage_mode,
+        "vintage_execution_enabled": execution_enabled,
         "vintage_validation_status": "OK",
-        "vintage_rows_inserted": 0,
-        "vintage_provenance_rows_inserted": 0,
+        "vintage_sec_reconstruct_requested": execution_enabled,
+        "vintage_yahoo_bridge_requested": False,
+        "vintage_yahoo_fallback_requested": False,
+        "vintage_rows_inserted": None if execution_enabled else 0,
+        "vintage_provenance_rows_inserted": None if execution_enabled else 0,
+        "vintage_count_status": "not_reported_by_child" if execution_enabled else "zero_validation_only",
         "vintage_rows_skipped_noop": 0,
         "vintage_rows_failed": 0,
         "vintage_error_summary": None,
+    }
+
+
+def build_sec_reconstruct_vintage_options(
+    *,
+    write_vintage: bool,
+    vintage_market: str | None,
+    vintage_available_at_utc: str | None,
+    vintage_ingested_at_utc: str | None,
+    vintage_run_id: str | None,
+    vintage_normalization_run_id: str | None,
+    vintage_mode: str | None,
+) -> dict[str, object] | None:
+    if not write_vintage or vintage_mode != VINTAGE_MODE_SEC_RECONSTRUCT_ONLY:
+        return None
+    return {
+        "write_vintage": True,
+        "vintage_market": str(vintage_market),
+        "vintage_available_at_utc": str(vintage_available_at_utc),
+        "vintage_ingested_at_utc": str(vintage_ingested_at_utc),
+        "vintage_run_id": str(vintage_run_id),
+        "vintage_normalization_run_id": vintage_normalization_run_id,
     }
 
 
@@ -133,6 +165,7 @@ def derive_child_run_ids(base_run_id: str) -> dict[str, str]:
         "yqtr": f"{base_run_id}__YQTR",
         "qbridge": f"{base_run_id}__QBRIDGE",
         "sec_raw": f"{base_run_id}__SEC_RAW",
+        "sec_reconstruct": f"{base_run_id}__SEC_QUARTERLY_RECON",
         "quarterly": f"{base_run_id}__QUARTERLY",
         "ttm": f"{base_run_id}__TTM",
         "lifecycle": f"{base_run_id}__LIFECYCLE",
@@ -323,11 +356,31 @@ def run_sec_quarterly_build_step(db_path: Path, ticker: str, run_id: str, dry_ru
         )
 
 
+def run_sec_reconstruct_step(
+    db_path: Path,
+    ticker: str,
+    run_id: str,
+    retrieved_at_utc: str,
+    dry_run: bool,
+    sec_vintage_options: dict[str, object] | None,
+) -> tuple[int, list[dict[str, Any]]]:
+    options = sec_vintage_options or {}
+    return run_sec_reconstruct_quarterly(
+        db_path=db_path,
+        ticker=ticker,
+        run_id=run_id,
+        retrieved_at_utc=retrieved_at_utc,
+        dry_run=dry_run,
+        **options,
+    )
+
+
 def run_quarterly_refresh(
     db_path: Path,
     ticker: str,
     market: str,
     child_run_ids: dict[str, str],
+    sec_vintage_options: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     if market == "usa":
         retrieved_at_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -355,6 +408,21 @@ def run_quarterly_refresh(
                 user_agent=SEC_USER_AGENT,
                 dry_run=False,
             )
+            sec_reconstruct_summary: dict[str, Any] | None = None
+            if sec_vintage_options is not None:
+                sec_fact_rows_read, reconstructed_rows = run_sec_reconstruct_step(
+                    db_path=db_path,
+                    ticker=ticker,
+                    run_id=child_run_ids["sec_reconstruct"],
+                    retrieved_at_utc=retrieved_at_utc,
+                    dry_run=False,
+                    sec_vintage_options=sec_vintage_options,
+                )
+                sec_reconstruct_summary = {
+                    "sec_fact_rows_read": sec_fact_rows_read,
+                    "quarterly_rows_reconstructed": len(reconstructed_rows),
+                    "vintage_requested": True,
+                }
             periods_detected, rows_written = run_sec_quarterly_build_step(
                 db_path=db_path,
                 ticker=ticker,
@@ -366,6 +434,7 @@ def run_quarterly_refresh(
                 "rows": rows,
                 "periods_detected": periods_detected,
                 "rows_written": rows_written,
+                "sec_reconstruct_summary": sec_reconstruct_summary,
             }
             with sqlite3.connect(str(db_path)) as conn:
                 if not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date):
@@ -438,6 +507,7 @@ def process_ticker(
     row: sqlite3.Row,
     child_run_ids: dict[str, str],
     skip_ack: bool,
+    sec_vintage_options: dict[str, object] | None = None,
 ) -> dict[str, int]:
     ticker = str(row["ticker"]).upper()
     market = str(row["market"]).lower()
@@ -451,6 +521,7 @@ def process_ticker(
         ticker=ticker,
         market=market,
         child_run_ids=child_run_ids,
+        sec_vintage_options=sec_vintage_options,
     )
     print("STEP quarterly_refresh=OK")
 
@@ -530,7 +601,15 @@ def run_fundamental_quarter_update(
         vintage_run_id=vintage_run_id,
         vintage_mode=vintage_mode,
     )
-    _ = vintage_normalization_run_id
+    sec_vintage_options = build_sec_reconstruct_vintage_options(
+        write_vintage=write_vintage,
+        vintage_market=vintage_market,
+        vintage_available_at_utc=vintage_available_at_utc,
+        vintage_ingested_at_utc=vintage_ingested_at_utc,
+        vintage_run_id=vintage_run_id,
+        vintage_normalization_run_id=vintage_normalization_run_id,
+        vintage_mode=vintage_mode,
+    )
     rows = load_eligible_rows(db_path, market, ticker, limit)
     market_label = market.strip().lower() if market is not None else "ALL"
     strict_single_ticker_mode = ticker is not None
@@ -562,12 +641,15 @@ def run_fundamental_quarter_update(
         current_ticker = str(row["ticker"]).upper()
         tickers_processed += 1
         try:
-            process_ticker(
-                db_path=db_path,
-                row=row,
-                child_run_ids=child_run_ids,
-                skip_ack=skip_ack,
-            )
+            process_kwargs: dict[str, object] = {
+                "db_path": db_path,
+                "row": row,
+                "child_run_ids": child_run_ids,
+                "skip_ack": skip_ack,
+            }
+            if sec_vintage_options is not None:
+                process_kwargs["sec_vintage_options"] = sec_vintage_options
+            process_ticker(**process_kwargs)
         except Exception as exc:
             step_name = "unknown"
             message = str(exc)

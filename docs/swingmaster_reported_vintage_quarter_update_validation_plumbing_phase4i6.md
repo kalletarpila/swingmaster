@@ -70,3 +70,9 @@ No vintage rows or provenance rows are written by quarter update in this phase.
 Recommended Phase 4I7: add mocked SEC-only vintage handoff design or implementation tests, still default-off and still without real providers, scheduler runs, or real DB writes.
 
 Full SEC + Yahoo fallback mixed-vintage orchestration should wait until duplicate, no-op, final-vs-intermediate, and availability timestamp semantics are proven.
+
+## Phase 4I7 Status
+
+Phase 4I7 adds default-off SEC-only forwarding, documented in [Reported Vintage Quarter Update SEC Forwarding Phase 4I7](swingmaster_reported_vintage_quarter_update_sec_forwarding_phase4i7.md).
+
+The `validation_only` behavior remains unchanged. The new `sec_reconstruct_only` mode forwards validated metadata only to the SEC reconstruct helper and still does not forward anything to Yahoo bridge or Yahoo fallback paths.

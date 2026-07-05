@@ -338,3 +338,9 @@ No runtime code, tests, providers, refresh jobs, schedulers, real DB writes, or 
 Phase 4I6 adds quarter_update vintage validation plumbing, documented in [Reported Vintage Quarter Update Validation Plumbing Phase 4I6](swingmaster_reported_vintage_quarter_update_validation_plumbing_phase4i6.md).
 
 The path remains default-off and validation-only. Quarter update validates explicit PIT metadata and reports opt-in zero-count vintage summary fields, but it still does not write vintage rows or pass vintage flags to SEC/Yahoo subpaths.
+
+## Phase 4I7 Status
+
+Phase 4I7 adds default-off SEC-only quarter_update forwarding, documented in [Reported Vintage Quarter Update SEC Forwarding Phase 4I7](swingmaster_reported_vintage_quarter_update_sec_forwarding_phase4i7.md).
+
+The production write path is still not broadly enabled. Quarter_update can forward validated metadata to the SEC reconstruct helper only when `--write-vintage --vintage-mode sec_reconstruct_only` is explicitly requested. Yahoo bridge, Yahoo fallback, scheduler, UI, ESS, and final mixed-vintage orchestration remain unwired.

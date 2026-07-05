@@ -241,3 +241,9 @@ This is intentionally conservative. It proves the public quarter_update interfac
 Phase 4I6 implements the recommended validation-only scope in [Reported Vintage Quarter Update Validation Plumbing Phase 4I6](swingmaster_reported_vintage_quarter_update_validation_plumbing_phase4i6.md).
 
 The implementation adds default-off CLI flags, metadata validation, and opt-in summary fields. It still does not execute vintage writes or pass vintage flags to SEC/Yahoo subpaths.
+
+## Phase 4I7 Status
+
+Phase 4I7 adds the first mocked SEC-only quarter_update forwarding path, documented in [Reported Vintage Quarter Update SEC Forwarding Phase 4I7](swingmaster_reported_vintage_quarter_update_sec_forwarding_phase4i7.md).
+
+The new mode is `sec_reconstruct_only`. It remains default-off, requires explicit PIT metadata, and does not implement Yahoo fallback forwarding or final mixed-vintage orchestration.

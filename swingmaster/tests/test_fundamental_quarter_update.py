@@ -448,6 +448,7 @@ def test_child_run_id_derivation_is_correct() -> None:
         "ack": "USA_QUARTER_UPDATE_20260505__ACK",
         "enrich": "USA_QUARTER_UPDATE_20260505__ENRICH",
         "sec_raw": "USA_QUARTER_UPDATE_20260505__SEC_RAW",
+        "sec_reconstruct": "USA_QUARTER_UPDATE_20260505__SEC_QUARTERLY_RECON",
         "quarterly": "USA_QUARTER_UPDATE_20260505__QUARTERLY",
     }
 

@@ -684,3 +684,9 @@ The gate classifies post-Yahoo state as `SEC_VINTAGE_SUFFICIENT`, `FINAL_MIXED_R
 Phase 4K4 adds temp-tested planning for final mixed and Yahoo-aware vintage candidates after the completion gate. It does not write real DB rows and does not run providers.
 
 The planner uses final latest row values, SEC field provenance, Yahoo fallback audit rows, and Yahoo quarterly staging evidence to report planned row/provenance counts, sample candidate ids/hashes, and blocked unknown provenance fields. Default behavior remains unchanged.
+
+## 29. Phase 4K5 Status Note
+
+Phase 4K5 adds a default-off temp-tested execution layer for planned final mixed and Yahoo-aware vintage candidates. It is controlled by `--vintage-yahoo-aware-action write`; the default is `plan_only`.
+
+The execution helper writes through existing final mixed and Yahoo vintage adapters using caller-supplied SQLite connections in tests. It does not run providers, refresh jobs, schedulers, or real DB apply.

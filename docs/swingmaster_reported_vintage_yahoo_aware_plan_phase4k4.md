@@ -63,3 +63,9 @@ Real DB/provider status: not run.
 ## Recommended Next Phase
 
 Phase 4K5 should add a default-off write executor for planned final mixed and Yahoo-aware candidates, still temp-tested first. Real DB apply should remain a separate preflight/apply phase after row counts, duplicate policy, and rollback are documented.
+
+## Phase 4K5 Follow-Up
+
+Phase 4K5 adds the default-off temp-tested execution layer in [Reported Vintage Yahoo-Aware Execution Phase 4K5](swingmaster_reported_vintage_yahoo_aware_execution_phase4k5.md).
+
+The execution path is controlled by `--vintage-yahoo-aware-action write`; `plan_only` remains the default.

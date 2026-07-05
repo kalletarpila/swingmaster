@@ -85,3 +85,5 @@ Phase 4K4 should implement a default-off final mixed or post-run apply path that
 Phase 4K4 adds temp-tested Yahoo-aware/final-mixed planning in [Reported Vintage Yahoo-Aware Plan Phase 4K4](swingmaster_reported_vintage_yahoo_aware_plan_phase4k4.md).
 
 The follow-up does not write final mixed or Yahoo vintages. It prepares candidate ids, hashes, row counts, provenance counts, and blocked-field summaries for later default-off execution work.
+
+Phase 4K5 adds that default-off execution layer for temp DBs only. It still does not run providers or write the real DB.

@@ -35,6 +35,9 @@ from swingmaster.fundamentals.reported_yahoo_vintage_metadata import (
     build_yahoo_source_hash,
     build_yahoo_vintage_metadata,
 )
+from swingmaster.fundamentals.reported_yahoo_dual_write_adapter import (
+    write_yahoo_quarterly_rows_with_optional_vintage,
+)
 from swingmaster.fundamentals.lifecycle import run_lifecycle_classification
 from swingmaster.fundamentals.score import run_fundamental_scoring
 
@@ -68,6 +71,16 @@ YAHOO_AWARE_PLAN_FINAL_MIXED_READY = "FINAL_MIXED_PLAN_READY"
 YAHOO_AWARE_PLAN_YAHOO_READY = "YAHOO_VINTAGE_PLAN_READY"
 YAHOO_AWARE_PLAN_BLOCKED = "PLAN_BLOCKED"
 YAHOO_AWARE_PLAN_UNKNOWN = "UNKNOWN"
+VINTAGE_YAHOO_AWARE_ACTION_PLAN_ONLY = "plan_only"
+VINTAGE_YAHOO_AWARE_ACTION_WRITE = "write"
+VINTAGE_YAHOO_AWARE_ACTION_CHOICES = [
+    VINTAGE_YAHOO_AWARE_ACTION_PLAN_ONLY,
+    VINTAGE_YAHOO_AWARE_ACTION_WRITE,
+]
+YAHOO_AWARE_EXEC_NOT_REQUESTED = "NOT_REQUESTED"
+YAHOO_AWARE_EXEC_COMPLETED = "EXECUTION_COMPLETED"
+YAHOO_AWARE_EXEC_BLOCKED = "EXECUTION_BLOCKED"
+YAHOO_AWARE_EXEC_NO_ACTION = "NO_ACTION_REQUIRED"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -115,6 +128,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "sec_latest_writer, yahoo_fallback_only, sec_plus_yahoo_fallback_planning, "
             "or sec_plus_yahoo_fallback_final_mixed"
         ),
+    )
+    parser.add_argument(
+        "--vintage-yahoo-aware-action",
+        default=VINTAGE_YAHOO_AWARE_ACTION_PLAN_ONLY,
+        choices=VINTAGE_YAHOO_AWARE_ACTION_CHOICES,
+        help="Yahoo-aware/final-mixed action for sec_latest_writer mode. Defaults to plan_only.",
     )
     return parser.parse_args(argv)
 
@@ -268,6 +287,19 @@ def merge_sec_latest_writer_post_run_guard_summary(
             "vintage_yahoo_aware_unknown_provenance_fields": guard_summary.get(
                 "vintage_yahoo_aware_unknown_provenance_fields"
             ),
+            "vintage_yahoo_aware_execution_status": guard_summary.get("vintage_yahoo_aware_execution_status"),
+            "vintage_yahoo_aware_final_mixed_rows_written": guard_summary.get(
+                "vintage_yahoo_aware_final_mixed_rows_written"
+            ),
+            "vintage_yahoo_aware_yahoo_vintage_rows_written": guard_summary.get(
+                "vintage_yahoo_aware_yahoo_vintage_rows_written"
+            ),
+            "vintage_yahoo_aware_provenance_rows_written": guard_summary.get(
+                "vintage_yahoo_aware_provenance_rows_written"
+            ),
+            "vintage_yahoo_aware_rows_blocked": guard_summary.get("vintage_yahoo_aware_rows_blocked"),
+            "vintage_yahoo_aware_rows_skipped": guard_summary.get("vintage_yahoo_aware_rows_skipped"),
+            "vintage_yahoo_aware_error": guard_summary.get("vintage_yahoo_aware_error"),
         }
     )
 
@@ -393,7 +425,14 @@ def validate_vintage_options(
     vintage_ingested_at_utc: str | None,
     vintage_run_id: str | None,
     vintage_mode: str | None,
+    vintage_yahoo_aware_action: str = VINTAGE_YAHOO_AWARE_ACTION_PLAN_ONLY,
 ) -> dict[str, object]:
+    if vintage_yahoo_aware_action not in VINTAGE_YAHOO_AWARE_ACTION_CHOICES:
+        raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_YAHOO_AWARE_ACTION_UNSUPPORTED:{vintage_yahoo_aware_action}")
+    if vintage_yahoo_aware_action == VINTAGE_YAHOO_AWARE_ACTION_WRITE and (
+        not write_vintage or vintage_mode != VINTAGE_MODE_SEC_LATEST_WRITER
+    ):
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_YAHOO_AWARE_WRITE_REQUIRES_SEC_LATEST_WRITER")
     if not write_vintage:
         if vintage_mode in {
             VINTAGE_MODE_SEC_RECONSTRUCT_ONLY,
@@ -1220,6 +1259,244 @@ def _yahoo_aware_plan_result(
     }
 
 
+def execute_quarter_update_yahoo_aware_vintage_plan(
+    conn: sqlite3.Connection,
+    *,
+    plan: Mapping[str, object],
+    final_mixed_candidates_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
+    yahoo_vintage_candidates_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
+    market: str,
+    available_at_utc: str,
+    ingested_at_utc: str,
+    vintage_run_id: str,
+) -> dict[str, object]:
+    plan_status = plan.get("vintage_yahoo_aware_planning_status")
+    if plan_status == YAHOO_AWARE_PLAN_NO_ACTION:
+        return _yahoo_aware_execution_result(YAHOO_AWARE_EXEC_NO_ACTION)
+    if plan_status not in {YAHOO_AWARE_PLAN_FINAL_MIXED_READY, YAHOO_AWARE_PLAN_YAHOO_READY}:
+        return _yahoo_aware_execution_result(
+            YAHOO_AWARE_EXEC_BLOCKED,
+            rows_blocked=int(plan.get("vintage_yahoo_aware_blocked_rows", 0) or 0),
+            error=str(plan.get("vintage_yahoo_aware_block_reason") or "PLAN_NOT_EXECUTABLE"),
+        )
+
+    final_mixed_rows_written = 0
+    yahoo_vintage_rows_written = 0
+    provenance_rows_written = 0
+    candidate_statement_ids = _yahoo_aware_candidate_statement_ids(
+        final_mixed_candidates_by_key=final_mixed_candidates_by_key,
+        yahoo_vintage_candidates_by_key=yahoo_vintage_candidates_by_key,
+        market=market,
+        available_at_utc=available_at_utc,
+        ingested_at_utc=ingested_at_utc,
+        vintage_run_id=vintage_run_id,
+    )
+    existing_statement_ids = _existing_statement_vintage_ids(conn, candidate_statement_ids)
+    if existing_statement_ids:
+        return _yahoo_aware_execution_result(
+            YAHOO_AWARE_EXEC_BLOCKED,
+            rows_blocked=len(existing_statement_ids),
+            rows_skipped=len(existing_statement_ids),
+            error="YAHOO_AWARE_VINTAGE_ALREADY_EXISTS:" + ",".join(sorted(existing_statement_ids)),
+        )
+    if plan_status == YAHOO_AWARE_PLAN_FINAL_MIXED_READY:
+        if not final_mixed_candidates_by_key:
+            return _yahoo_aware_execution_result(
+                YAHOO_AWARE_EXEC_BLOCKED,
+                rows_blocked=1,
+                error="FINAL_MIXED_CANDIDATES_REQUIRED",
+            )
+        unknown_fields = _final_mixed_candidate_unknown_fields(final_mixed_candidates_by_key)
+        if unknown_fields:
+            return _yahoo_aware_execution_result(
+                YAHOO_AWARE_EXEC_BLOCKED,
+                rows_blocked=len(unknown_fields),
+                error="UNKNOWN_PROVENANCE_FIELDS:" + ",".join(unknown_fields),
+            )
+        for candidate in final_mixed_candidates_by_key.values():
+            result = execute_final_mixed_vintage_write(
+                conn,
+                normalized_row=candidate["normalized_row"],
+                market=market,
+                available_at_utc=available_at_utc,
+                ingested_at_utc=ingested_at_utc,
+                run_id=vintage_run_id,
+                sec_field_source_map=candidate.get("sec_field_source_map"),
+                yahoo_field_source_map=candidate.get("yahoo_field_source_map"),
+                fallback_audit_rows=candidate.get("fallback_audit_rows"),
+                normalization_run_id=vintage_run_id,
+            )
+            final_mixed_rows_written += int(result.get("vintage_rows_inserted", 0) or 0)
+            provenance_rows_written += int(result.get("provenance_rows_inserted", 0) or 0)
+
+    if plan_status == YAHOO_AWARE_PLAN_YAHOO_READY:
+        if not yahoo_vintage_candidates_by_key:
+            return _yahoo_aware_execution_result(
+                YAHOO_AWARE_EXEC_BLOCKED,
+                rows_blocked=1,
+                error="YAHOO_VINTAGE_CANDIDATES_REQUIRED",
+            )
+        result = write_yahoo_quarterly_rows_with_optional_vintage(
+            conn,
+            normalized_rows=[candidate["normalized_row"] for candidate in yahoo_vintage_candidates_by_key.values()],
+            yahoo_quarterly_rows_by_key={
+                key: candidate["yahoo_quarterly_row"] for key, candidate in yahoo_vintage_candidates_by_key.items()
+            },
+            write_vintage=True,
+            market=market,
+            available_at_utc=available_at_utc,
+            ingested_at_utc=ingested_at_utc,
+            run_id=vintage_run_id,
+            mode="yahoo_missing_quarter_insert",
+            normalization_run_id=vintage_run_id,
+        )
+        yahoo_vintage_rows_written += int(result.get("vintage_rows_written", 0) or 0)
+        provenance_rows_written += int(result.get("field_provenance_rows_written", 0) or 0)
+
+    return _yahoo_aware_execution_result(
+        YAHOO_AWARE_EXEC_COMPLETED,
+        final_mixed_rows_written=final_mixed_rows_written,
+        yahoo_vintage_rows_written=yahoo_vintage_rows_written,
+        provenance_rows_written=provenance_rows_written,
+    )
+
+
+def _final_mixed_candidate_unknown_fields(
+    final_mixed_candidates_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> list[str]:
+    unknown_fields: list[str] = []
+    for key, candidate in final_mixed_candidates_by_key.items():
+        field_source_map = merge_final_mixed_field_source_maps(
+            normalized_row=candidate["normalized_row"],
+            sec_field_source_map=candidate.get("sec_field_source_map"),
+            yahoo_field_source_map=candidate.get("yahoo_field_source_map"),
+        )
+        for field_name, source_info in field_source_map.items():
+            if source_info.get("source_provider") == "unknown":
+                unknown_fields.append(f"{key[0]}:{key[1]}:{field_name}")
+    return sorted(unknown_fields)
+
+
+def _yahoo_aware_candidate_statement_ids(
+    *,
+    final_mixed_candidates_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
+    yahoo_vintage_candidates_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
+    market: str,
+    available_at_utc: str,
+    ingested_at_utc: str,
+    vintage_run_id: str,
+) -> list[str]:
+    statement_ids: list[str] = []
+    for key, candidate in final_mixed_candidates_by_key.items():
+        normalized_row = candidate["normalized_row"]
+        source_hash = build_final_mixed_source_hash(
+            market=market,
+            ticker=key[0],
+            period_end_date=key[1],
+            normalized_row=normalized_row,
+            sec_field_source_map=candidate.get("sec_field_source_map"),
+            yahoo_field_source_map=candidate.get("yahoo_field_source_map"),
+            fallback_audit_rows=candidate.get("fallback_audit_rows"),
+        )
+        statement_ids.append(
+            build_final_mixed_statement_vintage_id(
+                market=market,
+                ticker=key[0],
+                period_end_date=key[1],
+                source_hash=source_hash,
+            )
+        )
+    for key, candidate in yahoo_vintage_candidates_by_key.items():
+        normalized_row = candidate["normalized_row"]
+        yahoo_row = candidate["yahoo_quarterly_row"]
+        source_hash = build_yahoo_source_hash(
+            market=market,
+            ticker=key[0],
+            period_end_date=key[1],
+            yahoo_quarterly_row=yahoo_row,
+            normalized_row=normalized_row,
+        )
+        metadata = build_yahoo_vintage_metadata(
+            market=market,
+            ticker=key[0],
+            period_end_date=key[1],
+            normalized_row=normalized_row,
+            available_at_utc=available_at_utc,
+            ingested_at_utc=ingested_at_utc,
+            run_id=vintage_run_id,
+            source_hash=source_hash,
+            mode="yahoo_missing_quarter_insert",
+        )
+        statement_ids.append(str(metadata["statement_vintage_id"]))
+    return statement_ids
+
+
+def _existing_statement_vintage_ids(conn: sqlite3.Connection, statement_ids: list[str]) -> set[str]:
+    if not statement_ids:
+        return set()
+    placeholders = ", ".join("?" for _ in statement_ids)
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT statement_vintage_id
+        FROM rc_fundamental_quarterly_vintage
+        WHERE statement_vintage_id IN ({placeholders})
+        """,
+        statement_ids,
+    ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
+def _yahoo_aware_execution_result(
+    status: str,
+    *,
+    final_mixed_rows_written: int = 0,
+    yahoo_vintage_rows_written: int = 0,
+    provenance_rows_written: int = 0,
+    rows_blocked: int = 0,
+    rows_skipped: int = 0,
+    error: str | None = None,
+) -> dict[str, object]:
+    return {
+        "vintage_yahoo_aware_execution_status": status,
+        "vintage_yahoo_aware_final_mixed_rows_written": final_mixed_rows_written,
+        "vintage_yahoo_aware_yahoo_vintage_rows_written": yahoo_vintage_rows_written,
+        "vintage_yahoo_aware_provenance_rows_written": provenance_rows_written,
+        "vintage_yahoo_aware_rows_blocked": rows_blocked,
+        "vintage_yahoo_aware_rows_skipped": rows_skipped,
+        "vintage_yahoo_aware_error": error,
+    }
+
+
+def _build_yahoo_aware_execution_candidates(
+    *,
+    plan: Mapping[str, object],
+    latest_rows: list[Mapping[str, Any]],
+    sec_provenance_by_key: Mapping[tuple[str, str], Mapping[str, Mapping[str, Any]]],
+    yahoo_audit_rows_by_key: Mapping[tuple[str, str], list[Mapping[str, Any]]],
+    yahoo_rows_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
+    vintage_run_id: str,
+) -> tuple[dict[tuple[str, str], dict[str, Any]], dict[tuple[str, str], dict[str, Any]]]:
+    final_mixed_candidates: dict[tuple[str, str], dict[str, Any]] = {}
+    yahoo_candidates: dict[tuple[str, str], dict[str, Any]] = {}
+    plan_status = plan.get("vintage_yahoo_aware_planning_status")
+    for latest_row in latest_rows:
+        normalized_row = _normalized_latest_mapping(latest_row, vintage_run_id)
+        key = _ticker_period_key(normalized_row)
+        if plan_status == YAHOO_AWARE_PLAN_FINAL_MIXED_READY and key in yahoo_audit_rows_by_key:
+            final_mixed_candidates[key] = {
+                "normalized_row": normalized_row,
+                "sec_field_source_map": sec_provenance_by_key.get(key, {}),
+                "yahoo_field_source_map": _yahoo_audit_field_source_map(yahoo_audit_rows_by_key[key]),
+                "fallback_audit_rows": yahoo_audit_rows_by_key[key],
+            }
+        elif plan_status == YAHOO_AWARE_PLAN_YAHOO_READY and key in yahoo_rows_by_key:
+            yahoo_candidates[key] = {
+                "normalized_row": normalized_row,
+                "yahoo_quarterly_row": yahoo_rows_by_key[key],
+            }
+    return final_mixed_candidates, yahoo_candidates
+
+
 def _normalized_latest_mapping(row: Mapping[str, Any], run_id: str) -> dict[str, Any]:
     normalized = {
         "ticker": str(row.get("ticker")).upper(),
@@ -1851,6 +2128,7 @@ def process_ticker(
     sec_vintage_options: dict[str, object] | None = None,
     yahoo_fallback_vintage_options: dict[str, object] | None = None,
     sec_latest_writer_vintage_options: dict[str, object] | None = None,
+    vintage_yahoo_aware_action: str = VINTAGE_YAHOO_AWARE_ACTION_PLAN_ONLY,
 ) -> dict[str, object]:
     ticker = str(row["ticker"]).upper()
     market = str(row["market"]).lower()
@@ -1926,6 +2204,34 @@ def process_ticker(
                 available_at_utc=str(sec_latest_writer_vintage_options["available_at_utc"]),
                 ingested_at_utc=str(sec_latest_writer_vintage_options["ingested_at_utc"]),
             )
+            if vintage_yahoo_aware_action == VINTAGE_YAHOO_AWARE_ACTION_WRITE:
+                latest_run_ids = [child_run_ids["quarterly"], child_run_ids["enrich"]]
+                latest_rows = [dict(row) for row in _latest_rows_for_run_ids(conn, latest_run_ids)]
+                sec_provenance = _sec_provenance_by_key(conn, str(sec_latest_writer_vintage_options["vintage_run_id"]))
+                yahoo_audit_rows = _yahoo_audit_rows_by_key(conn, child_run_ids["enrich"])
+                yahoo_rows = _yahoo_rows_by_key(conn, market)
+                final_mixed_candidates, yahoo_candidates = _build_yahoo_aware_execution_candidates(
+                    plan=post_run_guard_summary,
+                    latest_rows=latest_rows,
+                    sec_provenance_by_key=sec_provenance,
+                    yahoo_audit_rows_by_key=yahoo_audit_rows,
+                    yahoo_rows_by_key=yahoo_rows,
+                    vintage_run_id=str(sec_latest_writer_vintage_options["vintage_run_id"]),
+                )
+                execution_summary = execute_quarter_update_yahoo_aware_vintage_plan(
+                    conn,
+                    plan=post_run_guard_summary,
+                    final_mixed_candidates_by_key=final_mixed_candidates,
+                    yahoo_vintage_candidates_by_key=yahoo_candidates,
+                    market=market,
+                    available_at_utc=str(sec_latest_writer_vintage_options["available_at_utc"]),
+                    ingested_at_utc=str(sec_latest_writer_vintage_options["ingested_at_utc"]),
+                    vintage_run_id=str(sec_latest_writer_vintage_options["vintage_run_id"]),
+                )
+                post_run_guard_summary.update(execution_summary)
+                conn.commit()
+            else:
+                post_run_guard_summary.update(_yahoo_aware_execution_result(YAHOO_AWARE_EXEC_NOT_REQUESTED))
     return {
         "quarterly_refresh_mode": 1 if quarterly_refresh_summary else 0,
         "ttm_rows_written": int(ttm_summary["rows_written"]),
@@ -1970,6 +2276,7 @@ def run_fundamental_quarter_update(
     vintage_run_id: str | None = None,
     vintage_normalization_run_id: str | None = None,
     vintage_mode: str | None = None,
+    vintage_yahoo_aware_action: str = VINTAGE_YAHOO_AWARE_ACTION_PLAN_ONLY,
     final_mixed_execution_runner: Callable[..., dict[str, object]] | None = None,
     final_mixed_inputs_by_key: Mapping[tuple[Any, ...], Mapping[str, Any]] | None = None,
 ) -> dict[str, object]:
@@ -1980,6 +2287,7 @@ def run_fundamental_quarter_update(
         vintage_ingested_at_utc=vintage_ingested_at_utc,
         vintage_run_id=vintage_run_id,
         vintage_mode=vintage_mode,
+        vintage_yahoo_aware_action=vintage_yahoo_aware_action,
     )
     sec_vintage_options = build_sec_reconstruct_vintage_options(
         write_vintage=write_vintage,
@@ -2061,6 +2369,7 @@ def run_fundamental_quarter_update(
                 process_kwargs["yahoo_fallback_vintage_options"] = yahoo_fallback_vintage_options
             if sec_latest_writer_vintage_options is not None:
                 process_kwargs["sec_latest_writer_vintage_options"] = sec_latest_writer_vintage_options
+                process_kwargs["vintage_yahoo_aware_action"] = vintage_yahoo_aware_action
             process_summary = process_ticker(**process_kwargs)
             if vintage_mode == VINTAGE_MODE_SEC_LATEST_WRITER:
                 merge_sec_latest_writer_vintage_summary(
@@ -2184,6 +2493,7 @@ def main() -> None:
             vintage_run_id=args.vintage_run_id,
             vintage_normalization_run_id=args.vintage_normalization_run_id,
             vintage_mode=args.vintage_mode,
+            vintage_yahoo_aware_action=args.vintage_yahoo_aware_action,
         )
     except Exception as exc:
         raise SystemExit(str(exc))

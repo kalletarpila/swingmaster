@@ -646,3 +646,9 @@ The design recommends one final mixed vintage per affected ticker/period after S
 Phase 4I14 adds a temp-DB final mixed execution helper. It does not change production runtime behavior.
 
 The helper writes final mixed vintage and field provenance rows through existing opt-in adapters in tests only, preserving PIT behavior by explicit `available_at_utc`.
+
+## 23. Phase 4I15 Status Note
+
+Phase 4I15 adds a default-off final mixed quarter_update mode and mocked execution seam. It does not enable production final mixed writes.
+
+The new mode requires explicit PIT metadata and a test-injected runner for non-dry execution; otherwise it fails before child steps. Existing planning and isolated vintage modes remain unchanged.

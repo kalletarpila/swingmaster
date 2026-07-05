@@ -386,3 +386,9 @@ No runtime code, tests, providers, schedulers, migrations, real DB writes, or pr
 Phase 4I14 adds a temp-DB final mixed execution helper, documented in [Reported Vintage Final Mixed Execution Helper Phase 4I14](swingmaster_reported_vintage_final_mixed_execution_helper_phase4i14.md).
 
 The helper can write final mixed vintage/provenance rows only through caller-supplied temp DB connections in tests. Production quarter_update execution remains unwired.
+
+## Phase 4I15 Status
+
+Phase 4I15 adds a default-off final mixed quarter_update mode and mocked runner seam, documented in [Reported Vintage Quarter Update Final Mixed Execution Wiring Phase 4I15](swingmaster_reported_vintage_quarter_update_final_mixed_execution_wiring_phase4i15.md).
+
+Production final mixed execution remains unwired: non-dry mode requires a test-injected runner and otherwise fails before child steps.

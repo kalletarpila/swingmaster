@@ -199,3 +199,9 @@ Real DB and production quarter_update final mixed execution should remain later,
 Phase 4I14 adds the temp-DB final mixed execution helper in [Reported Vintage Final Mixed Execution Helper Phase 4I14](swingmaster_reported_vintage_final_mixed_execution_helper_phase4i14.md).
 
 It proves the final mixed builder can write latest-compatible, vintage, and field provenance rows through the existing opt-in adapter, but it is still not wired into production quarter_update execution.
+
+## Phase 4I15 Wiring Reference
+
+Phase 4I15 adds the default-off `sec_plus_yahoo_fallback_final_mixed` mode and mocked runner seam in [Reported Vintage Quarter Update Final Mixed Execution Wiring Phase 4I15](swingmaster_reported_vintage_quarter_update_final_mixed_execution_wiring_phase4i15.md).
+
+The mode validates and summarizes future execution, but production execution remains gated because real final mixed input collection is not implemented.

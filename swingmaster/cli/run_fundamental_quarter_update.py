@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+from collections.abc import Callable
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,11 +30,13 @@ VINTAGE_MODE_VALIDATION_ONLY = "validation_only"
 VINTAGE_MODE_SEC_RECONSTRUCT_ONLY = "sec_reconstruct_only"
 VINTAGE_MODE_YAHOO_FALLBACK_ONLY = "yahoo_fallback_only"
 VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_PLANNING = "sec_plus_yahoo_fallback_planning"
+VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED = "sec_plus_yahoo_fallback_final_mixed"
 VINTAGE_MODE_CHOICES = [
     VINTAGE_MODE_VALIDATION_ONLY,
     VINTAGE_MODE_SEC_RECONSTRUCT_ONLY,
     VINTAGE_MODE_YAHOO_FALLBACK_ONLY,
     VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_PLANNING,
+    VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED,
 ]
 
 
@@ -79,7 +82,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=VINTAGE_MODE_CHOICES,
         help=(
             "Vintage mode. Supports validation_only, sec_reconstruct_only, "
-            "yahoo_fallback_only, or sec_plus_yahoo_fallback_planning"
+            "yahoo_fallback_only, sec_plus_yahoo_fallback_planning, "
+            "or sec_plus_yahoo_fallback_final_mixed"
         ),
     )
     return parser.parse_args(argv)
@@ -129,6 +133,39 @@ def build_final_mixed_vintage_plan_summary(
     }
 
 
+def build_final_mixed_vintage_options(
+    *,
+    vintage_market: str | None,
+    vintage_available_at_utc: str | None,
+    vintage_ingested_at_utc: str | None,
+    vintage_run_id: str | None,
+    vintage_normalization_run_id: str | None,
+) -> dict[str, object]:
+    return {
+        "market": str(vintage_market),
+        "available_at_utc": str(vintage_available_at_utc),
+        "ingested_at_utc": str(vintage_ingested_at_utc),
+        "run_id": str(vintage_run_id),
+        "normalization_run_id": vintage_normalization_run_id,
+    }
+
+
+def merge_final_mixed_execution_summary(
+    summary: dict[str, object],
+    execution_summary: dict[str, object],
+) -> None:
+    summary["vintage_final_mixed_written"] = bool(execution_summary.get("final_mixed_written"))
+    summary["vintage_final_mixed_rows_inserted"] = int(execution_summary.get("vintage_rows_inserted", 0) or 0)
+    summary["vintage_final_mixed_provenance_rows_inserted"] = int(
+        execution_summary.get("provenance_rows_inserted", 0) or 0
+    )
+    summary["vintage_rows_skipped_noop"] = int(execution_summary.get("skipped_noop", 0) or 0)
+    summary["vintage_final_mixed_rows_already_known"] = int(execution_summary.get("already_known", 0) or 0)
+    summary["vintage_rows_failed"] = 1 if execution_summary.get("error") else 0
+    summary["vintage_count_status"] = "final_mixed_execution"
+    summary["vintage_error_summary"] = execution_summary.get("error")
+
+
 def _validate_vintage_timestamp(value: str, field_name: str) -> None:
     try:
         datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
@@ -150,6 +187,7 @@ def validate_vintage_options(
             VINTAGE_MODE_SEC_RECONSTRUCT_ONLY,
             VINTAGE_MODE_YAHOO_FALLBACK_ONLY,
             VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_PLANNING,
+            VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED,
         }:
             raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_WRITE_REQUIRED_FOR_MODE:{vintage_mode}")
         return {}
@@ -165,7 +203,11 @@ def validate_vintage_options(
         raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MODE_REQUIRED")
     if vintage_mode not in VINTAGE_MODE_CHOICES:
         raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MODE_UNSUPPORTED:{vintage_mode}")
-    execution_enabled = vintage_mode in {VINTAGE_MODE_SEC_RECONSTRUCT_ONLY, VINTAGE_MODE_YAHOO_FALLBACK_ONLY}
+    execution_enabled = vintage_mode in {
+        VINTAGE_MODE_SEC_RECONSTRUCT_ONLY,
+        VINTAGE_MODE_YAHOO_FALLBACK_ONLY,
+        VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED,
+    }
     planning_only = vintage_mode == VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_PLANNING
     _validate_vintage_timestamp(vintage_available_at_utc, "vintage_available_at_utc")
     _validate_vintage_timestamp(vintage_ingested_at_utc, "vintage_ingested_at_utc")
@@ -190,6 +232,26 @@ def validate_vintage_options(
             "vintage_rows_skipped_noop": 0,
             "vintage_rows_failed": 0,
             "vintage_count_status": "planning_only_no_execution",
+            "vintage_error_summary": None,
+        }
+    if vintage_mode == VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED:
+        return {
+            "vintage_requested": True,
+            "vintage_mode": vintage_mode,
+            "vintage_execution_enabled": True,
+            "vintage_planning_only": False,
+            "vintage_validation_status": "OK",
+            "vintage_sec_reconstruct_requested": True,
+            "vintage_yahoo_bridge_requested": False,
+            "vintage_yahoo_fallback_requested": True,
+            "vintage_final_mixed_planned": True,
+            "vintage_final_mixed_written": False,
+            "vintage_final_mixed_rows_inserted": 0,
+            "vintage_final_mixed_provenance_rows_inserted": 0,
+            "vintage_rows_skipped_noop": 0,
+            "vintage_final_mixed_rows_already_known": 0,
+            "vintage_rows_failed": 0,
+            "vintage_count_status": "final_mixed_execution_not_run",
             "vintage_error_summary": None,
         }
     return {
@@ -703,6 +765,7 @@ def run_fundamental_quarter_update(
     vintage_run_id: str | None = None,
     vintage_normalization_run_id: str | None = None,
     vintage_mode: str | None = None,
+    final_mixed_execution_runner: Callable[..., dict[str, object]] | None = None,
 ) -> dict[str, object]:
     vintage_summary = validate_vintage_options(
         write_vintage=write_vintage,
@@ -730,6 +793,17 @@ def run_fundamental_quarter_update(
         vintage_normalization_run_id=vintage_normalization_run_id,
         vintage_mode=vintage_mode,
     )
+    final_mixed_vintage_options = None
+    if write_vintage and vintage_mode == VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED:
+        final_mixed_vintage_options = build_final_mixed_vintage_options(
+            vintage_market=vintage_market,
+            vintage_available_at_utc=vintage_available_at_utc,
+            vintage_ingested_at_utc=vintage_ingested_at_utc,
+            vintage_run_id=vintage_run_id,
+            vintage_normalization_run_id=vintage_normalization_run_id,
+        )
+        if not dry_run and final_mixed_execution_runner is None:
+            raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_RUNNER_REQUIRED")
     rows = load_eligible_rows(db_path, market, ticker, limit)
     market_label = market.strip().lower() if market is not None else "ALL"
     strict_single_ticker_mode = ticker is not None
@@ -772,6 +846,13 @@ def run_fundamental_quarter_update(
             if yahoo_fallback_vintage_options is not None:
                 process_kwargs["yahoo_fallback_vintage_options"] = yahoo_fallback_vintage_options
             process_ticker(**process_kwargs)
+            if final_mixed_vintage_options is not None and final_mixed_execution_runner is not None:
+                execution_summary = final_mixed_execution_runner(
+                    db_path=db_path,
+                    row=row,
+                    vintage_options=final_mixed_vintage_options,
+                )
+                merge_final_mixed_execution_summary(vintage_summary, execution_summary)
         except Exception as exc:
             step_name = "unknown"
             message = str(exc)
@@ -791,9 +872,14 @@ def run_fundamental_quarter_update(
                 step_name = "score"
             elif "YAHOO" in message or "ENRICH" in message:
                 step_name = "quarterly_refresh"
+            elif "FINAL_MIXED" in message:
+                step_name = "final_mixed_vintage"
             print(f"TICKER {current_ticker}=FAILED")
             print(f"ERROR ticker={current_ticker} step={step_name} message={message}")
             tickers_failed += 1
+            if vintage_mode == VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED:
+                vintage_summary["vintage_rows_failed"] = int(vintage_summary.get("vintage_rows_failed", 0) or 0) + 1
+                vintage_summary["vintage_error_summary"] = message
             if strict_single_ticker_mode:
                 raise
             continue

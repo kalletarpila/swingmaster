@@ -86,3 +86,9 @@ Phase 4I14 does not modify quarter_update production execution, vintage modes, S
 ## Recommended Next Phase
 
 Recommended Phase 4I15: mocked quarter_update integration around the execution helper summary and data collection contract, still without real DB/provider production execution.
+
+## Phase 4I15 Wiring Reference
+
+Phase 4I15 adds default-off mocked quarter_update wiring for final mixed execution in [Reported Vintage Quarter Update Final Mixed Execution Wiring Phase 4I15](swingmaster_reported_vintage_quarter_update_final_mixed_execution_wiring_phase4i15.md).
+
+The wiring requires an injected runner in tests and remains unavailable for production CLI execution.

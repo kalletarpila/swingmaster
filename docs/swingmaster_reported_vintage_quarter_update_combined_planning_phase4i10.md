@@ -103,3 +103,9 @@ The planning mode remains unchanged: it still writes no vintage rows and does no
 Phase 4I12 adds planning-only final mixed builder integration in [Reported Vintage Quarter Update Final Mixed Planning Phase 4I12](swingmaster_reported_vintage_quarter_update_final_mixed_planning_phase4i12.md).
 
 The planning mode remains no-execution. Its live summary exposes null final mixed plan details until real per-period plan input is available.
+
+## Phase 4I15 Wiring Reference
+
+Phase 4I15 adds a separate default-off final mixed execution mode, documented in [Reported Vintage Quarter Update Final Mixed Execution Wiring Phase 4I15](swingmaster_reported_vintage_quarter_update_final_mixed_execution_wiring_phase4i15.md).
+
+The existing `sec_plus_yahoo_fallback_planning` mode remains planning-only and unchanged.

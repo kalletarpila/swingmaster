@@ -562,3 +562,9 @@ The recommended path is additive:
 2. use the Phase 4B vintage table as the future statement-vintage storage foundation
 3. use the Phase 4B field-level provenance table for future mixed SEC/Yahoo lineage
 4. use the Phase 4C1 writer, Phase 4C2 reader, Phase 4C3 adapter, and Phase 4D preflight as future primitives, but add production reader wiring, provider-path dual-write, and actual backfill behavior only in later, separately approved phases
+
+## 9. Phase 4I1 Status Note
+
+Phase 4I1 adds a default-off SEC reconstruct CLI vintage opt-in. The default CLI behavior remains compatible with the existing raw-reconstruction path. Vintage writes require explicit opt-in flags and caller-provided PIT metadata.
+
+This is still not full production provider wiring. SEC refresh, Yahoo/fallback paths, quarter-update orchestration, schedulers, real DB writes, TTM, scoring, valuation, UI, and ESS readers remain outside the phase.

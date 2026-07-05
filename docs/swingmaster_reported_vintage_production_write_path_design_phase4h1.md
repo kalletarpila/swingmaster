@@ -298,3 +298,11 @@ The test proves the default-off SEC components can work together end to end with
 Phase 4H10 adds temp-DB integration coverage for the Yahoo bridge and Yahoo fallback metadata/scaffold/PIT chain, documented in [Reported Vintage Yahoo Fallback To Vintage Integration Phase 4H10](swingmaster_reported_vintage_yahoo_fallback_to_vintage_integration_phase4h10.md).
 
 The test proves the default-off Yahoo components can work together end to end with fixture data, including mixed SEC-retained and Yahoo-filled field provenance. Production Yahoo CLIs, provider refresh, fallback production execution, real DB writes, and quarter-update orchestration remain unwired.
+
+## Phase 4I1 Status
+
+Phase 4I1 adds a narrow, default-off SEC reconstruct CLI vintage opt-in, documented in [Reported Vintage SEC Reconstruct CLI Opt-In Phase 4I1](swingmaster_reported_vintage_sec_reconstruct_cli_opt_in_phase4i1.md).
+
+The default CLI path remains the existing SEC raw-reconstruction behavior and does not write latest normalized, vintage, or field-provenance tables. With `--write-vintage`, explicit market, availability, ingestion, and vintage run metadata are required before the CLI writes latest-compatible quarterly rows, statement vintages, and SEC provenance through the existing SEC dual-write scaffold.
+
+Provider refresh, Yahoo/fallback paths, `run_fundamental_quarter_update.py`, schedulers, real DB writes, TTM, scoring, valuation, UI, and ESS remain unwired.

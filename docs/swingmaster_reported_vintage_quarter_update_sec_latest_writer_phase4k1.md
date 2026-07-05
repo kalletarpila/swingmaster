@@ -84,3 +84,9 @@ PYTHONPATH=. pytest -q swingmaster/tests/test_quarter_update_sec_latest_writer_v
 ```
 
 Result: `21 passed`.
+
+## Phase 4K2 Follow-Up
+
+Phase 4K2 adds read-only/temp-tested post-run parity and Yahoo-impact guardrails in [Reported Vintage Yahoo Impact Guard Phase 4K2](swingmaster_reported_vintage_yahoo_impact_guard_phase4k2.md).
+
+The follow-up confirms that Yahoo fallback enrichment runs after the 4K1 SEC latest-writer side-write and can therefore create post-SEC latest/vintage drift by inserting a missing quarter or filling NULL fields from Yahoo. Default behavior remains unchanged; the guard summary is surfaced only for explicit `sec_latest_writer` vintage mode.

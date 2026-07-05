@@ -17,6 +17,7 @@ from swingmaster.cli.run_fundamental_yahoo_audit import run_yahoo_audit
 from swingmaster.cli.run_fundamental_yahoo_fallback_enrich import run_yahoo_fallback_enrich
 from swingmaster.cli.run_fundamental_yahoo_quarterly_write import run_yahoo_quarterly_write
 from swingmaster.cli.run_fundamental_yahoo_to_quarterly import run_yahoo_to_quarterly
+from swingmaster.fundamentals.reported_quarterly_dual_write import REPORTED_FINANCIAL_FIELDS
 from swingmaster.fundamentals.reported_final_mixed_execution import execute_final_mixed_vintage_write
 from swingmaster.fundamentals.reported_final_mixed_vintage import (
     build_final_mixed_source_hash,
@@ -48,6 +49,11 @@ VINTAGE_MODE_CHOICES = [
     VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_PLANNING,
     VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED,
 ]
+VINTAGE_PARITY_OK = "OK"
+VINTAGE_PARITY_DRIFT = "DRIFT"
+VINTAGE_PARITY_UNKNOWN_RUN_LINKAGE = "UNKNOWN_RUN_LINKAGE"
+VINTAGE_YAHOO_IMPACT_NONE = "NO_YAHOO_IMPACT_DETECTED"
+VINTAGE_YAHOO_IMPACT_DETECTED = "YAHOO_IMPACT_DETECTED"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -196,6 +202,42 @@ def merge_sec_latest_writer_vintage_summary(
     )
     summary["vintage_count_status"] = "sec_latest_writer_execution"
     summary["vintage_error_summary"] = None
+
+
+def merge_sec_latest_writer_post_run_guard_summary(
+    summary: dict[str, object],
+    guard_summary: Mapping[str, object] | None,
+) -> None:
+    if guard_summary is None:
+        return
+    summary.update(
+        {
+            "vintage_post_run_parity_status": guard_summary.get("vintage_post_run_parity_status"),
+            "vintage_post_run_latest_without_vintage_count": guard_summary.get(
+                "vintage_post_run_latest_without_vintage_count"
+            ),
+            "vintage_post_run_vintage_without_latest_count": guard_summary.get(
+                "vintage_post_run_vintage_without_latest_count"
+            ),
+            "vintage_post_run_value_mismatch_count": guard_summary.get("vintage_post_run_value_mismatch_count"),
+            "vintage_post_run_duplicate_statement_vintage_id_count": guard_summary.get(
+                "vintage_post_run_duplicate_statement_vintage_id_count"
+            ),
+            "vintage_yahoo_impact_status": guard_summary.get("vintage_yahoo_impact_status"),
+            "vintage_yahoo_fallback_rows_detected": guard_summary.get("vintage_yahoo_fallback_rows_detected"),
+            "vintage_yahoo_inserted_missing_quarter_rows_detected": guard_summary.get(
+                "vintage_yahoo_inserted_missing_quarter_rows_detected"
+            ),
+            "vintage_yahoo_filled_field_rows_detected": guard_summary.get(
+                "vintage_yahoo_filled_field_rows_detected"
+            ),
+            "vintage_yahoo_audit_rows_detected": guard_summary.get("vintage_yahoo_audit_rows_detected"),
+            "vintage_yahoo_can_create_post_sec_vintage_drift": guard_summary.get(
+                "vintage_yahoo_can_create_post_sec_vintage_drift"
+            ),
+            "vintage_recommendation": guard_summary.get("vintage_recommendation"),
+        }
+    )
 
 
 def run_final_mixed_vintage_execution_for_ticker(
@@ -783,6 +825,318 @@ def run_sec_latest_writer_vintage_side_write(
     }
 
 
+def check_quarter_update_vintage_parity_for_run(
+    conn: sqlite3.Connection,
+    *,
+    market: str,
+    source_run_id: str | None,
+    vintage_run_id: str | None = None,
+    additional_latest_run_ids: list[str] | None = None,
+) -> dict[str, object]:
+    if source_run_id is None or not str(source_run_id).strip():
+        return {
+            "vintage_post_run_parity_status": VINTAGE_PARITY_UNKNOWN_RUN_LINKAGE,
+            "vintage_post_run_latest_without_vintage_count": None,
+            "vintage_post_run_vintage_without_latest_count": None,
+            "vintage_post_run_value_mismatch_count": None,
+            "vintage_post_run_duplicate_statement_vintage_id_count": None,
+        }
+
+    normalized_market = str(market).strip().lower()
+    normalized_source_run_id = str(source_run_id).strip()
+    latest_run_ids = [normalized_source_run_id, *[run_id for run_id in (additional_latest_run_ids or []) if str(run_id).strip()]]
+    latest_rows = _latest_rows_for_run_ids(conn, latest_run_ids)
+    latest_without_vintage_count = 0
+    value_mismatch_count = 0
+    for latest_row in latest_rows:
+        vintage_rows = _matching_vintage_rows(conn, normalized_market, str(latest_row["ticker"]), str(latest_row["period_end_date"]))
+        if not vintage_rows:
+            latest_without_vintage_count += 1
+            continue
+        if not any(_latest_and_vintage_values_match(latest_row, vintage_row) for vintage_row in vintage_rows):
+            value_mismatch_count += 1
+
+    vintage_without_latest_count: int | None = None
+    if vintage_run_id is not None and str(vintage_run_id).strip():
+        vintage_without_latest_count = _vintage_without_latest_count(
+            conn,
+            market=normalized_market,
+            vintage_run_id=str(vintage_run_id).strip(),
+            source_run_id=normalized_source_run_id,
+        )
+
+    duplicate_statement_vintage_id_count = _duplicate_statement_vintage_id_count(conn, normalized_market, vintage_run_id)
+    drift_detected = latest_without_vintage_count > 0 or value_mismatch_count > 0 or duplicate_statement_vintage_id_count > 0
+    if vintage_without_latest_count is not None:
+        drift_detected = drift_detected or vintage_without_latest_count > 0
+
+    return {
+        "vintage_post_run_parity_status": VINTAGE_PARITY_DRIFT if drift_detected else VINTAGE_PARITY_OK,
+        "vintage_post_run_latest_without_vintage_count": latest_without_vintage_count,
+        "vintage_post_run_vintage_without_latest_count": vintage_without_latest_count,
+        "vintage_post_run_value_mismatch_count": value_mismatch_count,
+        "vintage_post_run_duplicate_statement_vintage_id_count": duplicate_statement_vintage_id_count,
+    }
+
+
+def detect_yahoo_quarter_update_impact_for_run(
+    conn: sqlite3.Connection,
+    *,
+    enrich_run_id: str | None,
+    enrich_summary: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    if enrich_run_id is None or not str(enrich_run_id).strip():
+        return {
+            "vintage_yahoo_impact_status": VINTAGE_PARITY_UNKNOWN_RUN_LINKAGE,
+            "vintage_yahoo_fallback_rows_detected": None,
+            "vintage_yahoo_inserted_missing_quarter_rows_detected": None,
+            "vintage_yahoo_filled_field_rows_detected": None,
+            "vintage_yahoo_audit_rows_detected": None,
+            "vintage_yahoo_can_create_post_sec_vintage_drift": None,
+        }
+
+    normalized_run_id = str(enrich_run_id).strip()
+    audit_rows_detected = _yahoo_audit_rows_for_run(conn, normalized_run_id)
+    filled_field_rows_detected = _yahoo_filled_field_rows_for_run(conn, normalized_run_id)
+    inserted_missing_quarter_rows_detected = _int_summary_value(enrich_summary, "rows_inserted")
+    if inserted_missing_quarter_rows_detected is None:
+        inserted_missing_quarter_rows_detected = _latest_rows_count_for_run(conn, normalized_run_id)
+    fallback_rows_detected = _int_summary_value(enrich_summary, "rows_updated")
+    if fallback_rows_detected is None:
+        fallback_rows_detected = _yahoo_fallback_period_count_for_run(conn, normalized_run_id)
+
+    can_drift = (
+        audit_rows_detected > 0
+        or filled_field_rows_detected > 0
+        or inserted_missing_quarter_rows_detected > 0
+        or fallback_rows_detected > 0
+    )
+    return {
+        "vintage_yahoo_impact_status": VINTAGE_YAHOO_IMPACT_DETECTED if can_drift else VINTAGE_YAHOO_IMPACT_NONE,
+        "vintage_yahoo_fallback_rows_detected": fallback_rows_detected,
+        "vintage_yahoo_inserted_missing_quarter_rows_detected": inserted_missing_quarter_rows_detected,
+        "vintage_yahoo_filled_field_rows_detected": filled_field_rows_detected,
+        "vintage_yahoo_audit_rows_detected": audit_rows_detected,
+        "vintage_yahoo_can_create_post_sec_vintage_drift": can_drift,
+    }
+
+
+def build_quarter_update_vintage_post_run_guard_summary(
+    conn: sqlite3.Connection,
+    *,
+    market: str,
+    source_run_id: str | None,
+    vintage_run_id: str | None,
+    enrich_run_id: str | None,
+    enrich_summary: Mapping[str, object] | None,
+) -> dict[str, object]:
+    parity = check_quarter_update_vintage_parity_for_run(
+        conn,
+        market=market,
+        source_run_id=source_run_id,
+        vintage_run_id=vintage_run_id,
+        additional_latest_run_ids=[enrich_run_id] if enrich_run_id is not None else None,
+    )
+    yahoo_impact = detect_yahoo_quarter_update_impact_for_run(
+        conn,
+        enrich_run_id=enrich_run_id,
+        enrich_summary=enrich_summary,
+    )
+    output = {**parity, **yahoo_impact}
+    output["vintage_recommendation"] = _quarter_update_vintage_recommendation(output)
+    return output
+
+
+def _latest_rows_for_run(conn: sqlite3.Connection, source_run_id: str) -> list[sqlite3.Row]:
+    return _latest_rows_for_run_ids(conn, [source_run_id])
+
+
+def _latest_rows_for_run_ids(conn: sqlite3.Connection, run_ids: list[str]) -> list[sqlite3.Row]:
+    normalized_run_ids = [str(run_id).strip() for run_id in run_ids if str(run_id).strip()]
+    if not normalized_run_ids:
+        return []
+    previous_row_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        placeholders = ", ".join("?" for _ in normalized_run_ids)
+        return conn.execute(
+            f"""
+            SELECT *
+            FROM rc_fundamental_quarterly
+            WHERE run_id IN ({placeholders})
+            ORDER BY ticker ASC, period_end_date ASC
+            """,
+            normalized_run_ids,
+        ).fetchall()
+    finally:
+        conn.row_factory = previous_row_factory
+
+
+def _matching_vintage_rows(
+    conn: sqlite3.Connection,
+    market: str,
+    ticker: str,
+    period_end_date: str,
+) -> list[sqlite3.Row]:
+    previous_row_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        return conn.execute(
+            """
+            SELECT *
+            FROM rc_fundamental_quarterly_vintage
+            WHERE market = ?
+              AND ticker = ?
+              AND period_end_date = ?
+            ORDER BY available_at_utc DESC, statement_vintage_id ASC
+            """,
+            (market, ticker.upper(), period_end_date),
+        ).fetchall()
+    finally:
+        conn.row_factory = previous_row_factory
+
+
+def _latest_and_vintage_values_match(latest_row: sqlite3.Row, vintage_row: sqlite3.Row) -> bool:
+    for field_name in REPORTED_FINANCIAL_FIELDS:
+        if not _values_equal_for_guard(latest_row[field_name], vintage_row[field_name]):
+            return False
+    return _values_equal_for_guard(latest_row["currency"], vintage_row["currency"])
+
+
+def _values_equal_for_guard(left: object, right: object) -> bool:
+    if left is None or right is None:
+        return left is right
+    try:
+        return float(left) == float(right)
+    except (TypeError, ValueError):
+        return left == right
+
+
+def _vintage_without_latest_count(
+    conn: sqlite3.Connection,
+    *,
+    market: str,
+    vintage_run_id: str,
+    source_run_id: str,
+) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM rc_fundamental_quarterly_vintage AS vintage
+        LEFT JOIN rc_fundamental_quarterly AS latest
+          ON latest.ticker = vintage.ticker
+         AND latest.period_end_date = vintage.period_end_date
+         AND latest.run_id = ?
+        WHERE vintage.market = ?
+          AND vintage.run_id = ?
+          AND latest.ticker IS NULL
+        """,
+        (source_run_id, market, vintage_run_id),
+    ).fetchone()
+    return int(row[0] or 0)
+
+
+def _duplicate_statement_vintage_id_count(
+    conn: sqlite3.Connection,
+    market: str,
+    vintage_run_id: str | None,
+) -> int:
+    params: list[object] = [market]
+    run_filter = ""
+    if vintage_run_id is not None and str(vintage_run_id).strip():
+        run_filter = "AND run_id = ?"
+        params.append(str(vintage_run_id).strip())
+    rows = conn.execute(
+        f"""
+        SELECT statement_vintage_id
+        FROM rc_fundamental_quarterly_vintage
+        WHERE market = ?
+          {run_filter}
+        GROUP BY statement_vintage_id
+        HAVING COUNT(*) > 1
+        """,
+        params,
+    ).fetchall()
+    return len(rows)
+
+
+def _yahoo_audit_rows_for_run(conn: sqlite3.Connection, run_id: str) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM rc_fundamental_quarterly_enrichment_audit
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+    return int(row[0] or 0)
+
+
+def _yahoo_filled_field_rows_for_run(conn: sqlite3.Connection, run_id: str) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM rc_fundamental_quarterly_enrichment_audit
+        WHERE run_id = ?
+          AND fallback_source = 'yahoo'
+          AND enrichment_status = 'FILLED_FROM_YAHOO'
+        """,
+        (run_id,),
+    ).fetchone()
+    return int(row[0] or 0)
+
+
+def _yahoo_fallback_period_count_for_run(conn: sqlite3.Connection, run_id: str) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM (
+            SELECT DISTINCT ticker, period_end_date
+            FROM rc_fundamental_quarterly_enrichment_audit
+            WHERE run_id = ?
+              AND fallback_source = 'yahoo'
+              AND enrichment_status = 'FILLED_FROM_YAHOO'
+        )
+        """,
+        (run_id,),
+    ).fetchone()
+    return int(row[0] or 0)
+
+
+def _latest_rows_count_for_run(conn: sqlite3.Connection, run_id: str) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM rc_fundamental_quarterly
+        WHERE run_id = ?
+        """,
+        (run_id,),
+    ).fetchone()
+    return int(row[0] or 0)
+
+
+def _int_summary_value(summary: Mapping[str, object] | None, key: str) -> int | None:
+    if summary is None or key not in summary:
+        return None
+    value = summary.get(key)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _quarter_update_vintage_recommendation(summary: Mapping[str, object]) -> str:
+    if summary.get("vintage_yahoo_can_create_post_sec_vintage_drift") is True:
+        return "phase_4k3_final_mixed_or_post_run_parity_apply"
+    if summary.get("vintage_post_run_parity_status") == VINTAGE_PARITY_DRIFT:
+        return "phase_4k3_post_run_parity_apply"
+    if summary.get("vintage_post_run_parity_status") == VINTAGE_PARITY_UNKNOWN_RUN_LINKAGE:
+        return "phase_4k3_fix_run_linkage_before_apply"
+    return "phase_4k3_can_prioritize_final_mixed_policy"
+
+
 def run_sec_reconstruct_step(
     db_path: Path,
     ticker: str,
@@ -1015,6 +1369,17 @@ def process_ticker(
         print("STEP ack=OK")
 
     sec_latest_writer_vintage_summary = _extract_sec_latest_writer_vintage_summary(quarterly_refresh_summary)
+    post_run_guard_summary = None
+    if sec_latest_writer_vintage_options is not None:
+        with sqlite3.connect(str(db_path)) as conn:
+            post_run_guard_summary = build_quarter_update_vintage_post_run_guard_summary(
+                conn,
+                market=market,
+                source_run_id=child_run_ids["quarterly"],
+                vintage_run_id=str(sec_latest_writer_vintage_options["vintage_run_id"]),
+                enrich_run_id=child_run_ids["enrich"],
+                enrich_summary=_extract_enrich_summary(quarterly_refresh_summary),
+            )
     return {
         "quarterly_refresh_mode": 1 if quarterly_refresh_summary else 0,
         "ttm_rows_written": int(ttm_summary["rows_written"]),
@@ -1022,6 +1387,7 @@ def process_ticker(
         "score_rows_written": score_rows_written,
         "ack_rows_written": ack_rows_written,
         "sec_latest_writer_vintage_summary": sec_latest_writer_vintage_summary,
+        "vintage_post_run_guard_summary": post_run_guard_summary,
     }
 
 
@@ -1032,6 +1398,13 @@ def _extract_sec_latest_writer_vintage_summary(summary: Mapping[str, Any]) -> Ma
     latest_writer_summary = sec_refresh_summary.get("sec_latest_writer_vintage_summary")
     if isinstance(latest_writer_summary, Mapping):
         return latest_writer_summary
+    return None
+
+
+def _extract_enrich_summary(summary: Mapping[str, Any]) -> Mapping[str, object] | None:
+    enrich_summary = summary.get("summary")
+    if isinstance(enrich_summary, Mapping):
+        return enrich_summary
     return None
 
 
@@ -1147,6 +1520,10 @@ def run_fundamental_quarter_update(
                 merge_sec_latest_writer_vintage_summary(
                     vintage_summary,
                     _optional_mapping(process_summary.get("sec_latest_writer_vintage_summary")),
+                )
+                merge_sec_latest_writer_post_run_guard_summary(
+                    vintage_summary,
+                    _optional_mapping(process_summary.get("vintage_post_run_guard_summary")),
                 )
             if final_mixed_vintage_options is not None:
                 if final_mixed_execution_runner is not None:

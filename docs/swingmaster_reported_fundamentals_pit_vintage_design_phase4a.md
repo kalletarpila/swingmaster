@@ -664,3 +664,11 @@ The runner writes only through a caller-supplied SQLite connection and requires 
 Phase 4J1 adds a read-only single-ticker final mixed preflight. It does not write real DB rows.
 
 The first real DB smoke used ticker `A` and classified the candidate as `INPUTS_INCOMPLETE_FOR_TRUE_FINAL_MIXED`, with row counts unchanged before and after the preflight.
+
+## 26. Phase 4K2 Status Note
+
+Phase 4K2 adds read-only, temp-tested quarter_update post-run guardrails for `sec_latest_writer` vintage mode. It does not run providers, scheduler jobs, refresh jobs, or real DB writes.
+
+The guard documents and tests that USA quarter_update runs Yahoo fallback enrichment after the SEC latest-writer vintage side-write. Repo evidence indicates Yahoo fallback can insert a missing quarterly row or fill NULL fields from Yahoo audit rows after the SEC-only vintage is written, while non-null SEC values are not overwritten by the fallback update builder.
+
+The new guard surfaces latest/vintage parity status, value mismatch counts, Yahoo audit impact counts, and a Phase 4K3 recommendation only when explicit `--write-vintage --vintage-mode sec_latest_writer` is used. Default no-vintage behavior remains unchanged.

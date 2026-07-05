@@ -177,6 +177,12 @@ Follow-up: the SEC-derived read-only dry-run was implemented and run in
 all 42 rows are blocked by reconstruction mismatches, so a guarded SEC-derived
 apply is not currently safe with the existing reconstruction logic.
 
+Follow-up diagnostics are documented in
+`docs/swingmaster_reported_vintage_sec_reconstruction_mismatch_diagnostics.md`.
+They indicate that the mismatch is systematic and likely caused by the SEC
+dry-run reconstruction path differing from the quarter-update latest writer
+path.
+
 ## Runtime/default behavior changed
 
 No.

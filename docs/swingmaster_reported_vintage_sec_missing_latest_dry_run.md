@@ -133,6 +133,12 @@ same SEC raw evidence. The likely next design decision is one of:
   reconsider a guarded legacy-baseline vintage path for these 42 rows, with
   explicit metadata that it is latest-derived rather than SEC-reconstructed.
 
+Follow-up: the mismatch diagnostics are documented in
+`docs/swingmaster_reported_vintage_sec_reconstruction_mismatch_diagnostics.md`.
+They indicate that the dry-run reconstruction path differs from the latest
+writer path, so the next phase should align the candidate builder with the
+actual latest writer semantics before any apply.
+
 ## Checks run
 
 ```bash

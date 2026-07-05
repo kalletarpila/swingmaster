@@ -658,3 +658,9 @@ The new mode requires explicit PIT metadata and a test-injected runner for non-d
 Phase 4J0 adds a production-safe final mixed runner for quarter_update. It does not run against the real DB.
 
 The runner writes only through a caller-supplied SQLite connection and requires explicit final mixed inputs. Temp-DB tests verify PIT-readable final mixed rows without provider calls.
+
+## 25. Phase 4J1 Status Note
+
+Phase 4J1 adds a read-only single-ticker final mixed preflight. It does not write real DB rows.
+
+The first real DB smoke used ticker `A` and classified the candidate as `INPUTS_INCOMPLETE_FOR_TRUE_FINAL_MIXED`, with row counts unchanged before and after the preflight.

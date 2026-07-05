@@ -77,3 +77,9 @@ Before a guarded single-ticker real DB test, the next phase must prove:
 - dry-run/preflight shows the row and provenance that would be written
 - backup/rollback procedure is documented
 - duplicate/no-op behavior is understood for the target ticker/period
+
+## Phase 4J1 Preflight Reference
+
+Phase 4J1 adds a read-only single-ticker preflight in [Reported Vintage Single Ticker Final Mixed Preflight Phase 4J1](swingmaster_reported_vintage_single_ticker_final_mixed_preflight_phase4j1.md).
+
+The first real DB smoke classified ticker `A` as `INPUTS_INCOMPLETE_FOR_TRUE_FINAL_MIXED`, so no guarded write is recommended yet.

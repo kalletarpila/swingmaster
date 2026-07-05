@@ -23,18 +23,27 @@ from swingmaster.fundamentals.reported_final_mixed_vintage import (
     build_final_mixed_statement_vintage_id,
     merge_final_mixed_field_source_maps,
 )
+from swingmaster.fundamentals.reported_sec_latest_writer_vintage import (
+    build_latest_writer_sec_vintage_candidate,
+)
+from swingmaster.fundamentals.reported_vintage_writer import (
+    insert_quarterly_field_provenance_rows,
+    insert_quarterly_vintage_row,
+)
 from swingmaster.fundamentals.lifecycle import run_lifecycle_classification
 from swingmaster.fundamentals.score import run_fundamental_scoring
 
 DEFAULT_EXCHANGE = "HE"
 VINTAGE_MODE_VALIDATION_ONLY = "validation_only"
 VINTAGE_MODE_SEC_RECONSTRUCT_ONLY = "sec_reconstruct_only"
+VINTAGE_MODE_SEC_LATEST_WRITER = "sec_latest_writer"
 VINTAGE_MODE_YAHOO_FALLBACK_ONLY = "yahoo_fallback_only"
 VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_PLANNING = "sec_plus_yahoo_fallback_planning"
 VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED = "sec_plus_yahoo_fallback_final_mixed"
 VINTAGE_MODE_CHOICES = [
     VINTAGE_MODE_VALIDATION_ONLY,
     VINTAGE_MODE_SEC_RECONSTRUCT_ONLY,
+    VINTAGE_MODE_SEC_LATEST_WRITER,
     VINTAGE_MODE_YAHOO_FALLBACK_ONLY,
     VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_PLANNING,
     VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED,
@@ -83,7 +92,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=VINTAGE_MODE_CHOICES,
         help=(
             "Vintage mode. Supports validation_only, sec_reconstruct_only, "
-            "yahoo_fallback_only, sec_plus_yahoo_fallback_planning, "
+            "sec_latest_writer, yahoo_fallback_only, sec_plus_yahoo_fallback_planning, "
             "or sec_plus_yahoo_fallback_final_mixed"
         ),
     )
@@ -165,6 +174,28 @@ def merge_final_mixed_execution_summary(
     summary["vintage_rows_failed"] = 1 if execution_summary.get("error") else 0
     summary["vintage_count_status"] = "final_mixed_execution"
     summary["vintage_error_summary"] = execution_summary.get("error")
+
+
+def merge_sec_latest_writer_vintage_summary(
+    summary: dict[str, object],
+    execution_summary: Mapping[str, object] | None,
+) -> None:
+    if execution_summary is None:
+        return
+    summary["vintage_rows_inserted"] = int(summary.get("vintage_rows_inserted", 0) or 0) + int(
+        execution_summary.get("vintage_rows_inserted", 0) or 0
+    )
+    summary["vintage_provenance_rows_inserted"] = int(
+        summary.get("vintage_provenance_rows_inserted", 0) or 0
+    ) + int(execution_summary.get("provenance_rows_inserted", 0) or 0)
+    summary["vintage_rows_skipped_noop"] = int(summary.get("vintage_rows_skipped_noop", 0) or 0) + int(
+        execution_summary.get("skipped_already_had_vintage", 0) or 0
+    )
+    summary["vintage_rows_failed"] = int(summary.get("vintage_rows_failed", 0) or 0) + int(
+        execution_summary.get("blocked_rows", 0) or 0
+    )
+    summary["vintage_count_status"] = "sec_latest_writer_execution"
+    summary["vintage_error_summary"] = None
 
 
 def run_final_mixed_vintage_execution_for_ticker(
@@ -292,6 +323,7 @@ def validate_vintage_options(
     if not write_vintage:
         if vintage_mode in {
             VINTAGE_MODE_SEC_RECONSTRUCT_ONLY,
+            VINTAGE_MODE_SEC_LATEST_WRITER,
             VINTAGE_MODE_YAHOO_FALLBACK_ONLY,
             VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_PLANNING,
             VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED,
@@ -312,6 +344,7 @@ def validate_vintage_options(
         raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MODE_UNSUPPORTED:{vintage_mode}")
     execution_enabled = vintage_mode in {
         VINTAGE_MODE_SEC_RECONSTRUCT_ONLY,
+        VINTAGE_MODE_SEC_LATEST_WRITER,
         VINTAGE_MODE_YAHOO_FALLBACK_ONLY,
         VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED,
     }
@@ -368,6 +401,7 @@ def validate_vintage_options(
         "vintage_planning_only": False,
         "vintage_validation_status": "OK",
         "vintage_sec_reconstruct_requested": vintage_mode == VINTAGE_MODE_SEC_RECONSTRUCT_ONLY,
+        "vintage_sec_latest_writer_requested": vintage_mode == VINTAGE_MODE_SEC_LATEST_WRITER,
         "vintage_yahoo_bridge_requested": False,
         "vintage_yahoo_fallback_requested": vintage_mode == VINTAGE_MODE_YAHOO_FALLBACK_ONLY,
         "vintage_final_mixed_planned": False,
@@ -422,6 +456,25 @@ def build_yahoo_fallback_vintage_options(
         "vintage_ingested_at_utc": str(vintage_ingested_at_utc),
         "vintage_run_id": str(vintage_run_id),
         "vintage_normalization_run_id": vintage_normalization_run_id,
+    }
+
+
+def build_sec_latest_writer_vintage_options(
+    *,
+    write_vintage: bool,
+    vintage_market: str | None,
+    vintage_available_at_utc: str | None,
+    vintage_ingested_at_utc: str | None,
+    vintage_run_id: str | None,
+    vintage_mode: str | None,
+) -> dict[str, object] | None:
+    if not write_vintage or vintage_mode != VINTAGE_MODE_SEC_LATEST_WRITER:
+        return None
+    return {
+        "market": str(vintage_market),
+        "available_at_utc": str(vintage_available_at_utc),
+        "ingested_at_utc": str(vintage_ingested_at_utc),
+        "vintage_run_id": str(vintage_run_id),
     }
 
 
@@ -632,6 +685,104 @@ def run_sec_quarterly_build_step(db_path: Path, ticker: str, run_id: str, dry_ru
         )
 
 
+def run_sec_latest_writer_vintage_side_write(
+    db_path: Path,
+    *,
+    ticker: str,
+    latest_run_id: str,
+    source_run_id: str,
+    market: str,
+    available_at_utc: str,
+    ingested_at_utc: str,
+    vintage_run_id: str,
+    allow_unknown_provenance: bool = False,
+) -> dict[str, object]:
+    normalized_ticker = ticker.upper()
+    candidates = []
+    skipped_already_has_vintage = 0
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        latest_rows = conn.execute(
+            """
+            SELECT *
+            FROM rc_fundamental_quarterly
+            WHERE ticker = ?
+              AND run_id = ?
+            ORDER BY period_end_date ASC
+            """,
+            (normalized_ticker, latest_run_id),
+        ).fetchall()
+        raw_rows = conn.execute(
+            """
+            SELECT
+                ticker,
+                statement_type,
+                period_end_date,
+                period_type,
+                field_name,
+                field_value,
+                currency,
+                source,
+                retrieved_at_utc,
+                run_id
+            FROM rc_fundamental_statement_raw
+            WHERE ticker = ?
+              AND source = 'sec_edgar'
+              AND period_type = 'sec_fact'
+            ORDER BY ticker ASC, statement_type ASC, period_end_date ASC, field_name ASC
+            """,
+            (normalized_ticker,),
+        ).fetchall()
+        for latest_row in latest_rows:
+            existing = conn.execute(
+                """
+                SELECT 1
+                FROM rc_fundamental_quarterly_vintage
+                WHERE ticker = ?
+                  AND period_end_date = ?
+                  AND market = ?
+                LIMIT 1
+                """,
+                (normalized_ticker, latest_row["period_end_date"], market),
+            ).fetchone()
+            if existing is not None:
+                skipped_already_has_vintage += 1
+                continue
+            candidate = build_latest_writer_sec_vintage_candidate(
+                latest_row={key: latest_row[key] for key in latest_row.keys()},
+                sec_raw_rows=raw_rows,
+                market=market,
+                available_at_utc=available_at_utc,
+                ingested_at_utc=ingested_at_utc,
+                vintage_run_id=vintage_run_id,
+                source_run_id=source_run_id,
+            )
+            if candidate["unknown_provenance_count"] and not allow_unknown_provenance:
+                fields = ",".join(candidate["unknown_provenance_fields"])
+                raise RuntimeError(
+                    "FUNDAMENTAL_QUARTER_UPDATE_SEC_LATEST_WRITER_UNKNOWN_PROVENANCE:"
+                    f"{normalized_ticker},{latest_row['period_end_date']}:{fields}"
+                )
+            candidates.append(candidate)
+
+        vintage_rows_inserted = 0
+        provenance_rows_inserted = 0
+        for candidate in candidates:
+            vintage_rows_inserted += insert_quarterly_vintage_row(conn, candidate["vintage_row"])
+            provenance_rows_inserted += insert_quarterly_field_provenance_rows(conn, candidate["provenance_rows"])
+        conn.commit()
+
+    return {
+        "latest_rows_considered": len(candidates) + skipped_already_has_vintage,
+        "vintage_rows_inserted": vintage_rows_inserted,
+        "provenance_rows_inserted": provenance_rows_inserted,
+        "skipped_already_had_vintage": skipped_already_has_vintage,
+        "blocked_rows": 0,
+        "unknown_provenance_fields": {},
+        "status": "ok",
+    }
+
+
 def run_sec_reconstruct_step(
     db_path: Path,
     ticker: str,
@@ -658,6 +809,7 @@ def run_quarterly_refresh(
     child_run_ids: dict[str, str],
     sec_vintage_options: dict[str, object] | None = None,
     yahoo_fallback_vintage_options: dict[str, object] | None = None,
+    sec_latest_writer_vintage_options: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     if market == "usa":
         retrieved_at_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -706,12 +858,25 @@ def run_quarterly_refresh(
                 run_id=child_run_ids["quarterly"],
                 dry_run=False,
             )
+            sec_latest_writer_vintage_summary = None
+            if sec_latest_writer_vintage_options is not None:
+                sec_latest_writer_vintage_summary = run_sec_latest_writer_vintage_side_write(
+                    db_path=db_path,
+                    ticker=ticker,
+                    latest_run_id=child_run_ids["quarterly"],
+                    source_run_id=child_run_ids["sec_raw"],
+                    market=str(sec_latest_writer_vintage_options["market"]),
+                    available_at_utc=str(sec_latest_writer_vintage_options["available_at_utc"]),
+                    ingested_at_utc=str(sec_latest_writer_vintage_options["ingested_at_utc"]),
+                    vintage_run_id=str(sec_latest_writer_vintage_options["vintage_run_id"]),
+                )
             sec_refresh_summary = {
                 "cik": cik,
                 "rows": rows,
                 "periods_detected": periods_detected,
                 "rows_written": rows_written,
                 "sec_reconstruct_summary": sec_reconstruct_summary,
+                "sec_latest_writer_vintage_summary": sec_latest_writer_vintage_summary,
             }
             with sqlite3.connect(str(db_path)) as conn:
                 if not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date):
@@ -787,7 +952,8 @@ def process_ticker(
     skip_ack: bool,
     sec_vintage_options: dict[str, object] | None = None,
     yahoo_fallback_vintage_options: dict[str, object] | None = None,
-) -> dict[str, int]:
+    sec_latest_writer_vintage_options: dict[str, object] | None = None,
+) -> dict[str, object]:
     ticker = str(row["ticker"]).upper()
     market = str(row["market"]).lower()
     detected_source_period_end_date = row["detected_source_period_end_date"]
@@ -802,6 +968,7 @@ def process_ticker(
         child_run_ids=child_run_ids,
         sec_vintage_options=sec_vintage_options,
         yahoo_fallback_vintage_options=yahoo_fallback_vintage_options,
+        sec_latest_writer_vintage_options=sec_latest_writer_vintage_options,
     )
     print("STEP quarterly_refresh=OK")
 
@@ -847,13 +1014,25 @@ def process_ticker(
         )
         print("STEP ack=OK")
 
+    sec_latest_writer_vintage_summary = _extract_sec_latest_writer_vintage_summary(quarterly_refresh_summary)
     return {
         "quarterly_refresh_mode": 1 if quarterly_refresh_summary else 0,
         "ttm_rows_written": int(ttm_summary["rows_written"]),
         "lifecycle_rows_written": lifecycle_rows_written,
         "score_rows_written": score_rows_written,
         "ack_rows_written": ack_rows_written,
+        "sec_latest_writer_vintage_summary": sec_latest_writer_vintage_summary,
     }
+
+
+def _extract_sec_latest_writer_vintage_summary(summary: Mapping[str, Any]) -> Mapping[str, object] | None:
+    sec_refresh_summary = summary.get("sec_refresh_summary")
+    if not isinstance(sec_refresh_summary, Mapping):
+        return None
+    latest_writer_summary = sec_refresh_summary.get("sec_latest_writer_vintage_summary")
+    if isinstance(latest_writer_summary, Mapping):
+        return latest_writer_summary
+    return None
 
 
 def run_fundamental_quarter_update(
@@ -899,6 +1078,14 @@ def run_fundamental_quarter_update(
         vintage_ingested_at_utc=vintage_ingested_at_utc,
         vintage_run_id=vintage_run_id,
         vintage_normalization_run_id=vintage_normalization_run_id,
+        vintage_mode=vintage_mode,
+    )
+    sec_latest_writer_vintage_options = build_sec_latest_writer_vintage_options(
+        write_vintage=write_vintage,
+        vintage_market=vintage_market,
+        vintage_available_at_utc=vintage_available_at_utc,
+        vintage_ingested_at_utc=vintage_ingested_at_utc,
+        vintage_run_id=vintage_run_id,
         vintage_mode=vintage_mode,
     )
     final_mixed_vintage_options = None
@@ -953,7 +1140,14 @@ def run_fundamental_quarter_update(
                 process_kwargs["sec_vintage_options"] = sec_vintage_options
             if yahoo_fallback_vintage_options is not None:
                 process_kwargs["yahoo_fallback_vintage_options"] = yahoo_fallback_vintage_options
-            process_ticker(**process_kwargs)
+            if sec_latest_writer_vintage_options is not None:
+                process_kwargs["sec_latest_writer_vintage_options"] = sec_latest_writer_vintage_options
+            process_summary = process_ticker(**process_kwargs)
+            if vintage_mode == VINTAGE_MODE_SEC_LATEST_WRITER:
+                merge_sec_latest_writer_vintage_summary(
+                    vintage_summary,
+                    _optional_mapping(process_summary.get("sec_latest_writer_vintage_summary")),
+                )
             if final_mixed_vintage_options is not None:
                 if final_mixed_execution_runner is not None:
                     execution_summary = final_mixed_execution_runner(
@@ -990,11 +1184,16 @@ def run_fundamental_quarter_update(
                 step_name = "score"
             elif "YAHOO" in message or "ENRICH" in message:
                 step_name = "quarterly_refresh"
+            elif "SEC_LATEST_WRITER" in message:
+                step_name = "sec_latest_writer_vintage"
             elif "FINAL_MIXED" in message:
                 step_name = "final_mixed_vintage"
             print(f"TICKER {current_ticker}=FAILED")
             print(f"ERROR ticker={current_ticker} step={step_name} message={message}")
             tickers_failed += 1
+            if vintage_mode == VINTAGE_MODE_SEC_LATEST_WRITER:
+                vintage_summary["vintage_rows_failed"] = int(vintage_summary.get("vintage_rows_failed", 0) or 0) + 1
+                vintage_summary["vintage_error_summary"] = message
             if vintage_mode == VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED:
                 vintage_summary["vintage_rows_failed"] = int(vintage_summary.get("vintage_rows_failed", 0) or 0) + 1
                 vintage_summary["vintage_error_summary"] = message

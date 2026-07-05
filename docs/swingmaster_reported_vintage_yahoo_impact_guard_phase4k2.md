@@ -124,3 +124,9 @@ Phase 4K3 should not silently rely on SEC-only vintage when Yahoo fallback can c
 - Yahoo-only vintage only for cases where the row is entirely Yahoo-inserted and no SEC latest row exists
 
 For final production policy, prefer a final mixed vintage after the full quarter_update latest row is stable.
+
+## Phase 4K3 Follow-Up
+
+Phase 4K3 adds the decision gate recommended here in [Reported Vintage Completion Gate Phase 4K3](swingmaster_reported_vintage_completion_gate_phase4k3.md).
+
+The gate classifies explicit `sec_latest_writer` quarter_update runs as `SEC_VINTAGE_SUFFICIENT`, `FINAL_MIXED_REQUIRED`, `YAHOO_VINTAGE_REQUIRED`, `BLOCKED_POST_RUN_DRIFT`, or `UNKNOWN` using the Phase 4K2 parity/Yahoo-impact summaries. It still does not write final mixed or Yahoo-aware vintages.

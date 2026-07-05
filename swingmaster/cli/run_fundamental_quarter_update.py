@@ -54,6 +54,11 @@ VINTAGE_PARITY_DRIFT = "DRIFT"
 VINTAGE_PARITY_UNKNOWN_RUN_LINKAGE = "UNKNOWN_RUN_LINKAGE"
 VINTAGE_YAHOO_IMPACT_NONE = "NO_YAHOO_IMPACT_DETECTED"
 VINTAGE_YAHOO_IMPACT_DETECTED = "YAHOO_IMPACT_DETECTED"
+VINTAGE_COMPLETION_SEC_SUFFICIENT = "SEC_VINTAGE_SUFFICIENT"
+VINTAGE_COMPLETION_FINAL_MIXED_REQUIRED = "FINAL_MIXED_REQUIRED"
+VINTAGE_COMPLETION_YAHOO_REQUIRED = "YAHOO_VINTAGE_REQUIRED"
+VINTAGE_COMPLETION_BLOCKED_DRIFT = "BLOCKED_POST_RUN_DRIFT"
+VINTAGE_COMPLETION_UNKNOWN = "UNKNOWN"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -236,6 +241,13 @@ def merge_sec_latest_writer_post_run_guard_summary(
                 "vintage_yahoo_can_create_post_sec_vintage_drift"
             ),
             "vintage_recommendation": guard_summary.get("vintage_recommendation"),
+            "vintage_completion_status": guard_summary.get("vintage_completion_status"),
+            "vintage_completion_reason": guard_summary.get("vintage_completion_reason"),
+            "vintage_next_required_action": guard_summary.get("vintage_next_required_action"),
+            "vintage_sec_only_sufficient": guard_summary.get("vintage_sec_only_sufficient"),
+            "vintage_final_mixed_required": guard_summary.get("vintage_final_mixed_required"),
+            "vintage_yahoo_vintage_required": guard_summary.get("vintage_yahoo_vintage_required"),
+            "vintage_blocked_post_run_drift": guard_summary.get("vintage_blocked_post_run_drift"),
         }
     )
 
@@ -944,7 +956,118 @@ def build_quarter_update_vintage_post_run_guard_summary(
     )
     output = {**parity, **yahoo_impact}
     output["vintage_recommendation"] = _quarter_update_vintage_recommendation(output)
+    output.update(
+        classify_quarter_update_vintage_completion(
+            parity_summary=parity,
+            yahoo_impact_summary=yahoo_impact,
+        )
+    )
     return output
+
+
+def classify_quarter_update_vintage_completion(
+    *,
+    parity_summary: Mapping[str, object],
+    yahoo_impact_summary: Mapping[str, object],
+    value_parity_summary: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    combined_summary = {**parity_summary, **yahoo_impact_summary}
+    if value_parity_summary is not None:
+        combined_summary.update(value_parity_summary)
+
+    if (
+        combined_summary.get("vintage_post_run_parity_status") == VINTAGE_PARITY_UNKNOWN_RUN_LINKAGE
+        or combined_summary.get("vintage_yahoo_impact_status") == VINTAGE_PARITY_UNKNOWN_RUN_LINKAGE
+    ):
+        return _vintage_completion_result(
+            VINTAGE_COMPLETION_UNKNOWN,
+            reason="run_linkage_unknown",
+            next_action="IMPROVE_RUN_LINKAGE",
+        )
+
+    latest_without_vintage = _int_guard_value(combined_summary, "vintage_post_run_latest_without_vintage_count")
+    vintage_without_latest = _int_guard_value(combined_summary, "vintage_post_run_vintage_without_latest_count")
+    value_mismatch = _int_guard_value(combined_summary, "vintage_post_run_value_mismatch_count")
+    duplicate_vintage_ids = _int_guard_value(
+        combined_summary,
+        "vintage_post_run_duplicate_statement_vintage_id_count",
+    )
+    yahoo_filled_fields = _int_guard_value(combined_summary, "vintage_yahoo_filled_field_rows_detected")
+    yahoo_inserted_rows = _int_guard_value(
+        combined_summary,
+        "vintage_yahoo_inserted_missing_quarter_rows_detected",
+    )
+    yahoo_audit_rows = _int_guard_value(combined_summary, "vintage_yahoo_audit_rows_detected")
+
+    if duplicate_vintage_ids > 0 or vintage_without_latest > 0:
+        return _vintage_completion_result(
+            VINTAGE_COMPLETION_BLOCKED_DRIFT,
+            reason="duplicate_or_inconsistent_vintage_state",
+            next_action="INVESTIGATE_DRIFT",
+        )
+    if latest_without_vintage > 0 and yahoo_inserted_rows <= 0:
+        return _vintage_completion_result(
+            VINTAGE_COMPLETION_BLOCKED_DRIFT,
+            reason="latest_rows_without_vintage",
+            next_action="INVESTIGATE_DRIFT",
+        )
+    if value_mismatch > 0 and yahoo_audit_rows <= 0 and yahoo_filled_fields <= 0:
+        return _vintage_completion_result(
+            VINTAGE_COMPLETION_BLOCKED_DRIFT,
+            reason="unexplained_value_mismatch",
+            next_action="INVESTIGATE_DRIFT",
+        )
+    if value_mismatch > 0 and (yahoo_audit_rows > 0 or yahoo_filled_fields > 0):
+        return _vintage_completion_result(
+            VINTAGE_COMPLETION_FINAL_MIXED_REQUIRED,
+            reason="value_mismatch_explained_by_yahoo_audit",
+            next_action="CREATE_FINAL_MIXED_VINTAGE",
+        )
+    if yahoo_filled_fields > 0:
+        return _vintage_completion_result(
+            VINTAGE_COMPLETION_FINAL_MIXED_REQUIRED,
+            reason="yahoo_filled_fields_on_sec_backed_latest",
+            next_action="CREATE_FINAL_MIXED_VINTAGE",
+        )
+    if yahoo_inserted_rows > 0:
+        return _vintage_completion_result(
+            VINTAGE_COMPLETION_YAHOO_REQUIRED,
+            reason="yahoo_inserted_missing_quarter",
+            next_action="CREATE_YAHOO_OR_FINAL_MIXED_VINTAGE",
+        )
+    if combined_summary.get("vintage_post_run_parity_status") == VINTAGE_PARITY_OK:
+        return _vintage_completion_result(
+            VINTAGE_COMPLETION_SEC_SUFFICIENT,
+            reason="post_run_parity_ok_no_yahoo_impact",
+            next_action="NONE",
+        )
+    return _vintage_completion_result(
+        VINTAGE_COMPLETION_UNKNOWN,
+        reason="insufficient_guard_data",
+        next_action="IMPROVE_RUN_LINKAGE",
+    )
+
+
+def _vintage_completion_result(status: str, *, reason: str, next_action: str) -> dict[str, object]:
+    return {
+        "vintage_completion_status": status,
+        "vintage_completion_reason": reason,
+        "vintage_next_required_action": next_action,
+        "vintage_sec_only_sufficient": status == VINTAGE_COMPLETION_SEC_SUFFICIENT,
+        "vintage_final_mixed_required": status == VINTAGE_COMPLETION_FINAL_MIXED_REQUIRED,
+        "vintage_yahoo_vintage_required": status == VINTAGE_COMPLETION_YAHOO_REQUIRED,
+        "vintage_blocked_post_run_drift": status == VINTAGE_COMPLETION_BLOCKED_DRIFT,
+    }
+
+
+def _int_guard_value(summary: Mapping[str, object], key: str) -> int:
+    value = summary.get(key)
+    if value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _latest_rows_for_run(conn: sqlite3.Connection, source_run_id: str) -> list[sqlite3.Row]:

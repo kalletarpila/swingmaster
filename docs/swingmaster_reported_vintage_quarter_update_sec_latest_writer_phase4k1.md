@@ -90,3 +90,5 @@ Result: `21 passed`.
 Phase 4K2 adds read-only/temp-tested post-run parity and Yahoo-impact guardrails in [Reported Vintage Yahoo Impact Guard Phase 4K2](swingmaster_reported_vintage_yahoo_impact_guard_phase4k2.md).
 
 The follow-up confirms that Yahoo fallback enrichment runs after the 4K1 SEC latest-writer side-write and can therefore create post-SEC latest/vintage drift by inserting a missing quarter or filling NULL fields from Yahoo. Default behavior remains unchanged; the guard summary is surfaced only for explicit `sec_latest_writer` vintage mode.
+
+Phase 4K3 adds a completion decision gate in [Reported Vintage Completion Gate Phase 4K3](swingmaster_reported_vintage_completion_gate_phase4k3.md). The gate decides whether SEC-only vintage is sufficient or whether final mixed/Yahoo-aware vintage work is required after Yahoo fallback.

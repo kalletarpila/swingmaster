@@ -672,3 +672,9 @@ Phase 4K2 adds read-only, temp-tested quarter_update post-run guardrails for `se
 The guard documents and tests that USA quarter_update runs Yahoo fallback enrichment after the SEC latest-writer vintage side-write. Repo evidence indicates Yahoo fallback can insert a missing quarterly row or fill NULL fields from Yahoo audit rows after the SEC-only vintage is written, while non-null SEC values are not overwritten by the fallback update builder.
 
 The new guard surfaces latest/vintage parity status, value mismatch counts, Yahoo audit impact counts, and a Phase 4K3 recommendation only when explicit `--write-vintage --vintage-mode sec_latest_writer` is used. Default no-vintage behavior remains unchanged.
+
+## 27. Phase 4K3 Status Note
+
+Phase 4K3 adds a temp-tested completion decision gate for explicit `sec_latest_writer` quarter_update vintage runs. It does not write final mixed rows, Yahoo-aware rows, provider data, or real DB data.
+
+The gate classifies post-Yahoo state as `SEC_VINTAGE_SUFFICIENT`, `FINAL_MIXED_REQUIRED`, `YAHOO_VINTAGE_REQUIRED`, `BLOCKED_POST_RUN_DRIFT`, or `UNKNOWN`. It surfaces next-action summary fields only in explicit vintage mode; default quarter_update behavior remains unchanged.

@@ -306,3 +306,11 @@ Phase 4I1 adds a narrow, default-off SEC reconstruct CLI vintage opt-in, documen
 The default CLI path remains the existing SEC raw-reconstruction behavior and does not write latest normalized, vintage, or field-provenance tables. With `--write-vintage`, explicit market, availability, ingestion, and vintage run metadata are required before the CLI writes latest-compatible quarterly rows, statement vintages, and SEC provenance through the existing SEC dual-write scaffold.
 
 Provider refresh, Yahoo/fallback paths, `run_fundamental_quarter_update.py`, schedulers, real DB writes, TTM, scoring, valuation, UI, and ESS remain unwired.
+
+## Phase 4I2 Status
+
+Phase 4I2 adds a narrow, default-off Yahoo-to-generic bridge CLI vintage opt-in, documented in [Reported Vintage Yahoo To Quarterly CLI Opt-In Phase 4I2](swingmaster_reported_vintage_yahoo_to_quarterly_cli_opt_in_phase4i2.md).
+
+The default Yahoo bridge path remains latest-only. With `--write-vintage`, explicit market, availability, ingestion, and vintage run metadata are required before the CLI writes latest-compatible quarterly rows, statement vintages, and Yahoo bridge provenance through the existing Yahoo dual-write scaffold.
+
+Yahoo fallback enrich production wiring, `run_fundamental_quarter_update.py`, provider refresh, schedulers, real DB writes, TTM, scoring, valuation, UI, and ESS remain unwired.

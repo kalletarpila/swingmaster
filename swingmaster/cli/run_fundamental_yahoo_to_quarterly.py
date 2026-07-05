@@ -5,6 +5,11 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from swingmaster.fundamentals.reported_quarterly_dual_write import REPORTED_FINANCIAL_FIELDS
+from swingmaster.fundamentals.reported_yahoo_dual_write_adapter import (
+    write_yahoo_quarterly_rows_with_optional_vintage,
+)
+
 
 DEFAULT_MARKET = "omxh"
 DEFAULT_SYMBOL = "NOKIA.HE"
@@ -29,6 +34,15 @@ def parse_args() -> argparse.Namespace:
         "--replace-symbol",
         action="store_true",
         help="Delete existing rc_fundamental_quarterly rows for the selected ticker before insert",
+    )
+    parser.add_argument("--write-vintage", action="store_true", help="Opt in to latest/vintage/provenance writes")
+    parser.add_argument("--vintage-market", help="Vintage market; required with --write-vintage")
+    parser.add_argument("--vintage-available-at-utc", help="PIT availability timestamp; required with --write-vintage")
+    parser.add_argument("--vintage-ingested-at-utc", help="Ingestion timestamp; required with --write-vintage")
+    parser.add_argument("--vintage-run-id", help="Vintage write run id; required with --write-vintage")
+    parser.add_argument(
+        "--vintage-normalization-run-id",
+        help="Optional normalization run id for vintage metadata",
     )
     return parser.parse_args()
 
@@ -64,7 +78,9 @@ def load_yahoo_quarterly_rows(conn: sqlite3.Connection, market: str, symbol: str
                 shares_outstanding,
                 shares_source,
                 shares_quality,
-                source_run_id
+                source_run_id,
+                run_id,
+                created_at_utc
             FROM rc_fundamental_yahoo_quarterly
             WHERE market = ?
               AND symbol = ?
@@ -167,6 +183,14 @@ def insert_quarterly_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) 
     return len(rows)
 
 
+def yahoo_quarterly_rows_by_generic_key(rows: list[sqlite3.Row]) -> dict[tuple[str, str], dict[str, Any]]:
+    return {
+        (str(row["symbol"]).upper(), str(row["period_end_date"])): dict(row)
+        for row in rows
+        if should_write_row(row)
+    }
+
+
 def run_yahoo_to_quarterly(
     db_path: Path,
     market: str,
@@ -174,8 +198,23 @@ def run_yahoo_to_quarterly(
     run_id: str,
     dry_run: bool,
     replace_symbol: bool,
+    *,
+    write_vintage: bool = False,
+    vintage_market: str | None = None,
+    vintage_available_at_utc: str | None = None,
+    vintage_ingested_at_utc: str | None = None,
+    vintage_run_id: str | None = None,
+    vintage_normalization_run_id: str | None = None,
 ) -> dict[str, Any]:
     normalized_symbol = symbol.upper()
+    if write_vintage:
+        _validate_vintage_args(
+            vintage_market=vintage_market,
+            vintage_available_at_utc=vintage_available_at_utc,
+            vintage_ingested_at_utc=vintage_ingested_at_utc,
+            vintage_run_id=vintage_run_id,
+        )
+
     with sqlite3.connect(str(db_path)) as conn:
         input_rows = load_yahoo_quarterly_rows(conn, market, normalized_symbol)
     mapped_rows = map_to_generic_quarterly_rows(input_rows, run_id)
@@ -185,7 +224,27 @@ def run_yahoo_to_quarterly(
         with sqlite3.connect(str(db_path)) as conn:
             if replace_symbol:
                 replace_symbol_rows(conn, normalized_symbol)
-            rows_written = insert_quarterly_rows(conn, mapped_rows)
+            if write_vintage:
+                yahoo_rows_by_key = yahoo_quarterly_rows_by_generic_key(input_rows)
+                _require_yahoo_source_rows_for_non_null_fields(
+                    normalized_rows=mapped_rows,
+                    yahoo_quarterly_rows_by_key=yahoo_rows_by_key,
+                )
+                result = write_yahoo_quarterly_rows_with_optional_vintage(
+                    conn,
+                    normalized_rows=mapped_rows,
+                    yahoo_quarterly_rows_by_key=yahoo_rows_by_key,
+                    write_vintage=True,
+                    market=str(vintage_market),
+                    available_at_utc=str(vintage_available_at_utc),
+                    ingested_at_utc=str(vintage_ingested_at_utc),
+                    run_id=str(vintage_run_id),
+                    mode="yahoo_to_generic_bridge",
+                    normalization_run_id=vintage_normalization_run_id,
+                )
+                rows_written = result["latest_rows_written"]
+            else:
+                rows_written = insert_quarterly_rows(conn, mapped_rows)
             conn.commit()
     return {
         "market": market,
@@ -200,9 +259,48 @@ def run_yahoo_to_quarterly(
     }
 
 
+def _validate_vintage_args(
+    *,
+    vintage_market: str | None,
+    vintage_available_at_utc: str | None,
+    vintage_ingested_at_utc: str | None,
+    vintage_run_id: str | None,
+) -> None:
+    required_values = {
+        "vintage_market": vintage_market,
+        "vintage_available_at_utc": vintage_available_at_utc,
+        "vintage_ingested_at_utc": vintage_ingested_at_utc,
+        "vintage_run_id": vintage_run_id,
+    }
+    missing = [name for name, value in required_values.items() if value is None or not str(value).strip()]
+    if missing:
+        raise ValueError("YAHOO_TO_QUARTERLY_CLI_VINTAGE_REQUIRED_FIELDS_MISSING:" + ",".join(missing))
+
+
+def _require_yahoo_source_rows_for_non_null_fields(
+    *,
+    normalized_rows: list[dict[str, Any]],
+    yahoo_quarterly_rows_by_key: dict[tuple[str, str], dict[str, Any]],
+) -> None:
+    for row in normalized_rows:
+        ticker = str(row["ticker"]).upper()
+        period_end_date = str(row["period_end_date"])
+        yahoo_row = yahoo_quarterly_rows_by_key.get((ticker, period_end_date))
+        if yahoo_row is None:
+            raise ValueError(f"YAHOO_TO_QUARTERLY_CLI_VINTAGE_SOURCE_ROW_MISSING:{ticker},{period_end_date}")
+        for field_name in REPORTED_FINANCIAL_FIELDS:
+            source_field_name = "operating_income" if field_name == "ebit" else field_name
+            if row.get(field_name) is not None and source_field_name not in yahoo_row:
+                raise ValueError(
+                    "YAHOO_TO_QUARTERLY_CLI_VINTAGE_SOURCE_FIELD_MISSING:"
+                    f"{ticker},{period_end_date},{field_name}"
+                )
+
+
 def main() -> None:
     args = parse_args()
     db_path = resolve_db_path(args.db)
+    write_vintage = bool(getattr(args, "write_vintage", False))
     summary = run_yahoo_to_quarterly(
         db_path=db_path,
         market=args.market,
@@ -210,6 +308,12 @@ def main() -> None:
         run_id=args.run_id,
         dry_run=args.dry_run,
         replace_symbol=args.replace_symbol,
+        write_vintage=write_vintage,
+        vintage_market=getattr(args, "vintage_market", None),
+        vintage_available_at_utc=getattr(args, "vintage_available_at_utc", None),
+        vintage_ingested_at_utc=getattr(args, "vintage_ingested_at_utc", None),
+        vintage_run_id=getattr(args, "vintage_run_id", None),
+        vintage_normalization_run_id=getattr(args, "vintage_normalization_run_id", None),
     )
     _summary(market=summary["market"])
     _summary(symbol=summary["symbol"])
@@ -220,6 +324,8 @@ def main() -> None:
     _summary(dry_run=summary["dry_run"])
     _summary(replace_symbol=summary["replace_symbol"])
     _summary(run_id=summary["run_id"])
+    if write_vintage:
+        _summary(vintage_write="enabled")
 
 
 if __name__ == "__main__":

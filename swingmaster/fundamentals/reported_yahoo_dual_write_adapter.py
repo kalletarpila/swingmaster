@@ -26,6 +26,7 @@ def write_yahoo_quarterly_rows_with_optional_vintage(
     ingested_at_utc: str | None = None,
     run_id: str | None = None,
     mode: str = "yahoo_to_generic_bridge",
+    normalization_run_id: str | None = None,
 ) -> dict[str, int]:
     """Opt-in Yahoo bridge scaffold for latest/vintage writes."""
     rows = [dict(row) for row in normalized_rows]
@@ -67,7 +68,7 @@ def write_yahoo_quarterly_rows_with_optional_vintage(
             payload_hash=payload_hash,
             provider_observed_at_utc=str(available_at_utc),
             provider_run_id=_optional_text(yahoo_quarterly_row.get("source_run_id")),
-            normalization_run_id=_optional_text(yahoo_quarterly_row.get("run_id")),
+            normalization_run_id=_optional_text(normalization_run_id) or _optional_text(yahoo_quarterly_row.get("run_id")),
         )
         field_source_map_by_key[key] = build_yahoo_field_source_map(
             normalized_row=row,

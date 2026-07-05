@@ -568,3 +568,9 @@ The recommended path is additive:
 Phase 4I1 adds a default-off SEC reconstruct CLI vintage opt-in. The default CLI behavior remains compatible with the existing raw-reconstruction path. Vintage writes require explicit opt-in flags and caller-provided PIT metadata.
 
 This is still not full production provider wiring. SEC refresh, Yahoo/fallback paths, quarter-update orchestration, schedulers, real DB writes, TTM, scoring, valuation, UI, and ESS readers remain outside the phase.
+
+## 10. Phase 4I2 Status Note
+
+Phase 4I2 adds a default-off Yahoo-to-generic bridge CLI vintage opt-in. The default bridge behavior remains latest-only and compatible with the existing Yahoo-to-quarterly path. Vintage writes require explicit opt-in flags and caller-provided PIT metadata.
+
+This is still not full production provider wiring. Yahoo fallback enrich, quarter-update orchestration, schedulers, provider refresh, real DB writes, TTM, scoring, valuation, UI, and ESS readers remain outside the phase.

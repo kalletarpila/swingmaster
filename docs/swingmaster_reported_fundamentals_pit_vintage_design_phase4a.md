@@ -586,3 +586,9 @@ The design requires future fallback vintage writes to preserve mixed SEC/Yahoo f
 Phase 4I4 adds a default-off Yahoo fallback enrich CLI vintage opt-in. Default fallback behavior remains latest/audit-only and compatible with the existing fallback enrich path.
 
 Vintage mode requires explicit PIT metadata, writes no vintage for no-op enriches, preserves Yahoo-filled field provenance separately from unknown retained fields, and keeps quarter-update, providers, real DB writes, and ESS readers out of scope.
+
+## 13. Phase 4I5 Status Note
+
+Phase 4I5 adds documentation-only design for future quarter_update vintage opt-in. It does not change runtime behavior.
+
+The design keeps quarter_update vintage execution out of scope for now and recommends Phase 4I6 start with default-off flag validation and summary plumbing only, because quarter_update spans SEC, Yahoo fallback, TTM, scoring, ack, and valuation.

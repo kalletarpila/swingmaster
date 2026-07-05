@@ -119,3 +119,9 @@ No provider, refresh, scheduler, or real DB run was executed in this phase. The 
 ## Recommended Next Phase
 
 The next phase should keep quarter-update wiring separate. A reasonable next step is a bounded dry-run/preflight for opt-in provider CLI paths, still without scheduler or automatic production writes.
+
+## Phase 4I5 Quarter Update Design Reference
+
+Phase 4I5 documents future quarter_update vintage opt-in design in [Reported Vintage Quarter Update Opt-In Design Phase 4I5](swingmaster_reported_vintage_quarter_update_opt_in_design_phase4i5.md).
+
+The design recommends quarter_update first add vintage flag validation and summary plumbing without executing Yahoo fallback vintage writes from the orchestrator.

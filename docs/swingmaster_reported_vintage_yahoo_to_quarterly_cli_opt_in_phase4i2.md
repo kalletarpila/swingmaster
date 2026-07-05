@@ -94,3 +94,9 @@ No provider, refresh, scheduler, or real DB run was executed in this phase. The 
 ## Recommended Next Phase
 
 The next phase can evaluate Yahoo fallback enrich production wiring only after an explicit availability policy and source metadata policy are accepted for that path. Quarter-update orchestration should remain separate until both bridge and fallback opt-in behavior have been verified against approved real-DB dry-run evidence.
+
+## Phase 4I5 Quarter Update Design Reference
+
+Phase 4I5 documents future quarter_update vintage opt-in design in [Reported Vintage Quarter Update Opt-In Design Phase 4I5](swingmaster_reported_vintage_quarter_update_opt_in_design_phase4i5.md).
+
+The design keeps non-USA Yahoo bridge vintage execution from quarter_update out of scope until quarter_update flag validation and summary behavior are proven.

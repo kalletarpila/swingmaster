@@ -93,3 +93,9 @@ The real `fundamentals_usa.db` is not modified by this phase. Tests use pytest t
 - SEC field provenance uses `sec_edgar`, `PRIMARY_REPORTED`, and `SEC_RETAINED`
 - duplicate `statement_vintage_id` fails through SQLite integrity behavior
 - dry-run with `--write-vintage` writes nothing
+
+## Phase 4I5 Quarter Update Design Reference
+
+Phase 4I5 documents future quarter_update vintage opt-in design in [Reported Vintage Quarter Update Opt-In Design Phase 4I5](swingmaster_reported_vintage_quarter_update_opt_in_design_phase4i5.md).
+
+The design notes that quarter_update does not currently call the SEC reconstruct CLI vintage path and recommends validation/summary plumbing before any quarter_update vintage execution.

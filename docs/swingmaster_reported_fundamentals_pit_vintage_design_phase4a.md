@@ -604,3 +604,9 @@ When requested, quarter_update now validates explicit vintage market, availabili
 Phase 4I7 adds a default-off `sec_reconstruct_only` quarter_update mode for mocked SEC-only vintage forwarding.
 
 The mode forwards validated PIT metadata only to the SEC reconstruct helper when explicitly requested. It does not forward metadata to Yahoo fallback, does not create a final mixed SEC/Yahoo vintage, and does not change default quarter_update behavior.
+
+## 16. Phase 4I8 Status Note
+
+Phase 4I8 adds a default-off `yahoo_fallback_only` quarter_update mode for mocked Yahoo fallback vintage forwarding.
+
+The mode forwards validated PIT metadata only to `run_yahoo_fallback_enrich(...)` when explicitly requested. It does not forward metadata to SEC reconstruct, does not wire Yahoo bridge, and does not create a combined final mixed vintage.

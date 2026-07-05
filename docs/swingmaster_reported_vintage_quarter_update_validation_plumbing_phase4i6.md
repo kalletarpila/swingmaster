@@ -76,3 +76,9 @@ Full SEC + Yahoo fallback mixed-vintage orchestration should wait until duplicat
 Phase 4I7 adds default-off SEC-only forwarding, documented in [Reported Vintage Quarter Update SEC Forwarding Phase 4I7](swingmaster_reported_vintage_quarter_update_sec_forwarding_phase4i7.md).
 
 The `validation_only` behavior remains unchanged. The new `sec_reconstruct_only` mode forwards validated metadata only to the SEC reconstruct helper and still does not forward anything to Yahoo bridge or Yahoo fallback paths.
+
+## Phase 4I8 Status
+
+Phase 4I8 adds default-off Yahoo fallback forwarding, documented in [Reported Vintage Quarter Update Yahoo Fallback Forwarding Phase 4I8](swingmaster_reported_vintage_quarter_update_yahoo_fallback_forwarding_phase4i8.md).
+
+The `validation_only` behavior remains unchanged. The new `yahoo_fallback_only` mode forwards validated metadata only to `run_yahoo_fallback_enrich(...)` and does not forward anything to SEC reconstruct or Yahoo bridge paths.

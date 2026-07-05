@@ -344,3 +344,9 @@ The path remains default-off and validation-only. Quarter update validates expli
 Phase 4I7 adds default-off SEC-only quarter_update forwarding, documented in [Reported Vintage Quarter Update SEC Forwarding Phase 4I7](swingmaster_reported_vintage_quarter_update_sec_forwarding_phase4i7.md).
 
 The production write path is still not broadly enabled. Quarter_update can forward validated metadata to the SEC reconstruct helper only when `--write-vintage --vintage-mode sec_reconstruct_only` is explicitly requested. Yahoo bridge, Yahoo fallback, scheduler, UI, ESS, and final mixed-vintage orchestration remain unwired.
+
+## Phase 4I8 Status
+
+Phase 4I8 adds default-off Yahoo fallback forwarding, documented in [Reported Vintage Quarter Update Yahoo Fallback Forwarding Phase 4I8](swingmaster_reported_vintage_quarter_update_yahoo_fallback_forwarding_phase4i8.md).
+
+Quarter_update can forward validated metadata to Yahoo fallback only when `--write-vintage --vintage-mode yahoo_fallback_only` is explicitly requested. SEC-only forwarding remains separate, Yahoo bridge remains unwired, and no combined final mixed-vintage production orchestration is enabled.

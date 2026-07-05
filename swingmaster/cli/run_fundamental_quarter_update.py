@@ -22,7 +22,8 @@ from swingmaster.fundamentals.score import run_fundamental_scoring
 DEFAULT_EXCHANGE = "HE"
 VINTAGE_MODE_VALIDATION_ONLY = "validation_only"
 VINTAGE_MODE_SEC_RECONSTRUCT_ONLY = "sec_reconstruct_only"
-VINTAGE_MODE_CHOICES = [VINTAGE_MODE_VALIDATION_ONLY, VINTAGE_MODE_SEC_RECONSTRUCT_ONLY]
+VINTAGE_MODE_YAHOO_FALLBACK_ONLY = "yahoo_fallback_only"
+VINTAGE_MODE_CHOICES = [VINTAGE_MODE_VALIDATION_ONLY, VINTAGE_MODE_SEC_RECONSTRUCT_ONLY, VINTAGE_MODE_YAHOO_FALLBACK_ONLY]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -65,7 +66,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--vintage-mode",
         default=None,
         choices=VINTAGE_MODE_CHOICES,
-        help="Vintage mode. Phase 4I7 supports validation_only or sec_reconstruct_only",
+        help="Vintage mode. Supports validation_only, sec_reconstruct_only, or yahoo_fallback_only",
     )
     return parser.parse_args(argv)
 
@@ -92,8 +93,8 @@ def validate_vintage_options(
     vintage_mode: str | None,
 ) -> dict[str, object]:
     if not write_vintage:
-        if vintage_mode == VINTAGE_MODE_SEC_RECONSTRUCT_ONLY:
-            raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_WRITE_REQUIRED_FOR_SEC_RECONSTRUCT_ONLY")
+        if vintage_mode in {VINTAGE_MODE_SEC_RECONSTRUCT_ONLY, VINTAGE_MODE_YAHOO_FALLBACK_ONLY}:
+            raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_WRITE_REQUIRED_FOR_MODE:{vintage_mode}")
         return {}
     if vintage_market is None or vintage_market.strip() == "":
         raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MARKET_REQUIRED")
@@ -107,7 +108,7 @@ def validate_vintage_options(
         raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MODE_REQUIRED")
     if vintage_mode not in VINTAGE_MODE_CHOICES:
         raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MODE_UNSUPPORTED:{vintage_mode}")
-    execution_enabled = vintage_mode == VINTAGE_MODE_SEC_RECONSTRUCT_ONLY
+    execution_enabled = vintage_mode in {VINTAGE_MODE_SEC_RECONSTRUCT_ONLY, VINTAGE_MODE_YAHOO_FALLBACK_ONLY}
     _validate_vintage_timestamp(vintage_available_at_utc, "vintage_available_at_utc")
     _validate_vintage_timestamp(vintage_ingested_at_utc, "vintage_ingested_at_utc")
     return {
@@ -115,9 +116,9 @@ def validate_vintage_options(
         "vintage_mode": vintage_mode,
         "vintage_execution_enabled": execution_enabled,
         "vintage_validation_status": "OK",
-        "vintage_sec_reconstruct_requested": execution_enabled,
+        "vintage_sec_reconstruct_requested": vintage_mode == VINTAGE_MODE_SEC_RECONSTRUCT_ONLY,
         "vintage_yahoo_bridge_requested": False,
-        "vintage_yahoo_fallback_requested": False,
+        "vintage_yahoo_fallback_requested": vintage_mode == VINTAGE_MODE_YAHOO_FALLBACK_ONLY,
         "vintage_rows_inserted": None if execution_enabled else 0,
         "vintage_provenance_rows_inserted": None if execution_enabled else 0,
         "vintage_count_status": "not_reported_by_child" if execution_enabled else "zero_validation_only",
@@ -138,6 +139,28 @@ def build_sec_reconstruct_vintage_options(
     vintage_mode: str | None,
 ) -> dict[str, object] | None:
     if not write_vintage or vintage_mode != VINTAGE_MODE_SEC_RECONSTRUCT_ONLY:
+        return None
+    return {
+        "write_vintage": True,
+        "vintage_market": str(vintage_market),
+        "vintage_available_at_utc": str(vintage_available_at_utc),
+        "vintage_ingested_at_utc": str(vintage_ingested_at_utc),
+        "vintage_run_id": str(vintage_run_id),
+        "vintage_normalization_run_id": vintage_normalization_run_id,
+    }
+
+
+def build_yahoo_fallback_vintage_options(
+    *,
+    write_vintage: bool,
+    vintage_market: str | None,
+    vintage_available_at_utc: str | None,
+    vintage_ingested_at_utc: str | None,
+    vintage_run_id: str | None,
+    vintage_normalization_run_id: str | None,
+    vintage_mode: str | None,
+) -> dict[str, object] | None:
+    if not write_vintage or vintage_mode != VINTAGE_MODE_YAHOO_FALLBACK_ONLY:
         return None
     return {
         "write_vintage": True,
@@ -381,6 +404,7 @@ def run_quarterly_refresh(
     market: str,
     child_run_ids: dict[str, str],
     sec_vintage_options: dict[str, object] | None = None,
+    yahoo_fallback_vintage_options: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     if market == "usa":
         retrieved_at_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -452,6 +476,7 @@ def run_quarterly_refresh(
             dry_run=False,
             replace_audit_for_run=False,
             detected_source_period_end_date=detected_source_period_end_date,
+            **(yahoo_fallback_vintage_options or {}),
         )
         with sqlite3.connect(str(db_path)) as conn:
             if not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date):
@@ -508,6 +533,7 @@ def process_ticker(
     child_run_ids: dict[str, str],
     skip_ack: bool,
     sec_vintage_options: dict[str, object] | None = None,
+    yahoo_fallback_vintage_options: dict[str, object] | None = None,
 ) -> dict[str, int]:
     ticker = str(row["ticker"]).upper()
     market = str(row["market"]).lower()
@@ -522,6 +548,7 @@ def process_ticker(
         market=market,
         child_run_ids=child_run_ids,
         sec_vintage_options=sec_vintage_options,
+        yahoo_fallback_vintage_options=yahoo_fallback_vintage_options,
     )
     print("STEP quarterly_refresh=OK")
 
@@ -610,6 +637,15 @@ def run_fundamental_quarter_update(
         vintage_normalization_run_id=vintage_normalization_run_id,
         vintage_mode=vintage_mode,
     )
+    yahoo_fallback_vintage_options = build_yahoo_fallback_vintage_options(
+        write_vintage=write_vintage,
+        vintage_market=vintage_market,
+        vintage_available_at_utc=vintage_available_at_utc,
+        vintage_ingested_at_utc=vintage_ingested_at_utc,
+        vintage_run_id=vintage_run_id,
+        vintage_normalization_run_id=vintage_normalization_run_id,
+        vintage_mode=vintage_mode,
+    )
     rows = load_eligible_rows(db_path, market, ticker, limit)
     market_label = market.strip().lower() if market is not None else "ALL"
     strict_single_ticker_mode = ticker is not None
@@ -649,6 +685,8 @@ def run_fundamental_quarter_update(
             }
             if sec_vintage_options is not None:
                 process_kwargs["sec_vintage_options"] = sec_vintage_options
+            if yahoo_fallback_vintage_options is not None:
+                process_kwargs["yahoo_fallback_vintage_options"] = yahoo_fallback_vintage_options
             process_ticker(**process_kwargs)
         except Exception as exc:
             step_name = "unknown"

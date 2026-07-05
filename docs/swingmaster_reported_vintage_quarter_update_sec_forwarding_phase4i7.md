@@ -103,3 +103,9 @@ This phase does not run providers, scheduler jobs, or real DB refreshes. Real pr
 Recommended Phase 4I8: add a temp-DB integration preflight for the SEC-only quarter_update path, still without providers, scheduler, or real DB writes.
 
 Yahoo fallback and final mixed-vintage orchestration should remain separate until duplicate, no-op, and final-vs-intermediate semantics are explicitly tested.
+
+## Phase 4I8 Status
+
+Phase 4I8 adds default-off Yahoo fallback forwarding, documented in [Reported Vintage Quarter Update Yahoo Fallback Forwarding Phase 4I8](swingmaster_reported_vintage_quarter_update_yahoo_fallback_forwarding_phase4i8.md).
+
+`sec_reconstruct_only` remains unchanged and SEC-only. `yahoo_fallback_only` is a separate mode; no combined SEC + Yahoo or final mixed-vintage orchestration is implemented.

@@ -247,3 +247,9 @@ The implementation adds default-off CLI flags, metadata validation, and opt-in s
 Phase 4I7 adds the first mocked SEC-only quarter_update forwarding path, documented in [Reported Vintage Quarter Update SEC Forwarding Phase 4I7](swingmaster_reported_vintage_quarter_update_sec_forwarding_phase4i7.md).
 
 The new mode is `sec_reconstruct_only`. It remains default-off, requires explicit PIT metadata, and does not implement Yahoo fallback forwarding or final mixed-vintage orchestration.
+
+## Phase 4I8 Status
+
+Phase 4I8 adds a separate mocked Yahoo fallback forwarding path, documented in [Reported Vintage Quarter Update Yahoo Fallback Forwarding Phase 4I8](swingmaster_reported_vintage_quarter_update_yahoo_fallback_forwarding_phase4i8.md).
+
+The new mode is `yahoo_fallback_only`. It remains default-off, requires explicit PIT metadata, and does not implement SEC+Yahoo combined mode or final mixed-vintage orchestration.

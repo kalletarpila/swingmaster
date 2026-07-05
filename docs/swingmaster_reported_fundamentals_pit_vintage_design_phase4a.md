@@ -690,3 +690,11 @@ The planner uses final latest row values, SEC field provenance, Yahoo fallback a
 Phase 4K5 adds a default-off temp-tested execution layer for planned final mixed and Yahoo-aware vintage candidates. It is controlled by `--vintage-yahoo-aware-action write`; the default is `plan_only`.
 
 The execution helper writes through existing final mixed and Yahoo vintage adapters using caller-supplied SQLite connections in tests. It does not run providers, refresh jobs, schedulers, or real DB apply.
+
+## 30. Phase 4K6 Status Note
+
+Phase 4K6 adds a read-only real DB readiness/no-op smoke for quarter_update vintage paths.
+
+The real USA DB was opened with `mode=ro` and `PRAGMA query_only=ON`. The smoke returned `quick_check=ok`, latest/vintage counts 155373/155373, provenance count 1306683, zero latest-without-vintage rows, zero vintage-without-latest rows, zero duplicate `statement_vintage_id` groups, zero SEC missing-latest candidates, zero Yahoo-aware pending actions, and `overall_status=READY_NOOP`.
+
+No providers, refresh jobs, schedulers, quarter_update provider paths, Yahoo-aware execution writes, or real DB writes were run.

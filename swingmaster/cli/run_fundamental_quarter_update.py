@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,6 +17,7 @@ from swingmaster.cli.run_fundamental_yahoo_audit import run_yahoo_audit
 from swingmaster.cli.run_fundamental_yahoo_fallback_enrich import run_yahoo_fallback_enrich
 from swingmaster.cli.run_fundamental_yahoo_quarterly_write import run_yahoo_quarterly_write
 from swingmaster.cli.run_fundamental_yahoo_to_quarterly import run_yahoo_to_quarterly
+from swingmaster.fundamentals.reported_final_mixed_execution import execute_final_mixed_vintage_write
 from swingmaster.fundamentals.reported_final_mixed_vintage import (
     build_final_mixed_source_hash,
     build_final_mixed_statement_vintage_id,
@@ -164,6 +165,112 @@ def merge_final_mixed_execution_summary(
     summary["vintage_rows_failed"] = 1 if execution_summary.get("error") else 0
     summary["vintage_count_status"] = "final_mixed_execution"
     summary["vintage_error_summary"] = execution_summary.get("error")
+
+
+def run_final_mixed_vintage_execution_for_ticker(
+    conn: sqlite3.Connection,
+    *,
+    ticker: str,
+    market: str,
+    normalized_row: Mapping[str, Any],
+    sec_field_source_map: Mapping[str, Mapping[str, Any]] | None,
+    yahoo_field_source_map: Mapping[str, Mapping[str, Any]] | None,
+    fallback_audit_rows: list[Mapping[str, Any]] | None,
+    available_at_utc: str,
+    ingested_at_utc: str,
+    run_id: str,
+    normalization_run_id: str | None = None,
+) -> dict[str, Any]:
+    normalized_ticker = _require_text(ticker, "ticker").upper()
+    row = dict(normalized_row)
+    row_ticker = _require_text(row.get("ticker"), "normalized_row.ticker").upper()
+    if row_ticker != normalized_ticker:
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_TICKER_MISMATCH")
+    _require_text(row.get("period_end_date"), "normalized_row.period_end_date")
+    return execute_final_mixed_vintage_write(
+        conn,
+        normalized_row=row,
+        market=_require_text(market, "market"),
+        available_at_utc=_require_text(available_at_utc, "available_at_utc"),
+        ingested_at_utc=_require_text(ingested_at_utc, "ingested_at_utc"),
+        run_id=_require_text(run_id, "run_id"),
+        sec_field_source_map=sec_field_source_map,
+        yahoo_field_source_map=yahoo_field_source_map,
+        fallback_audit_rows=fallback_audit_rows,
+        normalization_run_id=normalization_run_id,
+    )
+
+
+def _resolve_final_mixed_inputs(
+    row: sqlite3.Row,
+    final_mixed_inputs_by_key: Mapping[tuple[Any, ...], Mapping[str, Any]],
+) -> Mapping[str, Any]:
+    ticker = str(row["ticker"]).upper()
+    period_end_date = row["detected_source_period_end_date"]
+    market = str(row["market"]).lower()
+    key_candidates = (
+        (market, ticker, period_end_date),
+        (ticker, period_end_date),
+    )
+    for key in key_candidates:
+        inputs = final_mixed_inputs_by_key.get(key)
+        if inputs is not None:
+            return inputs
+    raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_INPUTS_MISSING:{ticker},{period_end_date}")
+
+
+def _run_final_mixed_execution_from_inputs(
+    db_path: Path,
+    row: sqlite3.Row,
+    vintage_options: Mapping[str, object],
+    final_mixed_inputs_by_key: Mapping[tuple[Any, ...], Mapping[str, Any]],
+) -> dict[str, Any]:
+    inputs = _resolve_final_mixed_inputs(row, final_mixed_inputs_by_key)
+    normalized_row = inputs.get("normalized_row")
+    if not isinstance(normalized_row, Mapping):
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_NORMALIZED_ROW_REQUIRED")
+    with sqlite3.connect(str(db_path)) as conn:
+        return run_final_mixed_vintage_execution_for_ticker(
+            conn,
+            ticker=str(row["ticker"]),
+            market=str(vintage_options["market"]),
+            normalized_row=normalized_row,
+            sec_field_source_map=_optional_mapping(inputs.get("sec_field_source_map")),
+            yahoo_field_source_map=_optional_mapping(inputs.get("yahoo_field_source_map")),
+            fallback_audit_rows=_optional_sequence(inputs.get("fallback_audit_rows")),
+            available_at_utc=str(vintage_options["available_at_utc"]),
+            ingested_at_utc=str(vintage_options["ingested_at_utc"]),
+            run_id=str(vintage_options["run_id"]),
+            normalization_run_id=_optional_text(vintage_options.get("normalization_run_id")),
+        )
+
+
+def _optional_mapping(value: Any) -> Mapping[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_INPUT_MAPPING_INVALID")
+    return value
+
+
+def _optional_sequence(value: Any) -> list[Mapping[str, Any]] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_INPUT_SEQUENCE_INVALID")
+    return value
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None or not str(value).strip():
+        return None
+    return str(value).strip()
+
+
+def _require_text(value: Any, field_name: str) -> str:
+    if value is None or not str(value).strip():
+        raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_REQUIRED_FIELD_MISSING:{field_name}")
+    return str(value).strip()
 
 
 def _validate_vintage_timestamp(value: str, field_name: str) -> None:
@@ -766,6 +873,7 @@ def run_fundamental_quarter_update(
     vintage_normalization_run_id: str | None = None,
     vintage_mode: str | None = None,
     final_mixed_execution_runner: Callable[..., dict[str, object]] | None = None,
+    final_mixed_inputs_by_key: Mapping[tuple[Any, ...], Mapping[str, Any]] | None = None,
 ) -> dict[str, object]:
     vintage_summary = validate_vintage_options(
         write_vintage=write_vintage,
@@ -802,8 +910,8 @@ def run_fundamental_quarter_update(
             vintage_run_id=vintage_run_id,
             vintage_normalization_run_id=vintage_normalization_run_id,
         )
-        if not dry_run and final_mixed_execution_runner is None:
-            raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_RUNNER_REQUIRED")
+        if not dry_run and final_mixed_execution_runner is None and final_mixed_inputs_by_key is None:
+            raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_INPUTS_REQUIRED")
     rows = load_eligible_rows(db_path, market, ticker, limit)
     market_label = market.strip().lower() if market is not None else "ALL"
     strict_single_ticker_mode = ticker is not None
@@ -846,12 +954,22 @@ def run_fundamental_quarter_update(
             if yahoo_fallback_vintage_options is not None:
                 process_kwargs["yahoo_fallback_vintage_options"] = yahoo_fallback_vintage_options
             process_ticker(**process_kwargs)
-            if final_mixed_vintage_options is not None and final_mixed_execution_runner is not None:
-                execution_summary = final_mixed_execution_runner(
-                    db_path=db_path,
-                    row=row,
-                    vintage_options=final_mixed_vintage_options,
-                )
+            if final_mixed_vintage_options is not None:
+                if final_mixed_execution_runner is not None:
+                    execution_summary = final_mixed_execution_runner(
+                        db_path=db_path,
+                        row=row,
+                        vintage_options=final_mixed_vintage_options,
+                    )
+                elif final_mixed_inputs_by_key is not None:
+                    execution_summary = _run_final_mixed_execution_from_inputs(
+                        db_path,
+                        row,
+                        final_mixed_vintage_options,
+                        final_mixed_inputs_by_key,
+                    )
+                else:
+                    raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_INPUTS_REQUIRED")
                 merge_final_mixed_execution_summary(vintage_summary, execution_summary)
         except Exception as exc:
             step_name = "unknown"

@@ -392,3 +392,9 @@ The helper can write final mixed vintage/provenance rows only through caller-sup
 Phase 4I15 adds a default-off final mixed quarter_update mode and mocked runner seam, documented in [Reported Vintage Quarter Update Final Mixed Execution Wiring Phase 4I15](swingmaster_reported_vintage_quarter_update_final_mixed_execution_wiring_phase4i15.md).
 
 Production final mixed execution remains unwired: non-dry mode requires a test-injected runner and otherwise fails before child steps.
+
+## Phase 4J0 Status
+
+Phase 4J0 adds a production-safe final mixed runner, documented in [Reported Vintage Quarter Update Final Mixed Runner Phase 4J0](swingmaster_reported_vintage_quarter_update_final_mixed_runner_phase4j0.md).
+
+The runner requires caller-supplied final mixed inputs and was exercised only against temp DBs. No real DB/provider run was performed.

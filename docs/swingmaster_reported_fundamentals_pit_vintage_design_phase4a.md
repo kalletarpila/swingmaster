@@ -652,3 +652,9 @@ The helper writes final mixed vintage and field provenance rows through existing
 Phase 4I15 adds a default-off final mixed quarter_update mode and mocked execution seam. It does not enable production final mixed writes.
 
 The new mode requires explicit PIT metadata and a test-injected runner for non-dry execution; otherwise it fails before child steps. Existing planning and isolated vintage modes remain unchanged.
+
+## 24. Phase 4J0 Status Note
+
+Phase 4J0 adds a production-safe final mixed runner for quarter_update. It does not run against the real DB.
+
+The runner writes only through a caller-supplied SQLite connection and requires explicit final mixed inputs. Temp-DB tests verify PIT-readable final mixed rows without provider calls.

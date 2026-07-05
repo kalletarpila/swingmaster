@@ -80,3 +80,9 @@ No SEC, Yahoo, yfinance, Finnhub, paid-provider, scheduler, or refresh job is ru
 Recommended Phase 4I16: implement mocked data collection contracts for final normalized rows and provenance handoff, still without real provider execution.
 
 Real production final mixed execution should wait until quarter_update can collect complete SEC/Yahoo/fallback inputs and duplicate/no-op behavior is proven end to end.
+
+## Phase 4J0 Runner Reference
+
+Phase 4J0 adds the production-safe final mixed runner in [Reported Vintage Quarter Update Final Mixed Runner Phase 4J0](swingmaster_reported_vintage_quarter_update_final_mixed_runner_phase4j0.md).
+
+The runner can execute only with caller-supplied final mixed inputs or test-injected seams; no real DB run was performed.

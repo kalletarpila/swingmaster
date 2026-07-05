@@ -154,8 +154,8 @@ def test_mocked_final_mixed_helper_failure_updates_error_summary(
         )
 
 
-def test_final_mixed_mode_requires_runner_before_child_steps(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    db_path = tmp_path / "final_mixed_wiring_runner_required.db"
+def test_final_mixed_mode_requires_inputs_before_child_steps(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "final_mixed_wiring_inputs_required.db"
     run_migration(db_path)
     _insert_state_row(db_path)
     monkeypatch.setattr(
@@ -164,7 +164,7 @@ def test_final_mixed_mode_requires_runner_before_child_steps(monkeypatch: pytest
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("process_ticker should not run")),
     )
 
-    with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_RUNNER_REQUIRED"):
+    with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_INPUTS_REQUIRED"):
         _run_update(db_path, market="omxh", dry_run=False, **_final_mixed_kwargs())
 
 

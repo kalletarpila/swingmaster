@@ -380,3 +380,9 @@ The integration computes final mixed plan details only from mocked inputs and ke
 Phase 4I13 is a documentation-only execution design for future final mixed quarter_update writes, documented in [Reported Vintage Quarter Update Final Mixed Execution Design Phase 4I13](swingmaster_reported_vintage_quarter_update_final_mixed_execution_design_phase4i13.md).
 
 No runtime code, tests, providers, schedulers, migrations, real DB writes, or production final mixed execution changed.
+
+## Phase 4I14 Status
+
+Phase 4I14 adds a temp-DB final mixed execution helper, documented in [Reported Vintage Final Mixed Execution Helper Phase 4I14](swingmaster_reported_vintage_final_mixed_execution_helper_phase4i14.md).
+
+The helper can write final mixed vintage/provenance rows only through caller-supplied temp DB connections in tests. Production quarter_update execution remains unwired.

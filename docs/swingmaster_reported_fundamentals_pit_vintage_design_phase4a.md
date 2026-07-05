@@ -640,3 +640,9 @@ Live `sec_plus_yahoo_fallback_planning` now exposes explicit final mixed plan de
 Phase 4I13 documents the future final mixed quarter_update execution policy. It does not change runtime behavior.
 
 The design recommends one final mixed vintage per affected ticker/period after SEC and Yahoo fallback complete, with explicit PIT metadata, deterministic duplicate/no-op handling, and no production execution until temp-DB helper tests prove the write path.
+
+## 22. Phase 4I14 Status Note
+
+Phase 4I14 adds a temp-DB final mixed execution helper. It does not change production runtime behavior.
+
+The helper writes final mixed vintage and field provenance rows through existing opt-in adapters in tests only, preserving PIT behavior by explicit `available_at_utc`.

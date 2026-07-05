@@ -193,3 +193,9 @@ Do not start with real provider execution.
 Phase 4I14 should implement a pure/temp-DB final mixed execution helper and mocked quarter_update summary tests only.
 
 Real DB and production quarter_update final mixed execution should remain later, after duplicate/no-op, supersession, and final-vs-intermediate semantics are tested.
+
+## Phase 4I14 Helper Reference
+
+Phase 4I14 adds the temp-DB final mixed execution helper in [Reported Vintage Final Mixed Execution Helper Phase 4I14](swingmaster_reported_vintage_final_mixed_execution_helper_phase4i14.md).
+
+It proves the final mixed builder can write latest-compatible, vintage, and field provenance rows through the existing opt-in adapter, but it is still not wired into production quarter_update execution.

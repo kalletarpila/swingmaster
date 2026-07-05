@@ -92,3 +92,9 @@ Before production execution, define duplicate/no-op policy, supersession semanti
 Phase 4I12 adds planning-only quarter_update integration for this builder in [Reported Vintage Quarter Update Final Mixed Planning Phase 4I12](swingmaster_reported_vintage_quarter_update_final_mixed_planning_phase4i12.md).
 
 The integration uses mocked inputs to compute planned source hash, statement id, and provenance count. Live quarter_update still writes no final mixed vintage rows.
+
+## Phase 4I14 Execution Helper Reference
+
+Phase 4I14 adds a temp-DB execution helper in [Reported Vintage Final Mixed Execution Helper Phase 4I14](swingmaster_reported_vintage_final_mixed_execution_helper_phase4i14.md).
+
+The helper uses this builder plus the existing opt-in adapter to write final mixed rows in tests only.

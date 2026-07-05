@@ -80,3 +80,9 @@ Before production writes, define duplicate/no-op behavior, supersession semantic
 Phase 4I13 documents the future final mixed execution policy in [Reported Vintage Quarter Update Final Mixed Execution Design Phase 4I13](swingmaster_reported_vintage_quarter_update_final_mixed_execution_design_phase4i13.md).
 
 It is documentation-only and does not add the execution mode.
+
+## Phase 4I14 Helper Reference
+
+Phase 4I14 adds the temp-DB final mixed execution helper in [Reported Vintage Final Mixed Execution Helper Phase 4I14](swingmaster_reported_vintage_final_mixed_execution_helper_phase4i14.md).
+
+The helper remains separate from live quarter_update planning and production execution.

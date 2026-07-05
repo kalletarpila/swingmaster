@@ -622,3 +622,9 @@ The design recommends one final mixed vintage per affected ticker/period as the 
 Phase 4I10 adds default-off `sec_plus_yahoo_fallback_planning` support to quarter_update.
 
 The mode validates explicit PIT metadata and reports combined SEC + Yahoo fallback planning summary fields, but it does not forward vintage metadata to child paths and does not write vintage rows.
+
+## 19. Phase 4I11 Status Note
+
+Phase 4I11 adds a pure final mixed SEC + Yahoo fallback vintage builder contract. It does not change runtime behavior.
+
+The helper requires explicit availability and ingestion metadata, creates deterministic `mixed_sec_yahoo` statement ids from the final source hash, preserves SEC-retained and Yahoo-filled field provenance, marks unmapped non-null fields with the existing unknown contract, and keeps PIT behavior based only on `available_at_utc`.

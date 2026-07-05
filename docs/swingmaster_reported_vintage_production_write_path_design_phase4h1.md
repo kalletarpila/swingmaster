@@ -362,3 +362,9 @@ No runtime code, providers, scheduler paths, real DB writes, or production combi
 Phase 4I10 adds a default-off combined planning mode, documented in [Reported Vintage Quarter Update Combined Planning Phase 4I10](swingmaster_reported_vintage_quarter_update_combined_planning_phase4i10.md).
 
 The mode reports a SEC + Yahoo fallback plan only. It does not write vintage rows, create final mixed vintages, forward child vintage metadata, run providers, run schedulers, or touch the real DB.
+
+## Phase 4I11 Status
+
+Phase 4I11 adds a pure final mixed SEC + Yahoo fallback vintage builder contract, documented in [Reported Vintage Final Mixed Builder Phase 4I11](swingmaster_reported_vintage_final_mixed_builder_phase4i11.md).
+
+The builder is test-only and not wired into production paths. It defines `mixed_sec_yahoo` row metadata, deterministic source hash and statement id policy, field provenance merge behavior, and PIT behavior through temp-DB tests only.

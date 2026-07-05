@@ -238,3 +238,9 @@ Phase 4I10 should use mocked tests only, avoid real DB/provider/scheduler runs, 
 Phase 4I10 implements the recommended planning-only combined mode in [Reported Vintage Quarter Update Combined Planning Phase 4I10](swingmaster_reported_vintage_quarter_update_combined_planning_phase4i10.md).
 
 The implementation adds `sec_plus_yahoo_fallback_planning`, validates explicit metadata, and reports combined planning summary fields without forwarding vintage metadata to SEC/Yahoo children or writing final mixed vintage rows.
+
+## Phase 4I11 Builder Reference
+
+Phase 4I11 adds the pure final mixed builder contract in [Reported Vintage Final Mixed Builder Phase 4I11](swingmaster_reported_vintage_final_mixed_builder_phase4i11.md).
+
+The builder defines deterministic `mixed_sec_yahoo` source hash, statement vintage id, and SEC/Yahoo/unknown field provenance merge behavior in temp-DB tests only. It is not wired into quarter_update execution.

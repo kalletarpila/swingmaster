@@ -91,3 +91,9 @@ Final mixed vintage creation still needs a dedicated implementation phase becaus
 ## Recommended Next Phase
 
 Recommended Phase 4I11: temp-DB final mixed vintage creation design or mocked implementation tests, still default-off and without providers, scheduler runs, or real DB writes.
+
+## Phase 4I11 Builder Reference
+
+Phase 4I11 implements the recommended test-only final mixed builder contract in [Reported Vintage Final Mixed Builder Phase 4I11](swingmaster_reported_vintage_final_mixed_builder_phase4i11.md).
+
+The planning mode remains unchanged: it still writes no vintage rows and does not call the final mixed builder.

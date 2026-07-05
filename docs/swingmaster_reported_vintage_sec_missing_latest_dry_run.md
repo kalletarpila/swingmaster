@@ -139,6 +139,12 @@ They indicate that the dry-run reconstruction path differs from the latest
 writer path, so the next phase should align the candidate builder with the
 actual latest writer semantics before any apply.
 
+Follow-up: `docs/swingmaster_reported_vintage_sec_latest_writer_aligned_dry_run.md`
+documents the aligned `--candidate-mode latest_writer` dry-run. The original
+blocked result in this document applies to `sec_reconstruct` semantics; the
+aligned mode preserves latest-writer values and is the applicable mode for a
+guarded apply of these 42 rows.
+
 ## Checks run
 
 ```bash

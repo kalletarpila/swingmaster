@@ -148,6 +148,11 @@ the safer next design is a guarded latest-writer-aligned provenance plan. That
 plan should document that the values are derived from the direct raw statement
 normalizer, not from the current SEC reconstruction helper.
 
+Follow-up: the latest-writer-aligned dry-run was implemented and documented in
+`docs/swingmaster_reported_vintage_sec_latest_writer_aligned_dry_run.md`. It
+uses `--candidate-mode latest_writer` and produced `DRY_RUN_READY` for the 42
+latest-only rows without changing SEC reconstruction behavior.
+
 ## Row counts unchanged
 
 Post-diagnostics real DB counts:

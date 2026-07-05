@@ -52,6 +52,21 @@ def test_reconstruction_mismatch_is_blocked(tmp_path: Path) -> None:
     assert "revenue" in str(result["samples"][0]["reason"])
 
 
+def test_latest_writer_candidate_mode_returns_ready_with_unknown_for_latest_only_sec_raw(tmp_path: Path) -> None:
+    db_path = _db_with_schema(tmp_path)
+    _insert_latest_and_raw(db_path, latest_revenue=101.0)
+
+    result = _run(db_path, candidate_mode="latest_writer")
+
+    assert result["summary"]["overall_status"] == "DRY_RUN_READY_WITH_UNKNOWN_PROVENANCE"
+    assert result["summary"]["planned_vintage_rows"] == 1
+    assert result["summary"]["planned_provenance_rows"] == 7
+    assert result["summary"]["ready_with_unknown_provenance_rows"] == 1
+    assert result["summary"]["unknown_provenance_rows"] == 1
+    assert result["samples"][0]["status"] == "READY_WITH_UNKNOWN_PROVENANCE"
+    assert "revenue" in result["samples"][0]["unknown_provenance_fields"]
+
+
 def test_row_with_existing_vintage_is_skipped(tmp_path: Path) -> None:
     db_path = _db_with_schema(tmp_path)
     _insert_latest_and_raw(db_path)
@@ -110,6 +125,7 @@ def test_json_output_includes_summary_and_samples(tmp_path: Path, capsys) -> Non
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["summary"]["ready_rows"] == 1
+    assert payload["summary"]["candidate_mode"] == "sec_reconstruct"
     assert payload["samples"][0]["ticker"] == "AAPL"
 
 
@@ -170,7 +186,11 @@ def test_fail_if_blocked_exits_nonzero_when_blocked_rows_exist(tmp_path: Path) -
     assert exit_code == 1
 
 
-def _run(db_path: Path) -> dict[str, object]:
+def _run(db_path: Path, *, candidate_mode: str = "sec_reconstruct") -> dict[str, object]:
+    return _run_with_mode(db_path, candidate_mode)
+
+
+def _run_with_mode(db_path: Path, candidate_mode: str) -> dict[str, object]:
     return run_dry_run(
         fundamentals_db=str(db_path),
         market="usa",
@@ -178,6 +198,7 @@ def _run(db_path: Path) -> dict[str, object]:
         available_at_utc=AVAILABLE_AT_UTC,
         ingested_at_utc=INGESTED_AT_UTC,
         vintage_run_id=VINTAGE_RUN_ID,
+        candidate_mode=candidate_mode,
     )
 
 

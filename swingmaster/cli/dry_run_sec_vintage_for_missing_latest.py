@@ -18,18 +18,25 @@ from swingmaster.fundamentals.reported_sec_vintage_metadata import (
     build_sec_field_source_map,
     build_sec_vintage_metadata,
 )
+from swingmaster.fundamentals.reported_sec_latest_writer_vintage import (
+    build_latest_writer_sec_vintage_candidate,
+)
 from swingmaster.fundamentals.sec_reconstruction_provenance import (
     reconstruct_quarterly_rows_with_provenance,
 )
 
 
 READY = "READY"
+READY_WITH_UNKNOWN_PROVENANCE = "READY_WITH_UNKNOWN_PROVENANCE"
 BLOCKED_NO_SEC_RAW = "BLOCKED_NO_SEC_RAW"
 BLOCKED_RECONSTRUCTION_MISMATCH = "BLOCKED_RECONSTRUCTION_MISMATCH"
 BLOCKED_INCOMPLETE_PROVENANCE = "BLOCKED_INCOMPLETE_PROVENANCE"
 BLOCKED_DUPLICATE_VINTAGE = "BLOCKED_DUPLICATE_VINTAGE"
+BLOCKED_METADATA_ERROR = "BLOCKED_METADATA_ERROR"
 SKIPPED_ALREADY_HAS_VINTAGE = "SKIPPED_ALREADY_HAS_VINTAGE"
 UNKNOWN = "UNKNOWN"
+CANDIDATE_MODE_SEC_RECONSTRUCT = "sec_reconstruct"
+CANDIDATE_MODE_LATEST_WRITER = "latest_writer"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -45,6 +52,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             vintage_run_id=args.vintage_run_id,
             ticker=args.ticker,
             sample_limit=args.sample_limit,
+            candidate_mode=args.candidate_mode,
         )
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -70,6 +78,7 @@ def run_dry_run(
     vintage_run_id: str,
     ticker: str | None = None,
     sample_limit: int = 20,
+    candidate_mode: str = CANDIDATE_MODE_SEC_RECONSTRUCT,
 ) -> dict[str, Any]:
     db_path = Path(fundamentals_db)
     if not db_path.exists():
@@ -84,15 +93,19 @@ def run_dry_run(
         samples: list[dict[str, Any]] = []
         counters = {
             READY: 0,
+            READY_WITH_UNKNOWN_PROVENANCE: 0,
             BLOCKED_NO_SEC_RAW: 0,
             BLOCKED_RECONSTRUCTION_MISMATCH: 0,
             BLOCKED_INCOMPLETE_PROVENANCE: 0,
             BLOCKED_DUPLICATE_VINTAGE: 0,
+            BLOCKED_METADATA_ERROR: 0,
             SKIPPED_ALREADY_HAS_VINTAGE: 0,
             UNKNOWN: 0,
         }
         planned_provenance_rows = 0
         planned_vintage_rows = 0
+        unknown_provenance_rows = 0
+        unknown_provenance_fields: dict[str, int] = {}
 
         for latest_row in latest_rows:
             candidate = _evaluate_candidate(
@@ -102,11 +115,17 @@ def run_dry_run(
                 available_at_utc=available_at_utc,
                 ingested_at_utc=ingested_at_utc,
                 vintage_run_id=vintage_run_id,
+                source_run_id=source_run_id,
+                candidate_mode=candidate_mode,
             )
             counters[candidate["status"]] = counters.get(candidate["status"], 0) + 1
-            if candidate["status"] == READY:
+            if candidate["status"] in (READY, READY_WITH_UNKNOWN_PROVENANCE):
                 planned_vintage_rows += 1
                 planned_provenance_rows += int(candidate["provenance_field_count"])
+                unknown_count = int(candidate.get("unknown_provenance_count", 0) or 0)
+                unknown_provenance_rows += 1 if unknown_count else 0
+                for field_name in candidate.get("unknown_provenance_fields", []):
+                    unknown_provenance_fields[field_name] = unknown_provenance_fields.get(field_name, 0) + 1
             if len(samples) < sample_limit:
                 samples.append(candidate)
 
@@ -117,15 +136,19 @@ def run_dry_run(
                 BLOCKED_RECONSTRUCTION_MISMATCH,
                 BLOCKED_INCOMPLETE_PROVENANCE,
                 BLOCKED_DUPLICATE_VINTAGE,
+                BLOCKED_METADATA_ERROR,
                 UNKNOWN,
             )
         )
         skipped_rows = counters[SKIPPED_ALREADY_HAS_VINTAGE]
         ready_rows = counters[READY]
+        ready_unknown_rows = counters[READY_WITH_UNKNOWN_PROVENANCE]
         if not latest_rows:
             overall_status = "NO_CANDIDATES"
         elif blocked_rows:
             overall_status = "DRY_RUN_BLOCKED"
+        elif ready_unknown_rows:
+            overall_status = "DRY_RUN_READY_WITH_UNKNOWN_PROVENANCE"
         else:
             overall_status = "DRY_RUN_READY"
 
@@ -134,19 +157,24 @@ def run_dry_run(
                 "fundamentals_db": str(db_path),
                 "market": market,
                 "source_run_id": source_run_id,
+                "candidate_mode": candidate_mode,
                 "available_at_utc": available_at_utc,
                 "ingested_at_utc": ingested_at_utc,
                 "vintage_run_id": vintage_run_id,
                 "latest_missing_vintage_rows": latest_missing_vintage_rows,
                 "candidates_checked": len(latest_rows),
                 "ready_rows": ready_rows,
+                "ready_with_unknown_provenance_rows": ready_unknown_rows,
                 "blocked_rows": blocked_rows,
                 "skipped_rows": skipped_rows,
                 "planned_vintage_rows": planned_vintage_rows,
                 "planned_provenance_rows": planned_provenance_rows,
+                "unknown_provenance_rows": unknown_provenance_rows,
+                "unknown_provenance_field_counts": dict(sorted(unknown_provenance_fields.items())),
                 "duplicate_vintage_rows": counters[BLOCKED_DUPLICATE_VINTAGE],
                 "reconstruction_mismatch_rows": counters[BLOCKED_RECONSTRUCTION_MISMATCH],
                 "incomplete_provenance_rows": counters[BLOCKED_INCOMPLETE_PROVENANCE],
+                "metadata_error_rows": counters[BLOCKED_METADATA_ERROR],
                 "no_sec_raw_rows": counters[BLOCKED_NO_SEC_RAW],
                 "already_has_vintage_rows": skipped_rows,
                 "overall_status": overall_status,
@@ -165,6 +193,8 @@ def _evaluate_candidate(
     available_at_utc: str,
     ingested_at_utc: str,
     vintage_run_id: str,
+    source_run_id: str | None,
+    candidate_mode: str,
 ) -> dict[str, Any]:
     ticker = str(latest_row["ticker"]).upper()
     period_end_date = str(latest_row["period_end_date"])
@@ -188,6 +218,21 @@ def _evaluate_candidate(
         return {**base, "status": BLOCKED_NO_SEC_RAW, "reason": "no exact SEC raw rows for ticker + period_end_date"}
 
     raw_rows = _load_sec_raw_rows_for_ticker(conn, ticker)
+    if candidate_mode == CANDIDATE_MODE_LATEST_WRITER:
+        return _evaluate_latest_writer_candidate(
+            conn,
+            latest=latest,
+            base=base,
+            raw_rows=raw_rows,
+            market=market,
+            available_at_utc=available_at_utc,
+            ingested_at_utc=ingested_at_utc,
+            vintage_run_id=vintage_run_id,
+            source_run_id=source_run_id,
+        )
+    if candidate_mode != CANDIDATE_MODE_SEC_RECONSTRUCT:
+        return {**base, "status": UNKNOWN, "reason": f"unsupported candidate_mode: {candidate_mode}"}
+
     try:
         reconstructed_rows, provenance_by_key = reconstruct_quarterly_rows_with_provenance(
             raw_rows,
@@ -278,6 +323,57 @@ def _evaluate_candidate(
         "source_hash": metadata["source_hash"],
         "provenance_field_count": len(provenance_rows),
         "status": READY,
+    }
+
+
+def _evaluate_latest_writer_candidate(
+    conn: sqlite3.Connection,
+    *,
+    latest: Mapping[str, Any],
+    base: Mapping[str, Any],
+    raw_rows: Sequence[Mapping[str, Any] | sqlite3.Row],
+    market: str,
+    available_at_utc: str,
+    ingested_at_utc: str,
+    vintage_run_id: str,
+    source_run_id: str | None,
+) -> dict[str, Any]:
+    try:
+        candidate = build_latest_writer_sec_vintage_candidate(
+            latest_row=latest,
+            sec_raw_rows=raw_rows,
+            market=market,
+            available_at_utc=available_at_utc,
+            ingested_at_utc=ingested_at_utc,
+            vintage_run_id=vintage_run_id,
+            source_run_id=source_run_id,
+        )
+    except Exception as exc:
+        return {**base, "status": BLOCKED_METADATA_ERROR, "reason": f"latest_writer candidate failed: {exc}"}
+
+    statement_vintage_id = str(candidate["statement_vintage_id"])
+    if _statement_vintage_id_exists(conn, statement_vintage_id):
+        return {
+            **base,
+            "statement_vintage_id": statement_vintage_id,
+            "source_hash": candidate["source_hash"],
+            "status": BLOCKED_DUPLICATE_VINTAGE,
+            "reason": "statement_vintage_id already exists",
+        }
+
+    unknown_count = int(candidate["unknown_provenance_count"])
+    status = READY_WITH_UNKNOWN_PROVENANCE if unknown_count else READY
+    return {
+        **base,
+        "statement_vintage_id": statement_vintage_id,
+        "source_hash": candidate["source_hash"],
+        "provenance_field_count": len(candidate["provenance_rows"]),
+        "sec_raw_fact_count": candidate["sec_raw_fact_count"],
+        "sec_provenance_count": candidate["sec_provenance_count"],
+        "unknown_provenance_count": unknown_count,
+        "unknown_provenance_fields": candidate["unknown_provenance_fields"],
+        "status": status,
+        "reason": "non-null latest fields with unknown provenance" if unknown_count else None,
     }
 
 
@@ -466,13 +562,16 @@ def _format_text(result: Mapping[str, Any]) -> str:
         f"fundamentals_db: {summary['fundamentals_db']}",
         f"market: {summary['market']}",
         f"source_run_id: {summary['source_run_id']}",
+        f"candidate_mode: {summary['candidate_mode']}",
         f"latest_missing_vintage_rows: {summary['latest_missing_vintage_rows']}",
         f"candidates_checked: {summary['candidates_checked']}",
         f"ready_rows: {summary['ready_rows']}",
+        f"ready_with_unknown_provenance_rows: {summary['ready_with_unknown_provenance_rows']}",
         f"blocked_rows: {summary['blocked_rows']}",
         f"skipped_rows: {summary['skipped_rows']}",
         f"planned_vintage_rows: {summary['planned_vintage_rows']}",
         f"planned_provenance_rows: {summary['planned_provenance_rows']}",
+        f"unknown_provenance_rows: {summary['unknown_provenance_rows']}",
         f"overall_status: {summary['overall_status']}",
         "samples:",
     ]
@@ -496,6 +595,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ticker")
     parser.add_argument("--format", choices=("text", "json"), default="text")
     parser.add_argument("--sample-limit", type=int, default=20)
+    parser.add_argument(
+        "--candidate-mode",
+        choices=(CANDIDATE_MODE_SEC_RECONSTRUCT, CANDIDATE_MODE_LATEST_WRITER),
+        default=CANDIDATE_MODE_SEC_RECONSTRUCT,
+    )
     parser.add_argument("--fail-if-blocked", action="store_true")
     return parser
 

@@ -157,6 +157,13 @@ confirm:
 - `unknown_provenance_rows=0`
 - real DB row counts have not changed unexpectedly
 
+Follow-up: the guarded real DB apply was completed and documented in
+`docs/swingmaster_reported_vintage_sec_latest_writer_apply_phase4j4.md`. It
+inserted 42 vintage rows and 295 provenance rows, closing the scoped latest /
+vintage parity gap.
+
 ## Verification
 
-The apply CLI was temp-tested only. The real DB apply was not run.
+At the time of Phase 4J3, the apply CLI was temp-tested only. Phase 4J4 later
+ran the guarded real DB apply; see
+`docs/swingmaster_reported_vintage_sec_latest_writer_apply_phase4j4.md`.

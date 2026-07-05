@@ -610,3 +610,9 @@ The mode forwards validated PIT metadata only to the SEC reconstruct helper when
 Phase 4I8 adds a default-off `yahoo_fallback_only` quarter_update mode for mocked Yahoo fallback vintage forwarding.
 
 The mode forwards validated PIT metadata only to `run_yahoo_fallback_enrich(...)` when explicitly requested. It does not forward metadata to SEC reconstruct, does not wire Yahoo bridge, and does not create a combined final mixed vintage.
+
+## 17. Phase 4I9 Status Note
+
+Phase 4I9 documents future combined SEC + Yahoo fallback orchestration. It does not change runtime behavior.
+
+The design recommends one final mixed vintage per affected ticker/period as the eventual production policy, but Phase 4I10 should first implement planning-only combined orchestration with no vintage execution.

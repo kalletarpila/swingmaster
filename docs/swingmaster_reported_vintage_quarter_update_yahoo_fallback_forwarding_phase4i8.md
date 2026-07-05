@@ -101,3 +101,9 @@ This phase does not run providers, scheduler jobs, refresh jobs against real dat
 Recommended Phase 4I9: design or test an explicit combined-mode policy before adding any SEC + Yahoo fallback orchestration.
 
 The next phase should decide whether quarter_update should write separate provider-stage vintages, one final mixed vintage, or keep SEC and Yahoo fallback modes mutually exclusive.
+
+## Phase 4I9 Status
+
+Phase 4I9 documents the combined-mode policy in [Reported Vintage Quarter Update Combined Orchestration Design Phase 4I9](swingmaster_reported_vintage_quarter_update_combined_orchestration_design_phase4i9.md).
+
+The design keeps `yahoo_fallback_only` separate and recommends planning-only combined orchestration before final mixed vintage writes.

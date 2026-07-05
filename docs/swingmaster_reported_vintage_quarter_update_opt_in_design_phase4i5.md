@@ -253,3 +253,9 @@ The new mode is `sec_reconstruct_only`. It remains default-off, requires explici
 Phase 4I8 adds a separate mocked Yahoo fallback forwarding path, documented in [Reported Vintage Quarter Update Yahoo Fallback Forwarding Phase 4I8](swingmaster_reported_vintage_quarter_update_yahoo_fallback_forwarding_phase4i8.md).
 
 The new mode is `yahoo_fallback_only`. It remains default-off, requires explicit PIT metadata, and does not implement SEC+Yahoo combined mode or final mixed-vintage orchestration.
+
+## Phase 4I9 Status
+
+Phase 4I9 documents future combined SEC + Yahoo fallback orchestration in [Reported Vintage Quarter Update Combined Orchestration Design Phase 4I9](swingmaster_reported_vintage_quarter_update_combined_orchestration_design_phase4i9.md).
+
+The design recommends a planning-only combined mode before any final mixed vintage execution.

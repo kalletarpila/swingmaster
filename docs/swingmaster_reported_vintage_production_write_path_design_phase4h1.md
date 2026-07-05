@@ -350,3 +350,9 @@ The production write path is still not broadly enabled. Quarter_update can forwa
 Phase 4I8 adds default-off Yahoo fallback forwarding, documented in [Reported Vintage Quarter Update Yahoo Fallback Forwarding Phase 4I8](swingmaster_reported_vintage_quarter_update_yahoo_fallback_forwarding_phase4i8.md).
 
 Quarter_update can forward validated metadata to Yahoo fallback only when `--write-vintage --vintage-mode yahoo_fallback_only` is explicitly requested. SEC-only forwarding remains separate, Yahoo bridge remains unwired, and no combined final mixed-vintage production orchestration is enabled.
+
+## Phase 4I9 Status
+
+Phase 4I9 is a documentation-only combined SEC + Yahoo fallback orchestration design, documented in [Reported Vintage Quarter Update Combined Orchestration Design Phase 4I9](swingmaster_reported_vintage_quarter_update_combined_orchestration_design_phase4i9.md).
+
+No runtime code, providers, scheduler paths, real DB writes, or production combined vintage execution changed. The design recommends Phase 4I10 add planning-only combined orchestration before final mixed vintage writes.

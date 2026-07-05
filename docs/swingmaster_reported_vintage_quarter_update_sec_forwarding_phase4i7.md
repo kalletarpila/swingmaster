@@ -109,3 +109,9 @@ Yahoo fallback and final mixed-vintage orchestration should remain separate unti
 Phase 4I8 adds default-off Yahoo fallback forwarding, documented in [Reported Vintage Quarter Update Yahoo Fallback Forwarding Phase 4I8](swingmaster_reported_vintage_quarter_update_yahoo_fallback_forwarding_phase4i8.md).
 
 `sec_reconstruct_only` remains unchanged and SEC-only. `yahoo_fallback_only` is a separate mode; no combined SEC + Yahoo or final mixed-vintage orchestration is implemented.
+
+## Phase 4I9 Status
+
+Phase 4I9 documents future combined SEC + Yahoo fallback orchestration in [Reported Vintage Quarter Update Combined Orchestration Design Phase 4I9](swingmaster_reported_vintage_quarter_update_combined_orchestration_design_phase4i9.md).
+
+The design keeps `sec_reconstruct_only` separate and recommends a new planning-only combined mode before any final mixed vintage writes.

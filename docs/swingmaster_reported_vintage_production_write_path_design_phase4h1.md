@@ -314,3 +314,9 @@ Phase 4I2 adds a narrow, default-off Yahoo-to-generic bridge CLI vintage opt-in,
 The default Yahoo bridge path remains latest-only. With `--write-vintage`, explicit market, availability, ingestion, and vintage run metadata are required before the CLI writes latest-compatible quarterly rows, statement vintages, and Yahoo bridge provenance through the existing Yahoo dual-write scaffold.
 
 Yahoo fallback enrich production wiring, `run_fundamental_quarter_update.py`, provider refresh, schedulers, real DB writes, TTM, scoring, valuation, UI, and ESS remain unwired.
+
+## Phase 4I3 Status
+
+Phase 4I3 is a documentation-only design for future Yahoo fallback enrich CLI vintage opt-in, documented in [Reported Vintage Yahoo Fallback Enrich CLI Opt-In Design Phase 4I3](swingmaster_reported_vintage_yahoo_fallback_enrich_cli_opt_in_design_phase4i3.md).
+
+No runtime code, tests, providers, refresh jobs, schedulers, real DB writes, or quarter-update wiring changed. The design defines how future fallback vintage rows should preserve mixed SEC/Yahoo provenance, how missing-quarter inserts should be distinguished, and which temp-DB tests are required before implementation.

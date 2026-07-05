@@ -574,3 +574,9 @@ This is still not full production provider wiring. SEC refresh, Yahoo/fallback p
 Phase 4I2 adds a default-off Yahoo-to-generic bridge CLI vintage opt-in. The default bridge behavior remains latest-only and compatible with the existing Yahoo-to-quarterly path. Vintage writes require explicit opt-in flags and caller-provided PIT metadata.
 
 This is still not full production provider wiring. Yahoo fallback enrich, quarter-update orchestration, schedulers, provider refresh, real DB writes, TTM, scoring, valuation, UI, and ESS readers remain outside the phase.
+
+## 11. Phase 4I3 Status Note
+
+Phase 4I3 adds documentation-only design for future Yahoo fallback enrich CLI vintage opt-in. It does not change runtime behavior.
+
+The design requires future fallback vintage writes to preserve mixed SEC/Yahoo field provenance, avoid silently attributing retained fields to Yahoo, and keep quarter-update, providers, real DB writes, and ESS readers out of scope until later phases.

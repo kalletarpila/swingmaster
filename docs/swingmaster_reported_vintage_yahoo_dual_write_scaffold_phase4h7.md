@@ -117,3 +117,9 @@ The next phase can add a narrow, explicitly opt-in Yahoo CLI experiment if it:
 Phase 4H10 adds temp-DB integration coverage for the Yahoo bridge and Yahoo fallback-to-vintage chains, documented in [Reported Vintage Yahoo Fallback To Vintage Integration Phase 4H10](swingmaster_reported_vintage_yahoo_fallback_to_vintage_integration_phase4h10.md).
 
 The integration test proves the Phase 4H7 scaffold can write latest, vintage, and field provenance rows from fixture Yahoo source rows and fallback audit rows, with PIT reader checks and without production wiring.
+
+## Phase 4I3 Design Reference
+
+Phase 4I3 documents the future Yahoo fallback enrich CLI opt-in design in [Reported Vintage Yahoo Fallback Enrich CLI Opt-In Design Phase 4I3](swingmaster_reported_vintage_yahoo_fallback_enrich_cli_opt_in_design_phase4i3.md).
+
+The design keeps fallback enrich default behavior unchanged and requires explicit availability metadata plus field-level provenance before any future vintage write path is enabled.

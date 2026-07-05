@@ -320,3 +320,9 @@ Yahoo fallback enrich production wiring, `run_fundamental_quarter_update.py`, pr
 Phase 4I3 is a documentation-only design for future Yahoo fallback enrich CLI vintage opt-in, documented in [Reported Vintage Yahoo Fallback Enrich CLI Opt-In Design Phase 4I3](swingmaster_reported_vintage_yahoo_fallback_enrich_cli_opt_in_design_phase4i3.md).
 
 No runtime code, tests, providers, refresh jobs, schedulers, real DB writes, or quarter-update wiring changed. The design defines how future fallback vintage rows should preserve mixed SEC/Yahoo provenance, how missing-quarter inserts should be distinguished, and which temp-DB tests are required before implementation.
+
+## Phase 4I4 Status
+
+Phase 4I4 adds a narrow, default-off Yahoo fallback enrich CLI vintage opt-in, documented in [Reported Vintage Yahoo Fallback Enrich CLI Opt-In Phase 4I4](swingmaster_reported_vintage_yahoo_fallback_enrich_cli_opt_in_phase4i4.md).
+
+The default fallback enrich path remains latest/audit-only. With `--write-vintage`, explicit market, availability, ingestion, and vintage run metadata are required before the CLI writes one vintage per affected period plus field provenance. `run_fundamental_quarter_update.py`, provider refresh, schedulers, real DB writes, TTM, scoring, valuation, UI, and ESS remain unwired.

@@ -201,3 +201,9 @@ Phase 4I5 can run bounded fixture or smoke verification if needed. Quarter-updat
 - The implementation should create one mixed vintage per affected period after all field fills, not one per field.
 - `available_at_utc` remains a policy input. Yahoo observed/ingested time is not the same as verified issuer publication time.
 - `replace_audit_for_run` can delete audit rows for a run before insert. Vintage implementation must ensure the audit rows used for source hash/provenance match the final stored audit evidence.
+
+## Phase 4I4 Implementation Reference
+
+Phase 4I4 implements the default-off Yahoo fallback enrich CLI vintage opt-in described here, documented in [Reported Vintage Yahoo Fallback Enrich CLI Opt-In Phase 4I4](swingmaster_reported_vintage_yahoo_fallback_enrich_cli_opt_in_phase4i4.md).
+
+The implementation keeps default fallback behavior unchanged, writes no vintage rows for no-op enriches, and keeps `run_fundamental_quarter_update.py`, providers, schedulers, and real DB execution unwired.

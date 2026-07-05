@@ -580,3 +580,9 @@ This is still not full production provider wiring. Yahoo fallback enrich, quarte
 Phase 4I3 adds documentation-only design for future Yahoo fallback enrich CLI vintage opt-in. It does not change runtime behavior.
 
 The design requires future fallback vintage writes to preserve mixed SEC/Yahoo field provenance, avoid silently attributing retained fields to Yahoo, and keep quarter-update, providers, real DB writes, and ESS readers out of scope until later phases.
+
+## 12. Phase 4I4 Status Note
+
+Phase 4I4 adds a default-off Yahoo fallback enrich CLI vintage opt-in. Default fallback behavior remains latest/audit-only and compatible with the existing fallback enrich path.
+
+Vintage mode requires explicit PIT metadata, writes no vintage for no-op enriches, preserves Yahoo-filled field provenance separately from unknown retained fields, and keeps quarter-update, providers, real DB writes, and ESS readers out of scope.

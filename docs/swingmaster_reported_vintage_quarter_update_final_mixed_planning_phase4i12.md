@@ -74,3 +74,9 @@ For that reason, live summary fields stay null and `vintage_final_mixed_plan_ava
 Recommended Phase 4I13: design the no-write per-period data collection contract needed for a real final mixed plan, still without DB writes or provider calls.
 
 Before production writes, define duplicate/no-op behavior, supersession semantics, and how final mixed rows relate to any intermediate SEC-only or Yahoo-only vintages.
+
+## Phase 4I13 Execution Design Reference
+
+Phase 4I13 documents the future final mixed execution policy in [Reported Vintage Quarter Update Final Mixed Execution Design Phase 4I13](swingmaster_reported_vintage_quarter_update_final_mixed_execution_design_phase4i13.md).
+
+It is documentation-only and does not add the execution mode.

@@ -374,3 +374,9 @@ The builder is test-only and not wired into production paths. It defines `mixed_
 Phase 4I12 adds planning-only quarter_update integration for the final mixed builder, documented in [Reported Vintage Quarter Update Final Mixed Planning Phase 4I12](swingmaster_reported_vintage_quarter_update_final_mixed_planning_phase4i12.md).
 
 The integration computes final mixed plan details only from mocked inputs and keeps live quarter_update execution disabled. No vintage rows are written, no providers are called, and production final mixed writes remain unwired.
+
+## Phase 4I13 Status
+
+Phase 4I13 is a documentation-only execution design for future final mixed quarter_update writes, documented in [Reported Vintage Quarter Update Final Mixed Execution Design Phase 4I13](swingmaster_reported_vintage_quarter_update_final_mixed_execution_design_phase4i13.md).
+
+No runtime code, tests, providers, schedulers, migrations, real DB writes, or production final mixed execution changed.

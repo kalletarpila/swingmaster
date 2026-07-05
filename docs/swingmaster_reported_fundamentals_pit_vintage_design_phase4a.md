@@ -634,3 +634,9 @@ The helper requires explicit availability and ingestion metadata, creates determ
 Phase 4I12 adds planning-only quarter_update integration for the final mixed builder. It does not execute vintage writes.
 
 Live `sec_plus_yahoo_fallback_planning` now exposes explicit final mixed plan detail fields, but keeps them null until real per-period input exists. Mocked tests verify that planned source hash, statement id, and provenance field count can be computed without DB writes.
+
+## 21. Phase 4I13 Status Note
+
+Phase 4I13 documents the future final mixed quarter_update execution policy. It does not change runtime behavior.
+
+The design recommends one final mixed vintage per affected ticker/period after SEC and Yahoo fallback complete, with explicit PIT metadata, deterministic duplicate/no-op handling, and no production execution until temp-DB helper tests prove the write path.

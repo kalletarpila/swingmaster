@@ -244,3 +244,9 @@ The implementation adds `sec_plus_yahoo_fallback_planning`, validates explicit m
 Phase 4I11 adds the pure final mixed builder contract in [Reported Vintage Final Mixed Builder Phase 4I11](swingmaster_reported_vintage_final_mixed_builder_phase4i11.md).
 
 The builder defines deterministic `mixed_sec_yahoo` source hash, statement vintage id, and SEC/Yahoo/unknown field provenance merge behavior in temp-DB tests only. It is not wired into quarter_update execution.
+
+## Phase 4I13 Execution Design Reference
+
+Phase 4I13 refines the future final mixed execution policy in [Reported Vintage Quarter Update Final Mixed Execution Design Phase 4I13](swingmaster_reported_vintage_quarter_update_final_mixed_execution_design_phase4i13.md).
+
+It keeps the preferred final-only combined policy: one accepted final mixed vintage per affected ticker/period after SEC and Yahoo fallback complete.

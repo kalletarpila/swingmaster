@@ -592,3 +592,9 @@ Vintage mode requires explicit PIT metadata, writes no vintage for no-op enriche
 Phase 4I5 adds documentation-only design for future quarter_update vintage opt-in. It does not change runtime behavior.
 
 The design keeps quarter_update vintage execution out of scope for now and recommends Phase 4I6 start with default-off flag validation and summary plumbing only, because quarter_update spans SEC, Yahoo fallback, TTM, scoring, ack, and valuation.
+
+## 14. Phase 4I6 Status Note
+
+Phase 4I6 adds default-off quarter_update vintage validation and summary plumbing. It does not execute vintage writes.
+
+When requested, quarter_update now validates explicit vintage market, availability timestamp, ingestion timestamp, run id, and `validation_only` mode before any child step. Successful validation reports zero inserted vintage/provenance rows and `vintage_execution_enabled=False`.

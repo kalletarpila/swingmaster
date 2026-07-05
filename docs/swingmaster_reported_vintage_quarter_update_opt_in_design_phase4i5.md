@@ -235,3 +235,9 @@ If Phase 4I6 follows the recommended validation-only scope, tests 5-8 should be 
 Recommended Phase 4I6: quarter_update vintage flag validation and summary plumbing, no vintage execution.
 
 This is intentionally conservative. It proves the public quarter_update interface and failure behavior without introducing provider, scheduler, real DB, or duplicate-vintage risk.
+
+## Phase 4I6 Implementation Reference
+
+Phase 4I6 implements the recommended validation-only scope in [Reported Vintage Quarter Update Validation Plumbing Phase 4I6](swingmaster_reported_vintage_quarter_update_validation_plumbing_phase4i6.md).
+
+The implementation adds default-off CLI flags, metadata validation, and opt-in summary fields. It still does not execute vintage writes or pass vintage flags to SEC/Yahoo subpaths.

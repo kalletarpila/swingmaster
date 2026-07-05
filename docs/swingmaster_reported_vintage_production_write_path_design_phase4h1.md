@@ -332,3 +332,9 @@ The default fallback enrich path remains latest/audit-only. With `--write-vintag
 Phase 4I5 is a documentation-only design for future quarter_update vintage opt-in, documented in [Reported Vintage Quarter Update Opt-In Design Phase 4I5](swingmaster_reported_vintage_quarter_update_opt_in_design_phase4i5.md).
 
 No runtime code, tests, providers, refresh jobs, schedulers, real DB writes, or quarter-update vintage wiring changed. The design recommends Phase 4I6 start with flag validation and summary plumbing only, before any SEC/Yahoo vintage execution from quarter_update.
+
+## Phase 4I6 Status
+
+Phase 4I6 adds quarter_update vintage validation plumbing, documented in [Reported Vintage Quarter Update Validation Plumbing Phase 4I6](swingmaster_reported_vintage_quarter_update_validation_plumbing_phase4i6.md).
+
+The path remains default-off and validation-only. Quarter update validates explicit PIT metadata and reports opt-in zero-count vintage summary fields, but it still does not write vintage rows or pass vintage flags to SEC/Yahoo subpaths.

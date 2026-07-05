@@ -19,9 +19,10 @@ from swingmaster.fundamentals.lifecycle import run_lifecycle_classification
 from swingmaster.fundamentals.score import run_fundamental_scoring
 
 DEFAULT_EXCHANGE = "HE"
+VINTAGE_MODE_VALIDATION_ONLY = "validation_only"
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Process flagged quarter-state tickers through score")
     parser.add_argument("--db", required=True, help="Fundamentals SQLite database path")
     parser.add_argument("--run-id", required=True, help="Deterministic base run identifier")
@@ -35,12 +36,85 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--dry-run", action="store_true", help="Read-only preview without running write paths")
     parser.add_argument("--skip-ack", action="store_true", help="Run steps but do not acknowledge quarter state")
-    return parser.parse_args()
+    parser.add_argument(
+        "--write-vintage",
+        action="store_true",
+        help="Validate future reported vintage metadata without executing vintage writes",
+    )
+    parser.add_argument("--vintage-market", default=None, help="Required market for future vintage writes")
+    parser.add_argument(
+        "--vintage-available-at-utc",
+        default=None,
+        help="Required explicit PIT availability timestamp for future vintage writes",
+    )
+    parser.add_argument(
+        "--vintage-ingested-at-utc",
+        default=None,
+        help="Required explicit ingestion timestamp for future vintage writes",
+    )
+    parser.add_argument("--vintage-run-id", default=None, help="Required explicit run id for future vintage writes")
+    parser.add_argument(
+        "--vintage-normalization-run-id",
+        default=None,
+        help="Optional normalization run id for future vintage writes",
+    )
+    parser.add_argument(
+        "--vintage-mode",
+        default=None,
+        choices=[VINTAGE_MODE_VALIDATION_ONLY],
+        help="Phase 4I6 supports validation_only only; no vintage writes are executed",
+    )
+    return parser.parse_args(argv)
 
 
 def _summary(**items: object) -> None:
     for key, value in items.items():
         print(f"SUMMARY {key}={value}")
+
+
+def _validate_vintage_timestamp(value: str, field_name: str) -> None:
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_INVALID_TIMESTAMP:{field_name}") from exc
+
+
+def validate_vintage_options(
+    *,
+    write_vintage: bool,
+    vintage_market: str | None,
+    vintage_available_at_utc: str | None,
+    vintage_ingested_at_utc: str | None,
+    vintage_run_id: str | None,
+    vintage_mode: str | None,
+) -> dict[str, object]:
+    if not write_vintage:
+        return {}
+    if vintage_market is None or vintage_market.strip() == "":
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MARKET_REQUIRED")
+    if vintage_available_at_utc is None or vintage_available_at_utc.strip() == "":
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_AVAILABLE_AT_UTC_REQUIRED")
+    if vintage_ingested_at_utc is None or vintage_ingested_at_utc.strip() == "":
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_INGESTED_AT_UTC_REQUIRED")
+    if vintage_run_id is None or vintage_run_id.strip() == "":
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_RUN_ID_REQUIRED")
+    if vintage_mode is None or vintage_mode.strip() == "":
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MODE_REQUIRED")
+    if vintage_mode != VINTAGE_MODE_VALIDATION_ONLY:
+        raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MODE_UNSUPPORTED:{vintage_mode}")
+    _validate_vintage_timestamp(vintage_available_at_utc, "vintage_available_at_utc")
+    _validate_vintage_timestamp(vintage_ingested_at_utc, "vintage_ingested_at_utc")
+    return {
+        "vintage_requested": True,
+        "vintage_mode": VINTAGE_MODE_VALIDATION_ONLY,
+        "vintage_execution_enabled": False,
+        "vintage_validation_status": "OK",
+        "vintage_rows_inserted": 0,
+        "vintage_provenance_rows_inserted": 0,
+        "vintage_rows_skipped_noop": 0,
+        "vintage_rows_failed": 0,
+        "vintage_error_summary": None,
+    }
 
 
 def resolve_db_path(db_arg: str) -> Path:
@@ -440,7 +514,23 @@ def run_fundamental_quarter_update(
     limit: int | None,
     dry_run: bool,
     skip_ack: bool,
+    write_vintage: bool = False,
+    vintage_market: str | None = None,
+    vintage_available_at_utc: str | None = None,
+    vintage_ingested_at_utc: str | None = None,
+    vintage_run_id: str | None = None,
+    vintage_normalization_run_id: str | None = None,
+    vintage_mode: str | None = None,
 ) -> dict[str, object]:
+    vintage_summary = validate_vintage_options(
+        write_vintage=write_vintage,
+        vintage_market=vintage_market,
+        vintage_available_at_utc=vintage_available_at_utc,
+        vintage_ingested_at_utc=vintage_ingested_at_utc,
+        vintage_run_id=vintage_run_id,
+        vintage_mode=vintage_mode,
+    )
+    _ = vintage_normalization_run_id
     rows = load_eligible_rows(db_path, market, ticker, limit)
     market_label = market.strip().lower() if market is not None else "ALL"
     strict_single_ticker_mode = ticker is not None
@@ -460,6 +550,7 @@ def run_fundamental_quarter_update(
             "skip_ack": 1 if skip_ack else 0,
             "run_id": run_id,
         }
+        summary.update(vintage_summary)
         _summary(**summary)
         return summary
 
@@ -535,6 +626,7 @@ def run_fundamental_quarter_update(
         "valuation_rows_written": valuation_rows_written,
         "run_id": run_id,
     }
+    summary.update(vintage_summary)
     _summary(**summary)
     if not strict_single_ticker_mode and tickers_failed > 0:
         raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_BATCH_FAILED:tickers_failed={tickers_failed}")
@@ -555,6 +647,13 @@ def main() -> None:
             limit=args.limit,
             dry_run=args.dry_run,
             skip_ack=args.skip_ack,
+            write_vintage=args.write_vintage,
+            vintage_market=args.vintage_market,
+            vintage_available_at_utc=args.vintage_available_at_utc,
+            vintage_ingested_at_utc=args.vintage_ingested_at_utc,
+            vintage_run_id=args.vintage_run_id,
+            vintage_normalization_run_id=args.vintage_normalization_run_id,
+            vintage_mode=args.vintage_mode,
         )
     except Exception as exc:
         raise SystemExit(str(exc))

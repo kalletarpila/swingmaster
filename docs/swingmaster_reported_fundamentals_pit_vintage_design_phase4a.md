@@ -628,3 +628,9 @@ The mode validates explicit PIT metadata and reports combined SEC + Yahoo fallba
 Phase 4I11 adds a pure final mixed SEC + Yahoo fallback vintage builder contract. It does not change runtime behavior.
 
 The helper requires explicit availability and ingestion metadata, creates deterministic `mixed_sec_yahoo` statement ids from the final source hash, preserves SEC-retained and Yahoo-filled field provenance, marks unmapped non-null fields with the existing unknown contract, and keeps PIT behavior based only on `available_at_utc`.
+
+## 20. Phase 4I12 Status Note
+
+Phase 4I12 adds planning-only quarter_update integration for the final mixed builder. It does not execute vintage writes.
+
+Live `sec_plus_yahoo_fallback_planning` now exposes explicit final mixed plan detail fields, but keeps them null until real per-period input exists. Mocked tests verify that planned source hash, statement id, and provenance field count can be computed without DB writes.

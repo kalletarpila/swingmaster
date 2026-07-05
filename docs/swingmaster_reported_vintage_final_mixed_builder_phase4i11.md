@@ -86,3 +86,9 @@ It does not modify `run_fundamental_quarter_update.py`, production provider flow
 Recommended Phase 4I12: add mocked/default-off quarter_update handoff planning for the final mixed builder, still without real DB writes or provider calls.
 
 Before production execution, define duplicate/no-op policy, supersession semantics, and whether existing SEC-only or Yahoo-only vintages should be treated as intermediate rows.
+
+## Phase 4I12 Planning Reference
+
+Phase 4I12 adds planning-only quarter_update integration for this builder in [Reported Vintage Quarter Update Final Mixed Planning Phase 4I12](swingmaster_reported_vintage_quarter_update_final_mixed_planning_phase4i12.md).
+
+The integration uses mocked inputs to compute planned source hash, statement id, and provenance count. Live quarter_update still writes no final mixed vintage rows.

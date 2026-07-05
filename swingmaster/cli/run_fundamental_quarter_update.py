@@ -16,6 +16,11 @@ from swingmaster.cli.run_fundamental_yahoo_audit import run_yahoo_audit
 from swingmaster.cli.run_fundamental_yahoo_fallback_enrich import run_yahoo_fallback_enrich
 from swingmaster.cli.run_fundamental_yahoo_quarterly_write import run_yahoo_quarterly_write
 from swingmaster.cli.run_fundamental_yahoo_to_quarterly import run_yahoo_to_quarterly
+from swingmaster.fundamentals.reported_final_mixed_vintage import (
+    build_final_mixed_source_hash,
+    build_final_mixed_statement_vintage_id,
+    merge_final_mixed_field_source_maps,
+)
 from swingmaster.fundamentals.lifecycle import run_lifecycle_classification
 from swingmaster.fundamentals.score import run_fundamental_scoring
 
@@ -85,6 +90,45 @@ def _summary(**items: object) -> None:
         print(f"SUMMARY {key}={value}")
 
 
+def build_final_mixed_vintage_plan_summary(
+    *,
+    market: str,
+    ticker: str,
+    period_end_date: str,
+    normalized_row: dict[str, Any],
+    sec_field_source_map: dict[str, dict[str, Any]] | None = None,
+    yahoo_field_source_map: dict[str, dict[str, Any]] | None = None,
+    fallback_audit_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, object]:
+    """Build a mocked final mixed vintage plan without writing vintage rows."""
+    source_hash = build_final_mixed_source_hash(
+        market=market,
+        ticker=ticker,
+        period_end_date=period_end_date,
+        normalized_row=normalized_row,
+        sec_field_source_map=sec_field_source_map,
+        yahoo_field_source_map=yahoo_field_source_map,
+        fallback_audit_rows=fallback_audit_rows,
+    )
+    field_source_map = merge_final_mixed_field_source_maps(
+        normalized_row=normalized_row,
+        sec_field_source_map=sec_field_source_map,
+        yahoo_field_source_map=yahoo_field_source_map,
+    )
+    return {
+        "vintage_final_mixed_plan_available": True,
+        "vintage_final_mixed_statement_vintage_id": build_final_mixed_statement_vintage_id(
+            market=market,
+            ticker=ticker,
+            period_end_date=period_end_date,
+            source_hash=source_hash,
+        ),
+        "vintage_final_mixed_source_hash": source_hash,
+        "vintage_final_mixed_provenance_field_count": len(field_source_map),
+        "vintage_final_mixed_field_source_map": field_source_map,
+    }
+
+
 def _validate_vintage_timestamp(value: str, field_name: str) -> None:
     try:
         datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
@@ -137,6 +181,10 @@ def validate_vintage_options(
             "vintage_yahoo_fallback_requested": True,
             "vintage_final_mixed_planned": True,
             "vintage_final_mixed_written": False,
+            "vintage_final_mixed_plan_available": False,
+            "vintage_final_mixed_statement_vintage_id": None,
+            "vintage_final_mixed_source_hash": None,
+            "vintage_final_mixed_provenance_field_count": None,
             "vintage_rows_inserted": 0,
             "vintage_provenance_rows_inserted": 0,
             "vintage_rows_skipped_noop": 0,

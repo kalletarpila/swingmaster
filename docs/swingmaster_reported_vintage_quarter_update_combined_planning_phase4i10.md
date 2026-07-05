@@ -97,3 +97,9 @@ Recommended Phase 4I11: temp-DB final mixed vintage creation design or mocked im
 Phase 4I11 implements the recommended test-only final mixed builder contract in [Reported Vintage Final Mixed Builder Phase 4I11](swingmaster_reported_vintage_final_mixed_builder_phase4i11.md).
 
 The planning mode remains unchanged: it still writes no vintage rows and does not call the final mixed builder.
+
+## Phase 4I12 Planning Reference
+
+Phase 4I12 adds planning-only final mixed builder integration in [Reported Vintage Quarter Update Final Mixed Planning Phase 4I12](swingmaster_reported_vintage_quarter_update_final_mixed_planning_phase4i12.md).
+
+The planning mode remains no-execution. Its live summary exposes null final mixed plan details until real per-period plan input is available.

@@ -368,3 +368,9 @@ The mode reports a SEC + Yahoo fallback plan only. It does not write vintage row
 Phase 4I11 adds a pure final mixed SEC + Yahoo fallback vintage builder contract, documented in [Reported Vintage Final Mixed Builder Phase 4I11](swingmaster_reported_vintage_final_mixed_builder_phase4i11.md).
 
 The builder is test-only and not wired into production paths. It defines `mixed_sec_yahoo` row metadata, deterministic source hash and statement id policy, field provenance merge behavior, and PIT behavior through temp-DB tests only.
+
+## Phase 4I12 Status
+
+Phase 4I12 adds planning-only quarter_update integration for the final mixed builder, documented in [Reported Vintage Quarter Update Final Mixed Planning Phase 4I12](swingmaster_reported_vintage_quarter_update_final_mixed_planning_phase4i12.md).
+
+The integration computes final mixed plan details only from mocked inputs and keeps live quarter_update execution disabled. No vintage rows are written, no providers are called, and production final mixed writes remain unwired.

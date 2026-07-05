@@ -130,3 +130,5 @@ For final production policy, prefer a final mixed vintage after the full quarter
 Phase 4K3 adds the decision gate recommended here in [Reported Vintage Completion Gate Phase 4K3](swingmaster_reported_vintage_completion_gate_phase4k3.md).
 
 The gate classifies explicit `sec_latest_writer` quarter_update runs as `SEC_VINTAGE_SUFFICIENT`, `FINAL_MIXED_REQUIRED`, `YAHOO_VINTAGE_REQUIRED`, `BLOCKED_POST_RUN_DRIFT`, or `UNKNOWN` using the Phase 4K2 parity/Yahoo-impact summaries. It still does not write final mixed or Yahoo-aware vintages.
+
+Phase 4K4 adds temp-tested planning for the final mixed or Yahoo-aware candidate when this gate says SEC-only vintage is not sufficient. It remains planning-only and does not write vintage rows.

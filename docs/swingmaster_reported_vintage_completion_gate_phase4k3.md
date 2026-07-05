@@ -79,3 +79,9 @@ Real DB/provider status: not run.
 ## Recommended Next Phase
 
 Phase 4K4 should implement a default-off final mixed or post-run apply path that runs after Yahoo fallback and writes one final PIT vintage for the stable latest row. It should remain temp-tested first and should not enable production writes until real DB preflight confirms safe inputs.
+
+## Phase 4K4 Follow-Up
+
+Phase 4K4 adds temp-tested Yahoo-aware/final-mixed planning in [Reported Vintage Yahoo-Aware Plan Phase 4K4](swingmaster_reported_vintage_yahoo_aware_plan_phase4k4.md).
+
+The follow-up does not write final mixed or Yahoo vintages. It prepares candidate ids, hashes, row counts, provenance counts, and blocked-field summaries for later default-off execution work.

@@ -31,6 +31,10 @@ from swingmaster.fundamentals.reported_vintage_writer import (
     insert_quarterly_field_provenance_rows,
     insert_quarterly_vintage_row,
 )
+from swingmaster.fundamentals.reported_yahoo_vintage_metadata import (
+    build_yahoo_source_hash,
+    build_yahoo_vintage_metadata,
+)
 from swingmaster.fundamentals.lifecycle import run_lifecycle_classification
 from swingmaster.fundamentals.score import run_fundamental_scoring
 
@@ -59,6 +63,11 @@ VINTAGE_COMPLETION_FINAL_MIXED_REQUIRED = "FINAL_MIXED_REQUIRED"
 VINTAGE_COMPLETION_YAHOO_REQUIRED = "YAHOO_VINTAGE_REQUIRED"
 VINTAGE_COMPLETION_BLOCKED_DRIFT = "BLOCKED_POST_RUN_DRIFT"
 VINTAGE_COMPLETION_UNKNOWN = "UNKNOWN"
+YAHOO_AWARE_PLAN_NO_ACTION = "NO_ACTION_REQUIRED"
+YAHOO_AWARE_PLAN_FINAL_MIXED_READY = "FINAL_MIXED_PLAN_READY"
+YAHOO_AWARE_PLAN_YAHOO_READY = "YAHOO_VINTAGE_PLAN_READY"
+YAHOO_AWARE_PLAN_BLOCKED = "PLAN_BLOCKED"
+YAHOO_AWARE_PLAN_UNKNOWN = "UNKNOWN"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -248,6 +257,17 @@ def merge_sec_latest_writer_post_run_guard_summary(
             "vintage_final_mixed_required": guard_summary.get("vintage_final_mixed_required"),
             "vintage_yahoo_vintage_required": guard_summary.get("vintage_yahoo_vintage_required"),
             "vintage_blocked_post_run_drift": guard_summary.get("vintage_blocked_post_run_drift"),
+            "vintage_yahoo_aware_planning_status": guard_summary.get("vintage_yahoo_aware_planning_status"),
+            "vintage_yahoo_aware_next_action": guard_summary.get("vintage_yahoo_aware_next_action"),
+            "vintage_planned_final_mixed_rows": guard_summary.get("vintage_planned_final_mixed_rows"),
+            "vintage_planned_yahoo_vintage_rows": guard_summary.get("vintage_planned_yahoo_vintage_rows"),
+            "vintage_planned_yahoo_aware_provenance_rows": guard_summary.get(
+                "vintage_planned_yahoo_aware_provenance_rows"
+            ),
+            "vintage_yahoo_aware_blocked_rows": guard_summary.get("vintage_yahoo_aware_blocked_rows"),
+            "vintage_yahoo_aware_unknown_provenance_fields": guard_summary.get(
+                "vintage_yahoo_aware_unknown_provenance_fields"
+            ),
         }
     )
 
@@ -941,6 +961,8 @@ def build_quarter_update_vintage_post_run_guard_summary(
     vintage_run_id: str | None,
     enrich_run_id: str | None,
     enrich_summary: Mapping[str, object] | None,
+    available_at_utc: str | None = None,
+    ingested_at_utc: str | None = None,
 ) -> dict[str, object]:
     parity = check_quarter_update_vintage_parity_for_run(
         conn,
@@ -962,7 +984,406 @@ def build_quarter_update_vintage_post_run_guard_summary(
             yahoo_impact_summary=yahoo_impact,
         )
     )
+    if vintage_run_id is not None and available_at_utc is not None and ingested_at_utc is not None:
+        latest_run_ids = [run_id for run_id in (source_run_id, enrich_run_id) if run_id is not None]
+        output.update(
+            plan_quarter_update_yahoo_aware_vintage(
+                completion_summary=output,
+                latest_rows=[dict(row) for row in _latest_rows_for_run_ids(conn, latest_run_ids)],
+                sec_provenance_by_key=_sec_provenance_by_key(conn, str(vintage_run_id)),
+                yahoo_audit_rows_by_key=_yahoo_audit_rows_by_key(conn, enrich_run_id),
+                yahoo_rows_by_key=_yahoo_rows_by_key(conn, market),
+                market=market,
+                available_at_utc=available_at_utc,
+                ingested_at_utc=ingested_at_utc,
+                vintage_run_id=str(vintage_run_id),
+            )
+        )
     return output
+
+
+def plan_quarter_update_yahoo_aware_vintage(
+    *,
+    completion_summary: Mapping[str, object],
+    latest_rows: list[Mapping[str, Any]],
+    sec_provenance_by_key: Mapping[tuple[str, str], Mapping[str, Mapping[str, Any]]],
+    yahoo_audit_rows_by_key: Mapping[tuple[str, str], list[Mapping[str, Any]]],
+    yahoo_rows_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
+    market: str,
+    available_at_utc: str,
+    ingested_at_utc: str,
+    vintage_run_id: str,
+) -> dict[str, object]:
+    completion_status = completion_summary.get("vintage_completion_status")
+    if completion_status == VINTAGE_COMPLETION_SEC_SUFFICIENT:
+        return _yahoo_aware_plan_result(YAHOO_AWARE_PLAN_NO_ACTION, next_action="NONE")
+    if completion_status == VINTAGE_COMPLETION_UNKNOWN:
+        return _yahoo_aware_plan_result(YAHOO_AWARE_PLAN_UNKNOWN, next_action="IMPROVE_RUN_LINKAGE")
+    if completion_status == VINTAGE_COMPLETION_BLOCKED_DRIFT:
+        return _yahoo_aware_plan_result(
+            YAHOO_AWARE_PLAN_BLOCKED,
+            next_action="INVESTIGATE_DRIFT",
+            blocked_rows=len(latest_rows),
+            reason="COMPLETION_GATE_BLOCKED_POST_RUN_DRIFT",
+        )
+    if completion_status == VINTAGE_COMPLETION_FINAL_MIXED_REQUIRED:
+        return _plan_final_mixed_vintage(
+            latest_rows=latest_rows,
+            sec_provenance_by_key=sec_provenance_by_key,
+            yahoo_audit_rows_by_key=yahoo_audit_rows_by_key,
+            market=market,
+            available_at_utc=available_at_utc,
+            ingested_at_utc=ingested_at_utc,
+            vintage_run_id=vintage_run_id,
+        )
+    if completion_status == VINTAGE_COMPLETION_YAHOO_REQUIRED:
+        return _plan_yahoo_inserted_vintage(
+            latest_rows=latest_rows,
+            yahoo_rows_by_key=yahoo_rows_by_key,
+            market=market,
+            available_at_utc=available_at_utc,
+            ingested_at_utc=ingested_at_utc,
+            vintage_run_id=vintage_run_id,
+        )
+    return _yahoo_aware_plan_result(YAHOO_AWARE_PLAN_UNKNOWN, next_action="IMPROVE_RUN_LINKAGE")
+
+
+def _plan_final_mixed_vintage(
+    *,
+    latest_rows: list[Mapping[str, Any]],
+    sec_provenance_by_key: Mapping[tuple[str, str], Mapping[str, Mapping[str, Any]]],
+    yahoo_audit_rows_by_key: Mapping[tuple[str, str], list[Mapping[str, Any]]],
+    market: str,
+    available_at_utc: str,
+    ingested_at_utc: str,
+    vintage_run_id: str,
+) -> dict[str, object]:
+    planned_rows = 0
+    planned_provenance_rows = 0
+    blocked_rows = 0
+    unknown_fields: list[str] = []
+    sample_ids: list[str] = []
+    sample_hashes: list[str] = []
+    for latest_row in latest_rows:
+        normalized_row = _normalized_latest_mapping(latest_row, vintage_run_id)
+        key = _ticker_period_key(normalized_row)
+        audit_rows = list(yahoo_audit_rows_by_key.get(key, []))
+        if not audit_rows:
+            continue
+        yahoo_source_map = _yahoo_audit_field_source_map(audit_rows)
+        sec_source_map = sec_provenance_by_key.get(key, {})
+        field_source_map = merge_final_mixed_field_source_maps(
+            normalized_row=normalized_row,
+            sec_field_source_map=sec_source_map,
+            yahoo_field_source_map=yahoo_source_map,
+        )
+        row_unknown_fields = sorted(
+            field_name
+            for field_name, source_info in field_source_map.items()
+            if source_info.get("source_provider") == "unknown"
+        )
+        if row_unknown_fields:
+            blocked_rows += 1
+            unknown_fields.extend(f"{key[0]}:{key[1]}:{field_name}" for field_name in row_unknown_fields)
+            continue
+        source_hash = build_final_mixed_source_hash(
+            market=market,
+            ticker=key[0],
+            period_end_date=key[1],
+            normalized_row=normalized_row,
+            sec_field_source_map=sec_source_map,
+            yahoo_field_source_map=yahoo_source_map,
+            fallback_audit_rows=audit_rows,
+        )
+        sample_ids.append(
+            build_final_mixed_statement_vintage_id(
+                market=market,
+                ticker=key[0],
+                period_end_date=key[1],
+                source_hash=source_hash,
+            )
+        )
+        sample_hashes.append(source_hash)
+        planned_rows += 1
+        planned_provenance_rows += len(field_source_map)
+
+    if blocked_rows > 0 or planned_rows == 0:
+        return _yahoo_aware_plan_result(
+            YAHOO_AWARE_PLAN_BLOCKED,
+            next_action="INVESTIGATE_DRIFT",
+            blocked_rows=blocked_rows or len(latest_rows),
+            unknown_fields=unknown_fields,
+            reason="UNKNOWN_OR_MISSING_FINAL_MIXED_PROVENANCE",
+            sample_ids=sample_ids,
+            sample_hashes=sample_hashes,
+        )
+    return _yahoo_aware_plan_result(
+        YAHOO_AWARE_PLAN_FINAL_MIXED_READY,
+        next_action="CREATE_FINAL_MIXED_VINTAGE",
+        final_mixed_rows=planned_rows,
+        provenance_rows=planned_provenance_rows,
+        sample_ids=sample_ids,
+        sample_hashes=sample_hashes,
+    )
+
+
+def _plan_yahoo_inserted_vintage(
+    *,
+    latest_rows: list[Mapping[str, Any]],
+    yahoo_rows_by_key: Mapping[tuple[str, str], Mapping[str, Any]],
+    market: str,
+    available_at_utc: str,
+    ingested_at_utc: str,
+    vintage_run_id: str,
+) -> dict[str, object]:
+    planned_rows = 0
+    planned_provenance_rows = 0
+    blocked_rows = 0
+    sample_ids: list[str] = []
+    sample_hashes: list[str] = []
+    for latest_row in latest_rows:
+        normalized_row = _normalized_latest_mapping(latest_row, vintage_run_id)
+        key = _ticker_period_key(normalized_row)
+        yahoo_row = yahoo_rows_by_key.get(key)
+        if yahoo_row is None:
+            blocked_rows += 1
+            continue
+        source_hash = build_yahoo_source_hash(
+            market=market,
+            ticker=key[0],
+            period_end_date=key[1],
+            yahoo_quarterly_row=yahoo_row,
+            normalized_row=normalized_row,
+        )
+        metadata = build_yahoo_vintage_metadata(
+            market=market,
+            ticker=key[0],
+            period_end_date=key[1],
+            normalized_row=normalized_row,
+            available_at_utc=available_at_utc,
+            ingested_at_utc=ingested_at_utc,
+            run_id=vintage_run_id,
+            source_hash=source_hash,
+            mode="yahoo_missing_quarter_insert",
+            provider_observed_at_utc=available_at_utc,
+            provider_run_id=_optional_text(yahoo_row.get("source_run_id")),
+            normalization_run_id=_optional_text(yahoo_row.get("run_id")),
+        )
+        sample_ids.append(str(metadata["statement_vintage_id"]))
+        sample_hashes.append(source_hash)
+        planned_rows += 1
+        planned_provenance_rows += len(_non_null_reported_fields(normalized_row))
+
+    if blocked_rows > 0 or planned_rows == 0:
+        return _yahoo_aware_plan_result(
+            YAHOO_AWARE_PLAN_BLOCKED,
+            next_action="IMPROVE_RUN_LINKAGE",
+            blocked_rows=blocked_rows or len(latest_rows),
+            reason="INSUFFICIENT_YAHOO_RUN_LINKAGE",
+            sample_ids=sample_ids,
+            sample_hashes=sample_hashes,
+        )
+    return _yahoo_aware_plan_result(
+        YAHOO_AWARE_PLAN_YAHOO_READY,
+        next_action="CREATE_YAHOO_OR_FINAL_MIXED_VINTAGE",
+        yahoo_rows=planned_rows,
+        provenance_rows=planned_provenance_rows,
+        sample_ids=sample_ids,
+        sample_hashes=sample_hashes,
+    )
+
+
+def _yahoo_aware_plan_result(
+    status: str,
+    *,
+    next_action: str,
+    final_mixed_rows: int = 0,
+    yahoo_rows: int = 0,
+    provenance_rows: int = 0,
+    blocked_rows: int = 0,
+    unknown_fields: list[str] | None = None,
+    reason: str | None = None,
+    sample_ids: list[str] | None = None,
+    sample_hashes: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "vintage_yahoo_aware_planning_status": status,
+        "vintage_yahoo_aware_next_action": next_action,
+        "vintage_planned_final_mixed_rows": final_mixed_rows,
+        "vintage_planned_yahoo_vintage_rows": yahoo_rows,
+        "vintage_planned_yahoo_aware_provenance_rows": provenance_rows,
+        "vintage_yahoo_aware_blocked_rows": blocked_rows,
+        "vintage_yahoo_aware_unknown_provenance_fields": ",".join(sorted(unknown_fields or [])),
+        "vintage_yahoo_aware_block_reason": reason,
+        "vintage_yahoo_aware_sample_statement_vintage_ids": ",".join((sample_ids or [])[:3]),
+        "vintage_yahoo_aware_sample_source_hashes": ",".join((sample_hashes or [])[:3]),
+    }
+
+
+def _normalized_latest_mapping(row: Mapping[str, Any], run_id: str) -> dict[str, Any]:
+    normalized = {
+        "ticker": str(row.get("ticker")).upper(),
+        "period_end_date": str(row.get("period_end_date")),
+        "currency": row.get("currency"),
+        "run_id": run_id,
+    }
+    for field_name in REPORTED_FINANCIAL_FIELDS:
+        normalized[field_name] = row.get(field_name)
+    return normalized
+
+
+def _ticker_period_key(row: Mapping[str, Any]) -> tuple[str, str]:
+    return (str(row["ticker"]).upper(), str(row["period_end_date"]))
+
+
+def _non_null_reported_fields(row: Mapping[str, Any]) -> list[str]:
+    return [field_name for field_name in REPORTED_FINANCIAL_FIELDS if row.get(field_name) is not None]
+
+
+def _yahoo_audit_field_source_map(audit_rows: list[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    source_map: dict[str, dict[str, Any]] = {}
+    for row in audit_rows:
+        if str(row.get("fallback_source", "")).lower() != "yahoo":
+            continue
+        if str(row.get("enrichment_status", "")) != "FILLED_FROM_YAHOO":
+            continue
+        field_name = str(row.get("field_name", ""))
+        if field_name not in REPORTED_FINANCIAL_FIELDS:
+            continue
+        source_map[field_name] = {
+            "source_provider": "yahoo",
+            "source_table": "rc_fundamental_quarterly_enrichment_audit",
+            "source_row_ref": (
+                f"{str(row.get('ticker')).upper()}:{row.get('period_end_date')}:{field_name}:"
+                f"{row.get('matched_yahoo_period_end_date') or 'NULL'}:{row.get('match_method') or 'NULL'}"
+            ),
+            "source_hash": None,
+            "provenance_role": "FALLBACK_REPORTED",
+            "merge_action": "YAHOO_FILLED_MISSING",
+            "old_value": row.get("old_value"),
+            "new_value": row.get("new_value"),
+            "available_at_utc": row.get("created_at_utc"),
+            "created_at_utc": row.get("created_at_utc"),
+            "run_id": row.get("run_id"),
+            "enrichment_run_id": row.get("run_id"),
+        }
+    return source_map
+
+
+def _sec_provenance_by_key(
+    conn: sqlite3.Connection,
+    vintage_run_id: str,
+) -> dict[tuple[str, str], dict[str, dict[str, Any]]]:
+    previous_row_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                ticker,
+                period_end_date,
+                field_name,
+                source_provider,
+                source_table,
+                source_row_ref,
+                source_document_id,
+                source_hash,
+                provenance_role,
+                merge_action,
+                old_value,
+                new_value,
+                available_at_utc,
+                created_at_utc,
+                run_id,
+                enrichment_run_id
+            FROM rc_fundamental_quarterly_field_provenance
+            WHERE run_id = ?
+              AND source_provider = 'sec_edgar'
+            ORDER BY ticker ASC, period_end_date ASC, field_name ASC
+            """,
+            (vintage_run_id,),
+        ).fetchall()
+    finally:
+        conn.row_factory = previous_row_factory
+    output: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for row in rows:
+        key = (str(row["ticker"]).upper(), str(row["period_end_date"]))
+        output.setdefault(key, {})[str(row["field_name"])] = {
+            "source_provider": row["source_provider"],
+            "source_table": row["source_table"],
+            "source_row_ref": row["source_row_ref"],
+            "source_document_id": row["source_document_id"],
+            "source_hash": row["source_hash"],
+            "provenance_role": row["provenance_role"],
+            "merge_action": row["merge_action"],
+            "old_value": row["old_value"],
+            "new_value": row["new_value"],
+            "available_at_utc": row["available_at_utc"],
+            "created_at_utc": row["created_at_utc"],
+            "run_id": row["run_id"],
+            "enrichment_run_id": row["enrichment_run_id"],
+        }
+    return output
+
+
+def _yahoo_audit_rows_by_key(
+    conn: sqlite3.Connection,
+    enrich_run_id: str | None,
+) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    if enrich_run_id is None or not str(enrich_run_id).strip():
+        return {}
+    previous_row_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                ticker,
+                period_end_date,
+                field_name,
+                old_value,
+                new_value,
+                primary_source,
+                fallback_source,
+                enrichment_status,
+                matched_yahoo_period_end_date,
+                match_method,
+                run_id,
+                created_at_utc
+            FROM rc_fundamental_quarterly_enrichment_audit
+            WHERE run_id = ?
+            ORDER BY ticker ASC, period_end_date ASC, field_name ASC
+            """,
+            (str(enrich_run_id).strip(),),
+        ).fetchall()
+    finally:
+        conn.row_factory = previous_row_factory
+    output: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (str(row["ticker"]).upper(), str(row["period_end_date"]))
+        output.setdefault(key, []).append(dict(row))
+    return output
+
+
+def _yahoo_rows_by_key(
+    conn: sqlite3.Connection,
+    market: str,
+) -> dict[tuple[str, str], dict[str, Any]]:
+    previous_row_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM rc_fundamental_yahoo_quarterly
+            WHERE market = ?
+            ORDER BY symbol ASC, period_end_date ASC
+            """,
+            (str(market).strip().lower(),),
+        ).fetchall()
+    finally:
+        conn.row_factory = previous_row_factory
+    return {(str(row["symbol"]).upper(), str(row["period_end_date"])): dict(row) for row in rows}
 
 
 def classify_quarter_update_vintage_completion(
@@ -1502,6 +1923,8 @@ def process_ticker(
                 vintage_run_id=str(sec_latest_writer_vintage_options["vintage_run_id"]),
                 enrich_run_id=child_run_ids["enrich"],
                 enrich_summary=_extract_enrich_summary(quarterly_refresh_summary),
+                available_at_utc=str(sec_latest_writer_vintage_options["available_at_utc"]),
+                ingested_at_utc=str(sec_latest_writer_vintage_options["ingested_at_utc"]),
             )
     return {
         "quarterly_refresh_mode": 1 if quarterly_refresh_summary else 0,

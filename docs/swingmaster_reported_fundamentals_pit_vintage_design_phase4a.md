@@ -678,3 +678,9 @@ The new guard surfaces latest/vintage parity status, value mismatch counts, Yaho
 Phase 4K3 adds a temp-tested completion decision gate for explicit `sec_latest_writer` quarter_update vintage runs. It does not write final mixed rows, Yahoo-aware rows, provider data, or real DB data.
 
 The gate classifies post-Yahoo state as `SEC_VINTAGE_SUFFICIENT`, `FINAL_MIXED_REQUIRED`, `YAHOO_VINTAGE_REQUIRED`, `BLOCKED_POST_RUN_DRIFT`, or `UNKNOWN`. It surfaces next-action summary fields only in explicit vintage mode; default quarter_update behavior remains unchanged.
+
+## 28. Phase 4K4 Status Note
+
+Phase 4K4 adds temp-tested planning for final mixed and Yahoo-aware vintage candidates after the completion gate. It does not write real DB rows and does not run providers.
+
+The planner uses final latest row values, SEC field provenance, Yahoo fallback audit rows, and Yahoo quarterly staging evidence to report planned row/provenance counts, sample candidate ids/hashes, and blocked unknown provenance fields. Default behavior remains unchanged.

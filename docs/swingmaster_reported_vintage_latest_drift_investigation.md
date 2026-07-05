@@ -172,6 +172,11 @@ because exact SEC raw evidence exists for every missing row. A legacy-baseline
 fallback should be reserved for cases where provider-derived reconstruction
 cannot reproduce the latest-row values or required vintage metadata.
 
+Follow-up: the SEC-derived read-only dry-run was implemented and run in
+`docs/swingmaster_reported_vintage_sec_missing_latest_dry_run.md`. It found that
+all 42 rows are blocked by reconstruction mismatches, so a guarded SEC-derived
+apply is not currently safe with the existing reconstruction logic.
+
 ## Runtime/default behavior changed
 
 No.

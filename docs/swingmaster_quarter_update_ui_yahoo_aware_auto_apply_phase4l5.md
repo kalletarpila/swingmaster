@@ -63,6 +63,8 @@ The UI records the auto decision in the summary panel:
 - `vintage_yahoo_aware_auto_apply_attempted`
 - `vintage_yahoo_aware_auto_apply_reason`
 
+Phase 4L6 smoke coverage verifies that these fields are preserved in the final combined UI summary after a successful auto apply.
+
 Apply execution summaries continue to map as:
 
 - `EXECUTION_COMPLETED` -> success
@@ -81,3 +83,9 @@ Phase 4L5 did not write:
 - `/home/kalle/projects/rawcandle/data/osakedata.db`
 
 Tests use fake executors, mocks, and temp DB paths only.
+
+## Phase 4L6 Smoke Coverage
+
+Phase 4L6 adds full UI workflow smoke tests for SEC-sufficient, final mixed auto apply, Yahoo vintage auto apply, blocked/unsafe summaries, preflight failure, checkbox-disabled default behavior, and user stop behavior.
+
+See [SwingMaster Quarter Update UI Vintage Full Workflow Smoke Phase 4L6](swingmaster_quarter_update_ui_vintage_full_workflow_smoke_phase4l6.md).

@@ -21,6 +21,7 @@ The smoke tests verify:
 - `SUMMARY key=value` vintage fields parse into the UI summary dict
 - vintage completion statuses map to `success`, `review`, `stop`, or `unknown`
 - Phase 4L5 auto-apply smoke coverage keeps the primary command in `plan_only` and runs apply only through the provider-free CLI after a safe summary
+- Phase 4L6 full workflow smoke coverage verifies command ordering, final status severity, blocked/preflight failure behavior, and checkbox-disabled default behavior
 
 ## Command-Chain Behavior
 
@@ -130,4 +131,4 @@ Before the first real UI-triggered vintage opt-in run:
 - keep Yahoo-aware execution write out of the UI
 - preserve the full terminal/UI summary output after the run
 
-Phase 4L4 adds a separate explicit no-provider apply action for planned Yahoo-aware/final mixed corrections. Phase 4L5 adds a gated automatic follow-up that uses the same no-provider apply command after a safe plan-only primary summary. The primary quarter update path remains planning-only for Yahoo-aware execution.
+Phase 4L4 adds a separate explicit no-provider apply action for planned Yahoo-aware/final mixed corrections. Phase 4L5 adds a gated automatic follow-up that uses the same no-provider apply command after a safe plan-only primary summary. Phase 4L6 adds full UI workflow smoke coverage for the complete mocked path. The primary quarter update path remains planning-only for Yahoo-aware execution.

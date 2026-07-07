@@ -12,6 +12,15 @@ def _has_text(value: object) -> bool:
     return bool(str(value or "").strip())
 
 
+def _has_unknown_provenance_fields(value: object) -> bool:
+    text = str(value or "").strip()
+    return bool(text) and text.lower() not in {"0", "none", "[]"}
+
+
+def _source_run_id(summary: dict) -> str:
+    return str(summary.get("run_id") or summary.get("source_run_id") or "").strip()
+
+
 def map_vintage_completion_status_to_ui_severity(summary: dict) -> str:
     """Map parsed vintage summary fields to a UI severity bucket."""
     completion_status = str(summary.get("vintage_completion_status") or "").strip()
@@ -27,7 +36,7 @@ def map_vintage_completion_status_to_ui_severity(summary: dict) -> str:
     ]
     if any(_as_int(summary.get(key)) > 0 for key in stop_counts):
         return "stop"
-    if _has_text(summary.get("vintage_yahoo_aware_unknown_provenance_fields")):
+    if _has_unknown_provenance_fields(summary.get("vintage_yahoo_aware_unknown_provenance_fields")):
         return "stop"
 
     if completion_status in {"BLOCKED_POST_RUN_DRIFT", "UNKNOWN"}:
@@ -80,7 +89,7 @@ def should_enable_yahoo_aware_apply(summary: dict) -> tuple[bool, str]:
     if completion_status not in {"FINAL_MIXED_REQUIRED", "YAHOO_VINTAGE_REQUIRED"}:
         return False, "Apply requires FINAL_MIXED_REQUIRED or YAHOO_VINTAGE_REQUIRED."
 
-    source_run_id = str(summary.get("run_id") or "").strip()
+    source_run_id = _source_run_id(summary)
     if not source_run_id:
         return False, "Apply requires source run id from the last USA quarter update summary."
 
@@ -103,7 +112,7 @@ def should_enable_yahoo_aware_apply(summary: dict) -> tuple[bool, str]:
     ]
     if any(_as_int(summary.get(key)) > 0 for key in stop_counts):
         return False, "Apply blocked by drift, duplicate, or blocked-row counts."
-    if _has_text(summary.get("vintage_yahoo_aware_unknown_provenance_fields")):
+    if _has_unknown_provenance_fields(summary.get("vintage_yahoo_aware_unknown_provenance_fields")):
         return False, "Apply blocked by unknown provenance fields."
     if str(summary.get("vintage_post_run_parity_status") or "").strip() in {"DRIFT", "UNKNOWN_RUN_LINKAGE"}:
         return False, "Apply blocked by post-run parity status."

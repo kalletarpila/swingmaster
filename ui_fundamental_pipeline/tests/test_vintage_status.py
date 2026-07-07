@@ -87,6 +87,18 @@ class TestYahooAwareApplyGate(unittest.TestCase):
         )
         self.assertTrue(enabled)
 
+    def test_source_run_id_and_zero_unknown_provenance_enable_apply(self):
+        enabled, _ = should_enable_yahoo_aware_apply(
+            {
+                "source_run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+                "vintage_completion_status": "FINAL_MIXED_REQUIRED",
+                "vintage_yahoo_aware_planning_status": "FINAL_MIXED_PLAN_READY",
+                "vintage_planned_final_mixed_rows": "1",
+                "vintage_yahoo_aware_unknown_provenance_fields": "0",
+            }
+        )
+        self.assertTrue(enabled)
+
     def test_yahoo_plan_ready_enables_apply(self):
         enabled, _ = should_enable_yahoo_aware_apply(
             {

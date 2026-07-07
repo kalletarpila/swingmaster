@@ -359,7 +359,8 @@ class SwingMasterApp:
         for idx, command in enumerate(commands, start=1):
             if self.stop_requested:
                 self._log("Run stopped by user.")
-                break
+                self._lock_ui(False)
+                return
             self._set_progress(idx - 1, total, status_prefix)
             exit_code, _ = self.executor.execute(
                 command=command,
@@ -391,7 +392,7 @@ class SwingMasterApp:
             self._lock_ui(False)
             return
 
-        source_run_id = str(summary["run_id"])
+        source_run_id = str(summary.get("run_id") or summary.get("source_run_id"))
         launch_timestamp_utc = get_utc_launch_timestamp()
         apply_command = build_usa_yahoo_aware_apply_command(
             UsaYahooAwareApplyOptions(
@@ -407,6 +408,11 @@ class SwingMasterApp:
             on_output=self._ui_callback(self.output_panel.add_line),
             on_summary=self._ui_callback(lambda summary: self._handle_summary("usa", summary)),
         )
+
+        apply_summary = self.output_panel._current_summary.copy()
+        combined_summary = decision_summary.copy()
+        combined_summary.update(apply_summary)
+        self._handle_summary("usa", combined_summary)
 
         color = self._status_color(apply_exit_code)
         suffix = self._vintage_status_suffix()

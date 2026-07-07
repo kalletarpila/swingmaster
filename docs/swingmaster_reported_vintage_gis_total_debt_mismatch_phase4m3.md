@@ -128,3 +128,18 @@ Before writing anything, implement a dry-run-only phase that proposes a new SEC-
 - provenance rows for `LongTermDebtCurrent`, `LongTermDebtNoncurrent`, and `ShortTermBorrowings`
 - the legacy vintage it would supersede
 - duplicate and parity checks
+
+## Phase 4M4 Follow-Up
+
+Phase 4M4 implemented the requested read-only dry-run:
+
+- doc: `docs/swingmaster_reported_vintage_gis_provider_vintage_dry_run_phase4m4.md`
+- candidate statement_vintage_id: `sec_edgar:usa:GIS:2025-05-25:dc65e8c864b43e37`
+- candidate `total_debt=14878600000.0`
+- visible legacy `total_debt=677000000.0`
+- duplicate candidate count: `0`
+- planned_vintage_rows: `1`
+- planned_provenance_rows: `11`
+- status: `DRY_RUN_READY_WITH_UNKNOWN_PROVENANCE`
+
+The dry-run confirms the row/value fix is feasible, but it should not be written yet because `total_debt` still has unknown provenance in the candidate. The next phase should first make derived total debt provenance explicit from the SEC debt components and require `DRY_RUN_READY` before any write/apply phase.

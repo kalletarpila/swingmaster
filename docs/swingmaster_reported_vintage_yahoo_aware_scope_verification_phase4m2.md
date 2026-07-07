@@ -97,3 +97,16 @@ Phase 4M3 diagnosed the exact GIS mismatch read-only. The latest `total_debt=148
 The visible legacy vintage value `677000000.0` equals only `ShortTermBorrowings`. Diagnosis: `DEBT_COMPONENT_POLICY_DIFF`.
 
 See [SwingMaster GIS Total Debt Mismatch Phase 4M3](swingmaster_reported_vintage_gis_total_debt_mismatch_phase4m3.md).
+
+## Phase 4M6 Follow-Up
+
+Phase 4M6 applied the guarded one-row GIS provider-derived vintage. The same scope diagnostic now reports:
+
+- overall diagnostic status: `NO_MISMATCH`
+- value mismatch count: `0`
+- unexplained mismatch count: `0`
+- latest-without-vintage: `0`
+- vintage-without-latest: `0`
+- duplicate statement_vintage_id count: `0`
+
+The GIS `total_debt` drift is no longer blocking this diagnostic. The remaining `FINAL_MIXED_REQUIRED` completion state should be handled separately from the GIS correction.

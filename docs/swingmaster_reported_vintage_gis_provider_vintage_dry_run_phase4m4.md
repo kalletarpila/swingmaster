@@ -140,6 +140,10 @@ Do not use Yahoo-aware final-mixed apply, broad recovery, scheduler, refresh, or
 
 After Phase 4M5, items 1-3 are complete and the current recommendation is a separate guarded one-row apply phase for GIS only, with backup and post-write verification.
 
+After Phase 4M6, that guarded one-row apply is complete. The new PIT-visible vintage at and after `2026-07-07T20:04:15Z` is `sec_edgar:usa:GIS:2025-05-25:9a81f59e8511cac0`, while the legacy baseline remains visible before that timestamp.
+
+See `docs/swingmaster_reported_vintage_gis_provider_vintage_apply_phase4m6.md`.
+
 ## Verification
 
 Checks run:

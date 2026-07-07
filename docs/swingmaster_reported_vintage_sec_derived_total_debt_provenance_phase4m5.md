@@ -128,6 +128,18 @@ The next phase can be a guarded one-row real DB apply for GIS provider-derived v
 
 Do not run a write/apply phase without a separate explicit prompt.
 
+## Phase 4M6 Follow-Up
+
+Phase 4M6 completed the guarded one-row real DB apply for GIS:
+
+- inserted vintage rows: `1`
+- inserted provenance rows: `11`
+- statement_vintage_id: `sec_edgar:usa:GIS:2025-05-25:9a81f59e8511cac0`
+- post-apply PIT at `2026-07-07T20:04:15Z`: new SEC provider-derived vintage
+- post-apply scope diagnostic: `NO_MISMATCH`
+
+See `docs/swingmaster_reported_vintage_gis_provider_vintage_apply_phase4m6.md`.
+
 ## Verification
 
 Checks run:

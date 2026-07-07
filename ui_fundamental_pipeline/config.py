@@ -81,6 +81,13 @@ def get_yahoo_aware_vintage_run_id_usa(source_run_id: str) -> str:
     return f"{source_run_id}__YAHOO_AWARE_VINTAGE"
 
 
+def get_yahoo_aware_recovery_run_id_usa(source_run_id: str) -> str:
+    """Derive the USA Yahoo-aware/final-mixed recovery vintage run ID."""
+    if source_run_id.endswith("__QUARTERLY"):
+        return source_run_id.removesuffix("__QUARTERLY") + "__YAHOO_AWARE_VINTAGE_RECOVERY"
+    return f"{source_run_id}__YAHOO_AWARE_VINTAGE_RECOVERY"
+
+
 def get_sec_vintage_recovery_run_id_usa() -> str:
     """Generate a USA SEC latest-writer vintage recovery run ID."""
     return f"USA_PIT_VINTAGE_RECOVERY_{datetime.now().strftime(DATE_FORMAT)}__SEC_LATEST_WRITER_VINTAGE_RECOVERY"

@@ -68,7 +68,7 @@ only after those gates pass.
 
 ## Yahoo/Final Mixed Handling Policy
 
-Phase 4L7 does not blindly apply Yahoo/final mixed recovery. If readiness or planning cannot prove SEC latest-writer recovery is safe, the UI stops with a manual-review reason.
+Phase 4L7 did not blindly apply Yahoo/final mixed recovery. Phase 4L8 adds a gated Yahoo-aware recovery path that uses the existing provider-free Yahoo-aware apply CLI in dry-run and expected-count apply modes.
 
 The explicit policy is:
 
@@ -76,7 +76,9 @@ The explicit policy is:
 Manual review required: Yahoo/final mixed recovery cannot be proven safe
 ```
 
-Future work can add a dedicated Yahoo/final mixed recovery planner if the missing rows can be classified safely.
+If Phase 4L8 cannot prove the Yahoo/final mixed plan safe, it still stops with the same manual-review policy.
+
+See [SwingMaster Quarter Update UI Yahoo-Aware Vintage Recovery Phase 4L8](swingmaster_quarter_update_ui_vintage_recovery_phase4l8.md).
 
 ## Statuses And Severity
 

@@ -2,7 +2,9 @@ import unittest
 
 from ui_fundamental_pipeline.vintage_status import (
     map_vintage_completion_status_to_ui_severity,
+    map_vintage_recovery_status_to_ui_severity,
     map_yahoo_aware_execution_status_to_ui_severity,
+    should_apply_yahoo_aware_recovery,
     should_auto_apply_yahoo_aware_vintage,
     should_enable_yahoo_aware_apply,
 )
@@ -230,6 +232,71 @@ class TestYahooAwareAutoApplyGate(unittest.TestCase):
             with self.subTest(summary=summary):
                 enabled, _ = should_auto_apply_yahoo_aware_vintage(summary, user_enabled_vintage=True)
                 self.assertFalse(enabled)
+
+
+class TestYahooAwareRecoveryGate(unittest.TestCase):
+    def test_yahoo_aware_recovery_ready_enables_apply(self):
+        enabled, reason = should_apply_yahoo_aware_recovery(
+            preflight_summary={
+                "latest_without_vintage_count": "2",
+                "duplicate_statement_vintage_id_count": "0",
+                "vintage_without_latest_count": "0",
+            },
+            plan_summary={
+                "overall_status": "YAHOO_AWARE_RECOVERY_READY",
+                "source_run_id": "USA_QUARTER_UPDATE_2026-07-07__QUARTERLY",
+                "vintage_yahoo_aware_planning_status": "FINAL_MIXED_PLAN_READY",
+                "vintage_planned_final_mixed_rows": "2",
+                "vintage_planned_yahoo_vintage_rows": "0",
+                "vintage_planned_yahoo_aware_provenance_rows": "10",
+                "vintage_yahoo_aware_blocked_rows": "0",
+                "vintage_yahoo_aware_unknown_provenance_fields": "",
+            },
+        )
+
+        self.assertTrue(enabled)
+        self.assertIn("safe", reason)
+
+    def test_yahoo_aware_recovery_blocks_unsafe_plan(self):
+        cases = [
+            {"source_run_id": ""},
+            {"vintage_yahoo_aware_blocked_rows": "1"},
+            {"vintage_yahoo_aware_unknown_provenance_fields": "AAPL:cash"},
+            {"vintage_planned_final_mixed_rows": "0", "vintage_planned_yahoo_vintage_rows": "0"},
+            {"overall_status": "YAHOO_AWARE_RECOVERY_BLOCKED"},
+        ]
+        base = {
+            "overall_status": "YAHOO_AWARE_RECOVERY_READY",
+            "source_run_id": "USA_QUARTER_UPDATE_2026-07-07__QUARTERLY",
+            "vintage_yahoo_aware_planning_status": "FINAL_MIXED_PLAN_READY",
+            "vintage_planned_final_mixed_rows": "2",
+            "vintage_planned_yahoo_vintage_rows": "0",
+            "vintage_planned_yahoo_aware_provenance_rows": "10",
+            "vintage_yahoo_aware_blocked_rows": "0",
+            "vintage_yahoo_aware_unknown_provenance_fields": "",
+        }
+        preflight = {
+            "latest_without_vintage_count": "2",
+            "duplicate_statement_vintage_id_count": "0",
+            "vintage_without_latest_count": "0",
+        }
+        for override in cases:
+            with self.subTest(override=override):
+                enabled, _ = should_apply_yahoo_aware_recovery(
+                    preflight_summary=preflight,
+                    plan_summary={**base, **override},
+                )
+                self.assertFalse(enabled)
+
+    def test_recovery_status_success_mapping_includes_explicit_modes(self):
+        self.assertEqual(
+            map_vintage_recovery_status_to_ui_severity({"vintage_recovery_status": "SEC_RECOVERY_APPLIED"}),
+            "success",
+        )
+        self.assertEqual(
+            map_vintage_recovery_status_to_ui_severity({"vintage_recovery_status": "YAHOO_AWARE_RECOVERY_APPLIED"}),
+            "success",
+        )
 
 
 if __name__ == "__main__":

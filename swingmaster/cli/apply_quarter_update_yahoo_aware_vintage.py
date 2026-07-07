@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -26,6 +27,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--vintage-run-id", required=True)
     parser.add_argument("--available-at-utc", required=True)
     parser.add_argument("--ingested-at-utc", required=True)
+    parser.add_argument("--expected-final-mixed-count", type=int, default=None)
+    parser.add_argument("--expected-yahoo-vintage-count", type=int, default=None)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--format", choices=("text", "json"), default="text")
     parser.add_argument("--approval-token", default="")
     return parser.parse_args(argv)
 
@@ -49,6 +54,50 @@ def _enrich_run_id(source_run_id: str) -> str:
     return f"{_base_run_id_from_quarterly(source_run_id)}__ENRICH"
 
 
+def _as_int(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _has_unknown_provenance(value: object) -> bool:
+    text = str(value or "").strip()
+    return bool(text) and text.lower() not in {"0", "none", "[]", "{}"}
+
+
+def _recovery_status_from_plan(plan: dict[str, object]) -> str:
+    planning_status = str(plan.get("vintage_yahoo_aware_planning_status") or "")
+    planned_final = _as_int(plan.get("vintage_planned_final_mixed_rows"))
+    planned_yahoo = _as_int(plan.get("vintage_planned_yahoo_vintage_rows"))
+    planned_provenance = _as_int(plan.get("vintage_planned_yahoo_aware_provenance_rows"))
+    blocked_rows = _as_int(plan.get("vintage_yahoo_aware_blocked_rows"))
+    if planning_status == "NO_ACTION_REQUIRED" and planned_final == 0 and planned_yahoo == 0:
+        return "YAHOO_AWARE_RECOVERY_NOOP"
+    if planning_status not in {"FINAL_MIXED_PLAN_READY", "YAHOO_VINTAGE_PLAN_READY"}:
+        return "YAHOO_AWARE_RECOVERY_BLOCKED"
+    if blocked_rows > 0 or _has_unknown_provenance(plan.get("vintage_yahoo_aware_unknown_provenance_fields")):
+        return "YAHOO_AWARE_RECOVERY_BLOCKED"
+    if planned_final + planned_yahoo <= 0 or planned_provenance <= 0:
+        return "YAHOO_AWARE_RECOVERY_BLOCKED"
+    return "YAHOO_AWARE_RECOVERY_READY"
+
+
+def _expected_count_error(
+    *,
+    plan: dict[str, object],
+    expected_final_mixed_count: int | None,
+    expected_yahoo_vintage_count: int | None,
+) -> str:
+    planned_final = _as_int(plan.get("vintage_planned_final_mixed_rows"))
+    planned_yahoo = _as_int(plan.get("vintage_planned_yahoo_vintage_rows"))
+    if expected_final_mixed_count is not None and planned_final != expected_final_mixed_count:
+        return f"EXPECTED_FINAL_MIXED_COUNT_MISMATCH:expected={expected_final_mixed_count}:actual={planned_final}"
+    if expected_yahoo_vintage_count is not None and planned_yahoo != expected_yahoo_vintage_count:
+        return f"EXPECTED_YAHOO_VINTAGE_COUNT_MISMATCH:expected={expected_yahoo_vintage_count}:actual={planned_yahoo}"
+    return ""
+
+
 def run_apply_quarter_update_yahoo_aware_vintage(
     *,
     fundamentals_db: Path,
@@ -58,6 +107,9 @@ def run_apply_quarter_update_yahoo_aware_vintage(
     available_at_utc: str,
     ingested_at_utc: str,
     approval_token: str,
+    dry_run: bool = False,
+    expected_final_mixed_count: int | None = None,
+    expected_yahoo_vintage_count: int | None = None,
 ) -> dict[str, object]:
     db_path = fundamentals_db.expanduser().resolve()
     normalized_market = market.strip().lower()
@@ -87,7 +139,37 @@ def run_apply_quarter_update_yahoo_aware_vintage(
             yahoo_rows_by_key=_yahoo_rows_by_key(conn, normalized_market),
             vintage_run_id=normalized_vintage_run_id,
         )
-        if approval_token != APPROVAL_TOKEN:
+        recovery_status = _recovery_status_from_plan(plan)
+        expected_error = _expected_count_error(
+            plan=plan,
+            expected_final_mixed_count=expected_final_mixed_count,
+            expected_yahoo_vintage_count=expected_yahoo_vintage_count,
+        )
+        if dry_run:
+            execution = {
+                "vintage_yahoo_aware_execution_status": "DRY_RUN_READY"
+                if recovery_status == "YAHOO_AWARE_RECOVERY_READY"
+                else "DRY_RUN_BLOCKED",
+                "vintage_yahoo_aware_final_mixed_rows_written": 0,
+                "vintage_yahoo_aware_yahoo_vintage_rows_written": 0,
+                "vintage_yahoo_aware_provenance_rows_written": 0,
+                "vintage_yahoo_aware_rows_blocked": plan.get("vintage_yahoo_aware_blocked_rows", 0),
+                "vintage_yahoo_aware_rows_skipped": 0,
+                "vintage_yahoo_aware_error": ""
+                if recovery_status == "YAHOO_AWARE_RECOVERY_READY"
+                else str(plan.get("vintage_yahoo_aware_block_reason") or recovery_status),
+            }
+        elif expected_error:
+            execution = {
+                "vintage_yahoo_aware_execution_status": "EXECUTION_BLOCKED",
+                "vintage_yahoo_aware_final_mixed_rows_written": 0,
+                "vintage_yahoo_aware_yahoo_vintage_rows_written": 0,
+                "vintage_yahoo_aware_provenance_rows_written": 0,
+                "vintage_yahoo_aware_rows_blocked": 0,
+                "vintage_yahoo_aware_rows_skipped": 0,
+                "vintage_yahoo_aware_error": expected_error,
+            }
+        elif approval_token != APPROVAL_TOKEN:
             execution = {
                 "vintage_yahoo_aware_execution_status": "APPROVAL_REQUIRED",
                 "vintage_yahoo_aware_final_mixed_rows_written": 0,
@@ -113,6 +195,7 @@ def run_apply_quarter_update_yahoo_aware_vintage(
         "market": normalized_market,
         "source_run_id": normalized_source_run_id,
         "vintage_run_id": normalized_vintage_run_id,
+        "overall_status": recovery_status,
         **plan,
         **execution,
     }
@@ -129,12 +212,20 @@ def main(argv: list[str] | None = None) -> int:
             available_at_utc=args.available_at_utc,
             ingested_at_utc=args.ingested_at_utc,
             approval_token=args.approval_token,
+            dry_run=args.dry_run,
+            expected_final_mixed_count=args.expected_final_mixed_count,
+            expected_yahoo_vintage_count=args.expected_yahoo_vintage_count,
         )
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
-    _summary(**summary)
+    if args.format == "json":
+        print(json.dumps({"summary": summary}, indent=2, sort_keys=True))
+    else:
+        _summary(**summary)
     status = str(summary.get("vintage_yahoo_aware_execution_status") or "")
+    if args.dry_run:
+        return 0 if status == "DRY_RUN_READY" else 1
     return 0 if status in {"EXECUTION_COMPLETED", "NO_ACTION_REQUIRED"} else 1
 
 

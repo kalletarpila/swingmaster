@@ -14,6 +14,8 @@ If the UI-triggered run returns `FINAL_MIXED_REQUIRED` or `YAHOO_VINTAGE_REQUIRE
 
 If USA quarter update was already run without the PIT/vintage checkbox and latest rows are missing vintage rows, use the Phase 4L7 UI recovery action instead of rerunning quarter_update. See [SwingMaster Quarter Update UI Vintage Recovery Phase 4L7](swingmaster_quarter_update_ui_vintage_recovery_phase4l7.md).
 
+Phase 4L8 extends that recovery action to Yahoo/final mixed recovery when the provider-free Yahoo-aware dry-run proves the plan safe. It still must not rerun quarter_update, Yahoo fallback, SEC refresh, or providers. See [SwingMaster Quarter Update UI Yahoo-Aware Vintage Recovery Phase 4L8](swingmaster_quarter_update_ui_vintage_recovery_phase4l8.md).
+
 Run the read-only readiness smoke before any real Q update:
 
 ```bash

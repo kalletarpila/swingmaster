@@ -83,6 +83,19 @@ class UsaSecVintageRecoveryApplyOptions:
     approved: bool = False
 
 
+@dataclass(frozen=True)
+class UsaYahooAwareRecoveryOptions:
+    """Explicit metadata for Yahoo-aware/final-mixed vintage recovery."""
+
+    source_run_id: str
+    vintage_run_id: str
+    launch_timestamp_utc: str
+    dry_run: bool = False
+    expected_final_mixed_count: int | None = None
+    expected_yahoo_vintage_count: int | None = None
+    approved: bool = False
+
+
 def build_usa_update_command(
     run_id: str,
     vintage_options: UsaQuarterUpdateVintageOptions | None = None,
@@ -212,6 +225,37 @@ def build_usa_sec_vintage_recovery_apply_command(
     ]
     if options.approved:
         command.extend(["--approval-token", SEC_LATEST_WRITER_VINTAGE_APPLY_APPROVAL_TOKEN])
+    return command
+
+
+def build_usa_yahoo_aware_recovery_command(options: UsaYahooAwareRecoveryOptions) -> list[str]:
+    command = [
+        str(PYTHON_EXECUTABLE),
+        "-m",
+        "swingmaster.cli.apply_quarter_update_yahoo_aware_vintage",
+        "--fundamentals-db",
+        str(FUNDAMENTALS_USA_DB),
+        "--market",
+        "usa",
+        "--source-run-id",
+        options.source_run_id,
+        "--vintage-run-id",
+        options.vintage_run_id,
+        "--available-at-utc",
+        options.launch_timestamp_utc,
+        "--ingested-at-utc",
+        options.launch_timestamp_utc,
+        "--format",
+        "json",
+    ]
+    if options.dry_run:
+        command.append("--dry-run")
+    if options.expected_final_mixed_count is not None:
+        command.extend(["--expected-final-mixed-count", str(options.expected_final_mixed_count)])
+    if options.expected_yahoo_vintage_count is not None:
+        command.extend(["--expected-yahoo-vintage-count", str(options.expected_yahoo_vintage_count)])
+    if options.approved:
+        command.extend(["--approval-token", YAHOO_AWARE_APPLY_APPROVAL_TOKEN])
     return command
 
 

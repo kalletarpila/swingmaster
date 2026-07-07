@@ -120,6 +120,8 @@ Phase 4L5 adds a safe automatic follow-up after the USA PIT/vintage checkbox wor
 
 See [SwingMaster Quarter Update UI Yahoo-Aware Auto Apply Phase 4L5](swingmaster_quarter_update_ui_yahoo_aware_auto_apply_phase4l5.md).
 
+Phase 4L8 reuses the same provider-free CLI for missing PIT/vintage recovery. Recovery first runs dry-run planning, then applies only with expected final mixed/Yahoo vintage row counts and the approval token. See [SwingMaster Quarter Update UI Yahoo-Aware Vintage Recovery Phase 4L8](swingmaster_quarter_update_ui_vintage_recovery_phase4l8.md).
+
 ## Next Real Apply
 
 Before any real UI apply:

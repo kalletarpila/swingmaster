@@ -104,6 +104,40 @@ class TestUiVintageRecoveryWorkflow(unittest.TestCase):
             "apply_provenance_rows_inserted": "10",
         }
 
+    def _sec_not_applicable_dry_run(self):
+        dry_run = self._ready_dry_run()
+        dry_run["overall_status"] = "DRY_RUN_BLOCKED"
+        dry_run["blocked_rows"] = "2"
+        dry_run["no_sec_raw_rows"] = "2"
+        return dry_run
+
+    def _yahoo_plan_ready(self, *, final_mixed_rows="2", yahoo_rows="0"):
+        return {
+            "overall_status": "YAHOO_AWARE_RECOVERY_READY",
+            "source_run_id": RUN_ID,
+            "vintage_yahoo_aware_planning_status": "FINAL_MIXED_PLAN_READY"
+            if int(final_mixed_rows)
+            else "YAHOO_VINTAGE_PLAN_READY",
+            "vintage_planned_final_mixed_rows": final_mixed_rows,
+            "vintage_planned_yahoo_vintage_rows": yahoo_rows,
+            "vintage_planned_yahoo_aware_provenance_rows": "10",
+            "vintage_yahoo_aware_blocked_rows": "0",
+            "vintage_yahoo_aware_unknown_provenance_fields": "",
+            "vintage_yahoo_aware_execution_status": "DRY_RUN_READY",
+        }
+
+    def _yahoo_apply_completed(self, *, final_mixed_rows="2", yahoo_rows="0"):
+        return {
+            "overall_status": "YAHOO_AWARE_RECOVERY_READY",
+            "source_run_id": RUN_ID,
+            "vintage_yahoo_aware_execution_status": "EXECUTION_COMPLETED",
+            "vintage_yahoo_aware_final_mixed_rows_written": final_mixed_rows,
+            "vintage_yahoo_aware_yahoo_vintage_rows_written": yahoo_rows,
+            "vintage_yahoo_aware_provenance_rows_written": "10",
+            "vintage_yahoo_aware_rows_blocked": "0",
+            "vintage_yahoo_aware_error": "",
+        }
+
     def test_recovery_button_exists_and_locks_with_other_buttons(self):
         app = self._app()
 
@@ -152,9 +186,59 @@ class TestUiVintageRecoveryWorkflow(unittest.TestCase):
         self.assertEqual(apply_command[apply_command.index("--expected-count") + 1], "2")
         self.assertIn("preflight_quarter_update_vintage_readiness", " ".join(app.executor.commands[3]))
         self.assertEqual(app.usa_panel.status_badge.color, "green")
-        self.assertIn("RECOVERY_APPLIED", app.usa_panel.status_badge.value)
-        self.assertEqual(app.last_usa_quarter_update_summary["vintage_recovery_status"], "RECOVERY_APPLIED")
+        self.assertIn("SEC_RECOVERY_APPLIED", app.usa_panel.status_badge.value)
+        self.assertEqual(app.last_usa_quarter_update_summary["vintage_recovery_status"], "SEC_RECOVERY_APPLIED")
         self.assertEqual(app.last_usa_quarter_update_summary["apply_vintage_rows_inserted"], "2")
+
+    def test_yahoo_final_mixed_recovery_success_after_sec_not_applicable(self):
+        app = self._app()
+        app.executor = FakeExecutor(
+            [
+                (1, self._parity_drift_preflight()),
+                (0, self._sec_not_applicable_dry_run()),
+                (0, self._yahoo_plan_ready(final_mixed_rows="2", yahoo_rows="0")),
+                (0, self._yahoo_apply_completed(final_mixed_rows="2", yahoo_rows="0")),
+                (0, self._ready_noop_preflight()),
+            ]
+        )
+
+        self._run_recovery(app)
+
+        self.assertEqual(len(app.executor.commands), 5)
+        self.assertIn("dry_run_sec_vintage_for_missing_latest", " ".join(app.executor.commands[1]))
+        yahoo_plan_command = app.executor.commands[2]
+        yahoo_apply_command = app.executor.commands[3]
+        self.assertIn("apply_quarter_update_yahoo_aware_vintage", " ".join(yahoo_plan_command))
+        self.assertIn("--dry-run", yahoo_plan_command)
+        self.assertNotIn("--approval-token", yahoo_plan_command)
+        self.assertIn("apply_quarter_update_yahoo_aware_vintage", " ".join(yahoo_apply_command))
+        self.assertNotIn("run_fundamental_quarter_update", " ".join(yahoo_apply_command))
+        self.assertNotIn("--provider", yahoo_apply_command)
+        self.assertIn("--approval-token", yahoo_apply_command)
+        self.assertEqual(yahoo_apply_command[yahoo_apply_command.index("--expected-final-mixed-count") + 1], "2")
+        self.assertEqual(yahoo_apply_command[yahoo_apply_command.index("--expected-yahoo-vintage-count") + 1], "0")
+        self.assertEqual(app.usa_panel.status_badge.color, "green")
+        self.assertIn("YAHOO_AWARE_RECOVERY_APPLIED", app.usa_panel.status_badge.value)
+        self.assertEqual(app.last_usa_quarter_update_summary["vintage_recovery_mode"], "yahoo_aware_final_mixed")
+        self.assertEqual(app.last_usa_quarter_update_summary["vintage_yahoo_aware_final_mixed_rows_written"], "2")
+
+    def test_yahoo_only_recovery_success_after_sec_not_applicable(self):
+        app = self._app()
+        app.executor = FakeExecutor(
+            [
+                (1, {"**": "unused", **self._parity_drift_preflight(), "latest_without_vintage_count": "1"}),
+                (0, {**self._sec_not_applicable_dry_run(), "latest_missing_vintage_rows": "1", "planned_vintage_rows": "0"}),
+                (0, self._yahoo_plan_ready(final_mixed_rows="0", yahoo_rows="1")),
+                (0, self._yahoo_apply_completed(final_mixed_rows="0", yahoo_rows="1")),
+                (0, self._ready_noop_preflight()),
+            ]
+        )
+
+        self._run_recovery(app)
+
+        self.assertEqual(app.usa_panel.status_badge.color, "green")
+        self.assertIn("YAHOO_AWARE_RECOVERY_APPLIED", app.usa_panel.status_badge.value)
+        self.assertEqual(app.last_usa_quarter_update_summary["vintage_yahoo_aware_yahoo_vintage_rows_written"], "1")
 
     def test_duplicate_statement_ids_stop_before_dry_run(self):
         app = self._app()
@@ -182,11 +266,13 @@ class TestUiVintageRecoveryWorkflow(unittest.TestCase):
         dry_run = self._ready_dry_run()
         dry_run["overall_status"] = "DRY_RUN_BLOCKED"
         dry_run["blocked_rows"] = "1"
-        app.executor = FakeExecutor([(1, self._parity_drift_preflight()), (0, dry_run)])
+        yahoo_plan = self._yahoo_plan_ready()
+        yahoo_plan["vintage_yahoo_aware_blocked_rows"] = "1"
+        app.executor = FakeExecutor([(1, self._parity_drift_preflight()), (0, dry_run), (0, yahoo_plan)])
 
         self._run_recovery(app)
 
-        self.assertEqual(len(app.executor.commands), 2)
+        self.assertEqual(len(app.executor.commands), 3)
         self.assertEqual(app.usa_panel.status_badge.color, "red")
         self.assertIn("RECOVERY_BLOCKED", app.usa_panel.status_badge.value)
 
@@ -195,11 +281,13 @@ class TestUiVintageRecoveryWorkflow(unittest.TestCase):
         dry_run = self._ready_dry_run()
         dry_run["unknown_provenance_rows"] = "1"
         dry_run["unknown_provenance_field_counts"] = {"cash": 1}
-        app.executor = FakeExecutor([(1, self._parity_drift_preflight()), (0, dry_run)])
+        yahoo_plan = self._yahoo_plan_ready()
+        yahoo_plan["vintage_yahoo_aware_unknown_provenance_fields"] = "AAPL:2026-03-31:cash"
+        app.executor = FakeExecutor([(1, self._parity_drift_preflight()), (0, dry_run), (0, yahoo_plan)])
 
         self._run_recovery(app)
 
-        self.assertEqual(len(app.executor.commands), 2)
+        self.assertEqual(len(app.executor.commands), 3)
         self.assertEqual(app.usa_panel.status_badge.color, "red")
         self.assertIn("unknown provenance", app.last_usa_quarter_update_summary["vintage_recovery_reason"].lower())
 
@@ -234,6 +322,78 @@ class TestUiVintageRecoveryWorkflow(unittest.TestCase):
         self.assertEqual(len(app.executor.commands), 1)
         self.assertEqual(app.usa_panel.status_badge.color, "red")
         self.assertIn("Yahoo/final mixed", app.last_usa_quarter_update_summary["vintage_recovery_reason"])
+
+    def test_yahoo_recovery_unknown_provenance_stops_before_apply(self):
+        app = self._app()
+        yahoo_plan = self._yahoo_plan_ready()
+        yahoo_plan["vintage_yahoo_aware_unknown_provenance_fields"] = "AAPL:2026-03-31:cash"
+        app.executor = FakeExecutor(
+            [
+                (1, self._parity_drift_preflight()),
+                (0, self._sec_not_applicable_dry_run()),
+                (0, yahoo_plan),
+            ]
+        )
+
+        self._run_recovery(app)
+
+        self.assertEqual(len(app.executor.commands), 3)
+        self.assertEqual(app.usa_panel.status_badge.color, "red")
+        self.assertIn("unknown provenance", app.last_usa_quarter_update_summary["vintage_recovery_reason"].lower())
+
+    def test_yahoo_recovery_blocked_rows_stop_before_apply(self):
+        app = self._app()
+        yahoo_plan = self._yahoo_plan_ready()
+        yahoo_plan["vintage_yahoo_aware_blocked_rows"] = "1"
+        app.executor = FakeExecutor(
+            [
+                (1, self._parity_drift_preflight()),
+                (0, self._sec_not_applicable_dry_run()),
+                (0, yahoo_plan),
+            ]
+        )
+
+        self._run_recovery(app)
+
+        self.assertEqual(len(app.executor.commands), 3)
+        self.assertEqual(app.usa_panel.status_badge.color, "red")
+        self.assertIn("blocked rows", app.last_usa_quarter_update_summary["vintage_recovery_reason"].lower())
+
+    def test_yahoo_recovery_planned_rows_zero_stops_before_apply(self):
+        app = self._app()
+        yahoo_plan = self._yahoo_plan_ready(final_mixed_rows="0", yahoo_rows="0")
+        yahoo_plan["vintage_yahoo_aware_planning_status"] = "FINAL_MIXED_PLAN_READY"
+        app.executor = FakeExecutor(
+            [
+                (1, self._parity_drift_preflight()),
+                (0, self._sec_not_applicable_dry_run()),
+                (0, yahoo_plan),
+            ]
+        )
+
+        self._run_recovery(app)
+
+        self.assertEqual(len(app.executor.commands), 3)
+        self.assertEqual(app.usa_panel.status_badge.color, "red")
+        self.assertIn("no planned vintage rows", app.last_usa_quarter_update_summary["vintage_recovery_reason"].lower())
+
+    def test_yahoo_recovery_post_check_failure_stops(self):
+        app = self._app()
+        app.executor = FakeExecutor(
+            [
+                (1, self._parity_drift_preflight()),
+                (0, self._sec_not_applicable_dry_run()),
+                (0, self._yahoo_plan_ready(final_mixed_rows="2", yahoo_rows="0")),
+                (0, self._yahoo_apply_completed(final_mixed_rows="2", yahoo_rows="0")),
+                (1, self._parity_drift_preflight()),
+            ]
+        )
+
+        self._run_recovery(app)
+
+        self.assertEqual(len(app.executor.commands), 5)
+        self.assertEqual(app.usa_panel.status_badge.color, "red")
+        self.assertIn("post-check", app.last_usa_quarter_update_summary["vintage_recovery_reason"])
 
     def test_recovery_does_not_change_quarter_update_checkbox_default(self):
         app = self._app()

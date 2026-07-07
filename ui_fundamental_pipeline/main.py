@@ -12,6 +12,7 @@ try:
         UsaQuarterUpdateVintageOptions,
         UsaSecVintageRecoveryApplyOptions,
         UsaSecVintageRecoveryDryRunOptions,
+        UsaYahooAwareRecoveryOptions,
         UsaYahooAwareApplyOptions,
         build_fin_classification_ttm_commands,
         build_fin_update_command,
@@ -20,6 +21,7 @@ try:
         build_usa_update_command,
         build_usa_sec_vintage_recovery_apply_command,
         build_usa_sec_vintage_recovery_dry_run_command,
+        build_usa_yahoo_aware_recovery_command,
         build_usa_yahoo_aware_apply_command,
         build_usa_vintage_preflight_command,
     )
@@ -43,6 +45,7 @@ try:
         get_run_id_usa,
         get_sec_vintage_recovery_run_id_usa,
         get_utc_launch_timestamp,
+        get_yahoo_aware_recovery_run_id_usa,
         get_yahoo_aware_vintage_run_id_usa,
         get_vintage_run_id_usa,
         validate_config,
@@ -53,6 +56,7 @@ try:
         map_vintage_completion_status_to_ui_severity,
         map_vintage_recovery_status_to_ui_severity,
         map_yahoo_aware_execution_status_to_ui_severity,
+        should_apply_yahoo_aware_recovery,
         should_apply_sec_vintage_recovery,
         should_auto_apply_yahoo_aware_vintage,
         should_enable_yahoo_aware_apply,
@@ -63,6 +67,7 @@ except ImportError:  # pragma: no cover
         UsaQuarterUpdateVintageOptions,
         UsaSecVintageRecoveryApplyOptions,
         UsaSecVintageRecoveryDryRunOptions,
+        UsaYahooAwareRecoveryOptions,
         UsaYahooAwareApplyOptions,
         build_fin_classification_ttm_commands,
         build_fin_update_command,
@@ -71,6 +76,7 @@ except ImportError:  # pragma: no cover
         build_usa_update_command,
         build_usa_sec_vintage_recovery_apply_command,
         build_usa_sec_vintage_recovery_dry_run_command,
+        build_usa_yahoo_aware_recovery_command,
         build_usa_yahoo_aware_apply_command,
         build_usa_vintage_preflight_command,
     )
@@ -94,6 +100,7 @@ except ImportError:  # pragma: no cover
         get_run_id_usa,
         get_sec_vintage_recovery_run_id_usa,
         get_utc_launch_timestamp,
+        get_yahoo_aware_recovery_run_id_usa,
         get_yahoo_aware_vintage_run_id_usa,
         get_vintage_run_id_usa,
         validate_config,
@@ -104,6 +111,7 @@ except ImportError:  # pragma: no cover
         map_vintage_completion_status_to_ui_severity,
         map_vintage_recovery_status_to_ui_severity,
         map_yahoo_aware_execution_status_to_ui_severity,
+        should_apply_yahoo_aware_recovery,
         should_apply_sec_vintage_recovery,
         should_auto_apply_yahoo_aware_vintage,
         should_enable_yahoo_aware_apply,
@@ -632,19 +640,12 @@ class SwingMasterApp:
             apply_allowed = False
             apply_reason = f"SEC recovery dry-run failed: {apply_reason}"
         if not apply_allowed:
-            summary = {
-                **preflight_summary,
-                **dry_run_summary,
-                "vintage_recovery_status": "RECOVERY_BLOCKED",
-                "vintage_recovery_reason": apply_reason,
-            }
-            self._handle_summary("usa", summary)
-            self.usa_panel.set_status(
-                f"USA PIT/Vintage Recovery: {apply_reason} recovery=RECOVERY_BLOCKED severity=stop",
-                "red",
+            self._execute_usa_yahoo_aware_recovery_fallback(
+                preflight_summary=preflight_summary,
+                sec_dry_run_summary=dry_run_summary,
+                sec_block_reason=apply_reason,
+                launch_timestamp_utc=launch_timestamp_utc,
             )
-            self._set_progress(2, 4, "USA PIT/Vintage Recovery")
-            self._lock_ui(False)
             return
 
         self._set_progress(2, 4, "USA PIT/Vintage Recovery")
@@ -687,7 +688,7 @@ class SwingMasterApp:
         )
         post_summary = self.output_panel._current_summary.copy()
         if post_exit_code == 0 and str(post_summary.get("overall_status") or "").strip() == "READY_NOOP":
-            recovery_status = "RECOVERY_APPLIED"
+            recovery_status = "SEC_RECOVERY_APPLIED"
             reason = "SEC latest-writer recovery applied and post-check is READY_NOOP."
             color = "green"
         else:
@@ -719,6 +720,155 @@ class SwingMasterApp:
                 return "Manual review required: Yahoo/final mixed recovery cannot be proven safe."
             return "Recovery blocked by readiness preflight."
         return "Recovery status is unknown; manual review required."
+
+    def _execute_usa_yahoo_aware_recovery_fallback(
+        self,
+        *,
+        preflight_summary: dict,
+        sec_dry_run_summary: dict,
+        sec_block_reason: str,
+        launch_timestamp_utc: str,
+    ) -> None:
+        source_run_id = str(sec_dry_run_summary.get("source_run_id") or "").strip()
+        if not source_run_id:
+            self._block_vintage_recovery(
+                {
+                    **preflight_summary,
+                    **sec_dry_run_summary,
+                    "vintage_recovery_mode": "none",
+                    "sec_recovery_block_reason": sec_block_reason,
+                },
+                "Manual review required: Yahoo/final mixed recovery cannot be proven safe. SOURCE_RUN_ID_REQUIRED",
+                progress_step=2,
+            )
+            return
+
+        yahoo_vintage_run_id = get_yahoo_aware_recovery_run_id_usa(source_run_id)
+        yahoo_plan_command = build_usa_yahoo_aware_recovery_command(
+            UsaYahooAwareRecoveryOptions(
+                source_run_id=source_run_id,
+                vintage_run_id=yahoo_vintage_run_id,
+                launch_timestamp_utc=launch_timestamp_utc,
+                dry_run=True,
+            )
+        )
+        yahoo_plan_exit_code, _ = self.executor.execute(
+            command=yahoo_plan_command,
+            on_output=self._ui_callback(self.output_panel.add_line),
+            on_summary=self._ui_callback(lambda summary: self._handle_summary("usa", summary)),
+        )
+        yahoo_plan_summary = self.output_panel._current_summary.copy()
+        yahoo_allowed, yahoo_reason = should_apply_yahoo_aware_recovery(
+            preflight_summary=preflight_summary,
+            plan_summary=yahoo_plan_summary,
+        )
+        if yahoo_plan_exit_code != 0:
+            yahoo_allowed = False
+            yahoo_reason = f"Yahoo-aware recovery dry-run failed: {yahoo_reason}"
+        if not yahoo_allowed:
+            self._block_vintage_recovery(
+                {
+                    **preflight_summary,
+                    **sec_dry_run_summary,
+                    **yahoo_plan_summary,
+                    "vintage_recovery_mode": "none",
+                    "sec_recovery_block_reason": sec_block_reason,
+                },
+                f"Manual review required: Yahoo/final mixed recovery cannot be proven safe. {yahoo_reason}",
+                progress_step=2,
+            )
+            return
+
+        expected_final = int(yahoo_plan_summary.get("vintage_planned_final_mixed_rows") or 0)
+        expected_yahoo = int(yahoo_plan_summary.get("vintage_planned_yahoo_vintage_rows") or 0)
+        yahoo_apply_command = build_usa_yahoo_aware_recovery_command(
+            UsaYahooAwareRecoveryOptions(
+                source_run_id=source_run_id,
+                vintage_run_id=yahoo_vintage_run_id,
+                launch_timestamp_utc=launch_timestamp_utc,
+                expected_final_mixed_count=expected_final,
+                expected_yahoo_vintage_count=expected_yahoo,
+                approved=True,
+            )
+        )
+        yahoo_apply_exit_code, _ = self.executor.execute(
+            command=yahoo_apply_command,
+            on_output=self._ui_callback(self.output_panel.add_line),
+            on_summary=self._ui_callback(lambda summary: self._handle_summary("usa", summary)),
+        )
+        yahoo_apply_summary = self.output_panel._current_summary.copy()
+        if yahoo_apply_exit_code != 0:
+            self._block_vintage_recovery(
+                {
+                    **preflight_summary,
+                    **sec_dry_run_summary,
+                    **yahoo_plan_summary,
+                    **yahoo_apply_summary,
+                    "vintage_recovery_mode": "yahoo_aware_final_mixed",
+                    "sec_recovery_block_reason": sec_block_reason,
+                },
+                f"Yahoo-aware recovery apply failed: exit={yahoo_apply_exit_code}",
+                progress_step=3,
+            )
+            return
+
+        post_exit_code, _ = self.executor.execute(
+            command=build_usa_vintage_preflight_command(),
+            on_output=self._ui_callback(self.output_panel.add_line),
+            on_summary=self._ui_callback(lambda summary: self._handle_summary("usa", summary)),
+        )
+        post_summary = self.output_panel._current_summary.copy()
+        post_ready = (
+            post_exit_code == 0
+            and str(post_summary.get("overall_status") or "").strip() == "READY_NOOP"
+            and int(post_summary.get("latest_without_vintage_count") or 0) == 0
+            and int(post_summary.get("duplicate_statement_vintage_id_count") or 0) == 0
+        )
+        if not post_ready:
+            self._block_vintage_recovery(
+                {
+                    **preflight_summary,
+                    **sec_dry_run_summary,
+                    **yahoo_plan_summary,
+                    **yahoo_apply_summary,
+                    "post_recovery_overall_status": post_summary.get("overall_status"),
+                    "post_recovery_latest_without_vintage_count": post_summary.get("latest_without_vintage_count"),
+                    "vintage_recovery_mode": "yahoo_aware_final_mixed",
+                    "sec_recovery_block_reason": sec_block_reason,
+                },
+                "Yahoo-aware recovery post-check did not return READY_NOOP.",
+                progress_step=4,
+            )
+            return
+
+        summary = {
+            **preflight_summary,
+            **sec_dry_run_summary,
+            **yahoo_plan_summary,
+            **yahoo_apply_summary,
+            "post_recovery_overall_status": post_summary.get("overall_status"),
+            "post_recovery_latest_without_vintage_count": post_summary.get("latest_without_vintage_count"),
+            "vintage_recovery_status": "YAHOO_AWARE_RECOVERY_APPLIED",
+            "vintage_recovery_mode": "yahoo_aware_final_mixed",
+            "vintage_recovery_reason": "Yahoo-aware/final-mixed recovery applied and post-check is READY_NOOP.",
+            "sec_recovery_block_reason": sec_block_reason,
+        }
+        self._handle_summary("usa", summary)
+        suffix = self._vintage_status_suffix()
+        self.usa_panel.set_status(f"USA PIT/Vintage Recovery: exit={post_exit_code}{suffix}", "green")
+        self._set_progress(4, 4, "USA PIT/Vintage Recovery")
+        self._lock_ui(False)
+
+    def _block_vintage_recovery(self, summary: dict, reason: str, *, progress_step: int) -> None:
+        blocked_summary = {
+            **summary,
+            "vintage_recovery_status": "RECOVERY_BLOCKED",
+            "vintage_recovery_reason": reason,
+        }
+        self._handle_summary("usa", blocked_summary)
+        self.usa_panel.set_status(f"USA PIT/Vintage Recovery: {reason} recovery=RECOVERY_BLOCKED severity=stop", "red")
+        self._set_progress(progress_step, 4, "USA PIT/Vintage Recovery")
+        self._lock_ui(False)
 
     def _run_usa_vintage_recovery(self) -> None:
         self._run_in_background(self._execute_usa_vintage_recovery_workflow)

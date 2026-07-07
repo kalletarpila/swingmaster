@@ -148,7 +148,7 @@ def map_vintage_recovery_status_to_ui_severity(summary: dict) -> str:
     status = str(summary.get("vintage_recovery_status") or "").strip()
     if not status:
         return "unknown"
-    if status in {"RECOVERY_NOOP", "RECOVERY_APPLIED"}:
+    if status in {"RECOVERY_NOOP", "RECOVERY_APPLIED", "SEC_RECOVERY_APPLIED", "YAHOO_AWARE_RECOVERY_APPLIED"}:
         return "success"
     if status == "RECOVERY_READY":
         return "review"
@@ -211,3 +211,45 @@ def should_apply_sec_vintage_recovery(
         return False, "SEC recovery candidate count does not match planned rows."
 
     return True, "SEC latest-writer recovery plan is safe to apply."
+
+
+def should_apply_yahoo_aware_recovery(
+    *,
+    preflight_summary: dict,
+    plan_summary: dict,
+) -> tuple[bool, str]:
+    """Decide whether Yahoo-aware/final-mixed recovery is safe to apply."""
+    source_run_id = str(plan_summary.get("source_run_id") or "").strip()
+    if not source_run_id:
+        return False, "SOURCE_RUN_ID_REQUIRED"
+
+    planning_status = str(plan_summary.get("vintage_yahoo_aware_planning_status") or "").strip()
+    if planning_status not in {"FINAL_MIXED_PLAN_READY", "YAHOO_VINTAGE_PLAN_READY"}:
+        return False, f"Yahoo-aware recovery planning is not ready: {planning_status or 'UNKNOWN'}."
+
+    planned_final = _as_int(plan_summary.get("vintage_planned_final_mixed_rows"))
+    planned_yahoo = _as_int(plan_summary.get("vintage_planned_yahoo_vintage_rows"))
+    planned_provenance = _as_int(plan_summary.get("vintage_planned_yahoo_aware_provenance_rows"))
+    if planned_final + planned_yahoo <= 0:
+        return False, "Yahoo-aware recovery has no planned vintage rows."
+    if planned_provenance <= 0:
+        return False, "Yahoo-aware recovery has no planned provenance rows."
+
+    if _as_int(plan_summary.get("vintage_yahoo_aware_blocked_rows")) > 0:
+        return False, "Yahoo-aware recovery has blocked rows."
+    if _has_unknown_provenance_fields(plan_summary.get("vintage_yahoo_aware_unknown_provenance_fields")):
+        return False, "Yahoo-aware recovery has unknown provenance."
+    if _as_int(preflight_summary.get("duplicate_statement_vintage_id_count")) > 0:
+        return False, "Yahoo-aware recovery blocked by duplicate statement vintage ids."
+    if _as_int(preflight_summary.get("vintage_without_latest_count")) > 0:
+        return False, "Yahoo-aware recovery blocked by vintage rows without latest rows."
+
+    latest_without_vintage = _as_int(preflight_summary.get("latest_without_vintage_count"))
+    if latest_without_vintage > 0 and planned_final + planned_yahoo != latest_without_vintage:
+        return False, "Yahoo-aware recovery planned rows do not match readiness missing count."
+
+    overall_status = str(plan_summary.get("overall_status") or "").strip()
+    if overall_status and overall_status not in {"YAHOO_AWARE_RECOVERY_READY"}:
+        return False, f"Yahoo-aware recovery status is not ready: {overall_status}."
+
+    return True, "Yahoo-aware/final-mixed recovery plan is safe to apply."

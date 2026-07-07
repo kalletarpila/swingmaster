@@ -4,6 +4,7 @@ from ui_fundamental_pipeline.command_builder import (
     UsaQuarterUpdateVintageOptions,
     UsaSecVintageRecoveryApplyOptions,
     UsaSecVintageRecoveryDryRunOptions,
+    UsaYahooAwareRecoveryOptions,
     UsaYahooAwareApplyOptions,
     build_fin_classification_ttm_commands,
     build_fin_update_command,
@@ -12,6 +13,7 @@ from ui_fundamental_pipeline.command_builder import (
     build_usa_update_command,
     build_usa_sec_vintage_recovery_apply_command,
     build_usa_sec_vintage_recovery_dry_run_command,
+    build_usa_yahoo_aware_recovery_command,
     build_usa_yahoo_aware_apply_command,
     build_usa_vintage_preflight_command,
 )
@@ -139,6 +141,42 @@ class TestCommandBuilder(unittest.TestCase):
         self.assertEqual(command[command.index("--candidate-mode") + 1], "latest_writer")
         self.assertEqual(command[command.index("--expected-count") + 1], "2")
         self.assertEqual(command[command.index("--approval-token") + 1], SEC_LATEST_WRITER_VINTAGE_APPLY_APPROVAL_TOKEN)
+        self.assertNotIn("run_fundamental_quarter_update", " ".join(command))
+        self.assertNotIn("--provider", command)
+
+    def test_build_usa_yahoo_aware_recovery_dry_run_command(self):
+        command = build_usa_yahoo_aware_recovery_command(
+            UsaYahooAwareRecoveryOptions(
+                source_run_id="USA_QUARTER_UPDATE_2026-07-07__QUARTERLY",
+                vintage_run_id="USA_QUARTER_UPDATE_2026-07-07__YAHOO_AWARE_VINTAGE_RECOVERY",
+                launch_timestamp_utc="2026-07-07T12:00:00Z",
+                dry_run=True,
+            )
+        )
+
+        self.assertEqual(command[command.index("-m") + 1], "swingmaster.cli.apply_quarter_update_yahoo_aware_vintage")
+        self.assertIn("--dry-run", command)
+        self.assertEqual(command[command.index("--format") + 1], "json")
+        self.assertNotIn("--approval-token", command)
+        self.assertNotIn("run_fundamental_quarter_update", " ".join(command))
+        self.assertNotIn("--provider", command)
+
+    def test_build_usa_yahoo_aware_recovery_apply_command_with_expected_counts(self):
+        command = build_usa_yahoo_aware_recovery_command(
+            UsaYahooAwareRecoveryOptions(
+                source_run_id="USA_QUARTER_UPDATE_2026-07-07__QUARTERLY",
+                vintage_run_id="USA_QUARTER_UPDATE_2026-07-07__YAHOO_AWARE_VINTAGE_RECOVERY",
+                launch_timestamp_utc="2026-07-07T12:00:00Z",
+                expected_final_mixed_count=2,
+                expected_yahoo_vintage_count=0,
+                approved=True,
+            )
+        )
+
+        self.assertNotIn("--dry-run", command)
+        self.assertEqual(command[command.index("--expected-final-mixed-count") + 1], "2")
+        self.assertEqual(command[command.index("--expected-yahoo-vintage-count") + 1], "0")
+        self.assertIn("--approval-token", command)
         self.assertNotIn("run_fundamental_quarter_update", " ".join(command))
         self.assertNotIn("--provider", command)
 

@@ -70,7 +70,9 @@ USA_QUARTER_UPDATE_YYYY-MM-DD__SEC_LATEST_WRITER_VINTAGE
 Preflight is implemented for the opt-in path. When the USA vintage checkbox is enabled, the UI runs this read-only preflight command before the quarter update:
 
 ```text
-preflight_quarter_update_vintage_readiness.py
+<PROJECT_ROOT>/.venv/bin/python
+-m
+swingmaster.cli.preflight_quarter_update_vintage_readiness
 --fundamentals-db /home/kalle/projects/swingmaster/fundamentals_usa.db
 --market usa
 --format json
@@ -126,7 +128,10 @@ Phase 4L2 did not write:
 
 Recommended next phase:
 
+- run the Phase 4L3 no-provider UI smoke before any real provider run
 - manually inspect the UI in a browser if desired
 - run a controlled dry command-builder review
 - perform the production run only after operator confirmation and DB backup
 - keep Yahoo-aware execution write out of the UI until the first opt-in run summary is reviewed
+
+Phase 4L3 no-provider smoke coverage is documented in [SwingMaster Quarter Update UI Vintage Smoke Phase 4L3](swingmaster_quarter_update_ui_vintage_smoke_phase4l3.md).

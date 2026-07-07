@@ -89,7 +89,8 @@ def build_usa_update_command(
 def build_usa_vintage_preflight_command() -> list[str]:
     return [
         str(PYTHON_EXECUTABLE),
-        str(CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT),
+        "-m",
+        "swingmaster.cli.preflight_quarter_update_vintage_readiness",
         "--fundamentals-db",
         str(FUNDAMENTALS_USA_DB),
         "--market",

@@ -51,7 +51,11 @@ class TestCommandBuilder(unittest.TestCase):
     def test_build_usa_vintage_preflight_command(self):
         command = build_usa_vintage_preflight_command()
 
-        self.assertIn("preflight_quarter_update_vintage_readiness.py", " ".join(command))
+        self.assertIn("-m", command)
+        self.assertEqual(
+            command[command.index("-m") + 1],
+            "swingmaster.cli.preflight_quarter_update_vintage_readiness",
+        )
         self.assertIn("--fundamentals-db", command)
         self.assertIn("fundamentals_usa.db", " ".join(command))
         self.assertEqual(command[command.index("--market") + 1], "usa")

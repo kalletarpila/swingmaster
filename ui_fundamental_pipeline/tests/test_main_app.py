@@ -203,7 +203,11 @@ class TestSwingMasterApp(unittest.TestCase):
         self.assertEqual(market, "usa")
         self.assertEqual(len(commands), 2)
         preflight_command, update_command = commands
-        self.assertIn("preflight_quarter_update_vintage_readiness.py", " ".join(preflight_command))
+        self.assertIn("-m", preflight_command)
+        self.assertEqual(
+            preflight_command[preflight_command.index("-m") + 1],
+            "swingmaster.cli.preflight_quarter_update_vintage_readiness",
+        )
         self.assertIn("--write-vintage", update_command)
         self.assertEqual(update_command[update_command.index("--vintage-yahoo-aware-action") + 1], "plan_only")
         self.assertNotEqual(update_command[update_command.index("--vintage-yahoo-aware-action") + 1], "write")

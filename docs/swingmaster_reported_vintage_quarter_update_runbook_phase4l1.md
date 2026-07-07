@@ -8,6 +8,8 @@ This document is operational guidance only. Phase 4L1 did not run the real `quar
 
 ## 1. Pre-Run Readiness
 
+For UI-triggered runs, Phase 4L3 adds a no-provider smoke test that verifies the UI command chain, vintage flags, preflight failure stop behavior, `SUMMARY key=value` parsing, and severity mapping without executing provider commands. See [SwingMaster Quarter Update UI Vintage Smoke Phase 4L3](swingmaster_quarter_update_ui_vintage_smoke_phase4l3.md).
+
 Run the read-only readiness smoke before any real Q update:
 
 ```bash

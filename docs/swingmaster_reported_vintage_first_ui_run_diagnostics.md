@@ -144,3 +144,11 @@ not a broad final-mixed plan over 184+ unrelated Yahoo-audited historical rows.
 Secondary fix: the completion gate should not classify `value_mismatch_explained_by_yahoo_audit` using only aggregate `yahoo_audit_rows > 0`. It should require key-level evidence that the mismatched ticker/period/field is explained by current-run Yahoo audit. In this run, `GIS:2025-05-25:total_debt` had no such current-run audit row.
 
 The failure-handling question is separate. The 86 enrich-missing errors are probably expected-period detection or fiscal-period tolerance issues, not a PIT/vintage apply issue. They should be investigated under SEC/Yahoo quarter detection and should not be fixed by broadening the Yahoo-aware vintage apply.
+
+## Follow-Up Verification
+
+Phase 4M1 implemented the planner-scope and exact-evidence fix. Phase 4M2 then replayed the fixed logic against the current real USA fundamentals DB in read-only mode.
+
+The GIS mismatch still exists, but it is now classified as `BLOCKED_POST_RUN_DRIFT` with `unexplained_value_mismatch`; Yahoo-aware planner scope is `0`, blocked rows are `0`, and the previous broad 184/188-row blocked set is gone.
+
+See [SwingMaster Yahoo-Aware Vintage Scope Verification Phase 4M2](swingmaster_reported_vintage_yahoo_aware_scope_verification_phase4m2.md).

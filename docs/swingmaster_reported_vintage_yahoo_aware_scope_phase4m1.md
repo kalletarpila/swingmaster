@@ -69,3 +69,9 @@ The execution candidate builder also respects the same scope, so provider-free a
 ## Safety
 
 This phase only changes planner/completion logic and temp-DB unit tests. It does not require real provider calls, scheduler runs, refresh jobs, recovery apply, Yahoo-aware apply, or real DB writes.
+
+## Phase 4M2 Verification
+
+Phase 4M2 replayed the fixed guard/planner logic against the current real USA fundamentals DB in read-only mode. The GIS mismatch remained unexplained by exact current-run Yahoo audit evidence, completion returned `BLOCKED_POST_RUN_DRIFT`, and planner scope stayed at `0` with `0` blocked rows.
+
+See [SwingMaster Yahoo-Aware Vintage Scope Verification Phase 4M2](swingmaster_reported_vintage_yahoo_aware_scope_verification_phase4m2.md).

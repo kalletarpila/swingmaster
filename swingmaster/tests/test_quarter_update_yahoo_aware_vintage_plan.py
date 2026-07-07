@@ -87,6 +87,8 @@ def _plan(
     sec_provenance_by_key: dict[tuple[str, str], dict[str, dict[str, object]]] | None = None,
     yahoo_audit_rows_by_key: dict[tuple[str, str], list[dict[str, object]]] | None = None,
     yahoo_rows_by_key: dict[tuple[str, str], dict[str, object]] | None = None,
+    final_mixed_scope_keys: list[tuple[str, str]] | None = None,
+    yahoo_vintage_scope_keys: list[tuple[str, str]] | None = None,
 ) -> dict[str, object]:
     return run_fundamental_quarter_update.plan_quarter_update_yahoo_aware_vintage(
         completion_summary=_completion(completion_status),
@@ -98,6 +100,8 @@ def _plan(
         available_at_utc="2026-05-05T12:00:00Z",
         ingested_at_utc="2026-05-05T12:05:00Z",
         vintage_run_id="VINTAGE_RUN",
+        final_mixed_scope_keys=final_mixed_scope_keys,
+        yahoo_vintage_scope_keys=yahoo_vintage_scope_keys,
     )
 
 
@@ -134,6 +138,7 @@ def test_final_mixed_required_with_sec_and_yahoo_sources_is_plan_ready() -> None
         latest_rows=[_latest_row(revenue=100.0, operating_income=20.0)],
         sec_provenance_by_key={key: {"revenue": _sec_source("revenue"), "ebit": _sec_source("ebit")}},
         yahoo_audit_rows_by_key={key: [_yahoo_audit("operating_income", 20.0)]},
+        final_mixed_scope_keys=[key],
     )
 
     assert summary["vintage_yahoo_aware_planning_status"] == "FINAL_MIXED_PLAN_READY"
@@ -149,12 +154,14 @@ def test_final_mixed_plan_uses_final_latest_row_values_for_hash() -> None:
         latest_rows=[_latest_row(revenue=100.0, operating_income=20.0)],
         sec_provenance_by_key={key: {"revenue": _sec_source("revenue"), "ebit": _sec_source("ebit")}},
         yahoo_audit_rows_by_key={key: [_yahoo_audit("operating_income", 20.0)]},
+        final_mixed_scope_keys=[key],
     )
     changed = _plan(
         completion_status="FINAL_MIXED_REQUIRED",
         latest_rows=[_latest_row(revenue=101.0, operating_income=20.0)],
         sec_provenance_by_key={key: {"revenue": _sec_source("revenue"), "ebit": _sec_source("ebit")}},
         yahoo_audit_rows_by_key={key: [_yahoo_audit("operating_income", 20.0)]},
+        final_mixed_scope_keys=[key],
     )
 
     assert base["vintage_yahoo_aware_sample_source_hashes"] != changed["vintage_yahoo_aware_sample_source_hashes"]
@@ -175,6 +182,7 @@ def test_sec_retained_fields_keep_sec_provenance_in_final_mixed_plan() -> None:
         latest_rows=[_latest_row(revenue=100.0, operating_income=20.0)],
         sec_provenance_by_key={key: {"revenue": _sec_source("revenue"), "ebit": _sec_source("ebit")}},
         yahoo_audit_rows_by_key={key: [_yahoo_audit("operating_income", 20.0)]},
+        final_mixed_scope_keys=[key],
     )
 
     assert summary["vintage_yahoo_aware_planning_status"] == "FINAL_MIXED_PLAN_READY"
@@ -188,6 +196,7 @@ def test_unknown_non_null_field_blocks_final_mixed_plan() -> None:
         latest_rows=[_latest_row(revenue=100.0, operating_income=20.0, cash=50.0)],
         sec_provenance_by_key={key: {"revenue": _sec_source("revenue"), "ebit": _sec_source("ebit")}},
         yahoo_audit_rows_by_key={key: [_yahoo_audit("operating_income", 20.0)]},
+        final_mixed_scope_keys=[key],
     )
 
     assert summary["vintage_yahoo_aware_planning_status"] == "PLAN_BLOCKED"
@@ -200,6 +209,7 @@ def test_yahoo_inserted_missing_quarter_plans_yahoo_vintage() -> None:
         completion_status="YAHOO_VINTAGE_REQUIRED",
         latest_rows=[_latest_row(run_id="BASE__ENRICH")],
         yahoo_rows_by_key={key: _yahoo_row()},
+        yahoo_vintage_scope_keys=[key],
     )
 
     assert summary["vintage_yahoo_aware_planning_status"] == "YAHOO_VINTAGE_PLAN_READY"

@@ -140,6 +140,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _summary(**items: object) -> None:
     for key, value in items.items():
+        if str(key).startswith("_"):
+            continue
         print(f"SUMMARY {key}={value}")
 
 
@@ -910,6 +912,7 @@ def check_quarter_update_vintage_parity_for_run(
             "vintage_post_run_latest_without_vintage_count": None,
             "vintage_post_run_vintage_without_latest_count": None,
             "vintage_post_run_value_mismatch_count": None,
+            "vintage_post_run_value_mismatch_sample": "",
             "vintage_post_run_duplicate_statement_vintage_id_count": None,
         }
 
@@ -918,14 +921,14 @@ def check_quarter_update_vintage_parity_for_run(
     latest_run_ids = [normalized_source_run_id, *[run_id for run_id in (additional_latest_run_ids or []) if str(run_id).strip()]]
     latest_rows = _latest_rows_for_run_ids(conn, latest_run_ids)
     latest_without_vintage_count = 0
-    value_mismatch_count = 0
+    value_mismatches: list[dict[str, object]] = []
     for latest_row in latest_rows:
         vintage_rows = _matching_vintage_rows(conn, normalized_market, str(latest_row["ticker"]), str(latest_row["period_end_date"]))
         if not vintage_rows:
             latest_without_vintage_count += 1
             continue
         if not any(_latest_and_vintage_values_match(latest_row, vintage_row) for vintage_row in vintage_rows):
-            value_mismatch_count += 1
+            value_mismatches.extend(_latest_vintage_value_mismatch_details(latest_row, vintage_rows[0]))
 
     vintage_without_latest_count: int | None = None
     if vintage_run_id is not None and str(vintage_run_id).strip():
@@ -937,6 +940,7 @@ def check_quarter_update_vintage_parity_for_run(
         )
 
     duplicate_statement_vintage_id_count = _duplicate_statement_vintage_id_count(conn, normalized_market, vintage_run_id)
+    value_mismatch_count = len({_mismatch_identity(mismatch) for mismatch in value_mismatches})
     drift_detected = latest_without_vintage_count > 0 or value_mismatch_count > 0 or duplicate_statement_vintage_id_count > 0
     if vintage_without_latest_count is not None:
         drift_detected = drift_detected or vintage_without_latest_count > 0
@@ -946,6 +950,8 @@ def check_quarter_update_vintage_parity_for_run(
         "vintage_post_run_latest_without_vintage_count": latest_without_vintage_count,
         "vintage_post_run_vintage_without_latest_count": vintage_without_latest_count,
         "vintage_post_run_value_mismatch_count": value_mismatch_count,
+        "_vintage_post_run_value_mismatch_details": value_mismatches,
+        "vintage_post_run_value_mismatch_sample": _format_mismatch_sample(value_mismatches),
         "vintage_post_run_duplicate_statement_vintage_id_count": duplicate_statement_vintage_id_count,
     }
 
@@ -1016,11 +1022,17 @@ def build_quarter_update_vintage_post_run_guard_summary(
         enrich_summary=enrich_summary,
     )
     output = {**parity, **yahoo_impact}
+    mismatch_evidence = _build_value_mismatch_yahoo_evidence(
+        parity.get("_vintage_post_run_value_mismatch_details"),
+        _yahoo_audit_rows_by_key(conn, enrich_run_id),
+    )
+    output.update(mismatch_evidence["summary"])
     output["vintage_recommendation"] = _quarter_update_vintage_recommendation(output)
     output.update(
         classify_quarter_update_vintage_completion(
             parity_summary=parity,
             yahoo_impact_summary=yahoo_impact,
+            value_parity_summary=mismatch_evidence["summary"],
         )
     )
     if vintage_run_id is not None and available_at_utc is not None and ingested_at_utc is not None:
@@ -1036,6 +1048,7 @@ def build_quarter_update_vintage_post_run_guard_summary(
                 available_at_utc=available_at_utc,
                 ingested_at_utc=ingested_at_utc,
                 vintage_run_id=str(vintage_run_id),
+                final_mixed_scope_keys=mismatch_evidence["explained_keys"],
             )
         )
     return output
@@ -1052,6 +1065,8 @@ def plan_quarter_update_yahoo_aware_vintage(
     available_at_utc: str,
     ingested_at_utc: str,
     vintage_run_id: str,
+    final_mixed_scope_keys: list[tuple[str, str]] | None = None,
+    yahoo_vintage_scope_keys: list[tuple[str, str]] | None = None,
 ) -> dict[str, object]:
     completion_status = completion_summary.get("vintage_completion_status")
     if completion_status == VINTAGE_COMPLETION_SEC_SUFFICIENT:
@@ -1062,8 +1077,9 @@ def plan_quarter_update_yahoo_aware_vintage(
         return _yahoo_aware_plan_result(
             YAHOO_AWARE_PLAN_BLOCKED,
             next_action="INVESTIGATE_DRIFT",
-            blocked_rows=len(latest_rows),
+            blocked_rows=0,
             reason="COMPLETION_GATE_BLOCKED_POST_RUN_DRIFT",
+            scope_source="none_blocked_completion",
         )
     if completion_status == VINTAGE_COMPLETION_FINAL_MIXED_REQUIRED:
         return _plan_final_mixed_vintage(
@@ -1074,6 +1090,7 @@ def plan_quarter_update_yahoo_aware_vintage(
             available_at_utc=available_at_utc,
             ingested_at_utc=ingested_at_utc,
             vintage_run_id=vintage_run_id,
+            scope_keys=final_mixed_scope_keys,
         )
     if completion_status == VINTAGE_COMPLETION_YAHOO_REQUIRED:
         return _plan_yahoo_inserted_vintage(
@@ -1083,6 +1100,7 @@ def plan_quarter_update_yahoo_aware_vintage(
             available_at_utc=available_at_utc,
             ingested_at_utc=ingested_at_utc,
             vintage_run_id=vintage_run_id,
+            scope_keys=yahoo_vintage_scope_keys,
         )
     return _yahoo_aware_plan_result(YAHOO_AWARE_PLAN_UNKNOWN, next_action="IMPROVE_RUN_LINKAGE")
 
@@ -1096,6 +1114,7 @@ def _plan_final_mixed_vintage(
     available_at_utc: str,
     ingested_at_utc: str,
     vintage_run_id: str,
+    scope_keys: list[tuple[str, str]] | None = None,
 ) -> dict[str, object]:
     planned_rows = 0
     planned_provenance_rows = 0
@@ -1103,7 +1122,9 @@ def _plan_final_mixed_vintage(
     unknown_fields: list[str] = []
     sample_ids: list[str] = []
     sample_hashes: list[str] = []
-    for latest_row in latest_rows:
+    normalized_scope_keys = _normalize_scope_keys(scope_keys)
+    scoped_latest_rows = _scope_latest_rows(latest_rows, normalized_scope_keys)
+    for latest_row in scoped_latest_rows:
         normalized_row = _normalized_latest_mapping(latest_row, vintage_run_id)
         key = _ticker_period_key(normalized_row)
         audit_rows = list(yahoo_audit_rows_by_key.get(key, []))
@@ -1150,11 +1171,14 @@ def _plan_final_mixed_vintage(
         return _yahoo_aware_plan_result(
             YAHOO_AWARE_PLAN_BLOCKED,
             next_action="INVESTIGATE_DRIFT",
-            blocked_rows=blocked_rows or len(latest_rows),
+            blocked_rows=blocked_rows or len(scoped_latest_rows),
             unknown_fields=unknown_fields,
             reason="UNKNOWN_OR_MISSING_FINAL_MIXED_PROVENANCE",
             sample_ids=sample_ids,
             sample_hashes=sample_hashes,
+            scope_count=len(scoped_latest_rows),
+            scope_source="post_run_yahoo_explained_mismatches",
+            scope_keys=normalized_scope_keys,
         )
     return _yahoo_aware_plan_result(
         YAHOO_AWARE_PLAN_FINAL_MIXED_READY,
@@ -1163,6 +1187,9 @@ def _plan_final_mixed_vintage(
         provenance_rows=planned_provenance_rows,
         sample_ids=sample_ids,
         sample_hashes=sample_hashes,
+        scope_count=len(scoped_latest_rows),
+        scope_source="post_run_yahoo_explained_mismatches",
+        scope_keys=normalized_scope_keys,
     )
 
 
@@ -1174,13 +1201,16 @@ def _plan_yahoo_inserted_vintage(
     available_at_utc: str,
     ingested_at_utc: str,
     vintage_run_id: str,
+    scope_keys: list[tuple[str, str]] | None = None,
 ) -> dict[str, object]:
     planned_rows = 0
     planned_provenance_rows = 0
     blocked_rows = 0
     sample_ids: list[str] = []
     sample_hashes: list[str] = []
-    for latest_row in latest_rows:
+    normalized_scope_keys = _normalize_scope_keys(scope_keys)
+    scoped_latest_rows = _scope_latest_rows(latest_rows, normalized_scope_keys)
+    for latest_row in scoped_latest_rows:
         normalized_row = _normalized_latest_mapping(latest_row, vintage_run_id)
         key = _ticker_period_key(normalized_row)
         yahoo_row = yahoo_rows_by_key.get(key)
@@ -1217,10 +1247,13 @@ def _plan_yahoo_inserted_vintage(
         return _yahoo_aware_plan_result(
             YAHOO_AWARE_PLAN_BLOCKED,
             next_action="IMPROVE_RUN_LINKAGE",
-            blocked_rows=blocked_rows or len(latest_rows),
+            blocked_rows=blocked_rows or len(scoped_latest_rows),
             reason="INSUFFICIENT_YAHOO_RUN_LINKAGE",
             sample_ids=sample_ids,
             sample_hashes=sample_hashes,
+            scope_count=len(scoped_latest_rows),
+            scope_source="yahoo_inserted_missing_quarter",
+            scope_keys=normalized_scope_keys,
         )
     return _yahoo_aware_plan_result(
         YAHOO_AWARE_PLAN_YAHOO_READY,
@@ -1229,6 +1262,9 @@ def _plan_yahoo_inserted_vintage(
         provenance_rows=planned_provenance_rows,
         sample_ids=sample_ids,
         sample_hashes=sample_hashes,
+        scope_count=len(scoped_latest_rows),
+        scope_source="yahoo_inserted_missing_quarter",
+        scope_keys=normalized_scope_keys,
     )
 
 
@@ -1244,6 +1280,9 @@ def _yahoo_aware_plan_result(
     reason: str | None = None,
     sample_ids: list[str] | None = None,
     sample_hashes: list[str] | None = None,
+    scope_count: int = 0,
+    scope_source: str = "none",
+    scope_keys: list[tuple[str, str]] | None = None,
 ) -> dict[str, object]:
     return {
         "vintage_yahoo_aware_planning_status": status,
@@ -1252,10 +1291,13 @@ def _yahoo_aware_plan_result(
         "vintage_planned_yahoo_vintage_rows": yahoo_rows,
         "vintage_planned_yahoo_aware_provenance_rows": provenance_rows,
         "vintage_yahoo_aware_blocked_rows": blocked_rows,
-        "vintage_yahoo_aware_unknown_provenance_fields": ",".join(sorted(unknown_fields or [])),
+        "vintage_yahoo_aware_unknown_provenance_fields": ",".join(sorted(unknown_fields or [])[:20]),
         "vintage_yahoo_aware_block_reason": reason,
         "vintage_yahoo_aware_sample_statement_vintage_ids": ",".join((sample_ids or [])[:3]),
         "vintage_yahoo_aware_sample_source_hashes": ",".join((sample_hashes or [])[:3]),
+        "vintage_yahoo_aware_planner_scope_count": scope_count,
+        "vintage_yahoo_aware_planner_scope_source": scope_source,
+        "_vintage_yahoo_aware_planner_scope_keys": _format_scope_keys(scope_keys or []),
     }
 
 
@@ -1467,6 +1509,10 @@ def _yahoo_aware_execution_result(
     }
 
 
+def _scope_keys_from_plan(plan: Mapping[str, object]) -> set[tuple[str, str]]:
+    return set(_parse_scope_keys(plan.get("_vintage_yahoo_aware_planner_scope_keys")))
+
+
 def _build_yahoo_aware_execution_candidates(
     *,
     plan: Mapping[str, object],
@@ -1479,9 +1525,12 @@ def _build_yahoo_aware_execution_candidates(
     final_mixed_candidates: dict[tuple[str, str], dict[str, Any]] = {}
     yahoo_candidates: dict[tuple[str, str], dict[str, Any]] = {}
     plan_status = plan.get("vintage_yahoo_aware_planning_status")
+    scope_keys = _scope_keys_from_plan(plan)
     for latest_row in latest_rows:
         normalized_row = _normalized_latest_mapping(latest_row, vintage_run_id)
         key = _ticker_period_key(normalized_row)
+        if scope_keys and key not in scope_keys:
+            continue
         if plan_status == YAHOO_AWARE_PLAN_FINAL_MIXED_READY and key in yahoo_audit_rows_by_key:
             final_mixed_candidates[key] = {
                 "normalized_row": normalized_row,
@@ -1511,6 +1560,47 @@ def _normalized_latest_mapping(row: Mapping[str, Any], run_id: str) -> dict[str,
 
 def _ticker_period_key(row: Mapping[str, Any]) -> tuple[str, str]:
     return (str(row["ticker"]).upper(), str(row["period_end_date"]))
+
+
+def _normalize_scope_keys(scope_keys: list[tuple[str, str]] | None) -> list[tuple[str, str]]:
+    if not scope_keys:
+        return []
+    seen: set[tuple[str, str]] = set()
+    output: list[tuple[str, str]] = []
+    for ticker, period_end_date in scope_keys:
+        key = (str(ticker).upper(), str(period_end_date))
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(key)
+    return output
+
+
+def _scope_latest_rows(
+    latest_rows: list[Mapping[str, Any]],
+    scope_keys: list[tuple[str, str]],
+) -> list[Mapping[str, Any]]:
+    if not scope_keys:
+        return []
+    scope = set(scope_keys)
+    return [row for row in latest_rows if (str(row.get("ticker")).upper(), str(row.get("period_end_date"))) in scope]
+
+
+def _format_scope_keys(scope_keys: list[tuple[str, str]]) -> str:
+    return ",".join(f"{ticker}:{period_end_date}" for ticker, period_end_date in scope_keys)
+
+
+def _parse_scope_keys(value: object) -> list[tuple[str, str]]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    output: list[tuple[str, str]] = []
+    for item in text.split(","):
+        parts = item.strip().split(":")
+        if len(parts) != 2:
+            continue
+        output.append((parts[0].upper(), parts[1]))
+    return _normalize_scope_keys(output)
 
 
 def _non_null_reported_fields(row: Mapping[str, Any]) -> list[str]:
@@ -1695,7 +1785,14 @@ def classify_quarter_update_vintage_completion(
         combined_summary,
         "vintage_yahoo_inserted_missing_quarter_rows_detected",
     )
-    yahoo_audit_rows = _int_guard_value(combined_summary, "vintage_yahoo_audit_rows_detected")
+    yahoo_explained_mismatches = _int_guard_value(
+        combined_summary,
+        "vintage_post_run_yahoo_explained_mismatch_count",
+    )
+    yahoo_unexplained_mismatches = _int_guard_value(
+        combined_summary,
+        "vintage_post_run_unexplained_mismatch_count",
+    )
 
     if duplicate_vintage_ids > 0 or vintage_without_latest > 0:
         return _vintage_completion_result(
@@ -1709,17 +1806,23 @@ def classify_quarter_update_vintage_completion(
             reason="latest_rows_without_vintage",
             next_action="INVESTIGATE_DRIFT",
         )
-    if value_mismatch > 0 and yahoo_audit_rows <= 0 and yahoo_filled_fields <= 0:
+    if value_mismatch > 0 and yahoo_unexplained_mismatches > 0:
         return _vintage_completion_result(
             VINTAGE_COMPLETION_BLOCKED_DRIFT,
             reason="unexplained_value_mismatch",
             next_action="INVESTIGATE_DRIFT",
         )
-    if value_mismatch > 0 and (yahoo_audit_rows > 0 or yahoo_filled_fields > 0):
+    if value_mismatch > 0 and yahoo_explained_mismatches == value_mismatch:
         return _vintage_completion_result(
             VINTAGE_COMPLETION_FINAL_MIXED_REQUIRED,
-            reason="value_mismatch_explained_by_yahoo_audit",
+            reason="value_mismatch_exactly_explained_by_yahoo_audit",
             next_action="CREATE_FINAL_MIXED_VINTAGE",
+        )
+    if value_mismatch > 0:
+        return _vintage_completion_result(
+            VINTAGE_COMPLETION_BLOCKED_DRIFT,
+            reason="unexplained_value_mismatch",
+            next_action="INVESTIGATE_DRIFT",
         )
     if yahoo_filled_fields > 0:
         return _vintage_completion_result(
@@ -1822,6 +1925,107 @@ def _latest_and_vintage_values_match(latest_row: sqlite3.Row, vintage_row: sqlit
         if not _values_equal_for_guard(latest_row[field_name], vintage_row[field_name]):
             return False
     return _values_equal_for_guard(latest_row["currency"], vintage_row["currency"])
+
+
+def _latest_vintage_value_mismatch_details(
+    latest_row: Mapping[str, Any],
+    visible_vintage_row: Mapping[str, Any],
+) -> list[dict[str, object]]:
+    details: list[dict[str, object]] = []
+    for field_name in (*REPORTED_FINANCIAL_FIELDS, "currency"):
+        if _values_equal_for_guard(latest_row[field_name], visible_vintage_row[field_name]):
+            continue
+        details.append(
+            {
+                "ticker": str(latest_row["ticker"]).upper(),
+                "period_end_date": str(latest_row["period_end_date"]),
+                "field_name": field_name,
+                "latest_value": latest_row[field_name],
+                "visible_vintage_value": visible_vintage_row[field_name],
+                "visible_statement_vintage_id": _row_value(visible_vintage_row, "statement_vintage_id"),
+                "available_at_utc": _row_value(visible_vintage_row, "available_at_utc"),
+            }
+        )
+    return details
+
+
+def _row_value(row: Mapping[str, Any], key: str) -> object:
+    if hasattr(row, "get"):
+        return row.get(key)
+    return row[key]
+
+
+def _mismatch_identity(mismatch: Mapping[str, object]) -> tuple[str, str, str]:
+    return (
+        str(mismatch.get("ticker")).upper(),
+        str(mismatch.get("period_end_date")),
+        str(mismatch.get("field_name")),
+    )
+
+
+def _format_mismatch_sample(mismatches: list[Mapping[str, object]], limit: int = 3) -> str:
+    parts: list[str] = []
+    for mismatch in mismatches[:limit]:
+        parts.append(
+            f"{str(mismatch.get('ticker')).upper()}:{mismatch.get('period_end_date')}:"
+            f"{mismatch.get('field_name')}:latest={mismatch.get('latest_value')}:"
+            f"vintage={mismatch.get('visible_vintage_value')}:"
+            f"statement_vintage_id={mismatch.get('visible_statement_vintage_id')}"
+        )
+    return ";".join(parts)
+
+
+def _build_value_mismatch_yahoo_evidence(
+    mismatches: object,
+    yahoo_audit_rows_by_key: Mapping[tuple[str, str], list[Mapping[str, Any]]],
+) -> dict[str, object]:
+    mismatch_rows = [row for row in (mismatches or []) if isinstance(row, Mapping)]
+    explained: list[dict[str, object]] = []
+    unexplained: list[dict[str, object]] = []
+    explained_keys: list[tuple[str, str]] = []
+
+    for mismatch in mismatch_rows:
+        key = (str(mismatch.get("ticker")).upper(), str(mismatch.get("period_end_date")))
+        field_name = str(mismatch.get("field_name"))
+        exact_audit = _find_exact_yahoo_audit_row(yahoo_audit_rows_by_key.get(key, []), field_name)
+        if exact_audit is None:
+            unexplained.append(dict(mismatch))
+            continue
+        enriched = dict(mismatch)
+        enriched.update(
+            {
+                "yahoo_audit_old_value": exact_audit.get("old_value"),
+                "yahoo_audit_new_value": exact_audit.get("new_value"),
+                "yahoo_audit_matched_yahoo_period_end_date": exact_audit.get("matched_yahoo_period_end_date"),
+                "yahoo_audit_run_id": exact_audit.get("run_id"),
+            }
+        )
+        explained.append(enriched)
+        explained_keys.append(key)
+
+    explained_keys = _normalize_scope_keys(explained_keys)
+    summary = {
+        "vintage_post_run_yahoo_explained_mismatch_count": len(explained),
+        "vintage_post_run_unexplained_mismatch_count": len(unexplained),
+        "vintage_post_run_yahoo_explained_mismatch_sample": _format_mismatch_sample(explained),
+        "vintage_post_run_unexplained_mismatch_sample": _format_mismatch_sample(unexplained),
+    }
+    return {"summary": summary, "explained_keys": explained_keys, "explained": explained, "unexplained": unexplained}
+
+
+def _find_exact_yahoo_audit_row(
+    audit_rows: list[Mapping[str, Any]],
+    field_name: str,
+) -> Mapping[str, Any] | None:
+    for row in audit_rows:
+        if str(row.get("field_name")) != field_name:
+            continue
+        if str(row.get("fallback_source", "")).lower() != "yahoo":
+            continue
+        if str(row.get("enrichment_status", "")) != "FILLED_FROM_YAHOO":
+            continue
+        return row
+    return None
 
 
 def _values_equal_for_guard(left: object, right: object) -> bool:

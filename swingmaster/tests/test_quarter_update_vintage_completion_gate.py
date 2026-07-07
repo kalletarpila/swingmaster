@@ -47,10 +47,12 @@ def _yahoo_summary(
 def _classify(
     parity: dict[str, object] | None = None,
     yahoo: dict[str, object] | None = None,
+    value_parity: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return run_fundamental_quarter_update.classify_quarter_update_vintage_completion(
         parity_summary=parity or _parity_summary(),
         yahoo_impact_summary=yahoo or _yahoo_summary(),
+        value_parity_summary=value_parity,
     )
 
 
@@ -133,7 +135,7 @@ def test_completion_gate_unknown_run_linkage_returns_unknown() -> None:
     assert summary["vintage_next_required_action"] == "IMPROVE_RUN_LINKAGE"
 
 
-def test_completion_gate_value_mismatch_with_yahoo_audit_requires_final_mixed() -> None:
+def test_completion_gate_value_mismatch_with_exact_yahoo_audit_requires_final_mixed() -> None:
     summary = _classify(
         parity=_parity_summary(status="DRIFT", value_mismatch=1),
         yahoo=_yahoo_summary(
@@ -141,11 +143,30 @@ def test_completion_gate_value_mismatch_with_yahoo_audit_requires_final_mixed() 
             audit_rows=1,
             filled_fields=1,
         ),
+        value_parity={
+            "vintage_post_run_yahoo_explained_mismatch_count": 1,
+            "vintage_post_run_unexplained_mismatch_count": 0,
+        },
     )
 
     assert summary["vintage_completion_status"] == "FINAL_MIXED_REQUIRED"
-    assert summary["vintage_completion_reason"] == "value_mismatch_explained_by_yahoo_audit"
+    assert summary["vintage_completion_reason"] == "value_mismatch_exactly_explained_by_yahoo_audit"
     assert summary["vintage_final_mixed_required"] is True
+
+
+def test_completion_gate_value_mismatch_with_only_aggregate_yahoo_audit_blocks_drift() -> None:
+    summary = _classify(
+        parity=_parity_summary(status="DRIFT", value_mismatch=1),
+        yahoo=_yahoo_summary(
+            status="YAHOO_IMPACT_DETECTED",
+            audit_rows=99,
+            filled_fields=99,
+        ),
+    )
+
+    assert summary["vintage_completion_status"] == "BLOCKED_POST_RUN_DRIFT"
+    assert summary["vintage_completion_reason"] == "unexplained_value_mismatch"
+    assert summary["vintage_final_mixed_required"] is False
 
 
 def test_completion_gate_value_mismatch_without_explanation_blocks_drift() -> None:

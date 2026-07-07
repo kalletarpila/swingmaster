@@ -37,6 +37,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _summary(**items: object) -> None:
     for key, value in items.items():
+        if str(key).startswith("_"):
+            continue
         print(f"SUMMARY {key}={value}")
 
 

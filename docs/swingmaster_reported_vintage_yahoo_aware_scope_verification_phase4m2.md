@@ -85,3 +85,15 @@ Create a separate diagnostic/fix phase for the exact GIS mismatch:
 - or determine whether the latest `total_debt=14878600000.0` value is incorrect
 
 The 93 ticker failures from the first UI run remain separate from this scope verification.
+
+## Phase 4M3 Follow-Up
+
+Phase 4M3 diagnosed the exact GIS mismatch read-only. The latest `total_debt=14878600000.0` is supported by SEC raw debt components:
+
+- `LongTermDebtCurrent=1528400000.0`
+- `LongTermDebtNoncurrent=12673200000.0`
+- `ShortTermBorrowings=677000000.0`
+
+The visible legacy vintage value `677000000.0` equals only `ShortTermBorrowings`. Diagnosis: `DEBT_COMPONENT_POLICY_DIFF`.
+
+See [SwingMaster GIS Total Debt Mismatch Phase 4M3](swingmaster_reported_vintage_gis_total_debt_mismatch_phase4m3.md).

@@ -152,3 +152,7 @@ Phase 4M1 implemented the planner-scope and exact-evidence fix. Phase 4M2 then r
 The GIS mismatch still exists, but it is now classified as `BLOCKED_POST_RUN_DRIFT` with `unexplained_value_mismatch`; Yahoo-aware planner scope is `0`, blocked rows are `0`, and the previous broad 184/188-row blocked set is gone.
 
 See [SwingMaster Yahoo-Aware Vintage Scope Verification Phase 4M2](swingmaster_reported_vintage_yahoo_aware_scope_verification_phase4m2.md).
+
+Phase 4M3 then diagnosed the GIS mismatch source. The latest value is supported by SEC raw debt component sum, while the visible legacy vintage equals only `ShortTermBorrowings`. Diagnosis: `DEBT_COMPONENT_POLICY_DIFF`.
+
+See [SwingMaster GIS Total Debt Mismatch Phase 4M3](swingmaster_reported_vintage_gis_total_debt_mismatch_phase4m3.md).

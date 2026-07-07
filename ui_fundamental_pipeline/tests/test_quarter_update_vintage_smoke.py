@@ -212,6 +212,65 @@ class TestUiQuarterUpdateVintageSmoke(unittest.TestCase):
                 else:
                     self.assertIn(f"severity={expected_severity}", suffix)
 
+    def test_yahoo_aware_apply_button_disabled_before_relevant_summary(self):
+        app = self._app()
+
+        self.assertIsNotNone(app.usa_panel.yahoo_aware_apply_btn)
+        self.assertTrue(app.usa_panel.yahoo_aware_apply_btn.disabled)
+
+    def test_yahoo_aware_apply_button_enabled_after_plan_ready_summary(self):
+        app = self._app()
+        summary = {
+            "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+            "vintage_completion_status": "FINAL_MIXED_REQUIRED",
+            "vintage_yahoo_aware_planning_status": "FINAL_MIXED_PLAN_READY",
+            "vintage_planned_final_mixed_rows": "1",
+            "vintage_yahoo_aware_blocked_rows": "0",
+            "vintage_yahoo_aware_unknown_provenance_fields": "",
+        }
+
+        app._handle_summary("usa", summary)
+
+        self.assertFalse(app.usa_panel.yahoo_aware_apply_btn.disabled)
+
+    def test_yahoo_aware_apply_button_disabled_after_blocked_status(self):
+        app = self._app()
+        summary = {
+            "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+            "vintage_completion_status": "BLOCKED_POST_RUN_DRIFT",
+        }
+
+        app._handle_summary("usa", summary)
+
+        self.assertTrue(app.usa_panel.yahoo_aware_apply_btn.disabled)
+
+    def test_yahoo_aware_apply_builds_separate_apply_command(self):
+        app = self._app()
+        app.last_usa_quarter_update_summary = {
+            "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+            "vintage_completion_status": "YAHOO_VINTAGE_REQUIRED",
+            "vintage_yahoo_aware_planning_status": "YAHOO_VINTAGE_PLAN_READY",
+            "vintage_planned_yahoo_vintage_rows": "1",
+        }
+        captured = {}
+
+        app._run_in_background = lambda target: captured.setdefault("target", target)
+        with patch("ui_fundamental_pipeline.main.get_utc_launch_timestamp", return_value="2026-05-10T13:00:00Z"):
+            with patch.object(app, "_execute_single_command") as execute_single:
+                app._run_usa_yahoo_aware_apply()
+                captured["target"]()
+
+        execute_single.assert_called_once()
+        command, status_prefix, market = execute_single.call_args[0]
+        self.assertEqual(status_prefix, "USA Yahoo-Aware Vintage Apply")
+        self.assertEqual(market, "usa")
+        self.assertIn("swingmaster.cli.apply_quarter_update_yahoo_aware_vintage", command)
+        self.assertNotIn("run_fundamental_quarter_update", " ".join(command))
+        self.assertEqual(command[command.index("--source-run-id") + 1], "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY")
+        self.assertEqual(command[command.index("--vintage-run-id") + 1], "USA_QUARTER_UPDATE_2026-05-10__YAHOO_AWARE_VINTAGE")
+        self.assertIn("--approval-token", command)
+        self.assertNotIn("--vintage-yahoo-aware-action", command)
+
 
 if __name__ == "__main__":
     unittest.main()

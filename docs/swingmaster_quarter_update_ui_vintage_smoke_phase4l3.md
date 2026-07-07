@@ -128,3 +128,5 @@ Before the first real UI-triggered vintage opt-in run:
 - run readiness preflight and require `READY_NOOP`
 - keep Yahoo-aware execution write out of the UI
 - preserve the full terminal/UI summary output after the run
+
+Phase 4L4 adds a separate explicit no-provider apply action for planned Yahoo-aware/final mixed corrections. The primary quarter update path remains planning-only for Yahoo-aware execution.

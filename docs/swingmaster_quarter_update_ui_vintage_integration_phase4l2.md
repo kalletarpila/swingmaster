@@ -135,3 +135,5 @@ Recommended next phase:
 - keep Yahoo-aware execution write out of the UI until the first opt-in run summary is reviewed
 
 Phase 4L3 no-provider smoke coverage is documented in [SwingMaster Quarter Update UI Vintage Smoke Phase 4L3](swingmaster_quarter_update_ui_vintage_smoke_phase4l3.md).
+
+Phase 4L4 adds a separate explicit UI action for planned Yahoo-aware/final mixed vintage apply, documented in [SwingMaster Quarter Update UI Yahoo-Aware Apply Phase 4L4](swingmaster_quarter_update_ui_yahoo_aware_apply_phase4l4.md). The primary quarter update remains `plan_only`.

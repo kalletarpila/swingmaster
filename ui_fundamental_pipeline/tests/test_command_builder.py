@@ -2,14 +2,20 @@ import unittest
 
 from ui_fundamental_pipeline.command_builder import (
     UsaQuarterUpdateVintageOptions,
+    UsaYahooAwareApplyOptions,
     build_fin_classification_ttm_commands,
     build_fin_update_command,
     build_score_percentile_command,
     build_snapshot_command,
     build_usa_update_command,
+    build_usa_yahoo_aware_apply_command,
     build_usa_vintage_preflight_command,
 )
-from ui_fundamental_pipeline.config import OSAKEDATA_DB, get_vintage_run_id_usa
+from ui_fundamental_pipeline.config import (
+    OSAKEDATA_DB,
+    YAHOO_AWARE_APPLY_APPROVAL_TOKEN,
+    get_vintage_run_id_usa,
+)
 
 
 class TestCommandBuilder(unittest.TestCase):
@@ -60,6 +66,40 @@ class TestCommandBuilder(unittest.TestCase):
         self.assertIn("fundamentals_usa.db", " ".join(command))
         self.assertEqual(command[command.index("--market") + 1], "usa")
         self.assertEqual(command[command.index("--format") + 1], "json")
+
+    def test_build_usa_yahoo_aware_apply_command_without_approval_token(self):
+        command = build_usa_yahoo_aware_apply_command(
+            UsaYahooAwareApplyOptions(
+                source_run_id="USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+                vintage_run_id="USA_QUARTER_UPDATE_2026-05-10__YAHOO_AWARE_VINTAGE",
+                launch_timestamp_utc="2026-05-10T12:00:00Z",
+                approved=False,
+            )
+        )
+
+        self.assertIn("-m", command)
+        self.assertEqual(command[command.index("-m") + 1], "swingmaster.cli.apply_quarter_update_yahoo_aware_vintage")
+        self.assertNotIn("run_fundamental_quarter_update", " ".join(command))
+        self.assertNotIn("--vintage-yahoo-aware-action", command)
+        self.assertNotIn("--approval-token", command)
+
+    def test_build_usa_yahoo_aware_apply_command_with_approval_token(self):
+        command = build_usa_yahoo_aware_apply_command(
+            UsaYahooAwareApplyOptions(
+                source_run_id="USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+                vintage_run_id="USA_QUARTER_UPDATE_2026-05-10__YAHOO_AWARE_VINTAGE",
+                launch_timestamp_utc="2026-05-10T12:00:00Z",
+                approved=True,
+            )
+        )
+
+        self.assertEqual(command[command.index("--market") + 1], "usa")
+        self.assertEqual(command[command.index("--source-run-id") + 1], "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY")
+        self.assertEqual(command[command.index("--vintage-run-id") + 1], "USA_QUARTER_UPDATE_2026-05-10__YAHOO_AWARE_VINTAGE")
+        self.assertEqual(command[command.index("--available-at-utc") + 1], "2026-05-10T12:00:00Z")
+        self.assertEqual(command[command.index("--ingested-at-utc") + 1], "2026-05-10T12:00:00Z")
+        self.assertEqual(command[command.index("--approval-token") + 1], YAHOO_AWARE_APPLY_APPROVAL_TOKEN)
+        self.assertNotIn("--provider", command)
 
     def test_build_fin_update_command(self):
         command = build_fin_update_command("FIN_YAHOO_BATCH_2026-05-10")

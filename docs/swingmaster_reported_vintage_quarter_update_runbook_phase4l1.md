@@ -10,6 +10,8 @@ This document is operational guidance only. Phase 4L1 did not run the real `quar
 
 For UI-triggered runs, Phase 4L3 adds a no-provider smoke test that verifies the UI command chain, vintage flags, preflight failure stop behavior, `SUMMARY key=value` parsing, and severity mapping without executing provider commands. See [SwingMaster Quarter Update UI Vintage Smoke Phase 4L3](swingmaster_quarter_update_ui_vintage_smoke_phase4l3.md).
 
+If the UI-triggered run returns `FINAL_MIXED_REQUIRED` or `YAHOO_VINTAGE_REQUIRED`, use the separate explicit Phase 4L4 apply action after reviewing planned counts and blockers. Do not rerun the provider update to apply Yahoo-aware/final mixed corrections. See [SwingMaster Quarter Update UI Yahoo-Aware Apply Phase 4L4](swingmaster_quarter_update_ui_yahoo_aware_apply_phase4l4.md).
+
 Run the read-only readiness smoke before any real Q update:
 
 ```bash

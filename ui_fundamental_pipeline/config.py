@@ -25,6 +25,7 @@ CLI_QUARTER_UPDATE = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_qua
 CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT = (
     PROJECT_ROOT / "swingmaster" / "cli" / "preflight_quarter_update_vintage_readiness.py"
 )
+YAHOO_AWARE_APPLY_APPROVAL_TOKEN = "USER_APPROVES_YAHOO_AWARE_VINTAGE_APPLY"
 CLI_YAHOO_BATCH_FIN = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_yahoo_batch_fin.py"
 CLI_REPORTING_FREQUENCY_AUDIT = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_reporting_frequency_audit.py"
 CLI_TTM_BATCH = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_ttm_batch.py"
@@ -70,6 +71,13 @@ def get_vintage_run_id_usa(source_run_id: str) -> str:
     if source_run_id.endswith("__QUARTERLY"):
         return source_run_id.removesuffix("__QUARTERLY") + "__SEC_LATEST_WRITER_VINTAGE"
     return f"{source_run_id}__SEC_LATEST_WRITER_VINTAGE"
+
+
+def get_yahoo_aware_vintage_run_id_usa(source_run_id: str) -> str:
+    """Derive the USA Yahoo-aware/final-mixed apply vintage run ID."""
+    if source_run_id.endswith("__QUARTERLY"):
+        return source_run_id.removesuffix("__QUARTERLY") + "__YAHOO_AWARE_VINTAGE"
+    return f"{source_run_id}__YAHOO_AWARE_VINTAGE"
 
 
 def get_run_id_fin() -> str:

@@ -20,6 +20,7 @@ try:
         PYTHON_EXECUTABLE,
         SNAPSHOTS_DIR,
         TEMP_DIR,
+        YAHOO_AWARE_APPLY_APPROVAL_TOKEN,
     )
 except ImportError:  # pragma: no cover
     from config import (
@@ -38,6 +39,7 @@ except ImportError:  # pragma: no cover
         PYTHON_EXECUTABLE,
         SNAPSHOTS_DIR,
         TEMP_DIR,
+        YAHOO_AWARE_APPLY_APPROVAL_TOKEN,
     )
 
 
@@ -47,6 +49,16 @@ class UsaQuarterUpdateVintageOptions:
 
     launch_timestamp_utc: str
     vintage_run_id: str
+
+
+@dataclass(frozen=True)
+class UsaYahooAwareApplyOptions:
+    """Explicit metadata for a USA Yahoo-aware/final-mixed vintage apply."""
+
+    source_run_id: str
+    vintage_run_id: str
+    launch_timestamp_utc: str
+    approved: bool = False
 
 
 def build_usa_update_command(
@@ -98,6 +110,29 @@ def build_usa_vintage_preflight_command() -> list[str]:
         "--format",
         "json",
     ]
+
+
+def build_usa_yahoo_aware_apply_command(options: UsaYahooAwareApplyOptions) -> list[str]:
+    command = [
+        str(PYTHON_EXECUTABLE),
+        "-m",
+        "swingmaster.cli.apply_quarter_update_yahoo_aware_vintage",
+        "--fundamentals-db",
+        str(FUNDAMENTALS_USA_DB),
+        "--market",
+        "usa",
+        "--source-run-id",
+        options.source_run_id,
+        "--vintage-run-id",
+        options.vintage_run_id,
+        "--available-at-utc",
+        options.launch_timestamp_utc,
+        "--ingested-at-utc",
+        options.launch_timestamp_utc,
+    ]
+    if options.approved:
+        command.extend(["--approval-token", YAHOO_AWARE_APPLY_APPROVAL_TOKEN])
+    return command
 
 
 def build_fin_update_command(run_id: str) -> list[str]:

@@ -24,6 +24,7 @@ class MarketPanel:
         on_lock: Callable[[bool], None],
         on_secondary_action: Callable[[], None] | None = None,
         secondary_action_label: str | None = None,
+        on_yahoo_aware_apply: Callable[[], None] | None = None,
     ):
         """
         Initialize market panel.
@@ -41,6 +42,8 @@ class MarketPanel:
         self.on_snapshot = on_snapshot
         self.on_lock = on_lock
         self.on_secondary_action = on_secondary_action
+        self.on_yahoo_aware_apply = on_yahoo_aware_apply
+        self._yahoo_aware_apply_available = False
 
         # Load valid tickers from database
         self.valid_tickers = self._load_valid_tickers()
@@ -61,6 +64,13 @@ class MarketPanel:
             self.vintage_write_checkbox = ft.Checkbox(
                 label="Enable PIT/vintage write for USA quarterly update",
                 value=False,
+            )
+        self.yahoo_aware_apply_btn = None
+        if self.market == "usa" and self.on_yahoo_aware_apply is not None:
+            self.yahoo_aware_apply_btn = ft.Button(
+                content=ft.Text("Apply planned Yahoo/final mixed vintage corrections"),
+                on_click=self._on_yahoo_aware_apply_click,
+                disabled=True,
             )
 
         self.percentile_btn = ft.Button(
@@ -91,6 +101,8 @@ class MarketPanel:
         ]
         if self.vintage_write_checkbox is not None:
             controls.append(self.vintage_write_checkbox)
+        if self.yahoo_aware_apply_btn is not None:
+            controls.append(self.yahoo_aware_apply_btn)
         if self.secondary_action_btn is not None:
             controls.extend(
                 [
@@ -185,6 +197,8 @@ class MarketPanel:
         self.quarter_update_btn.disabled = disable
         if self.vintage_write_checkbox is not None:
             self.vintage_write_checkbox.disabled = disable
+        if self.yahoo_aware_apply_btn is not None:
+            self.yahoo_aware_apply_btn.disabled = disable or not bool(getattr(self, "_yahoo_aware_apply_available", False))
         self.percentile_btn.disabled = disable
         if self.secondary_action_btn is not None:
             self.secondary_action_btn.disabled = disable
@@ -200,3 +214,17 @@ class MarketPanel:
         if self.vintage_write_checkbox is None:
             return False
         return bool(self.vintage_write_checkbox.value)
+
+    def set_yahoo_aware_apply_available(self, available: bool, reason: str = "") -> None:
+        """Enable or disable the explicit Yahoo-aware apply action."""
+        self._yahoo_aware_apply_available = bool(available)
+        if self.yahoo_aware_apply_btn is not None:
+            self.yahoo_aware_apply_btn.disabled = not available
+            self.yahoo_aware_apply_btn.tooltip = reason
+
+    def _on_yahoo_aware_apply_click(self, e):
+        """Handle explicit Yahoo-aware apply click."""
+        if self.on_yahoo_aware_apply is None:
+            return
+        self.on_lock(True)
+        self.on_yahoo_aware_apply()

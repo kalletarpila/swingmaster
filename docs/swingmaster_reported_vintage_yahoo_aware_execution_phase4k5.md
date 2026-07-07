@@ -82,3 +82,7 @@ Phase 4K6 should be a read-only real-DB preflight for the execution path before 
 Phase 4K6 adds the read-only real DB readiness/no-op smoke in [Reported Vintage Quarter Update Readiness No-Op Phase 4K6](swingmaster_reported_vintage_quarter_update_readiness_noop_phase4k6.md).
 
 The real USA DB smoke reported `READY_NOOP`, latest/vintage parity 155373/155373, zero latest-without-vintage rows, zero vintage-without-latest rows, zero duplicate `statement_vintage_id` groups, and zero Yahoo-aware pending actions. No providers, schedulers, refresh jobs, quarter_update provider paths, or real DB writes were run.
+
+## Phase 4L4 UI Apply Follow-Up
+
+Phase 4L4 adds a separate UI-driven apply command for planned Yahoo-aware/final mixed corrections without rerunning provider update paths. The primary quarter update UI path remains `plan_only`; the apply action requires explicit approval and is documented in [SwingMaster Quarter Update UI Yahoo-Aware Apply Phase 4L4](swingmaster_quarter_update_ui_yahoo_aware_apply_phase4l4.md).

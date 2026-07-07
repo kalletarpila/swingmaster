@@ -10,11 +10,13 @@ import flet as ft
 try:
     from .command_builder import (
         UsaQuarterUpdateVintageOptions,
+        UsaYahooAwareApplyOptions,
         build_fin_classification_ttm_commands,
         build_fin_update_command,
         build_score_percentile_command,
         build_single_ticker_snapshot_command,
         build_usa_update_command,
+        build_usa_yahoo_aware_apply_command,
         build_usa_vintage_preflight_command,
     )
     from .components.execution_output import ExecutionOutputPanel
@@ -36,20 +38,26 @@ try:
         get_run_id_fin,
         get_run_id_usa,
         get_utc_launch_timestamp,
+        get_yahoo_aware_vintage_run_id_usa,
         get_vintage_run_id_usa,
         validate_config,
     )
     from .data_access import resolve_latest_close_as_of_date
     from .executor import ProcessExecutor
-    from .vintage_status import map_vintage_completion_status_to_ui_severity
+    from .vintage_status import (
+        map_vintage_completion_status_to_ui_severity,
+        should_enable_yahoo_aware_apply,
+    )
 except ImportError:  # pragma: no cover
     from command_builder import (
         UsaQuarterUpdateVintageOptions,
+        UsaYahooAwareApplyOptions,
         build_fin_classification_ttm_commands,
         build_fin_update_command,
         build_score_percentile_command,
         build_single_ticker_snapshot_command,
         build_usa_update_command,
+        build_usa_yahoo_aware_apply_command,
         build_usa_vintage_preflight_command,
     )
     from components.execution_output import ExecutionOutputPanel
@@ -71,12 +79,16 @@ except ImportError:  # pragma: no cover
         get_run_id_fin,
         get_run_id_usa,
         get_utc_launch_timestamp,
+        get_yahoo_aware_vintage_run_id_usa,
         get_vintage_run_id_usa,
         validate_config,
     )
     from data_access import resolve_latest_close_as_of_date
     from executor import ProcessExecutor
-    from vintage_status import map_vintage_completion_status_to_ui_severity
+    from vintage_status import (
+        map_vintage_completion_status_to_ui_severity,
+        should_enable_yahoo_aware_apply,
+    )
 
 
 class SwingMasterApp:
@@ -87,6 +99,7 @@ class SwingMasterApp:
         self.executor = ProcessExecutor()
         self.current_worker: Optional[threading.Thread] = None
         self.stop_requested = False
+        self.last_usa_quarter_update_summary: dict = {}
 
         self._setup_page()
 
@@ -101,6 +114,7 @@ class SwingMasterApp:
             on_score_percentile=self._run_usa_percentile,
             on_snapshot=self._run_usa_snapshots,
             on_lock=self._lock_ui,
+            on_yahoo_aware_apply=self._run_usa_yahoo_aware_apply,
         )
         self.fin_panel = MarketPanel(
             market="fin",
@@ -273,6 +287,13 @@ class SwingMasterApp:
         self._log("Stopping current process...")
         self.executor.terminate()
 
+    def _handle_summary(self, market: str, summary: dict) -> None:
+        self.output_panel.set_summary(summary)
+        if market == "usa":
+            self.last_usa_quarter_update_summary = summary.copy()
+            enabled, reason = should_enable_yahoo_aware_apply(summary)
+            self.usa_panel.set_yahoo_aware_apply_available(enabled, reason)
+
     def _execute_single_command(self, command: list[str], status_prefix: str, market: str) -> None:
         self.output_panel.clear_output()
         self._set_progress(0, 1, status_prefix)
@@ -280,7 +301,7 @@ class SwingMasterApp:
         exit_code, _ = self.executor.execute(
             command=command,
             on_output=self._ui_callback(self.output_panel.add_line),
-            on_summary=self._ui_callback(self.output_panel.set_summary),
+            on_summary=self._ui_callback(lambda summary: self._handle_summary(market, summary)),
         )
 
         target_panel = self.usa_panel if market == "usa" else self.fin_panel
@@ -303,7 +324,7 @@ class SwingMasterApp:
             exit_code, _ = self.executor.execute(
                 command=command,
                 on_output=self._ui_callback(self.output_panel.add_line),
-                on_summary=self._ui_callback(self.output_panel.set_summary),
+                on_summary=self._ui_callback(lambda summary: self._handle_summary(market, summary)),
             )
             if exit_code != 0:
                 target_panel = self.usa_panel if market == "usa" else self.fin_panel
@@ -365,7 +386,7 @@ class SwingMasterApp:
             exit_code, _ = self.executor.execute(
                 command=command,
                 on_output=self._ui_callback(self.output_panel.add_line),
-                on_summary=self._ui_callback(self.output_panel.set_summary),
+                on_summary=self._ui_callback(lambda summary: self._handle_summary(market, summary)),
             )
 
             if exit_code != 0:
@@ -398,6 +419,25 @@ class SwingMasterApp:
             return
         command = build_usa_update_command(run_id=run_id)
         self._run_in_background(lambda: self._execute_single_command(command, "USA Quarter Update", "usa"))
+
+    def _run_usa_yahoo_aware_apply(self) -> None:
+        summary = self.last_usa_quarter_update_summary.copy()
+        enabled, reason = should_enable_yahoo_aware_apply(summary)
+        if not enabled:
+            self.usa_panel.set_status(f"Yahoo-aware apply unavailable: {reason}", "red")
+            self._lock_ui(False)
+            return
+        source_run_id = str(summary["run_id"])
+        launch_timestamp_utc = get_utc_launch_timestamp()
+        command = build_usa_yahoo_aware_apply_command(
+            UsaYahooAwareApplyOptions(
+                source_run_id=source_run_id,
+                vintage_run_id=get_yahoo_aware_vintage_run_id_usa(source_run_id),
+                launch_timestamp_utc=launch_timestamp_utc,
+                approved=True,
+            )
+        )
+        self._run_in_background(lambda: self._execute_single_command(command, "USA Yahoo-Aware Vintage Apply", "usa"))
 
     def _run_fin_update(self) -> None:
         run_id = get_run_id_fin()

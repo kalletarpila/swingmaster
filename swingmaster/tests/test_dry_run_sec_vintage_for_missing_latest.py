@@ -99,6 +99,55 @@ def test_statement_vintage_id_and_source_hash_are_deterministic(tmp_path: Path) 
     assert first["samples"][0]["source_hash"] == second["samples"][0]["source_hash"]
 
 
+def test_source_run_id_is_inferred_when_missing_rows_share_one_run(tmp_path: Path) -> None:
+    db_path = _db_with_schema(tmp_path)
+    _insert_latest_and_raw(db_path)
+
+    result = run_dry_run(
+        fundamentals_db=str(db_path),
+        market="usa",
+        source_run_id=None,
+        available_at_utc=AVAILABLE_AT_UTC,
+        ingested_at_utc=INGESTED_AT_UTC,
+        vintage_run_id=VINTAGE_RUN_ID,
+        candidate_mode="latest_writer",
+    )
+
+    assert result["summary"]["source_run_id"] == LATEST_RUN_ID
+    assert result["summary"]["source_run_id_inferred"] == 1
+    assert result["summary"]["source_run_id_candidates"] == [LATEST_RUN_ID]
+
+
+def test_source_run_id_is_not_inferred_when_missing_rows_have_multiple_runs(tmp_path: Path) -> None:
+    db_path = _db_with_schema(tmp_path)
+    _insert_latest_and_raw(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_quarterly (
+                ticker,
+                period_end_date,
+                revenue,
+                run_id
+            ) VALUES ('MSFT', '2026-03-31', 200.0, 'LATEST_RUN2')
+            """
+        )
+
+    result = run_dry_run(
+        fundamentals_db=str(db_path),
+        market="usa",
+        source_run_id=None,
+        available_at_utc=AVAILABLE_AT_UTC,
+        ingested_at_utc=INGESTED_AT_UTC,
+        vintage_run_id=VINTAGE_RUN_ID,
+        candidate_mode="latest_writer",
+    )
+
+    assert result["summary"]["source_run_id"] is None
+    assert result["summary"]["source_run_id_inferred"] == 0
+    assert result["summary"]["source_run_id_candidates"] == ["LATEST_RUN1", "LATEST_RUN2"]
+
+
 def test_json_output_includes_summary_and_samples(tmp_path: Path, capsys) -> None:
     db_path = _db_with_schema(tmp_path)
     _insert_latest_and_raw(db_path)

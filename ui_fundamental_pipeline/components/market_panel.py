@@ -25,6 +25,7 @@ class MarketPanel:
         on_secondary_action: Callable[[], None] | None = None,
         secondary_action_label: str | None = None,
         on_yahoo_aware_apply: Callable[[], None] | None = None,
+        on_vintage_recovery: Callable[[], None] | None = None,
     ):
         """
         Initialize market panel.
@@ -43,6 +44,7 @@ class MarketPanel:
         self.on_lock = on_lock
         self.on_secondary_action = on_secondary_action
         self.on_yahoo_aware_apply = on_yahoo_aware_apply
+        self.on_vintage_recovery = on_vintage_recovery
         self._yahoo_aware_apply_available = False
 
         # Load valid tickers from database
@@ -71,6 +73,12 @@ class MarketPanel:
                 content=ft.Text("Apply planned Yahoo/final mixed vintage corrections"),
                 on_click=self._on_yahoo_aware_apply_click,
                 disabled=True,
+            )
+        self.vintage_recovery_btn = None
+        if self.market == "usa" and self.on_vintage_recovery is not None:
+            self.vintage_recovery_btn = ft.Button(
+                content=ft.Text("Repair missing PIT/vintage rows"),
+                on_click=self._on_vintage_recovery_click,
             )
 
         self.percentile_btn = ft.Button(
@@ -103,6 +111,8 @@ class MarketPanel:
             controls.append(self.vintage_write_checkbox)
         if self.yahoo_aware_apply_btn is not None:
             controls.append(self.yahoo_aware_apply_btn)
+        if self.vintage_recovery_btn is not None:
+            controls.append(self.vintage_recovery_btn)
         if self.secondary_action_btn is not None:
             controls.extend(
                 [
@@ -199,6 +209,8 @@ class MarketPanel:
             self.vintage_write_checkbox.disabled = disable
         if self.yahoo_aware_apply_btn is not None:
             self.yahoo_aware_apply_btn.disabled = disable or not bool(getattr(self, "_yahoo_aware_apply_available", False))
+        if self.vintage_recovery_btn is not None:
+            self.vintage_recovery_btn.disabled = disable
         self.percentile_btn.disabled = disable
         if self.secondary_action_btn is not None:
             self.secondary_action_btn.disabled = disable
@@ -228,3 +240,10 @@ class MarketPanel:
             return
         self.on_lock(True)
         self.on_yahoo_aware_apply()
+
+    def _on_vintage_recovery_click(self, e):
+        """Handle missing PIT/vintage recovery click."""
+        if self.on_vintage_recovery is None:
+            return
+        self.on_lock(True)
+        self.on_vintage_recovery()

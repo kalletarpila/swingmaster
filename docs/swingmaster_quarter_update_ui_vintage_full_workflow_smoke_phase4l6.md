@@ -89,3 +89,5 @@ The tests use mocked subprocess protection and fake executor responses.
 ## Remaining Step
 
 The remaining operational step is the first real UI-triggered USA quarter update with the PIT/vintage checkbox intentionally enabled, after operator-managed DB backup and readiness review.
+
+Phase 4L7 adds a UI recovery action for the opposite case: a USA quarter update was run without the PIT/vintage checkbox and latest rows are missing vintage rows. See [SwingMaster Quarter Update UI Vintage Recovery Phase 4L7](swingmaster_quarter_update_ui_vintage_recovery_phase4l7.md).

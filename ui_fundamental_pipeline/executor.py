@@ -6,6 +6,7 @@ import threading
 import queue
 import signal
 import os
+import json
 from typing import Callable, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
@@ -208,7 +209,44 @@ class ProcessExecutor:
             key, value = item.split("=", 1)
             summary[key.strip()] = value.strip()
 
+        json_summary = self._parse_json_summary(all_output)
+        if json_summary:
+            summary.update(json_summary)
+
         return summary
+
+    def _parse_json_summary(self, all_output: list) -> dict:
+        """Parse JSON CLI output into a flat summary dict when available."""
+        payload_lines = []
+        for line in all_output:
+            parts = line.split("|", 1)
+            payload_lines.append(parts[1].strip() if len(parts) == 2 else str(line).strip())
+        payload = "\n".join(payload_lines).strip()
+        if not payload.startswith("{") or not payload.endswith("}"):
+            return {}
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
+        return self._flatten_json_summary(parsed)
+
+    def _flatten_json_summary(self, parsed: dict) -> dict:
+        if isinstance(parsed.get("summary"), dict):
+            return parsed["summary"].copy()
+        flattened = {}
+        for key, value in parsed.items():
+            if isinstance(value, dict):
+                for nested_key, nested_value in value.items():
+                    flattened[f"{key}_{nested_key}"] = nested_value
+            else:
+                flattened[key] = value
+        if isinstance(parsed.get("dry_run_summary"), dict):
+            flattened.update(parsed["dry_run_summary"])
+        if isinstance(parsed.get("apply"), dict):
+            flattened.update({f"apply_{key}": value for key, value in parsed["apply"].items()})
+        return flattened
 
     def terminate(self):
         """Terminate the process."""

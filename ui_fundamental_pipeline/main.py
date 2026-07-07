@@ -10,12 +10,16 @@ import flet as ft
 try:
     from .command_builder import (
         UsaQuarterUpdateVintageOptions,
+        UsaSecVintageRecoveryApplyOptions,
+        UsaSecVintageRecoveryDryRunOptions,
         UsaYahooAwareApplyOptions,
         build_fin_classification_ttm_commands,
         build_fin_update_command,
         build_score_percentile_command,
         build_single_ticker_snapshot_command,
         build_usa_update_command,
+        build_usa_sec_vintage_recovery_apply_command,
+        build_usa_sec_vintage_recovery_dry_run_command,
         build_usa_yahoo_aware_apply_command,
         build_usa_vintage_preflight_command,
     )
@@ -37,6 +41,7 @@ try:
         get_run_id_fin_ttm,
         get_run_id_fin,
         get_run_id_usa,
+        get_sec_vintage_recovery_run_id_usa,
         get_utc_launch_timestamp,
         get_yahoo_aware_vintage_run_id_usa,
         get_vintage_run_id_usa,
@@ -46,19 +51,26 @@ try:
     from .executor import ProcessExecutor
     from .vintage_status import (
         map_vintage_completion_status_to_ui_severity,
+        map_vintage_recovery_status_to_ui_severity,
         map_yahoo_aware_execution_status_to_ui_severity,
+        should_apply_sec_vintage_recovery,
         should_auto_apply_yahoo_aware_vintage,
         should_enable_yahoo_aware_apply,
+        should_plan_sec_vintage_recovery,
     )
 except ImportError:  # pragma: no cover
     from command_builder import (
         UsaQuarterUpdateVintageOptions,
+        UsaSecVintageRecoveryApplyOptions,
+        UsaSecVintageRecoveryDryRunOptions,
         UsaYahooAwareApplyOptions,
         build_fin_classification_ttm_commands,
         build_fin_update_command,
         build_score_percentile_command,
         build_single_ticker_snapshot_command,
         build_usa_update_command,
+        build_usa_sec_vintage_recovery_apply_command,
+        build_usa_sec_vintage_recovery_dry_run_command,
         build_usa_yahoo_aware_apply_command,
         build_usa_vintage_preflight_command,
     )
@@ -80,6 +92,7 @@ except ImportError:  # pragma: no cover
         get_run_id_fin_ttm,
         get_run_id_fin,
         get_run_id_usa,
+        get_sec_vintage_recovery_run_id_usa,
         get_utc_launch_timestamp,
         get_yahoo_aware_vintage_run_id_usa,
         get_vintage_run_id_usa,
@@ -89,9 +102,12 @@ except ImportError:  # pragma: no cover
     from executor import ProcessExecutor
     from vintage_status import (
         map_vintage_completion_status_to_ui_severity,
+        map_vintage_recovery_status_to_ui_severity,
         map_yahoo_aware_execution_status_to_ui_severity,
+        should_apply_sec_vintage_recovery,
         should_auto_apply_yahoo_aware_vintage,
         should_enable_yahoo_aware_apply,
+        should_plan_sec_vintage_recovery,
     )
 
 
@@ -119,6 +135,7 @@ class SwingMasterApp:
             on_snapshot=self._run_usa_snapshots,
             on_lock=self._lock_ui,
             on_yahoo_aware_apply=self._run_usa_yahoo_aware_apply,
+            on_vintage_recovery=self._run_usa_vintage_recovery,
         )
         self.fin_panel = MarketPanel(
             market="fin",
@@ -435,6 +452,13 @@ class SwingMasterApp:
             return "orange"
         if execution_severity == "stop":
             return "red"
+        recovery_severity = map_vintage_recovery_status_to_ui_severity(self.output_panel._current_summary)
+        if recovery_severity == "success":
+            return "green"
+        if recovery_severity == "review":
+            return "orange"
+        if recovery_severity == "stop":
+            return "red"
         severity = map_vintage_completion_status_to_ui_severity(self.output_panel._current_summary)
         if severity == "success":
             return "green"
@@ -446,6 +470,10 @@ class SwingMasterApp:
 
     def _vintage_status_suffix(self) -> str:
         summary = self.output_panel._current_summary
+        recovery_status = summary.get("vintage_recovery_status")
+        if recovery_status:
+            severity = map_vintage_recovery_status_to_ui_severity(summary)
+            return f" recovery={recovery_status} severity={severity}"
         execution_status = summary.get("vintage_yahoo_aware_execution_status")
         if execution_status:
             severity = map_yahoo_aware_execution_status_to_ui_severity(summary)
@@ -540,6 +568,160 @@ class SwingMasterApp:
             )
         )
         self._run_in_background(lambda: self._execute_single_command(command, "USA Yahoo-Aware Vintage Apply", "usa"))
+
+    def _execute_usa_vintage_recovery_workflow(self) -> None:
+        self.output_panel.clear_output()
+        self._set_progress(0, 4, "USA PIT/Vintage Recovery")
+
+        preflight_command = build_usa_vintage_preflight_command()
+        preflight_exit_code, _ = self.executor.execute(
+            command=preflight_command,
+            on_output=self._ui_callback(self.output_panel.add_line),
+            on_summary=self._ui_callback(lambda summary: self._handle_summary("usa", summary)),
+        )
+        preflight_summary = self.output_panel._current_summary.copy()
+        should_plan, recovery_status = should_plan_sec_vintage_recovery(preflight_summary)
+        if not preflight_summary and preflight_exit_code != 0:
+            recovery_status = "RECOVERY_UNKNOWN"
+
+        if recovery_status == "RECOVERY_NOOP":
+            summary = {
+                **preflight_summary,
+                "vintage_recovery_status": "RECOVERY_NOOP",
+                "vintage_recovery_reason": "No missing PIT/vintage rows detected.",
+            }
+            self._handle_summary("usa", summary)
+            self.usa_panel.set_status("USA PIT/Vintage Recovery: exit=0 recovery=RECOVERY_NOOP severity=success", "green")
+            self._set_progress(4, 4, "USA PIT/Vintage Recovery")
+            self._lock_ui(False)
+            return
+
+        if not should_plan:
+            reason = self._recovery_block_reason(preflight_summary, recovery_status)
+            summary = {
+                **preflight_summary,
+                "vintage_recovery_status": recovery_status,
+                "vintage_recovery_reason": reason,
+            }
+            self._handle_summary("usa", summary)
+            self.usa_panel.set_status(f"USA PIT/Vintage Recovery: {reason} recovery={recovery_status} severity=stop", "red")
+            self._set_progress(1, 4, "USA PIT/Vintage Recovery")
+            self._lock_ui(False)
+            return
+
+        self._set_progress(1, 4, "USA PIT/Vintage Recovery")
+        launch_timestamp_utc = get_utc_launch_timestamp()
+        vintage_run_id = get_sec_vintage_recovery_run_id_usa()
+        dry_run_command = build_usa_sec_vintage_recovery_dry_run_command(
+            UsaSecVintageRecoveryDryRunOptions(
+                vintage_run_id=vintage_run_id,
+                launch_timestamp_utc=launch_timestamp_utc,
+            )
+        )
+        dry_run_exit_code, _ = self.executor.execute(
+            command=dry_run_command,
+            on_output=self._ui_callback(self.output_panel.add_line),
+            on_summary=self._ui_callback(lambda summary: self._handle_summary("usa", summary)),
+        )
+        dry_run_summary = self.output_panel._current_summary.copy()
+        apply_allowed, apply_reason = should_apply_sec_vintage_recovery(
+            preflight_summary=preflight_summary,
+            dry_run_summary=dry_run_summary,
+        )
+        if dry_run_exit_code != 0:
+            apply_allowed = False
+            apply_reason = f"SEC recovery dry-run failed: {apply_reason}"
+        if not apply_allowed:
+            summary = {
+                **preflight_summary,
+                **dry_run_summary,
+                "vintage_recovery_status": "RECOVERY_BLOCKED",
+                "vintage_recovery_reason": apply_reason,
+            }
+            self._handle_summary("usa", summary)
+            self.usa_panel.set_status(
+                f"USA PIT/Vintage Recovery: {apply_reason} recovery=RECOVERY_BLOCKED severity=stop",
+                "red",
+            )
+            self._set_progress(2, 4, "USA PIT/Vintage Recovery")
+            self._lock_ui(False)
+            return
+
+        self._set_progress(2, 4, "USA PIT/Vintage Recovery")
+        source_run_id = str(dry_run_summary["source_run_id"])
+        expected_count = int(dry_run_summary["planned_vintage_rows"])
+        apply_command = build_usa_sec_vintage_recovery_apply_command(
+            UsaSecVintageRecoveryApplyOptions(
+                source_run_id=source_run_id,
+                vintage_run_id=vintage_run_id,
+                launch_timestamp_utc=launch_timestamp_utc,
+                expected_count=expected_count,
+                approved=True,
+            )
+        )
+        apply_exit_code, _ = self.executor.execute(
+            command=apply_command,
+            on_output=self._ui_callback(self.output_panel.add_line),
+            on_summary=self._ui_callback(lambda summary: self._handle_summary("usa", summary)),
+        )
+        apply_summary = self.output_panel._current_summary.copy()
+        if apply_exit_code != 0:
+            summary = {
+                **preflight_summary,
+                **dry_run_summary,
+                **apply_summary,
+                "vintage_recovery_status": "RECOVERY_BLOCKED",
+                "vintage_recovery_reason": f"SEC recovery apply failed: exit={apply_exit_code}",
+            }
+            self._handle_summary("usa", summary)
+            self.usa_panel.set_status("USA PIT/Vintage Recovery: apply failed recovery=RECOVERY_BLOCKED severity=stop", "red")
+            self._set_progress(3, 4, "USA PIT/Vintage Recovery")
+            self._lock_ui(False)
+            return
+
+        self._set_progress(3, 4, "USA PIT/Vintage Recovery")
+        post_exit_code, _ = self.executor.execute(
+            command=build_usa_vintage_preflight_command(),
+            on_output=self._ui_callback(self.output_panel.add_line),
+            on_summary=self._ui_callback(lambda summary: self._handle_summary("usa", summary)),
+        )
+        post_summary = self.output_panel._current_summary.copy()
+        if post_exit_code == 0 and str(post_summary.get("overall_status") or "").strip() == "READY_NOOP":
+            recovery_status = "RECOVERY_APPLIED"
+            reason = "SEC latest-writer recovery applied and post-check is READY_NOOP."
+            color = "green"
+        else:
+            recovery_status = "RECOVERY_BLOCKED"
+            reason = "SEC recovery post-check did not return READY_NOOP."
+            color = "red"
+        summary = {
+            **preflight_summary,
+            **dry_run_summary,
+            **apply_summary,
+            "post_recovery_overall_status": post_summary.get("overall_status"),
+            "post_recovery_latest_without_vintage_count": post_summary.get("latest_without_vintage_count"),
+            "vintage_recovery_status": recovery_status,
+            "vintage_recovery_reason": reason,
+        }
+        self._handle_summary("usa", summary)
+        suffix = self._vintage_status_suffix()
+        self.usa_panel.set_status(f"USA PIT/Vintage Recovery: exit={post_exit_code}{suffix}", color)
+        self._set_progress(4, 4, "USA PIT/Vintage Recovery")
+        self._lock_ui(False)
+
+    def _recovery_block_reason(self, summary: dict, recovery_status: str) -> str:
+        if recovery_status == "RECOVERY_BLOCKED":
+            if int(summary.get("duplicate_statement_vintage_id_count") or 0) > 0:
+                return "Recovery blocked by duplicate statement vintage ids."
+            if int(summary.get("vintage_without_latest_count") or 0) > 0:
+                return "Recovery blocked by vintage rows without latest rows."
+            if str(summary.get("overall_status") or "").strip() == "PENDING_YAHOO_AWARE_ACTION":
+                return "Manual review required: Yahoo/final mixed recovery cannot be proven safe."
+            return "Recovery blocked by readiness preflight."
+        return "Recovery status is unknown; manual review required."
+
+    def _run_usa_vintage_recovery(self) -> None:
+        self._run_in_background(self._execute_usa_vintage_recovery_workflow)
 
     def _run_fin_update(self) -> None:
         run_id = get_run_id_fin()

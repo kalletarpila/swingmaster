@@ -12,6 +12,8 @@ For UI-triggered runs, Phase 4L3 adds a no-provider smoke test that verifies the
 
 If the UI-triggered run returns `FINAL_MIXED_REQUIRED` or `YAHOO_VINTAGE_REQUIRED`, the Phase 4L5 UI can run a gated automatic provider-free apply follow-up when the PIT/vintage checkbox was enabled and the Phase 4L4 apply gate passes. If auto apply is not attempted but the gate is safe, use the separate explicit Phase 4L4 apply action after reviewing planned counts and blockers. Do not rerun the provider update to apply Yahoo-aware/final mixed corrections. See [SwingMaster Quarter Update UI Yahoo-Aware Apply Phase 4L4](swingmaster_quarter_update_ui_yahoo_aware_apply_phase4l4.md), [SwingMaster Quarter Update UI Yahoo-Aware Auto Apply Phase 4L5](swingmaster_quarter_update_ui_yahoo_aware_auto_apply_phase4l5.md), and [SwingMaster Quarter Update UI Vintage Full Workflow Smoke Phase 4L6](swingmaster_quarter_update_ui_vintage_full_workflow_smoke_phase4l6.md).
 
+If USA quarter update was already run without the PIT/vintage checkbox and latest rows are missing vintage rows, use the Phase 4L7 UI recovery action instead of rerunning quarter_update. See [SwingMaster Quarter Update UI Vintage Recovery Phase 4L7](swingmaster_quarter_update_ui_vintage_recovery_phase4l7.md).
+
 Run the read-only readiness smoke before any real Q update:
 
 ```bash

@@ -13,8 +13,10 @@ def _has_text(value: object) -> bool:
 
 
 def _has_unknown_provenance_fields(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(_as_int(item) > 0 for item in value.values())
     text = str(value or "").strip()
-    return bool(text) and text.lower() not in {"0", "none", "[]"}
+    return bool(text) and text.lower() not in {"0", "none", "[]", "{}"}
 
 
 def _source_run_id(summary: dict) -> str:
@@ -139,3 +141,73 @@ def should_auto_apply_yahoo_aware_vintage(
     if completion_status == "YAHOO_VINTAGE_REQUIRED":
         return True, "Auto apply allowed for YAHOO_VINTAGE_PLAN_READY summary."
     return False, f"Auto apply is not required for completion status {completion_status or 'UNKNOWN'}."
+
+
+def map_vintage_recovery_status_to_ui_severity(summary: dict) -> str:
+    """Map PIT/vintage recovery status fields to a UI severity bucket."""
+    status = str(summary.get("vintage_recovery_status") or "").strip()
+    if not status:
+        return "unknown"
+    if status in {"RECOVERY_NOOP", "RECOVERY_APPLIED"}:
+        return "success"
+    if status == "RECOVERY_READY":
+        return "review"
+    if status in {"RECOVERY_BLOCKED", "RECOVERY_UNKNOWN"}:
+        return "stop"
+    return "unknown"
+
+
+def should_plan_sec_vintage_recovery(preflight_summary: dict) -> tuple[bool, str]:
+    """Decide whether readiness preflight should continue to SEC recovery dry-run."""
+    overall_status = str(preflight_summary.get("overall_status") or "").strip()
+    latest_without_vintage = _as_int(preflight_summary.get("latest_without_vintage_count"))
+    duplicate_count = _as_int(preflight_summary.get("duplicate_statement_vintage_id_count"))
+    vintage_without_latest = _as_int(preflight_summary.get("vintage_without_latest_count"))
+
+    if overall_status == "READY_NOOP" and latest_without_vintage <= 0:
+        return False, "RECOVERY_NOOP"
+    if duplicate_count > 0 or vintage_without_latest > 0:
+        return False, "RECOVERY_BLOCKED"
+    if overall_status == "PARITY_DRIFT" or latest_without_vintage > 0:
+        return True, "RECOVERY_READY"
+    if overall_status in {"PENDING_YAHOO_AWARE_ACTION"}:
+        return False, "RECOVERY_BLOCKED"
+    return False, "RECOVERY_UNKNOWN"
+
+
+def should_apply_sec_vintage_recovery(
+    *,
+    preflight_summary: dict,
+    dry_run_summary: dict,
+) -> tuple[bool, str]:
+    """Decide whether the SEC latest-writer recovery dry-run is safe to apply."""
+    overall_status = str(dry_run_summary.get("overall_status") or "").strip()
+    if overall_status != "DRY_RUN_READY":
+        return False, f"SEC recovery dry-run is not ready: {overall_status or 'UNKNOWN'}."
+
+    source_run_id = str(dry_run_summary.get("source_run_id") or "").strip()
+    if not source_run_id:
+        return False, "SOURCE_RUN_ID_REQUIRED"
+
+    latest_without_vintage = _as_int(preflight_summary.get("latest_without_vintage_count"))
+    latest_missing = _as_int(dry_run_summary.get("latest_missing_vintage_rows"))
+    candidates_checked = _as_int(dry_run_summary.get("candidates_checked"))
+    planned_vintage = _as_int(dry_run_summary.get("planned_vintage_rows"))
+    planned_provenance = _as_int(dry_run_summary.get("planned_provenance_rows"))
+    blocked_rows = _as_int(dry_run_summary.get("blocked_rows"))
+    unknown_rows = _as_int(dry_run_summary.get("unknown_provenance_rows"))
+
+    if blocked_rows > 0:
+        return False, "SEC recovery dry-run has blocked rows."
+    if unknown_rows > 0 or _has_unknown_provenance_fields(dry_run_summary.get("unknown_provenance_field_counts")):
+        return False, "SEC recovery dry-run has unknown provenance."
+    if planned_vintage <= 0 or planned_provenance <= 0:
+        return False, "SEC recovery dry-run has no planned vintage/provenance rows."
+    if latest_without_vintage > 0 and planned_vintage != latest_without_vintage:
+        return False, "SEC recovery planned rows do not match readiness missing count."
+    if latest_missing > 0 and planned_vintage != latest_missing:
+        return False, "SEC recovery planned rows do not match dry-run missing count."
+    if candidates_checked != planned_vintage:
+        return False, "SEC recovery candidate count does not match planned rows."
+
+    return True, "SEC latest-writer recovery plan is safe to apply."

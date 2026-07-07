@@ -2,17 +2,22 @@ import unittest
 
 from ui_fundamental_pipeline.command_builder import (
     UsaQuarterUpdateVintageOptions,
+    UsaSecVintageRecoveryApplyOptions,
+    UsaSecVintageRecoveryDryRunOptions,
     UsaYahooAwareApplyOptions,
     build_fin_classification_ttm_commands,
     build_fin_update_command,
     build_score_percentile_command,
     build_snapshot_command,
     build_usa_update_command,
+    build_usa_sec_vintage_recovery_apply_command,
+    build_usa_sec_vintage_recovery_dry_run_command,
     build_usa_yahoo_aware_apply_command,
     build_usa_vintage_preflight_command,
 )
 from ui_fundamental_pipeline.config import (
     OSAKEDATA_DB,
+    SEC_LATEST_WRITER_VINTAGE_APPLY_APPROVAL_TOKEN,
     YAHOO_AWARE_APPLY_APPROVAL_TOKEN,
     get_vintage_run_id_usa,
 )
@@ -99,6 +104,42 @@ class TestCommandBuilder(unittest.TestCase):
         self.assertEqual(command[command.index("--available-at-utc") + 1], "2026-05-10T12:00:00Z")
         self.assertEqual(command[command.index("--ingested-at-utc") + 1], "2026-05-10T12:00:00Z")
         self.assertEqual(command[command.index("--approval-token") + 1], YAHOO_AWARE_APPLY_APPROVAL_TOKEN)
+        self.assertNotIn("--provider", command)
+
+    def test_build_usa_sec_vintage_recovery_dry_run_command(self):
+        command = build_usa_sec_vintage_recovery_dry_run_command(
+            UsaSecVintageRecoveryDryRunOptions(
+                source_run_id="USA_QUARTER_UPDATE_2026-07-07__QUARTERLY",
+                vintage_run_id="USA_PIT_VINTAGE_RECOVERY_2026-07-07__SEC_LATEST_WRITER_VINTAGE_RECOVERY",
+                launch_timestamp_utc="2026-07-07T12:00:00Z",
+            )
+        )
+
+        self.assertEqual(command[command.index("-m") + 1], "swingmaster.cli.dry_run_sec_vintage_for_missing_latest")
+        self.assertEqual(command[command.index("--candidate-mode") + 1], "latest_writer")
+        self.assertEqual(command[command.index("--source-run-id") + 1], "USA_QUARTER_UPDATE_2026-07-07__QUARTERLY")
+        self.assertEqual(command[command.index("--format") + 1], "json")
+        self.assertNotIn("run_fundamental_quarter_update", " ".join(command))
+        self.assertNotIn("--approval-token", command)
+        self.assertNotIn("--provider", command)
+
+    def test_build_usa_sec_vintage_recovery_apply_command_with_approval_token(self):
+        command = build_usa_sec_vintage_recovery_apply_command(
+            UsaSecVintageRecoveryApplyOptions(
+                source_run_id="USA_QUARTER_UPDATE_2026-07-07__QUARTERLY",
+                vintage_run_id="USA_PIT_VINTAGE_RECOVERY_2026-07-07__SEC_LATEST_WRITER_VINTAGE_RECOVERY",
+                launch_timestamp_utc="2026-07-07T12:00:00Z",
+                expected_count=2,
+                approved=True,
+            )
+        )
+
+        self.assertEqual(command[command.index("-m") + 1], "swingmaster.cli.apply_sec_vintage_for_missing_latest")
+        self.assertEqual(command[command.index("--source-run-id") + 1], "USA_QUARTER_UPDATE_2026-07-07__QUARTERLY")
+        self.assertEqual(command[command.index("--candidate-mode") + 1], "latest_writer")
+        self.assertEqual(command[command.index("--expected-count") + 1], "2")
+        self.assertEqual(command[command.index("--approval-token") + 1], SEC_LATEST_WRITER_VINTAGE_APPLY_APPROVAL_TOKEN)
+        self.assertNotIn("run_fundamental_quarter_update", " ".join(command))
         self.assertNotIn("--provider", command)
 
     def test_build_fin_update_command(self):

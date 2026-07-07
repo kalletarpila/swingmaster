@@ -18,6 +18,7 @@ try:
         OSAKEDATA_DB,
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
+        SEC_LATEST_WRITER_VINTAGE_APPLY_APPROVAL_TOKEN,
         SNAPSHOTS_DIR,
         TEMP_DIR,
         YAHOO_AWARE_APPLY_APPROVAL_TOKEN,
@@ -37,6 +38,7 @@ except ImportError:  # pragma: no cover
         OSAKEDATA_DB,
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
+        SEC_LATEST_WRITER_VINTAGE_APPLY_APPROVAL_TOKEN,
         SNAPSHOTS_DIR,
         TEMP_DIR,
         YAHOO_AWARE_APPLY_APPROVAL_TOKEN,
@@ -58,6 +60,26 @@ class UsaYahooAwareApplyOptions:
     source_run_id: str
     vintage_run_id: str
     launch_timestamp_utc: str
+    approved: bool = False
+
+
+@dataclass(frozen=True)
+class UsaSecVintageRecoveryDryRunOptions:
+    """Explicit metadata for planning SEC latest-writer vintage recovery."""
+
+    vintage_run_id: str
+    launch_timestamp_utc: str
+    source_run_id: str | None = None
+
+
+@dataclass(frozen=True)
+class UsaSecVintageRecoveryApplyOptions:
+    """Explicit metadata for applying SEC latest-writer vintage recovery."""
+
+    source_run_id: str
+    vintage_run_id: str
+    launch_timestamp_utc: str
+    expected_count: int
     approved: bool = False
 
 
@@ -132,6 +154,64 @@ def build_usa_yahoo_aware_apply_command(options: UsaYahooAwareApplyOptions) -> l
     ]
     if options.approved:
         command.extend(["--approval-token", YAHOO_AWARE_APPLY_APPROVAL_TOKEN])
+    return command
+
+
+def build_usa_sec_vintage_recovery_dry_run_command(
+    options: UsaSecVintageRecoveryDryRunOptions,
+) -> list[str]:
+    command = [
+        str(PYTHON_EXECUTABLE),
+        "-m",
+        "swingmaster.cli.dry_run_sec_vintage_for_missing_latest",
+        "--fundamentals-db",
+        str(FUNDAMENTALS_USA_DB),
+        "--market",
+        "usa",
+        "--candidate-mode",
+        "latest_writer",
+        "--available-at-utc",
+        options.launch_timestamp_utc,
+        "--ingested-at-utc",
+        options.launch_timestamp_utc,
+        "--vintage-run-id",
+        options.vintage_run_id,
+        "--format",
+        "json",
+        "--sample-limit",
+        "20",
+    ]
+    if options.source_run_id:
+        command.extend(["--source-run-id", options.source_run_id])
+    return command
+
+
+def build_usa_sec_vintage_recovery_apply_command(
+    options: UsaSecVintageRecoveryApplyOptions,
+) -> list[str]:
+    command = [
+        str(PYTHON_EXECUTABLE),
+        "-m",
+        "swingmaster.cli.apply_sec_vintage_for_missing_latest",
+        "--fundamentals-db",
+        str(FUNDAMENTALS_USA_DB),
+        "--market",
+        "usa",
+        "--source-run-id",
+        options.source_run_id,
+        "--candidate-mode",
+        "latest_writer",
+        "--available-at-utc",
+        options.launch_timestamp_utc,
+        "--ingested-at-utc",
+        options.launch_timestamp_utc,
+        "--vintage-run-id",
+        options.vintage_run_id,
+        "--expected-count",
+        str(options.expected_count),
+    ]
+    if options.approved:
+        command.extend(["--approval-token", SEC_LATEST_WRITER_VINTAGE_APPLY_APPROVAL_TOKEN])
     return command
 
 

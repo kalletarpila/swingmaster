@@ -89,3 +89,5 @@ Tests use fake executors, mocks, and temp DB paths only.
 Phase 4L6 adds full UI workflow smoke tests for SEC-sufficient, final mixed auto apply, Yahoo vintage auto apply, blocked/unsafe summaries, preflight failure, checkbox-disabled default behavior, and user stop behavior.
 
 See [SwingMaster Quarter Update UI Vintage Full Workflow Smoke Phase 4L6](swingmaster_quarter_update_ui_vintage_full_workflow_smoke_phase4l6.md).
+
+Phase 4L7 adds a separate missing PIT/vintage recovery action for checkbox-off accidents. It does not use Yahoo-aware apply unless a future planner can prove Yahoo/final mixed recovery is safe.

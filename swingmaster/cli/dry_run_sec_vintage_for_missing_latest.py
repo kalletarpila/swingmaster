@@ -88,8 +88,12 @@ def run_dry_run(
     try:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only=ON")
-        latest_missing_vintage_rows = _count_latest_missing_vintage(conn, source_run_id, ticker)
-        latest_rows = _load_latest_rows(conn, source_run_id, ticker)
+        inferred_source_run_ids = [] if source_run_id else _distinct_missing_latest_source_run_ids(conn, ticker)
+        effective_source_run_id = source_run_id
+        if effective_source_run_id is None and len(inferred_source_run_ids) == 1:
+            effective_source_run_id = inferred_source_run_ids[0]
+        latest_missing_vintage_rows = _count_latest_missing_vintage(conn, effective_source_run_id, ticker)
+        latest_rows = _load_latest_rows(conn, effective_source_run_id, ticker)
         samples: list[dict[str, Any]] = []
         counters = {
             READY: 0,
@@ -115,7 +119,7 @@ def run_dry_run(
                 available_at_utc=available_at_utc,
                 ingested_at_utc=ingested_at_utc,
                 vintage_run_id=vintage_run_id,
-                source_run_id=source_run_id,
+                source_run_id=effective_source_run_id,
                 candidate_mode=candidate_mode,
             )
             counters[candidate["status"]] = counters.get(candidate["status"], 0) + 1
@@ -156,7 +160,9 @@ def run_dry_run(
             "summary": {
                 "fundamentals_db": str(db_path),
                 "market": market,
-                "source_run_id": source_run_id,
+                "source_run_id": effective_source_run_id,
+                "source_run_id_inferred": int(source_run_id is None and effective_source_run_id is not None),
+                "source_run_id_candidates": inferred_source_run_ids,
                 "candidate_mode": candidate_mode,
                 "available_at_utc": available_at_utc,
                 "ingested_at_utc": ingested_at_utc,
@@ -441,6 +447,38 @@ def _count_latest_missing_vintage(
         params,
     ).fetchone()
     return int(row[0])
+
+
+def _distinct_missing_latest_source_run_ids(
+    conn: sqlite3.Connection,
+    ticker: str | None,
+) -> list[str]:
+    where_parts = [
+        """
+        NOT EXISTS (
+            SELECT 1
+            FROM rc_fundamental_quarterly_vintage v
+            WHERE v.ticker = q.ticker
+              AND v.period_end_date = q.period_end_date
+        )
+        """,
+        "q.run_id IS NOT NULL",
+        "TRIM(q.run_id) != ''",
+    ]
+    params: list[Any] = []
+    if ticker:
+        where_parts.append("q.ticker = ?")
+        params.append(ticker.upper())
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT q.run_id
+        FROM rc_fundamental_quarterly q
+        WHERE {" AND ".join(where_parts)}
+        ORDER BY q.run_id ASC
+        """,
+        params,
+    ).fetchall()
+    return [str(row[0]) for row in rows]
 
 
 def _has_vintage_for_latest(conn: sqlite3.Connection, ticker: str, period_end_date: str, market: str) -> bool:

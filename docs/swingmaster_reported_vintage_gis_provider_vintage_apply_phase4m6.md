@@ -137,7 +137,7 @@ PYTHONPATH=. python3 -m swingmaster.cli.diagnose_quarter_update_vintage_scope \
   --sample-limit 20
 ```
 
-The CLI returned exit code `1`, but its JSON summary reports the post-apply target state:
+At the time of Phase 4M6, the CLI returned exit code `1`, but its JSON summary reported the post-apply target state:
 
 - overall_diagnostic_status: `NO_MISMATCH`
 - value_mismatch_count: `0`
@@ -148,6 +148,8 @@ The CLI returned exit code `1`, but its JSON summary reports the post-apply targ
 - duplicate_statement_vintage_id_count: `0`
 - planner_scope_count: `0`
 - planner_blocked_rows: `0`
+
+Phase 4M7 corrected this exit-code policy. The same read-only diagnostic now returns exit code `0` for `overall_diagnostic_status=NO_MISMATCH`.
 
 ## Recommended Next Phase
 

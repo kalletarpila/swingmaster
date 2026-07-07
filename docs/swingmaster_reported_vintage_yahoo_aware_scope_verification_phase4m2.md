@@ -110,3 +110,9 @@ Phase 4M6 applied the guarded one-row GIS provider-derived vintage. The same sco
 - duplicate statement_vintage_id count: `0`
 
 The GIS `total_debt` drift is no longer blocking this diagnostic. The remaining `FINAL_MIXED_REQUIRED` completion state should be handled separately from the GIS correction.
+
+## Phase 4M7 Follow-Up
+
+Phase 4M7 corrected the scope diagnostic CLI exit policy. After the GIS provider vintage apply, `overall_diagnostic_status=NO_MISMATCH` is now a successful CLI outcome and returns exit code `0`.
+
+See `docs/swingmaster_reported_vintage_scope_diagnostic_exit_policy_phase4m7.md`.

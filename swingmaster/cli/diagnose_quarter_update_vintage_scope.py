@@ -145,6 +145,15 @@ def _status(parity: dict[str, int], guard: dict[str, object]) -> str:
     return "UNKNOWN"
 
 
+def _exit_code(summary: dict[str, Any]) -> int:
+    status = str(summary.get("overall_diagnostic_status") or "")
+    if status == "NO_MISMATCH":
+        return 0
+    if status == "SCOPE_FIX_VERIFIED_BLOCKED_NARROW":
+        return 0
+    return 1
+
+
 def run_diagnostic(
     *,
     fundamentals_db: Path,
@@ -219,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"summary": summary}, indent=2, sort_keys=True))
     else:
         _print_text(summary)
-    return 0 if summary.get("overall_diagnostic_status") == "SCOPE_FIX_VERIFIED_BLOCKED_NARROW" else 1
+    return _exit_code(summary)
 
 
 if __name__ == "__main__":

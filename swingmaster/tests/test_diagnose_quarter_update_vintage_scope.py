@@ -4,7 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from swingmaster.cli.diagnose_quarter_update_vintage_scope import main, run_diagnostic
+from swingmaster.cli.diagnose_quarter_update_vintage_scope import _exit_code, main, run_diagnostic
 from swingmaster.cli.run_fundamental_migrations import run_migration
 
 
@@ -244,6 +244,158 @@ def test_duplicate_statement_id_returns_parity_drift(tmp_path: Path) -> None:
 
     assert summary["duplicate_statement_vintage_id_count"] == 1
     assert summary["overall_diagnostic_status"] == "PARITY_DRIFT"
+
+
+def test_no_mismatch_main_returns_zero(tmp_path: Path) -> None:
+    db_path = tmp_path / "no_mismatch.db"
+    run_migration(db_path)
+    with _connect(db_path) as conn:
+        _insert_latest(conn, total_debt=14878600000.0)
+        _insert_vintage(conn, total_debt=14878600000.0)
+        _insert_sec_provenance(conn, field_name="total_debt")
+        conn.commit()
+
+    rc = main(
+        [
+            "--fundamentals-db",
+            str(db_path),
+            "--market",
+            "usa",
+            "--source-run-id",
+            SOURCE_RUN_ID,
+            "--enrich-run-id",
+            ENRICH_RUN_ID,
+            "--format",
+            "json",
+        ]
+    )
+
+    assert rc == 0
+    assert _diagnose(db_path)["overall_diagnostic_status"] == "NO_MISMATCH"
+
+
+def test_post_apply_like_no_mismatch_summary_returns_zero(tmp_path: Path, capsys) -> None:
+    db_path = tmp_path / "post_apply_like.db"
+    run_migration(db_path)
+    with _connect(db_path) as conn:
+        _insert_latest(conn, total_debt=14878600000.0)
+        _insert_vintage(
+            conn,
+            total_debt=14878600000.0,
+            statement_vintage_id="sec_edgar:usa:GIS:2025-05-25:9a81f59e8511cac0",
+            run_id="USA_QUARTER_UPDATE_2026-07-07__GIS_TOTAL_DEBT_PROVIDER_VINTAGE_APPLY",
+        )
+        _insert_sec_provenance(
+            conn,
+            field_name="total_debt",
+            statement_vintage_id="sec_edgar:usa:GIS:2025-05-25:9a81f59e8511cac0",
+            run_id="USA_QUARTER_UPDATE_2026-07-07__GIS_TOTAL_DEBT_PROVIDER_VINTAGE_APPLY",
+        )
+        conn.commit()
+
+    rc = main(
+        [
+            "--fundamentals-db",
+            str(db_path),
+            "--market",
+            "usa",
+            "--source-run-id",
+            SOURCE_RUN_ID,
+            "--enrich-run-id",
+            ENRICH_RUN_ID,
+            "--format",
+            "json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert payload["summary"]["overall_diagnostic_status"] == "NO_MISMATCH"
+    assert payload["summary"]["value_mismatch_count"] == 0
+
+
+def test_parity_drift_main_returns_nonzero(tmp_path: Path) -> None:
+    db_path = tmp_path / "parity_exit.db"
+    run_migration(db_path)
+    with _connect(db_path) as conn:
+        _insert_latest(conn)
+        conn.commit()
+
+    rc = main(
+        [
+            "--fundamentals-db",
+            str(db_path),
+            "--market",
+            "usa",
+            "--source-run-id",
+            SOURCE_RUN_ID,
+            "--enrich-run-id",
+            ENRICH_RUN_ID,
+            "--format",
+            "json",
+        ]
+    )
+
+    assert rc == 1
+
+
+def test_duplicate_statement_id_main_returns_nonzero(tmp_path: Path) -> None:
+    db_path = tmp_path / "duplicate_exit.db"
+    _base_db(db_path)
+    with _connect(db_path) as conn:
+        _insert_latest(conn, ticker="MSFT", period_end_date="2026-03-31", total_debt=50.0)
+        _insert_vintage(
+            conn,
+            ticker="MSFT",
+            period_end_date="2026-03-31",
+            total_debt=50.0,
+            statement_vintage_id="legacy:usa:GIS:2025-05-25:9441b8313c7894e3",
+        )
+        conn.commit()
+
+    rc = main(
+        [
+            "--fundamentals-db",
+            str(db_path),
+            "--market",
+            "usa",
+            "--source-run-id",
+            SOURCE_RUN_ID,
+            "--enrich-run-id",
+            ENRICH_RUN_ID,
+            "--format",
+            "json",
+        ]
+    )
+
+    assert rc == 1
+
+
+def test_scope_fix_failed_still_broad_returns_nonzero() -> None:
+    assert _exit_code({"overall_diagnostic_status": "SCOPE_FIX_FAILED_STILL_BROAD"}) == 1
+
+
+def test_blocked_narrow_main_returns_zero_as_successful_diagnostic_verification(tmp_path: Path) -> None:
+    db_path = tmp_path / "blocked_narrow_exit.db"
+    _base_db(db_path)
+
+    rc = main(
+        [
+            "--fundamentals-db",
+            str(db_path),
+            "--market",
+            "usa",
+            "--source-run-id",
+            SOURCE_RUN_ID,
+            "--enrich-run-id",
+            ENRICH_RUN_ID,
+            "--format",
+            "json",
+        ]
+    )
+
+    assert rc == 0
+    assert _diagnose(db_path)["overall_diagnostic_status"] == "SCOPE_FIX_VERIFIED_BLOCKED_NARROW"
 
 
 def test_json_output_includes_bounded_samples(tmp_path: Path, capsys) -> None:

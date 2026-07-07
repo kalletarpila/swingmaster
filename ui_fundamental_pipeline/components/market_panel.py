@@ -56,6 +56,12 @@ class MarketPanel:
             content=ft.Text(f"▶ Run {self.market.upper()} Quarter Update"),
             on_click=self._on_quarter_update_click,
         )
+        self.vintage_write_checkbox = None
+        if self.market == "usa":
+            self.vintage_write_checkbox = ft.Checkbox(
+                label="Enable PIT/vintage write for USA quarterly update",
+                value=False,
+            )
 
         self.percentile_btn = ft.Button(
             content=ft.Text(f"▶ Run {self.market.upper()} Score Percentile"),
@@ -83,6 +89,8 @@ class MarketPanel:
             ft.Text("1. DATABASE UPDATE", weight="bold", size=13),
             self.quarter_update_btn,
         ]
+        if self.vintage_write_checkbox is not None:
+            controls.append(self.vintage_write_checkbox)
         if self.secondary_action_btn is not None:
             controls.extend(
                 [
@@ -175,6 +183,8 @@ class MarketPanel:
     def disable_buttons(self, disable: bool = True):
         """Disable/enable all action buttons."""
         self.quarter_update_btn.disabled = disable
+        if self.vintage_write_checkbox is not None:
+            self.vintage_write_checkbox.disabled = disable
         self.percentile_btn.disabled = disable
         if self.secondary_action_btn is not None:
             self.secondary_action_btn.disabled = disable
@@ -184,3 +194,9 @@ class MarketPanel:
     def clear_ticker_input(self):
         """Clear ticker input field."""
         self.ticker_input.value = ""
+
+    def is_vintage_write_enabled(self) -> bool:
+        """Return whether the USA PIT/vintage write option is enabled."""
+        if self.vintage_write_checkbox is None:
+            return False
+        return bool(self.vintage_write_checkbox.value)

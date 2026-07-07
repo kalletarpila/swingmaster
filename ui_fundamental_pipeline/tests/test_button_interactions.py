@@ -170,6 +170,7 @@ class TestMarketPanelButtons(unittest.TestCase):
 
         # All buttons should be disabled
         self.assertTrue(self.panel.quarter_update_btn.disabled)
+        self.assertTrue(self.panel.vintage_write_checkbox.disabled)
         self.assertTrue(self.panel.percentile_btn.disabled)
         self.assertTrue(self.panel.snapshot_btn.disabled)
 
@@ -178,6 +179,7 @@ class TestMarketPanelButtons(unittest.TestCase):
 
         # All buttons should be enabled
         self.assertFalse(self.panel.quarter_update_btn.disabled)
+        self.assertFalse(self.panel.vintage_write_checkbox.disabled)
         self.assertFalse(self.panel.percentile_btn.disabled)
         self.assertFalse(self.panel.snapshot_btn.disabled)
 

@@ -13,6 +13,10 @@ class TestSwingMasterApp(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        self.snapshot_refresh_patcher = patch(
+            "ui_fundamental_pipeline.components.snapshot_browser.SnapshotBrowser.refresh_file_list"
+        )
+        self.snapshot_refresh_patcher.start()
         # Create a mock page object
         self.mock_page = MagicMock(spec=ft.Page)
         self.mock_page.title = ""
@@ -25,6 +29,9 @@ class TestSwingMasterApp(unittest.TestCase):
         self.mock_page.scroll = ft.ScrollMode.AUTO
         self.mock_page.clean = Mock()
         self.mock_page.add = Mock()
+
+    def tearDown(self):
+        self.snapshot_refresh_patcher.stop()
 
     def test_app_initialization(self):
         """Test that SwingMasterApp initializes without errors."""
@@ -175,6 +182,56 @@ class TestSwingMasterApp(unittest.TestCase):
         self.assertTrue(callable(app._run_usa_snapshots))
         self.assertTrue(callable(app._run_fin_snapshots))
 
+    def test_usa_vintage_update_uses_preflight_command_chain(self):
+        """Test USA vintage opt-in runs preflight before quarter update."""
+        app = SwingMasterApp(self.mock_page)
+        app.usa_panel.vintage_write_checkbox.value = True
+        captured = {}
+
+        def _capture(target):
+            captured["target"] = target
+
+        app._run_in_background = _capture
+        with patch("ui_fundamental_pipeline.main.get_utc_launch_timestamp", return_value="2026-05-10T12:00:00Z"):
+            with patch.object(app, "_execute_command_chain") as execute_chain:
+                app._run_usa_update()
+                captured["target"]()
+
+        execute_chain.assert_called_once()
+        commands, status_prefix, market = execute_chain.call_args[0]
+        self.assertEqual(status_prefix, "USA Quarter Update")
+        self.assertEqual(market, "usa")
+        self.assertEqual(len(commands), 2)
+        preflight_command, update_command = commands
+        self.assertIn("preflight_quarter_update_vintage_readiness.py", " ".join(preflight_command))
+        self.assertIn("--write-vintage", update_command)
+        self.assertEqual(update_command[update_command.index("--vintage-yahoo-aware-action") + 1], "plan_only")
+        self.assertNotEqual(update_command[update_command.index("--vintage-yahoo-aware-action") + 1], "write")
+        self.assertEqual(
+            update_command[update_command.index("--vintage-available-at-utc") + 1],
+            update_command[update_command.index("--vintage-ingested-at-utc") + 1],
+        )
+
+    def test_usa_default_update_uses_single_command_without_vintage(self):
+        """Test default USA update keeps vintage flags omitted."""
+        app = SwingMasterApp(self.mock_page)
+        app.usa_panel.vintage_write_checkbox.value = False
+        captured = {}
+
+        def _capture(target):
+            captured["target"] = target
+
+        app._run_in_background = _capture
+        with patch.object(app, "_execute_single_command") as execute_single:
+            app._run_usa_update()
+            captured["target"]()
+
+        execute_single.assert_called_once()
+        command, status_prefix, market = execute_single.call_args[0]
+        self.assertEqual(status_prefix, "USA Quarter Update")
+        self.assertEqual(market, "usa")
+        self.assertNotIn("--write-vintage", command)
+
 
 class TestMainFunction(unittest.TestCase):
     """Test main function entry point."""
@@ -195,7 +252,8 @@ class TestMainFunction(unittest.TestCase):
 
         try:
             # Call main with mock page - should not raise
-            main(mock_page)
+            with patch("ui_fundamental_pipeline.components.snapshot_browser.SnapshotBrowser.refresh_file_list"):
+                main(mock_page)
         except Exception as e:
             # Some errors might occur due to mocking, but TypeError about API parameters should not
             if "unexpected keyword argument" in str(e):

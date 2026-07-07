@@ -1,20 +1,61 @@
 import unittest
 
 from ui_fundamental_pipeline.command_builder import (
+    UsaQuarterUpdateVintageOptions,
     build_fin_classification_ttm_commands,
     build_fin_update_command,
     build_score_percentile_command,
     build_snapshot_command,
     build_usa_update_command,
+    build_usa_vintage_preflight_command,
 )
+from ui_fundamental_pipeline.config import OSAKEDATA_DB, get_vintage_run_id_usa
 
 
 class TestCommandBuilder(unittest.TestCase):
     def test_build_usa_update_command(self):
-        command = build_usa_update_command("USA_QUARTER_UPDATE_2026-05-10")
+        command = build_usa_update_command("USA_QUARTER_UPDATE_2026-05-10__QUARTERLY")
         self.assertIn("--market", command)
         self.assertIn("usa", command)
         self.assertIn("--run-id", command)
+        self.assertIn("--osakedata-db", command)
+        self.assertIn(str(OSAKEDATA_DB), command)
+        self.assertNotIn("--write-vintage", command)
+        self.assertNotIn("--vintage-mode", command)
+        self.assertNotIn("--vintage-yahoo-aware-action", command)
+
+    def test_build_usa_update_command_with_vintage_flags(self):
+        source_run_id = "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY"
+        launch_timestamp = "2026-05-10T12:00:00Z"
+        vintage_run_id = get_vintage_run_id_usa(source_run_id)
+        command = build_usa_update_command(
+            source_run_id,
+            vintage_options=UsaQuarterUpdateVintageOptions(
+                launch_timestamp_utc=launch_timestamp,
+                vintage_run_id=vintage_run_id,
+            ),
+        )
+
+        self.assertIn("--write-vintage", command)
+        self.assertEqual(command[command.index("--vintage-mode") + 1], "sec_latest_writer")
+        self.assertEqual(command[command.index("--vintage-market") + 1], "usa")
+        self.assertEqual(command[command.index("--vintage-available-at-utc") + 1], launch_timestamp)
+        self.assertEqual(command[command.index("--vintage-ingested-at-utc") + 1], launch_timestamp)
+        self.assertEqual(command[command.index("--vintage-run-id") + 1], vintage_run_id)
+        self.assertEqual(command[command.index("--vintage-yahoo-aware-action") + 1], "plan_only")
+        self.assertNotIn("write", command[command.index("--vintage-yahoo-aware-action") + 1])
+        self.assertEqual(command[command.index("--osakedata-db") + 1], str(OSAKEDATA_DB))
+        self.assertIn("2026-05-10", command[command.index("--run-id") + 1])
+        self.assertIn("2026-05-10", command[command.index("--vintage-run-id") + 1])
+
+    def test_build_usa_vintage_preflight_command(self):
+        command = build_usa_vintage_preflight_command()
+
+        self.assertIn("preflight_quarter_update_vintage_readiness.py", " ".join(command))
+        self.assertIn("--fundamentals-db", command)
+        self.assertIn("fundamentals_usa.db", " ".join(command))
+        self.assertEqual(command[command.index("--market") + 1], "usa")
+        self.assertEqual(command[command.index("--format") + 1], "json")
 
     def test_build_fin_update_command(self):
         command = build_fin_update_command("FIN_YAHOO_BATCH_2026-05-10")

@@ -2,7 +2,7 @@
 Configuration and constants for Fundamental Pipeline Manager UI.
 """
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Project root
 PROJECT_ROOT = Path(__file__).parent.parent.absolute()
@@ -22,6 +22,9 @@ PYTHON_EXECUTABLE = PROJECT_ROOT / ".venv" / "bin" / "python"
 
 # CLI scripts
 CLI_QUARTER_UPDATE = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_quarter_update.py"
+CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT = (
+    PROJECT_ROOT / "swingmaster" / "cli" / "preflight_quarter_update_vintage_readiness.py"
+)
 CLI_YAHOO_BATCH_FIN = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_yahoo_batch_fin.py"
 CLI_REPORTING_FREQUENCY_AUDIT = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_reporting_frequency_audit.py"
 CLI_TTM_BATCH = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_ttm_batch.py"
@@ -54,7 +57,19 @@ DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 def get_run_id_usa() -> str:
     """Generate USA run ID based on current date."""
-    return f"USA_QUARTER_UPDATE_{datetime.now().strftime(DATE_FORMAT)}"
+    return f"USA_QUARTER_UPDATE_{datetime.now().strftime(DATE_FORMAT)}__QUARTERLY"
+
+
+def get_utc_launch_timestamp() -> str:
+    """Generate an explicit UTC launch timestamp for PIT/vintage metadata."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def get_vintage_run_id_usa(source_run_id: str) -> str:
+    """Derive the USA SEC latest-writer vintage run ID from the source run ID."""
+    if source_run_id.endswith("__QUARTERLY"):
+        return source_run_id.removesuffix("__QUARTERLY") + "__SEC_LATEST_WRITER_VINTAGE"
+    return f"{source_run_id}__SEC_LATEST_WRITER_VINTAGE"
 
 
 def get_run_id_fin() -> str:
@@ -91,6 +106,7 @@ def validate_config() -> bool:
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
         CLI_QUARTER_UPDATE,
+        CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT,
         CLI_YAHOO_BATCH_FIN,
         CLI_REPORTING_FREQUENCY_AUDIT,
         CLI_TTM_BATCH,
@@ -110,6 +126,7 @@ def get_missing_paths() -> list:
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
         CLI_QUARTER_UPDATE,
+        CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT,
         CLI_YAHOO_BATCH_FIN,
         CLI_REPORTING_FREQUENCY_AUDIT,
         CLI_TTM_BATCH,

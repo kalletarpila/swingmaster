@@ -287,3 +287,15 @@ Recommended tests:
 ## Verification
 
 No runtime commands, provider calls, scheduler jobs, refresh jobs, or real DB writes were run for this investigation.
+
+## Phase 4L2 Follow-Up
+
+Phase 4L2 implemented the first UI-side vintage opt-in support described by this investigation:
+
+- USA-only checkbox, initially unchecked.
+- Command-builder support for `sec_latest_writer` vintage flags.
+- Read-only vintage readiness preflight before opt-in USA quarter update.
+- Summary parser support for `SUMMARY key=value` output.
+- Pure UI severity mapping for vintage completion statuses.
+
+See [SwingMaster Quarter Update UI Vintage Integration Phase 4L2](swingmaster_quarter_update_ui_vintage_integration_phase4l2.md).

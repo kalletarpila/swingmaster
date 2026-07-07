@@ -125,6 +125,8 @@ class TestMarketPanel(unittest.TestCase):
 
         self.assertIsNotNone(panel.ticker_input)
         self.assertIsNotNone(panel.quarter_update_btn)
+        self.assertIsNotNone(panel.vintage_write_checkbox)
+        self.assertFalse(panel.is_vintage_write_enabled())
         self.assertIsNotNone(panel.percentile_btn)
         self.assertIsNotNone(panel.snapshot_btn)
         self.assertIsNotNone(panel.container)
@@ -141,6 +143,8 @@ class TestMarketPanel(unittest.TestCase):
 
         self.assertIsNotNone(panel.ticker_input)
         self.assertIsNotNone(panel.quarter_update_btn)
+        self.assertIsNone(panel.vintage_write_checkbox)
+        self.assertFalse(panel.is_vintage_write_enabled())
         self.assertIsNotNone(panel.percentile_btn)
         self.assertIsNotNone(panel.snapshot_btn)
 
@@ -172,14 +176,30 @@ class TestMarketPanel(unittest.TestCase):
         panel.disable_buttons(True)
         self.assertTrue(panel.ticker_input.disabled)
         self.assertTrue(panel.quarter_update_btn.disabled)
+        self.assertTrue(panel.vintage_write_checkbox.disabled)
         self.assertTrue(panel.percentile_btn.disabled)
         self.assertTrue(panel.snapshot_btn.disabled)
 
         panel.disable_buttons(False)
         self.assertFalse(panel.ticker_input.disabled)
         self.assertFalse(panel.quarter_update_btn.disabled)
+        self.assertFalse(panel.vintage_write_checkbox.disabled)
         self.assertFalse(panel.percentile_btn.disabled)
         self.assertFalse(panel.snapshot_btn.disabled)
+
+    def test_usa_vintage_checkbox_state(self):
+        """Test USA PIT/vintage option is off by default and readable."""
+        panel = MarketPanel(
+            market="usa",
+            on_quarter_update=self.on_run_usa_update,
+            on_score_percentile=self.on_run_usa_percentile,
+            on_snapshot=self.on_run_usa_snapshots,
+            on_lock=Mock(),
+        )
+
+        self.assertFalse(panel.is_vintage_write_enabled())
+        panel.vintage_write_checkbox.value = True
+        self.assertTrue(panel.is_vintage_write_enabled())
 
     def test_set_status(self):
         """Test setting status message."""

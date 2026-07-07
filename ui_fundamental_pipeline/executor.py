@@ -49,7 +49,7 @@ class ProcessExecutor:
         Args:
             command: List of command arguments [python_exe, script, --arg1, val1, ...]
             on_output: Callback for each output line (called from main thread)
-            on_summary: Callback when SUMMARY: block is found (called from main thread)
+            on_summary: Callback when SUMMARY output is found (called from main thread)
             cwd: Working directory
 
         Returns:
@@ -105,7 +105,7 @@ class ProcessExecutor:
                     # Call output callback
                     on_output(timestamped_line)
 
-                    # Parse SUMMARY block continuously so key=value lines are captured
+                    # Parse SUMMARY output continuously so key=value lines are captured
                     parsed_summary = self._parse_summary_block(all_output, summary_data)
                     if parsed_summary != summary_data and parsed_summary:
                         summary_data = parsed_summary
@@ -168,11 +168,14 @@ class ProcessExecutor:
         self, all_output: list, previous_summary: dict
     ) -> dict:
         """
-        Parse SUMMARY: block from output.
-        Format:
+        Parse SUMMARY output from supported formats.
+        Formats:
             SUMMARY:
             key1=value1
             key2=value2
+
+            SUMMARY key1=value1
+            SUMMARY key2=value2
         """
         summary = previous_summary.copy()
 
@@ -181,17 +184,28 @@ class ProcessExecutor:
             if "SUMMARY:" in line:
                 latest_summary_index = idx
 
-        if latest_summary_index is None:
-            return summary
+        if latest_summary_index is not None:
+            for line in all_output[latest_summary_index + 1 :]:
+                parts = line.split("|", 1)
+                if len(parts) != 2:
+                    continue
+                payload = parts[1].strip()
+                if "=" not in payload:
+                    break
+                key, value = payload.split("=", 1)
+                summary[key.strip()] = value.strip()
 
-        for line in all_output[latest_summary_index + 1 :]:
+        for line in all_output:
             parts = line.split("|", 1)
             if len(parts) != 2:
                 continue
             payload = parts[1].strip()
-            if "=" not in payload:
-                break
-            key, value = payload.split("=", 1)
+            if not payload.startswith("SUMMARY "):
+                continue
+            item = payload[len("SUMMARY ") :].strip()
+            if "=" not in item:
+                continue
+            key, value = item.split("=", 1)
             summary[key.strip()] = value.strip()
 
         return summary

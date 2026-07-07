@@ -9,11 +9,13 @@ import flet as ft
 
 try:
     from .command_builder import (
+        UsaQuarterUpdateVintageOptions,
         build_fin_classification_ttm_commands,
         build_fin_update_command,
         build_score_percentile_command,
         build_single_ticker_snapshot_command,
         build_usa_update_command,
+        build_usa_vintage_preflight_command,
     )
     from .components.execution_output import ExecutionOutputPanel
     from .components.market_panel import MarketPanel
@@ -33,17 +35,22 @@ try:
         get_run_id_fin_ttm,
         get_run_id_fin,
         get_run_id_usa,
+        get_utc_launch_timestamp,
+        get_vintage_run_id_usa,
         validate_config,
     )
     from .data_access import resolve_latest_close_as_of_date
     from .executor import ProcessExecutor
+    from .vintage_status import map_vintage_completion_status_to_ui_severity
 except ImportError:  # pragma: no cover
     from command_builder import (
+        UsaQuarterUpdateVintageOptions,
         build_fin_classification_ttm_commands,
         build_fin_update_command,
         build_score_percentile_command,
         build_single_ticker_snapshot_command,
         build_usa_update_command,
+        build_usa_vintage_preflight_command,
     )
     from components.execution_output import ExecutionOutputPanel
     from components.market_panel import MarketPanel
@@ -63,10 +70,13 @@ except ImportError:  # pragma: no cover
         get_run_id_fin_ttm,
         get_run_id_fin,
         get_run_id_usa,
+        get_utc_launch_timestamp,
+        get_vintage_run_id_usa,
         validate_config,
     )
     from data_access import resolve_latest_close_as_of_date
     from executor import ProcessExecutor
+    from vintage_status import map_vintage_completion_status_to_ui_severity
 
 
 class SwingMasterApp:
@@ -273,9 +283,10 @@ class SwingMasterApp:
             on_summary=self._ui_callback(self.output_panel.set_summary),
         )
 
-        color = "green" if exit_code == 0 else "red"
         target_panel = self.usa_panel if market == "usa" else self.fin_panel
-        target_panel.set_status(f"{status_prefix}: exit={exit_code}", color)
+        color = self._status_color(exit_code)
+        suffix = self._vintage_status_suffix()
+        target_panel.set_status(f"{status_prefix}: exit={exit_code}{suffix}", color)
         self._set_progress(1, 1, status_prefix)
         self._lock_ui(False)
 
@@ -303,8 +314,30 @@ class SwingMasterApp:
             self._set_progress(idx, total, status_prefix)
 
         target_panel = self.usa_panel if market == "usa" else self.fin_panel
-        target_panel.set_status(f"{status_prefix}: exit=0", "green")
+        color = self._status_color(0)
+        suffix = self._vintage_status_suffix()
+        target_panel.set_status(f"{status_prefix}: exit=0{suffix}", color)
         self._lock_ui(False)
+
+    def _status_color(self, exit_code: int) -> str:
+        if exit_code != 0:
+            return "red"
+        severity = map_vintage_completion_status_to_ui_severity(self.output_panel._current_summary)
+        if severity == "success":
+            return "green"
+        if severity == "review":
+            return "orange"
+        if severity == "stop":
+            return "red"
+        return "green"
+
+    def _vintage_status_suffix(self) -> str:
+        summary = self.output_panel._current_summary
+        completion_status = summary.get("vintage_completion_status")
+        if completion_status:
+            severity = map_vintage_completion_status_to_ui_severity(summary)
+            return f" vintage={completion_status} severity={severity}"
+        return ""
 
     def _execute_snapshot_batch(self, market: str, tickers: list[str]) -> None:
         self.output_panel.clear_output()
@@ -351,6 +384,18 @@ class SwingMasterApp:
 
     def _run_usa_update(self) -> None:
         run_id = get_run_id_usa()
+        if self.usa_panel.is_vintage_write_enabled():
+            launch_timestamp_utc = get_utc_launch_timestamp()
+            vintage_options = UsaQuarterUpdateVintageOptions(
+                launch_timestamp_utc=launch_timestamp_utc,
+                vintage_run_id=get_vintage_run_id_usa(run_id),
+            )
+            commands = [
+                build_usa_vintage_preflight_command(),
+                build_usa_update_command(run_id=run_id, vintage_options=vintage_options),
+            ]
+            self._run_in_background(lambda: self._execute_command_chain(commands, "USA Quarter Update", "usa"))
+            return
         command = build_usa_update_command(run_id=run_id)
         self._run_in_background(lambda: self._execute_single_command(command, "USA Quarter Update", "usa"))
 

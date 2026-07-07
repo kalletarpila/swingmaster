@@ -1,4 +1,5 @@
 """Build deterministic commands for fundamental pipeline CLIs."""
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -6,6 +7,7 @@ try:
     from .config import (
         CLI_MISSING_PERIOD_RECOVERY_CHECK,
         CLI_QUARTER_UPDATE,
+        CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT,
         CLI_REPORTING_FREQUENCY_AUDIT,
         CLI_SCORE_PERCENTILE,
         CLI_TTM_BATCH,
@@ -23,6 +25,7 @@ except ImportError:  # pragma: no cover
     from config import (
         CLI_MISSING_PERIOD_RECOVERY_CHECK,
         CLI_QUARTER_UPDATE,
+        CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT,
         CLI_REPORTING_FREQUENCY_AUDIT,
         CLI_SCORE_PERCENTILE,
         CLI_TTM_BATCH,
@@ -38,8 +41,19 @@ except ImportError:  # pragma: no cover
     )
 
 
-def build_usa_update_command(run_id: str) -> list[str]:
-    return [
+@dataclass(frozen=True)
+class UsaQuarterUpdateVintageOptions:
+    """Explicit PIT/vintage metadata for a USA quarter update UI launch."""
+
+    launch_timestamp_utc: str
+    vintage_run_id: str
+
+
+def build_usa_update_command(
+    run_id: str,
+    vintage_options: UsaQuarterUpdateVintageOptions | None = None,
+) -> list[str]:
+    command = [
         str(PYTHON_EXECUTABLE),
         str(CLI_QUARTER_UPDATE),
         "--db",
@@ -50,6 +64,38 @@ def build_usa_update_command(run_id: str) -> list[str]:
         run_id,
         "--market",
         "usa",
+    ]
+    if vintage_options is not None:
+        command.extend(
+            [
+                "--write-vintage",
+                "--vintage-mode",
+                "sec_latest_writer",
+                "--vintage-market",
+                "usa",
+                "--vintage-available-at-utc",
+                vintage_options.launch_timestamp_utc,
+                "--vintage-ingested-at-utc",
+                vintage_options.launch_timestamp_utc,
+                "--vintage-run-id",
+                vintage_options.vintage_run_id,
+                "--vintage-yahoo-aware-action",
+                "plan_only",
+            ]
+        )
+    return command
+
+
+def build_usa_vintage_preflight_command() -> list[str]:
+    return [
+        str(PYTHON_EXECUTABLE),
+        str(CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT),
+        "--fundamentals-db",
+        str(FUNDAMENTALS_USA_DB),
+        "--market",
+        "usa",
+        "--format",
+        "json",
     ]
 
 

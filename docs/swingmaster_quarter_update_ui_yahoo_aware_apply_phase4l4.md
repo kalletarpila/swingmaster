@@ -6,7 +6,7 @@ Date: 2026-07-07
 
 Phase 4L4 adds UI support for a second explicit action after a USA quarter update vintage opt-in run reports that Yahoo-aware or final mixed vintage corrections are required.
 
-The primary USA quarter update remains planning-only for Yahoo-aware execution. It does not automatically apply final mixed or Yahoo-only vintage corrections.
+The primary USA quarter update remains planning-only for Yahoo-aware execution. Phase 4L5 can run a gated automatic follow-up apply after a vintage opt-in primary run, but the primary command itself still never writes Yahoo-aware corrections.
 
 ## Why A Second Action Is Needed
 
@@ -31,7 +31,7 @@ It never uses:
 --vintage-yahoo-aware-action write
 ```
 
-Yahoo-aware/final mixed apply is a separate explicit UI button.
+Yahoo-aware/final mixed apply is a separate provider-free command path. In Phase 4L4 it is exposed by an explicit UI button; in Phase 4L5 the same command can also run automatically after the primary plan-only summary passes the same gate.
 
 ## Gating Rules
 
@@ -84,7 +84,7 @@ The standalone apply CLI defaults to no-write behavior unless the approval token
 USER_APPROVES_YAHOO_AWARE_VINTAGE_APPLY
 ```
 
-The UI adds this token only for the explicit apply button action. The primary quarter update button never adds it.
+The UI adds this token only for the explicit apply button action or the Phase 4L5 gated auto-apply follow-up. The primary quarter update command never adds it.
 
 ## Parser And Status Display
 
@@ -114,7 +114,13 @@ Phase 4L4 did not write:
 
 Tests use mocks and temp DBs only.
 
-## Next Phase
+## Phase 4L5 Follow-Up
+
+Phase 4L5 adds a safe automatic follow-up after the USA PIT/vintage checkbox workflow. The auto path uses the same provider-free apply CLI and the same Phase 4L4 gate, records `vintage_yahoo_aware_auto_apply_attempted` and `vintage_yahoo_aware_auto_apply_reason`, and disables the manual apply button after successful auto execution.
+
+See [SwingMaster Quarter Update UI Yahoo-Aware Auto Apply Phase 4L5](swingmaster_quarter_update_ui_yahoo_aware_auto_apply_phase4l5.md).
+
+## Next Real Apply
 
 Before any real UI apply:
 

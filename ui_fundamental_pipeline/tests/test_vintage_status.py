@@ -3,6 +3,7 @@ import unittest
 from ui_fundamental_pipeline.vintage_status import (
     map_vintage_completion_status_to_ui_severity,
     map_yahoo_aware_execution_status_to_ui_severity,
+    should_auto_apply_yahoo_aware_vintage,
     should_enable_yahoo_aware_apply,
 )
 
@@ -138,6 +139,85 @@ class TestYahooAwareApplyGate(unittest.TestCase):
         for status in ("BLOCKED_POST_RUN_DRIFT", "UNKNOWN"):
             enabled, _ = should_enable_yahoo_aware_apply({"vintage_completion_status": status})
             self.assertFalse(enabled)
+
+
+class TestYahooAwareAutoApplyGate(unittest.TestCase):
+    def test_safe_final_mixed_summary_enables_auto_apply(self):
+        enabled, reason = should_auto_apply_yahoo_aware_vintage(
+            {
+                "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+                "vintage_completion_status": "FINAL_MIXED_REQUIRED",
+                "vintage_yahoo_aware_planning_status": "FINAL_MIXED_PLAN_READY",
+                "vintage_planned_final_mixed_rows": "1",
+                "vintage_yahoo_aware_blocked_rows": "0",
+                "vintage_yahoo_aware_unknown_provenance_fields": "",
+            },
+            user_enabled_vintage=True,
+        )
+        self.assertTrue(enabled)
+        self.assertIn("FINAL_MIXED_PLAN_READY", reason)
+
+    def test_safe_yahoo_summary_enables_auto_apply(self):
+        enabled, reason = should_auto_apply_yahoo_aware_vintage(
+            {
+                "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+                "vintage_completion_status": "YAHOO_VINTAGE_REQUIRED",
+                "vintage_yahoo_aware_planning_status": "YAHOO_VINTAGE_PLAN_READY",
+                "vintage_planned_yahoo_vintage_rows": "1",
+            },
+            user_enabled_vintage=True,
+        )
+        self.assertTrue(enabled)
+        self.assertIn("YAHOO_VINTAGE_PLAN_READY", reason)
+
+    def test_checkbox_off_disables_auto_apply(self):
+        enabled, reason = should_auto_apply_yahoo_aware_vintage(
+            {
+                "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+                "vintage_completion_status": "FINAL_MIXED_REQUIRED",
+                "vintage_yahoo_aware_planning_status": "FINAL_MIXED_PLAN_READY",
+                "vintage_planned_final_mixed_rows": "1",
+            },
+            user_enabled_vintage=False,
+        )
+        self.assertFalse(enabled)
+        self.assertIn("checkbox", reason.lower())
+
+    def test_sec_sufficient_disables_auto_apply(self):
+        enabled, _ = should_auto_apply_yahoo_aware_vintage(
+            {"vintage_completion_status": "SEC_VINTAGE_SUFFICIENT"},
+            user_enabled_vintage=True,
+        )
+        self.assertFalse(enabled)
+
+    def test_blocked_unknown_and_unsafe_summaries_disable_auto_apply(self):
+        cases = [
+            {"vintage_completion_status": "BLOCKED_POST_RUN_DRIFT"},
+            {"vintage_completion_status": "UNKNOWN"},
+            {
+                "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+                "vintage_completion_status": "FINAL_MIXED_REQUIRED",
+                "vintage_yahoo_aware_planning_status": "FINAL_MIXED_PLAN_READY",
+                "vintage_planned_final_mixed_rows": "1",
+                "vintage_yahoo_aware_blocked_rows": "1",
+            },
+            {
+                "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+                "vintage_completion_status": "FINAL_MIXED_REQUIRED",
+                "vintage_yahoo_aware_planning_status": "FINAL_MIXED_PLAN_READY",
+                "vintage_planned_final_mixed_rows": "1",
+                "vintage_yahoo_aware_unknown_provenance_fields": "AAPL:field",
+            },
+            {
+                "vintage_completion_status": "FINAL_MIXED_REQUIRED",
+                "vintage_yahoo_aware_planning_status": "FINAL_MIXED_PLAN_READY",
+                "vintage_planned_final_mixed_rows": "1",
+            },
+        ]
+        for summary in cases:
+            with self.subTest(summary=summary):
+                enabled, _ = should_auto_apply_yahoo_aware_vintage(summary, user_enabled_vintage=True)
+                self.assertFalse(enabled)
 
 
 if __name__ == "__main__":

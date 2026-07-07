@@ -109,3 +109,24 @@ def should_enable_yahoo_aware_apply(summary: dict) -> tuple[bool, str]:
         return False, "Apply blocked by post-run parity status."
 
     return True, "Yahoo-aware apply is available after explicit operator confirmation."
+
+
+def should_auto_apply_yahoo_aware_vintage(
+    summary: dict,
+    *,
+    user_enabled_vintage: bool,
+) -> tuple[bool, str]:
+    """Decide whether the UI may auto-run the Yahoo-aware apply follow-up."""
+    if not user_enabled_vintage:
+        return False, "Auto apply requires the PIT/vintage checkbox to be enabled for the primary run."
+
+    enabled, reason = should_enable_yahoo_aware_apply(summary)
+    if not enabled:
+        return False, reason
+
+    completion_status = str(summary.get("vintage_completion_status") or "").strip()
+    if completion_status == "FINAL_MIXED_REQUIRED":
+        return True, "Auto apply allowed for FINAL_MIXED_PLAN_READY summary."
+    if completion_status == "YAHOO_VINTAGE_REQUIRED":
+        return True, "Auto apply allowed for YAHOO_VINTAGE_PLAN_READY summary."
+    return False, f"Auto apply is not required for completion status {completion_status or 'UNKNOWN'}."

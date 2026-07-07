@@ -6,9 +6,6 @@ import flet as ft
 from ui_fundamental_pipeline.config import FUNDAMENTALS_USA_DB, OSAKEDATA_DB
 from ui_fundamental_pipeline.executor import ProcessExecutor
 from ui_fundamental_pipeline.main import SwingMasterApp
-from ui_fundamental_pipeline.vintage_status import map_vintage_completion_status_to_ui_severity
-
-
 class FakeExecutor:
     def __init__(self, responses):
         self.responses = list(responses)
@@ -20,6 +17,36 @@ class FakeExecutor:
         if summary:
             on_summary(summary)
         return exit_code, []
+
+
+def _safe_final_mixed_summary():
+    return {
+        "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+        "vintage_completion_status": "FINAL_MIXED_REQUIRED",
+        "vintage_yahoo_aware_planning_status": "FINAL_MIXED_PLAN_READY",
+        "vintage_planned_final_mixed_rows": "1",
+        "vintage_yahoo_aware_blocked_rows": "0",
+        "vintage_yahoo_aware_unknown_provenance_fields": "",
+    }
+
+
+def _safe_yahoo_summary():
+    return {
+        "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+        "vintage_completion_status": "YAHOO_VINTAGE_REQUIRED",
+        "vintage_yahoo_aware_planning_status": "YAHOO_VINTAGE_PLAN_READY",
+        "vintage_planned_yahoo_vintage_rows": "1",
+        "vintage_yahoo_aware_blocked_rows": "0",
+        "vintage_yahoo_aware_unknown_provenance_fields": "",
+    }
+
+
+def _apply_completed_summary():
+    return {
+        "vintage_yahoo_aware_execution_status": "EXECUTION_COMPLETED",
+        "vintage_yahoo_aware_rows_blocked": "0",
+        "vintage_yahoo_aware_error": "",
+    }
 
 
 def _mock_page():
@@ -86,14 +113,14 @@ class TestUiQuarterUpdateVintageSmoke(unittest.TestCase):
         app._run_in_background = lambda target: captured.setdefault("target", target)
         with patch("ui_fundamental_pipeline.main.get_run_id_usa", return_value="USA_QUARTER_UPDATE_2026-05-10__QUARTERLY"):
             with patch("ui_fundamental_pipeline.main.get_utc_launch_timestamp", return_value="2026-05-10T12:00:00Z"):
-                with patch.object(app, "_execute_command_chain") as execute_chain:
+                with patch.object(app, "_execute_usa_quarter_update_workflow") as execute_chain:
                     app._run_usa_update()
                     captured["target"]()
 
         execute_chain.assert_called_once()
-        commands, status_prefix, market = execute_chain.call_args[0]
+        commands, status_prefix = execute_chain.call_args[0]
+        self.assertTrue(execute_chain.call_args.kwargs["auto_apply_enabled"])
         self.assertEqual(status_prefix, "USA Quarter Update")
-        self.assertEqual(market, "usa")
         self.assertEqual(len(commands), 2)
 
         preflight_command, quarter_update_command = commands
@@ -138,19 +165,121 @@ class TestUiQuarterUpdateVintageSmoke(unittest.TestCase):
         fake_executor = FakeExecutor([(1, {})])
         app.executor = fake_executor
 
-        app._execute_command_chain(
+        app._execute_usa_quarter_update_workflow(
             [
                 ["python", "-m", "swingmaster.cli.preflight_quarter_update_vintage_readiness"],
                 ["python", "run_fundamental_quarter_update.py", "--write-vintage"],
             ],
             "USA Quarter Update",
-            "usa",
+            auto_apply_enabled=True,
         )
 
         self.assertEqual(len(fake_executor.commands), 1)
         self.assertIn("preflight_quarter_update_vintage_readiness", " ".join(fake_executor.commands[0]))
         self.assertEqual(app.usa_panel.status_badge.value, "USA Quarter Update: exit=1")
         self.assertEqual(app.usa_panel.status_badge.color, "red")
+
+    def test_sec_sufficient_primary_does_not_auto_apply(self):
+        app = self._app()
+        fake_executor = FakeExecutor(
+            [
+                (0, {}),
+                (
+                    0,
+                    {
+                        "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+                        "vintage_completion_status": "SEC_VINTAGE_SUFFICIENT",
+                        "vintage_post_run_parity_status": "OK",
+                    },
+                ),
+            ]
+        )
+        app.executor = fake_executor
+
+        app._execute_usa_quarter_update_workflow(
+            [["python", "-m", "swingmaster.cli.preflight_quarter_update_vintage_readiness"], ["python", "quarter"]],
+            "USA Quarter Update",
+            auto_apply_enabled=True,
+        )
+
+        self.assertEqual(len(fake_executor.commands), 2)
+        self.assertEqual(app.last_usa_quarter_update_summary["vintage_yahoo_aware_auto_apply_attempted"], "0")
+
+    def test_safe_final_mixed_primary_auto_runs_provider_free_apply(self):
+        app = self._app()
+        fake_executor = FakeExecutor([(0, {}), (0, _safe_final_mixed_summary()), (0, _apply_completed_summary())])
+        app.executor = fake_executor
+
+        with patch("ui_fundamental_pipeline.main.get_utc_launch_timestamp", return_value="2026-05-10T13:00:00Z"):
+            app._execute_usa_quarter_update_workflow(
+                [
+                    ["python", "-m", "swingmaster.cli.preflight_quarter_update_vintage_readiness"],
+                    ["python", "run_fundamental_quarter_update.py", "--vintage-yahoo-aware-action", "plan_only"],
+                ],
+                "USA Quarter Update",
+                auto_apply_enabled=True,
+            )
+
+        self.assertEqual(len(fake_executor.commands), 3)
+        apply_command = fake_executor.commands[2]
+        joined = " ".join(apply_command)
+        self.assertIn("swingmaster.cli.apply_quarter_update_yahoo_aware_vintage", joined)
+        self.assertNotIn("run_fundamental_quarter_update", joined)
+        self.assertNotIn("--provider", apply_command)
+        self.assertNotIn("--vintage-yahoo-aware-action", apply_command)
+        self.assertIn("--approval-token", apply_command)
+        self.assertTrue(app.usa_panel.yahoo_aware_apply_btn.disabled)
+        self.assertEqual(app.usa_panel.yahoo_aware_apply_btn.tooltip, "Auto apply completed.")
+
+    def test_safe_yahoo_primary_auto_runs_provider_free_apply(self):
+        app = self._app()
+        fake_executor = FakeExecutor([(0, {}), (0, _safe_yahoo_summary()), (0, _apply_completed_summary())])
+        app.executor = fake_executor
+
+        app._execute_usa_quarter_update_workflow(
+            [["python", "-m", "swingmaster.cli.preflight_quarter_update_vintage_readiness"], ["python", "quarter"]],
+            "USA Quarter Update",
+            auto_apply_enabled=True,
+        )
+
+        self.assertEqual(len(fake_executor.commands), 3)
+        self.assertIn("swingmaster.cli.apply_quarter_update_yahoo_aware_vintage", " ".join(fake_executor.commands[2]))
+
+    def test_blocked_primary_summary_does_not_auto_apply(self):
+        app = self._app()
+        fake_executor = FakeExecutor([(0, {}), (0, {"vintage_completion_status": "BLOCKED_POST_RUN_DRIFT"})])
+        app.executor = fake_executor
+
+        app._execute_usa_quarter_update_workflow(
+            [["python", "-m", "swingmaster.cli.preflight_quarter_update_vintage_readiness"], ["python", "quarter"]],
+            "USA Quarter Update",
+            auto_apply_enabled=True,
+        )
+
+        self.assertEqual(len(fake_executor.commands), 2)
+        self.assertTrue(app.usa_panel.yahoo_aware_apply_btn.disabled)
+
+    def test_primary_plan_only_command_is_never_write_for_auto_apply_workflow(self):
+        app = self._app()
+        app.usa_panel.vintage_write_checkbox.value = True
+        captured = {}
+
+        app._run_in_background = lambda target: captured.setdefault("target", target)
+        with patch("ui_fundamental_pipeline.main.get_run_id_usa", return_value="USA_QUARTER_UPDATE_2026-05-10__QUARTERLY"):
+            with patch("ui_fundamental_pipeline.main.get_utc_launch_timestamp", return_value="2026-05-10T12:00:00Z"):
+                with patch.object(app, "_execute_usa_quarter_update_workflow") as execute_chain:
+                    app._run_usa_update()
+                    captured["target"]()
+
+        quarter_update_command = execute_chain.call_args[0][0][1]
+        self.assertEqual(
+            quarter_update_command[quarter_update_command.index("--vintage-yahoo-aware-action") + 1],
+            "plan_only",
+        )
+        self.assertNotEqual(
+            quarter_update_command[quarter_update_command.index("--vintage-yahoo-aware-action") + 1],
+            "write",
+        )
 
     def test_summary_key_value_parser_reads_vintage_statuses(self):
         executor = ProcessExecutor()
@@ -195,6 +324,8 @@ class TestUiQuarterUpdateVintageSmoke(unittest.TestCase):
             ),
             ({"vintage_completion_status": "FINAL_MIXED_REQUIRED"}, "review", "orange"),
             ({"vintage_completion_status": "YAHOO_VINTAGE_REQUIRED"}, "review", "orange"),
+            ({"vintage_yahoo_aware_execution_status": "EXECUTION_COMPLETED"}, "success", "green"),
+            ({"vintage_yahoo_aware_execution_status": "EXECUTION_BLOCKED"}, "stop", "red"),
             ({"vintage_completion_status": "BLOCKED_POST_RUN_DRIFT"}, "stop", "red"),
             ({"vintage_completion_status": "UNKNOWN"}, "stop", "red"),
             ({}, "unknown", "green"),
@@ -204,7 +335,6 @@ class TestUiQuarterUpdateVintageSmoke(unittest.TestCase):
             with self.subTest(summary=summary):
                 app = self._app()
                 app.output_panel.set_summary(summary)
-                self.assertEqual(map_vintage_completion_status_to_ui_severity(summary), expected_severity)
                 self.assertEqual(app._status_color(0), expected_color)
                 suffix = app._vintage_status_suffix()
                 if expected_severity == "unknown":

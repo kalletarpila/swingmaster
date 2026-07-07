@@ -46,6 +46,8 @@ try:
     from .executor import ProcessExecutor
     from .vintage_status import (
         map_vintage_completion_status_to_ui_severity,
+        map_yahoo_aware_execution_status_to_ui_severity,
+        should_auto_apply_yahoo_aware_vintage,
         should_enable_yahoo_aware_apply,
     )
 except ImportError:  # pragma: no cover
@@ -87,6 +89,8 @@ except ImportError:  # pragma: no cover
     from executor import ProcessExecutor
     from vintage_status import (
         map_vintage_completion_status_to_ui_severity,
+        map_yahoo_aware_execution_status_to_ui_severity,
+        should_auto_apply_yahoo_aware_vintage,
         should_enable_yahoo_aware_apply,
     )
 
@@ -319,7 +323,8 @@ class SwingMasterApp:
         for idx, command in enumerate(commands, start=1):
             if self.stop_requested:
                 self._log("Run stopped by user.")
-                break
+                self._lock_ui(False)
+                return
             self._set_progress(idx - 1, total, status_prefix)
             exit_code, _ = self.executor.execute(
                 command=command,
@@ -340,8 +345,89 @@ class SwingMasterApp:
         target_panel.set_status(f"{status_prefix}: exit=0{suffix}", color)
         self._lock_ui(False)
 
+    def _execute_usa_quarter_update_workflow(
+        self,
+        commands: list[list[str]],
+        status_prefix: str,
+        *,
+        auto_apply_enabled: bool,
+    ) -> None:
+        self.output_panel.clear_output()
+        total = len(commands) + 1
+        self._set_progress(0, total, status_prefix)
+
+        for idx, command in enumerate(commands, start=1):
+            if self.stop_requested:
+                self._log("Run stopped by user.")
+                break
+            self._set_progress(idx - 1, total, status_prefix)
+            exit_code, _ = self.executor.execute(
+                command=command,
+                on_output=self._ui_callback(self.output_panel.add_line),
+                on_summary=self._ui_callback(lambda summary: self._handle_summary("usa", summary)),
+            )
+            if exit_code != 0:
+                self.usa_panel.set_status(f"{status_prefix}: exit={exit_code}", "red")
+                self._set_progress(idx, total, status_prefix)
+                self._lock_ui(False)
+                return
+            self._set_progress(idx, total, status_prefix)
+
+        summary = self.last_usa_quarter_update_summary.copy()
+        auto_apply, reason = should_auto_apply_yahoo_aware_vintage(
+            summary,
+            user_enabled_vintage=auto_apply_enabled,
+        )
+        decision_summary = summary.copy()
+        decision_summary["vintage_yahoo_aware_auto_apply_attempted"] = "1" if auto_apply else "0"
+        decision_summary["vintage_yahoo_aware_auto_apply_reason"] = reason
+        self._handle_summary("usa", decision_summary)
+
+        if not auto_apply:
+            color = self._status_color(0)
+            suffix = self._vintage_status_suffix()
+            self.usa_panel.set_status(f"{status_prefix}: exit=0{suffix}", color)
+            self._set_progress(total, total, status_prefix)
+            self._lock_ui(False)
+            return
+
+        source_run_id = str(summary["run_id"])
+        launch_timestamp_utc = get_utc_launch_timestamp()
+        apply_command = build_usa_yahoo_aware_apply_command(
+            UsaYahooAwareApplyOptions(
+                source_run_id=source_run_id,
+                vintage_run_id=get_yahoo_aware_vintage_run_id_usa(source_run_id),
+                launch_timestamp_utc=launch_timestamp_utc,
+                approved=True,
+            )
+        )
+        self._set_progress(total - 1, total, "USA Yahoo-Aware Vintage Apply")
+        apply_exit_code, _ = self.executor.execute(
+            command=apply_command,
+            on_output=self._ui_callback(self.output_panel.add_line),
+            on_summary=self._ui_callback(lambda summary: self._handle_summary("usa", summary)),
+        )
+
+        color = self._status_color(apply_exit_code)
+        suffix = self._vintage_status_suffix()
+        self.usa_panel.set_status(
+            f"{status_prefix} + Yahoo-Aware Apply: exit={apply_exit_code}{suffix}",
+            color,
+        )
+        if map_yahoo_aware_execution_status_to_ui_severity(self.output_panel._current_summary) == "success":
+            self.usa_panel.set_yahoo_aware_apply_available(False, "Auto apply completed.")
+        self._set_progress(total, total, "USA Yahoo-Aware Vintage Apply")
+        self._lock_ui(False)
+
     def _status_color(self, exit_code: int) -> str:
         if exit_code != 0:
+            return "red"
+        execution_severity = map_yahoo_aware_execution_status_to_ui_severity(self.output_panel._current_summary)
+        if execution_severity == "success":
+            return "green"
+        if execution_severity == "review":
+            return "orange"
+        if execution_severity == "stop":
             return "red"
         severity = map_vintage_completion_status_to_ui_severity(self.output_panel._current_summary)
         if severity == "success":
@@ -354,6 +440,10 @@ class SwingMasterApp:
 
     def _vintage_status_suffix(self) -> str:
         summary = self.output_panel._current_summary
+        execution_status = summary.get("vintage_yahoo_aware_execution_status")
+        if execution_status:
+            severity = map_yahoo_aware_execution_status_to_ui_severity(summary)
+            return f" yahoo_aware_execution={execution_status} severity={severity}"
         completion_status = summary.get("vintage_completion_status")
         if completion_status:
             severity = map_vintage_completion_status_to_ui_severity(summary)
@@ -415,7 +505,13 @@ class SwingMasterApp:
                 build_usa_vintage_preflight_command(),
                 build_usa_update_command(run_id=run_id, vintage_options=vintage_options),
             ]
-            self._run_in_background(lambda: self._execute_command_chain(commands, "USA Quarter Update", "usa"))
+            self._run_in_background(
+                lambda: self._execute_usa_quarter_update_workflow(
+                    commands,
+                    "USA Quarter Update",
+                    auto_apply_enabled=True,
+                )
+            )
             return
         command = build_usa_update_command(run_id=run_id)
         self._run_in_background(lambda: self._execute_single_command(command, "USA Quarter Update", "usa"))

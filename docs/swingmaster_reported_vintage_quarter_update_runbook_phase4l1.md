@@ -10,7 +10,7 @@ This document is operational guidance only. Phase 4L1 did not run the real `quar
 
 For UI-triggered runs, Phase 4L3 adds a no-provider smoke test that verifies the UI command chain, vintage flags, preflight failure stop behavior, `SUMMARY key=value` parsing, and severity mapping without executing provider commands. See [SwingMaster Quarter Update UI Vintage Smoke Phase 4L3](swingmaster_quarter_update_ui_vintage_smoke_phase4l3.md).
 
-If the UI-triggered run returns `FINAL_MIXED_REQUIRED` or `YAHOO_VINTAGE_REQUIRED`, use the separate explicit Phase 4L4 apply action after reviewing planned counts and blockers. Do not rerun the provider update to apply Yahoo-aware/final mixed corrections. See [SwingMaster Quarter Update UI Yahoo-Aware Apply Phase 4L4](swingmaster_quarter_update_ui_yahoo_aware_apply_phase4l4.md).
+If the UI-triggered run returns `FINAL_MIXED_REQUIRED` or `YAHOO_VINTAGE_REQUIRED`, the Phase 4L5 UI can run a gated automatic provider-free apply follow-up when the PIT/vintage checkbox was enabled and the Phase 4L4 apply gate passes. If auto apply is not attempted but the gate is safe, use the separate explicit Phase 4L4 apply action after reviewing planned counts and blockers. Do not rerun the provider update to apply Yahoo-aware/final mixed corrections. See [SwingMaster Quarter Update UI Yahoo-Aware Apply Phase 4L4](swingmaster_quarter_update_ui_yahoo_aware_apply_phase4l4.md) and [SwingMaster Quarter Update UI Yahoo-Aware Auto Apply Phase 4L5](swingmaster_quarter_update_ui_yahoo_aware_auto_apply_phase4l5.md).
 
 Run the read-only readiness smoke before any real Q update:
 
@@ -82,6 +82,8 @@ The operator-confirmed OHLCV SQLite DB for USA valuation is `/home/kalle/project
 Do not add `--dry-run` to the real command. `--dry-run` is useful for command shape testing, but it is not the real update.
 
 Do not use `--skip-ack` for the normal production run unless intentionally reprocessing without acknowledging quarter-state rows.
+
+In the UI, the Phase 4L5 auto-apply follow-up must not change this primary command. The primary command remains `plan_only`; any apply is a separate no-provider command after summary parsing and gating.
 
 ## 3. Timestamp And Run-ID Convention
 

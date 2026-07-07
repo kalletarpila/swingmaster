@@ -125,6 +125,35 @@ def test_supported_latest_builds_ready_candidate(tmp_path: Path) -> None:
     assert str(summary["candidate_statement_vintage_id"]).startswith("sec_edgar:usa:GIS:2025-05-25")
 
 
+def test_duplicate_sec_component_facts_still_build_ready_total_debt_provenance(tmp_path: Path) -> None:
+    db_path = tmp_path / "duplicate_sec_component_facts.db"
+    run_migration(db_path)
+    with _connect(db_path) as conn:
+        _insert_latest(conn, total_debt=100.0, cash=None)
+        _insert_visible_vintage(conn, total_debt=40.0)
+        _insert_sec_fact(
+            conn,
+            "RevenueFromContractWithCustomerExcludingAssessedTax|form=10-K|unit=USD|fy=2026|fp=FY|frame=NULL|start=NULL|filed=2026-07-01",
+            10.0,
+            "income",
+        )
+        _insert_sec_fact(conn, "LongTermDebtCurrent|form=10-Q|unit=USD|fy=2026|fp=FY|frame=NULL|start=NULL|filed=2026-06-30", 999.0)
+        _insert_sec_fact(conn, "LongTermDebtCurrent|form=10-K|unit=USD|fy=2026|fp=FY|frame=NULL|start=NULL|filed=2026-07-01", 10.0)
+        _insert_sec_fact(conn, "LongTermDebtNoncurrent|form=10-K|unit=USD|fy=2026|fp=FY|frame=NULL|start=NULL|filed=2026-07-01", 50.0)
+        _insert_sec_fact(conn, "ShortTermBorrowings|form=10-K|unit=USD|fy=2026|fp=FY|frame=NULL|start=NULL|filed=2026-07-01", 40.0)
+        conn.commit()
+
+    summary = _run(db_path)
+    total_debt_provenance = {
+        str(row["field_name"]): row for row in summary["candidate_provenance_rows_sample"]  # type: ignore[index]
+    }["total_debt"]
+
+    assert summary["overall_status"] == "DRY_RUN_READY"
+    assert summary["unknown_provenance_fields"] == []
+    assert total_debt_provenance["source_provider"] == "sec_edgar"
+    assert "ShortTermBorrowings" in str(total_debt_provenance["source_row_ref"])
+
+
 def test_visible_legacy_lower_value_is_described(tmp_path: Path) -> None:
     db_path = tmp_path / "mismatch.db"
     _base_db(db_path)

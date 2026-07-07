@@ -13,6 +13,7 @@ from swingmaster.fundamentals.reported_quarterly_dual_write import (
 from swingmaster.fundamentals.reported_sec_vintage_metadata import (
     build_sec_vintage_metadata,
 )
+from swingmaster.fundamentals.sec_reconstruct_quarterly import DEBT_GROUPS
 
 
 SEC_PROVIDER = "sec_edgar"
@@ -21,6 +22,10 @@ UNKNOWN_PROVENANCE_ROLE = "UNKNOWN_RETAINED"
 UNKNOWN_MERGE_ACTION = "SOURCE_NOT_PROVIDED"
 SEC_PROVENANCE_ROLE = "PRIMARY_REPORTED"
 SEC_MERGE_ACTION = "SEC_RETAINED"
+DERIVED_TOTAL_DEBT_GROUPS = (
+    ("LongTermDebtCurrent", "LongTermDebtNoncurrent", "ShortTermBorrowings"),
+    *tuple(tuple(group) for group in DEBT_GROUPS),
+)
 
 
 def build_latest_writer_sec_vintage_candidate(
@@ -133,15 +138,13 @@ def _build_latest_writer_field_facts(
         if facts:
             by_field[field_name] = facts
 
-    if normalized_row.get("total_debt") is not None and "total_debt" not in by_field:
-        debt_facts = _matching_facts(
-            exact_facts,
-            "balance",
-            ("LongTermDebtCurrent", "LongTermDebtNoncurrent", "ShortTermBorrowings"),
-            expected_value=None,
-        )
-        if debt_facts and _values_equal(sum(float(fact["field_value"]) for fact in debt_facts), normalized_row.get("total_debt")):
-            by_field["total_debt"] = debt_facts
+    derived_total_debt = build_sec_component_provenance_for_derived_field(
+        field_name="total_debt",
+        latest_value=normalized_row.get("total_debt"),
+        sec_facts=exact_facts,
+    )
+    if derived_total_debt is not None:
+        by_field["total_debt"] = derived_total_debt["facts"]
 
     if normalized_row.get("free_cashflow") is not None:
         fcf_facts = [*by_field.get("operating_cashflow", []), *by_field.get("capex", [])]
@@ -154,6 +157,47 @@ def _build_latest_writer_field_facts(
             by_field["free_cashflow"] = _dedupe_facts(fcf_facts)
 
     return by_field
+
+
+def build_sec_component_provenance_for_derived_field(
+    *,
+    field_name: str,
+    latest_value: Any,
+    sec_facts: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    if field_name != "total_debt" or latest_value is None:
+        return None
+    exact_balance_facts = [
+        dict(fact)
+        for fact in sec_facts
+        if str(fact.get("statement_type")) == "balance"
+        and str(fact.get("source", SEC_PROVIDER)) == SEC_PROVIDER
+        and fact.get("field_value") is not None
+    ]
+    if not exact_balance_facts:
+        return None
+
+    grouped = _debt_facts_by_group_key(exact_balance_facts)
+    for group in DERIVED_TOTAL_DEBT_GROUPS:
+        required = set(group)
+        for group_key in sorted(grouped):
+            facts_by_tag = grouped[group_key]
+            if not required.issubset(facts_by_tag):
+                continue
+            selected = [_pick_deterministic_fact(facts_by_tag[tag]) for tag in group]
+            if any(fact is None for fact in selected):
+                continue
+            selected_facts = [fact for fact in selected if fact is not None]
+            component_sum = sum(float(fact["field_value"]) for fact in selected_facts)
+            if _values_equal(component_sum, latest_value):
+                return {
+                    "field_name": field_name,
+                    "facts": _dedupe_facts(selected_facts),
+                    "component_tags": list(group),
+                    "component_sum": component_sum,
+                    "transform_action": "SEC_COMPONENT_SUM",
+                }
+    return None
 
 
 def _matching_facts(
@@ -175,6 +219,60 @@ def _matching_facts(
         ):
             matches.append(dict(fact))
     return _dedupe_facts(matches)
+
+
+def _debt_facts_by_group_key(
+    facts: Sequence[Mapping[str, Any]],
+) -> dict[tuple[str, str, str, str, str], dict[str, list[dict[str, Any]]]]:
+    grouped: dict[tuple[str, str, str, str, str], dict[str, list[dict[str, Any]]]] = {}
+    debt_tags = {tag for group in DERIVED_TOTAL_DEBT_GROUPS for tag in group}
+    for fact in facts:
+        parsed = _parse_sec_fact_name(str(fact.get("field_name")))
+        if parsed is None:
+            continue
+        tag = parsed["tag"]
+        if tag not in debt_tags:
+            continue
+        key = (
+            _normalize_ticker(fact.get("ticker")),
+            str(fact.get("period_end_date")),
+            parsed.get("unit", ""),
+            parsed.get("fy", ""),
+            parsed.get("fp", ""),
+        )
+        grouped.setdefault(key, {}).setdefault(tag, []).append(dict(fact))
+    return grouped
+
+
+def _pick_deterministic_fact(facts: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    if not facts:
+        return None
+    return sorted(
+        (dict(fact) for fact in facts),
+        key=lambda fact: (
+            _form_priority(_parse_sec_fact_name(str(fact.get("field_name"))) or {}),
+            str(fact.get("retrieved_at_utc") or ""),
+            str(fact.get("run_id") or ""),
+            str(fact.get("field_name") or ""),
+        ),
+    )[-1]
+
+
+def _form_priority(parsed: Mapping[str, Any]) -> int:
+    return {"10-Q": 1, "10-K": 2}.get(str(parsed.get("form")), 0)
+
+
+def _parse_sec_fact_name(field_name: str) -> dict[str, str] | None:
+    parts = field_name.split("|")
+    if not parts:
+        return None
+    metadata = {"tag": parts[0]}
+    for part in parts[1:]:
+        if "=" not in part:
+            return None
+        key, value = part.split("=", 1)
+        metadata[key] = value
+    return metadata
 
 
 def _values_equal(left: Any, right: Any) -> bool:

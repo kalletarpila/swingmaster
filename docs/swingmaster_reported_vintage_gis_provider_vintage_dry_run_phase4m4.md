@@ -100,9 +100,32 @@ The existing SEC latest-writer helper builds `total_debt=14878600000.0`, but its
 
 This means the next writing phase should not simply apply the candidate as-is. It should first make the total debt provenance explicit from the three SEC debt components, then rerun this dry-run and require `DRY_RUN_READY`.
 
-## Recommendation
+## Phase 4M5 Follow-Up
 
-Next phase should be narrow and GIS-only:
+Phase 4M5 fixed the SEC latest-writer helper so derived `total_debt` can receive SEC component provenance when the latest value equals a supported same-period debt component sum.
+
+Rerunning the GIS dry-run changed the result to:
+
+- overall_status: `DRY_RUN_READY`
+- unknown_provenance_count: `0`
+- unknown_provenance_fields: `[]`
+- planned_vintage_rows: `1`
+- planned_provenance_rows: `11`
+- candidate statement_vintage_id: `sec_edgar:usa:GIS:2025-05-25:9a81f59e8511cac0`
+- candidate `total_debt=14878600000.0`
+
+The `total_debt` provenance now uses:
+
+- source_provider: `sec_edgar`
+- provenance_role: `PRIMARY_REPORTED`
+- merge_action: `SEC_RETAINED`
+- source_row_ref containing `LongTermDebtCurrent`, `LongTermDebtNoncurrent`, and `ShortTermBorrowings`
+
+See `docs/swingmaster_reported_vintage_sec_derived_total_debt_provenance_phase4m5.md`.
+
+## Original Recommendation
+
+At the end of Phase 4M4, the next phase was expected to be narrow and GIS-only:
 
 1. Enhance SEC latest-writer provenance for derived `total_debt` so it references `LongTermDebtCurrent`, `LongTermDebtNoncurrent`, and `ShortTermBorrowings`.
 2. Keep the dry-run status blocked/review-required while any candidate field has unknown provenance.
@@ -114,6 +137,8 @@ Next phase should be narrow and GIS-only:
 4. Only after that, consider a separate explicit approval/write phase for this single GIS vintage supersession.
 
 Do not use Yahoo-aware final-mixed apply, broad recovery, scheduler, refresh, or provider calls for this mismatch.
+
+After Phase 4M5, items 1-3 are complete and the current recommendation is a separate guarded one-row apply phase for GIS only, with backup and post-write verification.
 
 ## Verification
 

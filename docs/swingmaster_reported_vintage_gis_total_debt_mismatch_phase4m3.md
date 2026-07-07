@@ -143,3 +143,14 @@ Phase 4M4 implemented the requested read-only dry-run:
 - status: `DRY_RUN_READY_WITH_UNKNOWN_PROVENANCE`
 
 The dry-run confirms the row/value fix is feasible, but it should not be written yet because `total_debt` still has unknown provenance in the candidate. The next phase should first make derived total debt provenance explicit from the SEC debt components and require `DRY_RUN_READY` before any write/apply phase.
+
+## Phase 4M5 Follow-Up
+
+Phase 4M5 added SEC component-derived provenance for latest-writer `total_debt`. The GIS dry-run now returns:
+
+- status: `DRY_RUN_READY`
+- unknown_provenance_count: `0`
+- candidate statement_vintage_id: `sec_edgar:usa:GIS:2025-05-25:9a81f59e8511cac0`
+- candidate `total_debt=14878600000.0`
+
+The next phase can be a separate guarded one-row apply for this GIS provider-derived vintage, with backup and post-verify. No broad Yahoo-aware apply or recovery is indicated.

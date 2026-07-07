@@ -63,7 +63,7 @@ PYTHONPATH=. python3 -m swingmaster.cli.run_fundamental_quarter_update \
   --db /home/kalle/projects/swingmaster/fundamentals_usa.db \
   --run-id "${RUN_ID}" \
   --market usa \
-  --osakedata-db <OSAKEDATA_DB> \
+  --osakedata-db /home/kalle/projects/rawcandle/data/osakedata.db \
   --write-vintage \
   --vintage-mode sec_latest_writer \
   --vintage-market usa \
@@ -73,7 +73,7 @@ PYTHONPATH=. python3 -m swingmaster.cli.run_fundamental_quarter_update \
   --vintage-yahoo-aware-action plan_only
 ```
 
-`<OSAKEDATA_DB>` must be the operator-confirmed OHLCV SQLite DB used for USA valuation. Existing repo examples commonly use `/home/kalle/projects/rawcandle/data/osakedata.db`, but this runbook did not validate that external path.
+The operator-confirmed OHLCV SQLite DB for USA valuation is `/home/kalle/projects/rawcandle/data/osakedata.db`. Phase 4L1 validated that the path exists, but did not open it for data inspection and did not write to it.
 
 Do not add `--dry-run` to the real command. `--dry-run` is useful for command shape testing, but it is not the real update.
 

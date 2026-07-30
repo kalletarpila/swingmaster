@@ -22,6 +22,7 @@ REQUIRED_TABLES = (
     "rc_fundamental_missing_period_recovery_check",
     "rc_fundamental_quarterly_vintage",
     "rc_fundamental_quarterly_field_provenance",
+    "rc_earnings_event",
 )
 SCHEMA_VERSION = 1
 TTM_COMPONENT_COLUMNS = (
@@ -131,6 +132,23 @@ QUARTERLY_FIELD_PROVENANCE_REQUIRED_COLUMNS = (
     "run_id",
     "enrichment_run_id",
 )
+EARNINGS_EVENT_REQUIRED_COLUMNS = (
+    "id",
+    "market",
+    "ticker",
+    "announcement_at",
+    "announcement_date",
+    "announcement_session",
+    "is_reported",
+    "reported_eps",
+    "estimated_eps",
+    "surprise_pct",
+    "source",
+    "source_observed_at_utc",
+    "source_timezone",
+    "created_at_utc",
+    "updated_at_utc",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -218,6 +236,16 @@ def get_quarterly_vintage_migration_file_path() -> Path:
     )
 
 
+def get_earnings_event_migration_file_path() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent
+        / "infra"
+        / "sqlite"
+        / "migrations"
+        / "029_rc_earnings_event.sql"
+    )
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -238,6 +266,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_reporting_frequency_classification_migration_file_path(),
         get_missing_period_recovery_check_migration_file_path(),
         get_quarterly_vintage_migration_file_path(),
+        get_earnings_event_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")
@@ -480,6 +509,22 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
         raise RuntimeError(
             "FUNDAMENTAL_QUARTERLY_FIELD_PROVENANCE_COLUMNS_MISSING:"
             + ",".join(missing_field_provenance_columns)
+        )
+
+    earnings_event_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_earnings_event)
+            """
+        )
+    }
+    missing_earnings_event_columns = [
+        column_name for column_name in EARNINGS_EVENT_REQUIRED_COLUMNS if column_name not in earnings_event_columns
+    ]
+    if missing_earnings_event_columns:
+        raise RuntimeError(
+            "EARNINGS_EVENT_COLUMNS_MISSING:" + ",".join(missing_earnings_event_columns)
         )
 
     return len(REQUIRED_TABLES)

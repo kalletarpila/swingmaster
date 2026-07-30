@@ -113,23 +113,33 @@ Per-ticker output includes:
 - `ticker`
 - `fundamentals_row_count`
 - `oldest_required_period_end_date`
+- `newest_fundamentals_period_end_date`
 - `fetch_lower_bound`
 - `calculated_limit`
 - `requested_limit`
 - `limit_was_capped`
+- `cap_source`
 - `raw_yahoo_row_count`
 - `completed_qualifying_count`
+- `unreported_count`
+- `duplicate_count`
+- `invalid_count`
 - `oldest_completed_announcement_date`
 - `newest_completed_announcement_date`
 - `covers_oldest_fundamentals_period`
 - `covers_fetch_lower_bound`
 - `coverage_status`
 - `source_status`
+- `planning_classification`
+- `uncovered_actual_days`
+- `uncovered_actual_quarters`
+- `anomaly_flags`
+- `attempt_count`
 - `error_type`
 - `error_message`
 - `elapsed_seconds`
 
-Aggregate output includes counts for coverage statuses, capped limits, source/parse failures, and oldest observed dates across the audited universe.
+Aggregate output includes counts for coverage statuses, capped limits, source/parse failures, planning classifications, anomaly flags, completed-event counts, percentages, and oldest/newest observed dates across the audited universe.
 
 The main business metric is `covers_oldest_fundamentals_period`. A ticker can be `COVERAGE_PARTIAL` because it does not cover the wider 120-day safety margin while still covering the actual oldest fundamentals period. These booleans are reported separately.
 
@@ -142,14 +152,22 @@ Defaults:
 - `--sleep-seconds 0.5`
 - `--max-retries 1`
 
-Retries are bounded and use a simple increasing backoff based on `sleep_seconds`. Rate-limit and HTTP/network-like failures are classified from available exception text when possible. The implementation does not modify yfinance internals and does not cache Yahoo responses in SQLite.
+For longer live audits, the CLI also supports bounded jitter and rate-limit backoff:
+
+- `--sleep-min-seconds`
+- `--sleep-max-seconds`
+- `--rate-limit-backoff-seconds`
+- `--progress-every`
+- `--progress-log`
+
+Retries are bounded and use a simple increasing backoff based on `sleep_seconds`, except identifiable rate-limit failures can use the configured bounded backoff sequence. Rate-limit and HTTP/network-like failures are classified from available exception text when possible. The implementation does not modify yfinance internals and does not cache Yahoo responses in SQLite.
 
 ## Resume Artifacts
 
 JSON artifacts use:
 
 ```text
-artifact_schema_version = 1
+artifact_schema_version = 2
 ```
 
 `--resume-from-json` loads a prior artifact, verifies the schema version and database path identity, preserves deterministic ticker order, skips previously successful tickers, and retries failed tickers.
@@ -159,7 +177,10 @@ Artifacts can be written as JSON and CSV using:
 ```bash
 --output-json path
 --output-csv path
+--output-summary-json path
 ```
+
+When output paths are provided, the CLI writes JSON, CSV, and summary artifacts atomically after each processed ticker. This makes long full-universe audits resumable without re-running already successful tickers.
 
 `--no-network` performs planning-only audit output without Yahoo calls.
 

@@ -375,6 +375,38 @@ def test_audit_ticker_sources_aggregation_selection_and_incompatible_resume(
         audit_yahoo_earnings_coverage.load_resume_artifact(bad, audit_yahoo_earnings_coverage.db_identity(path))
 
 
+def test_audit_rate_limit_backoff_and_three_total_attempts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _db(tmp_path)
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    def fake_fetch(**kwargs: object) -> YahooEarningsResult:
+        calls.append(str(kwargs["ticker"]))
+        if len(calls) < 3:
+            return _source_result((), "SOURCE_FAILED", "429 Too Many Requests")
+        return _source_result((_record(),))
+
+    monkeypatch.setattr(audit_yahoo_earnings_coverage, "fetch_yahoo_earnings_events", fake_fetch)
+    monkeypatch.setattr(audit_yahoo_earnings_coverage.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    row = audit_yahoo_earnings_coverage.audit_ticker(
+        "AAPL",
+        db_path=path,
+        no_network=False,
+        max_retries=2,
+        sleep_seconds=1.0,
+        rate_limit_backoffs=[30.0, 60.0, 120.0],
+    )
+
+    assert calls == ["AAPL", "AAPL", "AAPL"]
+    assert sleeps == [30.0, 60.0]
+    assert row["attempt_count"] == 3
+    assert row["source_status"] == "COVERAGE_OK"
+
+
 def test_read_only_planning_does_not_change_database_content(tmp_path: Path) -> None:
     path = _db(tmp_path)
     before = _table_counts(path)

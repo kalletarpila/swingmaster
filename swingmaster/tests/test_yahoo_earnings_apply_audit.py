@@ -128,6 +128,67 @@ def test_repo_insert_update_unchanged_created_updated_and_no_delete(tmp_path: Pa
     assert row["reported_eps"] == 1.30
 
 
+def test_repo_second_apply_observation_only_is_idempotent_and_preserves_timestamps(tmp_path: Path) -> None:
+    path = _db(tmp_path)
+    first = _record(observed="2026-07-30T14:00:00Z")
+    observed_again = _record(observed="2026-07-31T14:00:00Z")
+
+    with sqlite3.connect(str(path)) as conn:
+        conn.row_factory = sqlite3.Row
+        inserted = apply_earnings_event_upsert(conn, [first], ticker="AAPL", applied_at_utc="2026-07-30T15:00:00Z")
+        second = apply_earnings_event_upsert(
+            conn,
+            [observed_again],
+            ticker="AAPL",
+            applied_at_utc="2026-07-31T15:00:00Z",
+        )
+        row = conn.execute("SELECT * FROM rc_earnings_event WHERE ticker='AAPL'").fetchone()
+
+    assert inserted.inserted_count == 1
+    assert second.inserted_count == 0
+    assert second.updated_count == 0
+    assert second.unchanged_count == 1
+    assert row["source_observed_at_utc"] == "2026-07-30T14:00:00Z"
+    assert row["created_at_utc"] == "2026-07-30T15:00:00Z"
+    assert row["updated_at_utc"] == "2026-07-30T15:00:00Z"
+
+
+def test_repo_multiple_ticker_transactions_and_16_timestamp(tmp_path: Path) -> None:
+    path = _db(tmp_path)
+
+    with sqlite3.connect(str(path)) as conn:
+        conn.row_factory = sqlite3.Row
+        aapl = apply_earnings_event_upsert(conn, [_record("2020-01-28")], ticker="AAPL")
+        msft = apply_earnings_event_upsert(conn, [_record("2020-01-29", ticker="MSFT")], ticker="MSFT")
+        bad = _record("2020-01-30", ticker="MSFT")
+        with pytest.raises(ValueError):
+            apply_earnings_event_upsert(conn, [_record("2020-04-30", ticker="JPM"), bad], ticker="JPM")
+        counts = {
+            row[0]: row[1]
+            for row in conn.execute(
+                """
+                SELECT ticker, COUNT(*)
+                FROM rc_earnings_event
+                GROUP BY ticker
+                """
+            )
+        }
+        row = conn.execute(
+            """
+            SELECT announcement_at, announcement_date, announcement_session
+            FROM rc_earnings_event
+            WHERE ticker = 'AAPL'
+            """
+        ).fetchone()
+
+    assert aapl.inserted_count == 1
+    assert msft.inserted_count == 1
+    assert counts == {"AAPL": 1, "MSFT": 1}
+    assert row["announcement_at"].endswith("16:00:00-05:00")
+    assert row["announcement_date"] == "2020-01-28"
+    assert row["announcement_session"] == "DURING_MARKET"
+
+
 def test_repo_rolls_back_duplicates_and_skips_future(tmp_path: Path) -> None:
     path = _db(tmp_path)
     future = _record("2026-07-30", reported_eps=None)
@@ -144,6 +205,24 @@ def test_repo_rolls_back_duplicates_and_skips_future(tmp_path: Path) -> None:
         with pytest.raises(ValueError):
             apply_earnings_event_upsert(conn, [_record("2020-01-28"), invalid], ticker="AAPL")
         assert count_events_for_ticker(conn, ticker="AAPL") == 0
+
+
+def test_repo_requires_migrated_earnings_event_table(tmp_path: Path) -> None:
+    path = tmp_path / "unmigrated.db"
+    with sqlite3.connect(str(path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE rc_fundamental_quarterly (
+                ticker TEXT NOT NULL,
+                period_end_date TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                PRIMARY KEY (ticker, period_end_date)
+            )
+            """
+        )
+        conn.commit()
+        with pytest.raises(RuntimeError, match="EARNINGS_EVENT_TABLE_MISSING"):
+            apply_earnings_event_upsert(conn, [_record()], ticker="AAPL")
 
 
 def test_apply_cli_default_dry_run_apply_backup_and_conflict(

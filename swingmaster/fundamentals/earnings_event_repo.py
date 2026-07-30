@@ -19,6 +19,9 @@ MUTABLE_COLUMNS = (
     "source_observed_at_utc",
     "source_timezone",
 )
+MATERIAL_COMPARE_COLUMNS = tuple(
+    column for column in MUTABLE_COLUMNS if column != "source_observed_at_utc"
+)
 INSERT_COLUMNS = (
     "market",
     "ticker",
@@ -291,7 +294,7 @@ def _update_record(conn: sqlite3.Connection, record: dict[str, Any], updated_at_
 
 
 def _mutable_values_equal(existing: sqlite3.Row, record: dict[str, Any]) -> bool:
-    for column in MUTABLE_COLUMNS:
+    for column in MATERIAL_COMPARE_COLUMNS:
         existing_value = existing[column]
         new_value = record[column]
         if column == "is_reported":

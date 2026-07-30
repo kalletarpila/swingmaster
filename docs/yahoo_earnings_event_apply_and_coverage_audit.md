@@ -42,6 +42,8 @@ Immutable identity fields:
 
 `created_at_utc` is preserved on update. `updated_at_utc` changes only on insert or material update.
 
+`source_observed_at_utc` is persisted on insert and refreshed when another mutable source value changes. A changed observation timestamp by itself is not treated as a material update because that would create write churn on every idempotent Yahoo refetch.
+
 ## Transaction Boundary
 
 Single-ticker apply uses one explicit SQLite transaction for the ticker. If any record in that ticker apply fails validation or persistence, the full ticker transaction is rolled back.

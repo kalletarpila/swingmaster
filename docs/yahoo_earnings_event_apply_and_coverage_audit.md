@@ -184,6 +184,24 @@ When output paths are provided, the CLI writes JSON, CSV, and summary artifacts 
 
 `--no-network` performs planning-only audit output without Yahoo calls.
 
+## Batch Backfill CLI
+
+The guarded resumable batch apply path is:
+
+```bash
+python -m swingmaster.cli.backfill_yahoo_earnings_events
+```
+
+It consumes a prior coverage audit JSON artifact, defaults to dry-run, requires explicit `--apply` for writes, creates one verified pre-batch SQLite backup for apply mode, writes atomic checkpoints after every ticker, and validates all runtime artifact paths under repository `temp/`.
+
+Batch apply eligibility is based on completed normalized Yahoo events from these audit classifications:
+
+- `BACKFILL_READY_FULL_HISTORY`
+- `BACKFILL_READY_PARTIAL_MARGIN_ONLY`
+- `BACKFILL_PARTIAL_ACTUAL_HISTORY`
+
+The batch CLI deliberately excludes `BACKFILL_NO_YAHOO_ROWS`, `BACKFILL_SOURCE_FAILED`, and `BACKFILL_PARSE_FAILED` by default.
+
 ## WAL/SHM Investigation
 
 The real `fundamentals_usa.db-shm` and `fundamentals_usa.db-wal` files were already present at the start of this phase. They were not deleted.

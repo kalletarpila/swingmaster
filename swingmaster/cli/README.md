@@ -7,3 +7,5 @@ Command-line tools for audits, universe runs, and summaries.
 - `run_daily_universe.py`: single-day universe execution.
 - `chain_summary.py`: run summary reports.
 - `run_cboe_pcr_fetch.py`: fetch CBOE daily put/call ratios to a timestamped CSV in the repo `cboe/` directory by default, with a configurable delay between requests.
+- `apply_yahoo_earnings_events.py`: guarded single-ticker dry-run/apply path for Yahoo earnings events.
+- `audit_yahoo_earnings_coverage.py`: read-only Yahoo earnings-date coverage audit for the fundamentals universe.

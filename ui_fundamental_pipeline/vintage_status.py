@@ -1,5 +1,7 @@
 """UI severity mapping for quarter update vintage summaries."""
 
+VINTAGE_DISABLED_REASON = "Vintage/provenance writes are disabled by product policy."
+
 
 def _as_int(value: object) -> int:
     try:
@@ -83,6 +85,7 @@ def map_yahoo_aware_execution_status_to_ui_severity(summary: dict) -> str:
 
 def should_enable_yahoo_aware_apply(summary: dict) -> tuple[bool, str]:
     """Decide whether the UI should enable the explicit Yahoo-aware apply action."""
+    return False, VINTAGE_DISABLED_REASON
     completion_status = str(summary.get("vintage_completion_status") or "").strip()
     if completion_status in {"SEC_VINTAGE_SUFFICIENT", ""}:
         return False, "No Yahoo-aware apply is required."
@@ -128,6 +131,7 @@ def should_auto_apply_yahoo_aware_vintage(
     user_enabled_vintage: bool,
 ) -> tuple[bool, str]:
     """Decide whether the UI may auto-run the Yahoo-aware apply follow-up."""
+    return False, VINTAGE_DISABLED_REASON
     if not user_enabled_vintage:
         return False, "Auto apply requires the PIT/vintage checkbox to be enabled for the primary run."
 
@@ -159,6 +163,7 @@ def map_vintage_recovery_status_to_ui_severity(summary: dict) -> str:
 
 def should_plan_sec_vintage_recovery(preflight_summary: dict) -> tuple[bool, str]:
     """Decide whether readiness preflight should continue to SEC recovery dry-run."""
+    return False, "RECOVERY_DISABLED"
     overall_status = str(preflight_summary.get("overall_status") or "").strip()
     latest_without_vintage = _as_int(preflight_summary.get("latest_without_vintage_count"))
     duplicate_count = _as_int(preflight_summary.get("duplicate_statement_vintage_id_count"))
@@ -181,6 +186,7 @@ def should_apply_sec_vintage_recovery(
     dry_run_summary: dict,
 ) -> tuple[bool, str]:
     """Decide whether the SEC latest-writer recovery dry-run is safe to apply."""
+    return False, VINTAGE_DISABLED_REASON
     overall_status = str(dry_run_summary.get("overall_status") or "").strip()
     if overall_status != "DRY_RUN_READY":
         return False, f"SEC recovery dry-run is not ready: {overall_status or 'UNKNOWN'}."
@@ -219,6 +225,7 @@ def should_apply_yahoo_aware_recovery(
     plan_summary: dict,
 ) -> tuple[bool, str]:
     """Decide whether Yahoo-aware/final-mixed recovery is safe to apply."""
+    return False, VINTAGE_DISABLED_REASON
     source_run_id = str(plan_summary.get("source_run_id") or "").strip()
     if not source_run_id:
         return False, "SOURCE_RUN_ID_REQUIRED"

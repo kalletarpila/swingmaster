@@ -16,6 +16,10 @@ from swingmaster.fundamentals.reported_yahoo_dual_write_adapter import (
     write_yahoo_quarterly_rows_with_optional_vintage,
 )
 
+pytestmark = pytest.mark.skip(
+    reason="Legacy vintage/provenance write contract is retired; see test_vintage_provenance_deactivation.py"
+)
+
 
 def test_default_write_vintage_false_writes_only_latest_row(tmp_path: Path) -> None:
     db_path = tmp_path / "yahoo_dual_write_latest_only.db"

@@ -183,12 +183,12 @@ class TestMarketPanel(unittest.TestCase):
         panel.disable_buttons(False)
         self.assertFalse(panel.ticker_input.disabled)
         self.assertFalse(panel.quarter_update_btn.disabled)
-        self.assertFalse(panel.vintage_write_checkbox.disabled)
+        self.assertTrue(panel.vintage_write_checkbox.disabled)
         self.assertFalse(panel.percentile_btn.disabled)
         self.assertFalse(panel.snapshot_btn.disabled)
 
     def test_usa_vintage_checkbox_state(self):
-        """Test USA PIT/vintage option is off by default and readable."""
+        """Test USA PIT/vintage option is retired and cannot enable writes."""
         panel = MarketPanel(
             market="usa",
             on_quarter_update=self.on_run_usa_update,
@@ -199,7 +199,8 @@ class TestMarketPanel(unittest.TestCase):
 
         self.assertFalse(panel.is_vintage_write_enabled())
         panel.vintage_write_checkbox.value = True
-        self.assertTrue(panel.is_vintage_write_enabled())
+        self.assertFalse(panel.is_vintage_write_enabled())
+        self.assertTrue(panel.vintage_write_checkbox.disabled)
 
     def test_set_status(self):
         """Test setting status message."""

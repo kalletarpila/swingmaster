@@ -15,6 +15,10 @@ from swingmaster.fundamentals.reported_vintage_reader import (
     get_quarterly_field_provenance,
 )
 
+pytestmark = pytest.mark.skip(
+    reason="Legacy vintage/provenance write contract is retired; see test_vintage_provenance_deactivation.py"
+)
+
 
 def test_default_write_vintage_false_writes_only_latest_row(tmp_path: Path) -> None:
     db_path = tmp_path / "sec_dual_write_latest_only.db"

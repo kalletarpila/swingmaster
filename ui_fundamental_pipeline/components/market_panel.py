@@ -64,8 +64,9 @@ class MarketPanel:
         self.vintage_write_checkbox = None
         if self.market == "usa":
             self.vintage_write_checkbox = ft.Checkbox(
-                label="Enable PIT/vintage write for USA quarterly update",
+                label="PIT/vintage writes disabled by policy",
                 value=False,
+                disabled=True,
             )
         self.yahoo_aware_apply_btn = None
         if self.market == "usa" and self.on_yahoo_aware_apply is not None:
@@ -206,7 +207,7 @@ class MarketPanel:
         """Disable/enable all action buttons."""
         self.quarter_update_btn.disabled = disable
         if self.vintage_write_checkbox is not None:
-            self.vintage_write_checkbox.disabled = disable
+            self.vintage_write_checkbox.disabled = True
         if self.yahoo_aware_apply_btn is not None:
             self.yahoo_aware_apply_btn.disabled = disable or not bool(getattr(self, "_yahoo_aware_apply_available", False))
         if self.vintage_recovery_btn is not None:
@@ -223,9 +224,7 @@ class MarketPanel:
 
     def is_vintage_write_enabled(self) -> bool:
         """Return whether the USA PIT/vintage write option is enabled."""
-        if self.vintage_write_checkbox is None:
-            return False
-        return bool(self.vintage_write_checkbox.value)
+        return False
 
     def set_yahoo_aware_apply_available(self, available: bool, reason: str = "") -> None:
         """Enable or disable the explicit Yahoo-aware apply action."""

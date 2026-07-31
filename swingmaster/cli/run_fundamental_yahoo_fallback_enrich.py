@@ -17,6 +17,7 @@ from swingmaster.fundamentals.reported_yahoo_vintage_metadata import (
     build_yahoo_source_hash,
     build_yahoo_vintage_metadata,
 )
+from swingmaster.fundamentals.reported_vintage_policy import reject_vintage_write
 
 
 DEFAULT_MARKET = "usa"
@@ -61,7 +62,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Delete existing enrichment audit rows for the selected run_id before writing new audit rows",
     )
-    parser.add_argument("--write-vintage", action="store_true", help="Opt in to latest/vintage/provenance writes")
+    parser.add_argument("--write-vintage", action="store_true", help="Retired; exits with VINTAGE_DISABLED")
     parser.add_argument("--vintage-market", help="Vintage market; required with --write-vintage")
     parser.add_argument("--vintage-available-at-utc", help="PIT availability timestamp; required with --write-vintage")
     parser.add_argument("--vintage-ingested-at-utc", help="Ingestion timestamp; required with --write-vintage")
@@ -451,12 +452,7 @@ def run_yahoo_fallback_enrich(
     vintage_normalization_run_id: str | None = None,
 ) -> dict[str, Any]:
     if write_vintage:
-        _validate_vintage_args(
-            vintage_market=vintage_market,
-            vintage_available_at_utc=vintage_available_at_utc,
-            vintage_ingested_at_utc=vintage_ingested_at_utc,
-            vintage_run_id=vintage_run_id,
-        )
+        reject_vintage_write()
 
     created_at_utc = resolve_created_at_utc()
     filled_per_field = {field_name: 0 for field_name in ALLOWED_FIELDS}

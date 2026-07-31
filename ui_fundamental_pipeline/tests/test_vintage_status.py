@@ -76,8 +76,8 @@ class TestYahooAwareApplyGate(unittest.TestCase):
         enabled, _ = should_enable_yahoo_aware_apply({"vintage_completion_status": "SEC_VINTAGE_SUFFICIENT"})
         self.assertFalse(enabled)
 
-    def test_final_mixed_plan_ready_enables_apply(self):
-        enabled, _ = should_enable_yahoo_aware_apply(
+    def test_final_mixed_plan_ready_stays_disabled_after_retirement(self):
+        enabled, reason = should_enable_yahoo_aware_apply(
             {
                 "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
                 "vintage_completion_status": "FINAL_MIXED_REQUIRED",
@@ -87,10 +87,11 @@ class TestYahooAwareApplyGate(unittest.TestCase):
                 "vintage_yahoo_aware_unknown_provenance_fields": "",
             }
         )
-        self.assertTrue(enabled)
+        self.assertFalse(enabled)
+        self.assertIn("disabled", reason.lower())
 
-    def test_source_run_id_and_zero_unknown_provenance_enable_apply(self):
-        enabled, _ = should_enable_yahoo_aware_apply(
+    def test_source_run_id_and_zero_unknown_provenance_stay_disabled_after_retirement(self):
+        enabled, reason = should_enable_yahoo_aware_apply(
             {
                 "source_run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
                 "vintage_completion_status": "FINAL_MIXED_REQUIRED",
@@ -99,10 +100,11 @@ class TestYahooAwareApplyGate(unittest.TestCase):
                 "vintage_yahoo_aware_unknown_provenance_fields": "0",
             }
         )
-        self.assertTrue(enabled)
+        self.assertFalse(enabled)
+        self.assertIn("disabled", reason.lower())
 
-    def test_yahoo_plan_ready_enables_apply(self):
-        enabled, _ = should_enable_yahoo_aware_apply(
+    def test_yahoo_plan_ready_stays_disabled_after_retirement(self):
+        enabled, reason = should_enable_yahoo_aware_apply(
             {
                 "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
                 "vintage_completion_status": "YAHOO_VINTAGE_REQUIRED",
@@ -110,7 +112,8 @@ class TestYahooAwareApplyGate(unittest.TestCase):
                 "vintage_planned_yahoo_vintage_rows": "1",
             }
         )
-        self.assertTrue(enabled)
+        self.assertFalse(enabled)
+        self.assertIn("disabled", reason.lower())
 
     def test_blocked_rows_disable_apply(self):
         enabled, reason = should_enable_yahoo_aware_apply(
@@ -123,7 +126,7 @@ class TestYahooAwareApplyGate(unittest.TestCase):
             }
         )
         self.assertFalse(enabled)
-        self.assertIn("blocked", reason.lower())
+        self.assertIn("disabled", reason.lower())
 
     def test_unknown_provenance_disables_apply(self):
         enabled, reason = should_enable_yahoo_aware_apply(
@@ -136,7 +139,7 @@ class TestYahooAwareApplyGate(unittest.TestCase):
             }
         )
         self.assertFalse(enabled)
-        self.assertIn("unknown provenance", reason.lower())
+        self.assertIn("disabled", reason.lower())
 
     def test_missing_source_run_id_disables_apply(self):
         enabled, reason = should_enable_yahoo_aware_apply(
@@ -147,7 +150,7 @@ class TestYahooAwareApplyGate(unittest.TestCase):
             }
         )
         self.assertFalse(enabled)
-        self.assertIn("source run id", reason.lower())
+        self.assertIn("disabled", reason.lower())
 
     def test_blocked_or_unknown_completion_disables_apply(self):
         for status in ("BLOCKED_POST_RUN_DRIFT", "UNKNOWN"):
@@ -156,7 +159,7 @@ class TestYahooAwareApplyGate(unittest.TestCase):
 
 
 class TestYahooAwareAutoApplyGate(unittest.TestCase):
-    def test_safe_final_mixed_summary_enables_auto_apply(self):
+    def test_safe_final_mixed_summary_stays_disabled_after_retirement(self):
         enabled, reason = should_auto_apply_yahoo_aware_vintage(
             {
                 "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
@@ -168,10 +171,10 @@ class TestYahooAwareAutoApplyGate(unittest.TestCase):
             },
             user_enabled_vintage=True,
         )
-        self.assertTrue(enabled)
-        self.assertIn("FINAL_MIXED_PLAN_READY", reason)
+        self.assertFalse(enabled)
+        self.assertIn("disabled", reason.lower())
 
-    def test_safe_yahoo_summary_enables_auto_apply(self):
+    def test_safe_yahoo_summary_stays_disabled_after_retirement(self):
         enabled, reason = should_auto_apply_yahoo_aware_vintage(
             {
                 "run_id": "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
@@ -181,8 +184,8 @@ class TestYahooAwareAutoApplyGate(unittest.TestCase):
             },
             user_enabled_vintage=True,
         )
-        self.assertTrue(enabled)
-        self.assertIn("YAHOO_VINTAGE_PLAN_READY", reason)
+        self.assertFalse(enabled)
+        self.assertIn("disabled", reason.lower())
 
     def test_checkbox_off_disables_auto_apply(self):
         enabled, reason = should_auto_apply_yahoo_aware_vintage(
@@ -195,7 +198,7 @@ class TestYahooAwareAutoApplyGate(unittest.TestCase):
             user_enabled_vintage=False,
         )
         self.assertFalse(enabled)
-        self.assertIn("checkbox", reason.lower())
+        self.assertIn("disabled", reason.lower())
 
     def test_sec_sufficient_disables_auto_apply(self):
         enabled, _ = should_auto_apply_yahoo_aware_vintage(
@@ -235,7 +238,7 @@ class TestYahooAwareAutoApplyGate(unittest.TestCase):
 
 
 class TestYahooAwareRecoveryGate(unittest.TestCase):
-    def test_yahoo_aware_recovery_ready_enables_apply(self):
+    def test_yahoo_aware_recovery_ready_stays_disabled_after_retirement(self):
         enabled, reason = should_apply_yahoo_aware_recovery(
             preflight_summary={
                 "latest_without_vintage_count": "2",
@@ -254,8 +257,8 @@ class TestYahooAwareRecoveryGate(unittest.TestCase):
             },
         )
 
-        self.assertTrue(enabled)
-        self.assertIn("safe", reason)
+        self.assertFalse(enabled)
+        self.assertIn("disabled", reason.lower())
 
     def test_yahoo_aware_recovery_blocks_unsafe_plan(self):
         cases = [

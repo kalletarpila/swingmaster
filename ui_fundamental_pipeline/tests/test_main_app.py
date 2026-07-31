@@ -182,8 +182,8 @@ class TestSwingMasterApp(unittest.TestCase):
         self.assertTrue(callable(app._run_usa_snapshots))
         self.assertTrue(callable(app._run_fin_snapshots))
 
-    def test_usa_vintage_update_uses_preflight_command_chain(self):
-        """Test USA vintage opt-in runs preflight before quarter update."""
+    def test_usa_vintage_update_value_still_uses_latest_only_command(self):
+        """Test retired USA vintage opt-in cannot trigger preflight or write flags."""
         app = SwingMasterApp(self.mock_page)
         app.usa_panel.vintage_write_checkbox.value = True
         captured = {}
@@ -192,29 +192,16 @@ class TestSwingMasterApp(unittest.TestCase):
             captured["target"] = target
 
         app._run_in_background = _capture
-        with patch("ui_fundamental_pipeline.main.get_utc_launch_timestamp", return_value="2026-05-10T12:00:00Z"):
-            with patch.object(app, "_execute_command_chain") as execute_chain:
-                app._run_usa_update()
-                captured["target"]()
+        with patch.object(app, "_execute_single_command") as execute_single:
+            app._run_usa_update()
+            captured["target"]()
 
-        execute_chain.assert_called_once()
-        commands, status_prefix, market = execute_chain.call_args[0]
+        execute_single.assert_called_once()
+        update_command, status_prefix, market = execute_single.call_args[0]
         self.assertEqual(status_prefix, "USA Quarter Update")
         self.assertEqual(market, "usa")
-        self.assertEqual(len(commands), 2)
-        preflight_command, update_command = commands
-        self.assertIn("-m", preflight_command)
-        self.assertEqual(
-            preflight_command[preflight_command.index("-m") + 1],
-            "swingmaster.cli.preflight_quarter_update_vintage_readiness",
-        )
-        self.assertIn("--write-vintage", update_command)
-        self.assertEqual(update_command[update_command.index("--vintage-yahoo-aware-action") + 1], "plan_only")
-        self.assertNotEqual(update_command[update_command.index("--vintage-yahoo-aware-action") + 1], "write")
-        self.assertEqual(
-            update_command[update_command.index("--vintage-available-at-utc") + 1],
-            update_command[update_command.index("--vintage-ingested-at-utc") + 1],
-        )
+        self.assertNotIn("--write-vintage", update_command)
+        self.assertNotIn("--vintage-yahoo-aware-action", update_command)
 
     def test_usa_default_update_uses_single_command_without_vintage(self):
         """Test default USA update keeps vintage flags omitted."""

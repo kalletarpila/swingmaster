@@ -4,6 +4,8 @@ import sqlite3
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from swingmaster.fundamentals.reported_vintage_policy import reject_vintage_write
+
 
 VINTAGE_COLUMNS = (
     "ticker",
@@ -70,6 +72,7 @@ VINTAGE_DEFAULTS: dict[str, Any] = {
 
 
 def insert_quarterly_vintage_row(conn: sqlite3.Connection, row: Mapping[str, Any]) -> int:
+    reject_vintage_write()
     normalized_row = _normalize_vintage_row(row)
     conn.execute(
         """
@@ -119,6 +122,7 @@ def insert_quarterly_field_provenance_rows(
     conn: sqlite3.Connection,
     rows: Iterable[Mapping[str, Any]],
 ) -> int:
+    reject_vintage_write()
     normalized_rows = [_normalize_field_provenance_row(row) for row in rows]
     conn.executemany(
         """

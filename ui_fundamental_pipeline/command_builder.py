@@ -112,24 +112,6 @@ def build_usa_update_command(
         "--market",
         "usa",
     ]
-    if vintage_options is not None:
-        command.extend(
-            [
-                "--write-vintage",
-                "--vintage-mode",
-                "sec_latest_writer",
-                "--vintage-market",
-                "usa",
-                "--vintage-available-at-utc",
-                vintage_options.launch_timestamp_utc,
-                "--vintage-ingested-at-utc",
-                vintage_options.launch_timestamp_utc,
-                "--vintage-run-id",
-                vintage_options.vintage_run_id,
-                "--vintage-yahoo-aware-action",
-                "plan_only",
-            ]
-        )
     return command
 
 

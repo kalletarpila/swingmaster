@@ -11,6 +11,7 @@ from swingmaster.fundamentals.reported_sec_vintage_metadata import (
     build_sec_field_source_map,
     build_sec_vintage_metadata,
 )
+from swingmaster.fundamentals.reported_vintage_policy import VINTAGE_PROVENANCE_WRITES_ENABLED
 
 
 def write_sec_reconstructed_quarterly_rows_with_optional_vintage(
@@ -34,6 +35,8 @@ def write_sec_reconstructed_quarterly_rows_with_optional_vintage(
     rows = [dict(row) for row in normalized_rows]
     if not write_vintage:
         return write_normalized_quarterly_rows_with_optional_vintage(conn, rows)
+    if not VINTAGE_PROVENANCE_WRITES_ENABLED:
+        return write_normalized_quarterly_rows_with_optional_vintage(conn, rows, write_vintage=True)
 
     _require_text(available_at_utc, "available_at_utc")
     _require_text(ingested_at_utc, "ingested_at_utc")

@@ -10,6 +10,10 @@ from swingmaster.fundamentals.reported_quarterly_dual_write import (
     write_normalized_quarterly_rows_with_optional_vintage,
 )
 
+pytestmark = pytest.mark.skip(
+    reason="Legacy vintage/provenance write contract is retired; see test_vintage_provenance_deactivation.py"
+)
+
 
 def test_default_latest_only_mode_writes_latest_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "reported_quarterly_adapter_latest.db"

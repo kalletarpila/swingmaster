@@ -9,6 +9,7 @@ from swingmaster.fundamentals.reported_quarterly_dual_write import REPORTED_FINA
 from swingmaster.fundamentals.reported_yahoo_dual_write_adapter import (
     write_yahoo_quarterly_rows_with_optional_vintage,
 )
+from swingmaster.fundamentals.reported_vintage_policy import reject_vintage_write
 
 
 DEFAULT_MARKET = "omxh"
@@ -35,7 +36,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Delete existing rc_fundamental_quarterly rows for the selected ticker before insert",
     )
-    parser.add_argument("--write-vintage", action="store_true", help="Opt in to latest/vintage/provenance writes")
+    parser.add_argument("--write-vintage", action="store_true", help="Retired; exits with VINTAGE_DISABLED")
     parser.add_argument("--vintage-market", help="Vintage market; required with --write-vintage")
     parser.add_argument("--vintage-available-at-utc", help="PIT availability timestamp; required with --write-vintage")
     parser.add_argument("--vintage-ingested-at-utc", help="Ingestion timestamp; required with --write-vintage")
@@ -208,12 +209,7 @@ def run_yahoo_to_quarterly(
 ) -> dict[str, Any]:
     normalized_symbol = symbol.upper()
     if write_vintage:
-        _validate_vintage_args(
-            vintage_market=vintage_market,
-            vintage_available_at_utc=vintage_available_at_utc,
-            vintage_ingested_at_utc=vintage_ingested_at_utc,
-            vintage_run_id=vintage_run_id,
-        )
+        reject_vintage_write()
 
     with sqlite3.connect(str(db_path)) as conn:
         input_rows = load_yahoo_quarterly_rows(conn, market, normalized_symbol)

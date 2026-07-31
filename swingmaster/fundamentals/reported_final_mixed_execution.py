@@ -12,6 +12,7 @@ from swingmaster.fundamentals.reported_final_mixed_vintage import (
 from swingmaster.fundamentals.reported_quarterly_dual_write import (
     write_normalized_quarterly_rows_with_optional_vintage,
 )
+from swingmaster.fundamentals.reported_vintage_policy import reject_vintage_write
 
 
 def execute_final_mixed_vintage_write(
@@ -28,6 +29,7 @@ def execute_final_mixed_vintage_write(
     normalization_run_id: str | None = None,
 ) -> dict[str, Any]:
     """Write one final mixed vintage using an existing SQLite connection."""
+    reject_vintage_write()
     row = dict(normalized_row)
     ticker = _require_text(row.get("ticker"), "ticker").upper()
     period_end_date = _require_text(row.get("period_end_date"), "period_end_date")

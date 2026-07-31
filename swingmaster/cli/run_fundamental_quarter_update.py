@@ -38,6 +38,12 @@ from swingmaster.fundamentals.reported_yahoo_vintage_metadata import (
 from swingmaster.fundamentals.reported_yahoo_dual_write_adapter import (
     write_yahoo_quarterly_rows_with_optional_vintage,
 )
+from swingmaster.fundamentals.reported_vintage_policy import (
+    VINTAGE_DISABLED_ERROR,
+    VINTAGE_DISABLED_REASON,
+    VINTAGE_DISABLED_STATUS,
+    reject_vintage_write,
+)
 from swingmaster.fundamentals.lifecycle import run_lifecycle_classification
 from swingmaster.fundamentals.score import run_fundamental_scoring
 
@@ -320,6 +326,7 @@ def run_final_mixed_vintage_execution_for_ticker(
     run_id: str,
     normalization_run_id: str | None = None,
 ) -> dict[str, Any]:
+    reject_vintage_write()
     normalized_ticker = _require_text(ticker, "ticker").upper()
     row = dict(normalized_row)
     row_ticker = _require_text(row.get("ticker"), "normalized_row.ticker").upper()
@@ -431,6 +438,8 @@ def validate_vintage_options(
 ) -> dict[str, object]:
     if vintage_yahoo_aware_action not in VINTAGE_YAHOO_AWARE_ACTION_CHOICES:
         raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_YAHOO_AWARE_ACTION_UNSUPPORTED:{vintage_yahoo_aware_action}")
+    if write_vintage:
+        raise RuntimeError(f"{VINTAGE_DISABLED_ERROR}:{VINTAGE_DISABLED_REASON}")
     if vintage_yahoo_aware_action == VINTAGE_YAHOO_AWARE_ACTION_WRITE and (
         not write_vintage or vintage_mode != VINTAGE_MODE_SEC_LATEST_WRITER
     ):
@@ -444,7 +453,14 @@ def validate_vintage_options(
             VINTAGE_MODE_SEC_PLUS_YAHOO_FALLBACK_FINAL_MIXED,
         }:
             raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_WRITE_REQUIRED_FOR_MODE:{vintage_mode}")
-        return {}
+        return {
+            "vintage_requested": False,
+            "vintage_execution_enabled": False,
+            "vintage_status": VINTAGE_DISABLED_STATUS,
+            "vintage_rows_inserted": 0,
+            "vintage_provenance_rows_inserted": 0,
+            "vintage_count_status": "disabled_by_policy",
+        }
     if vintage_market is None or vintage_market.strip() == "":
         raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MARKET_REQUIRED")
     if vintage_available_at_utc is None or vintage_available_at_utc.strip() == "":
@@ -812,6 +828,7 @@ def run_sec_latest_writer_vintage_side_write(
     vintage_run_id: str,
     allow_unknown_provenance: bool = False,
 ) -> dict[str, object]:
+    reject_vintage_write()
     normalized_ticker = ticker.upper()
     candidates = []
     skipped_already_has_vintage = 0
@@ -1312,6 +1329,7 @@ def execute_quarter_update_yahoo_aware_vintage_plan(
     ingested_at_utc: str,
     vintage_run_id: str,
 ) -> dict[str, object]:
+    reject_vintage_write()
     plan_status = plan.get("vintage_yahoo_aware_planning_status")
     if plan_status == YAHOO_AWARE_PLAN_NO_ACTION:
         return _yahoo_aware_execution_result(YAHOO_AWARE_EXEC_NO_ACTION)

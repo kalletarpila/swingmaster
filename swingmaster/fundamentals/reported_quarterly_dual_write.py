@@ -9,6 +9,10 @@ from swingmaster.fundamentals.reported_vintage_writer import (
     insert_quarterly_field_provenance_rows,
     insert_quarterly_vintage_row,
 )
+from swingmaster.fundamentals.reported_vintage_policy import (
+    VINTAGE_PROVENANCE_WRITES_ENABLED,
+    disabled_write_summary,
+)
 
 
 LATEST_QUARTERLY_FIELDS = (
@@ -112,6 +116,11 @@ def write_normalized_quarterly_rows_with_optional_vintage(
     latest_rows_written = 0
     vintage_rows_written = 0
     field_provenance_rows_written = 0
+
+    if write_vintage and not VINTAGE_PROVENANCE_WRITES_ENABLED:
+        if write_latest:
+            latest_rows_written = insert_quarterly_rows(conn, list(rows))
+        return disabled_write_summary(latest_rows_written=latest_rows_written)
 
     if write_latest and not write_vintage:
         latest_rows_written = insert_quarterly_rows(conn, list(rows))
@@ -247,6 +256,11 @@ def write_quarterly_latest_and_vintage(
     metadata: Mapping[str, Any],
     field_source_map: Mapping[str, Any] | None = None,
 ) -> dict[str, int]:
+    if not VINTAGE_PROVENANCE_WRITES_ENABLED:
+        latest_row = _build_latest_row(row, metadata)
+        latest_rows_written = insert_quarterly_rows(conn, [latest_row])
+        return disabled_write_summary(latest_rows_written=latest_rows_written)
+
     vintage_row = build_quarterly_vintage_row_from_latest(row, metadata)
     latest_row = _build_latest_row(row, metadata)
     provenance_rows = build_field_provenance_rows(

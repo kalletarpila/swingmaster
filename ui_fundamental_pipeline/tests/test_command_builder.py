@@ -37,7 +37,7 @@ class TestCommandBuilder(unittest.TestCase):
         self.assertNotIn("--vintage-mode", command)
         self.assertNotIn("--vintage-yahoo-aware-action", command)
 
-    def test_build_usa_update_command_with_vintage_flags(self):
+    def test_build_usa_update_command_with_retired_vintage_options_remains_latest_only(self):
         source_run_id = "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY"
         launch_timestamp = "2026-05-10T12:00:00Z"
         vintage_run_id = get_vintage_run_id_usa(source_run_id)
@@ -49,17 +49,15 @@ class TestCommandBuilder(unittest.TestCase):
             ),
         )
 
-        self.assertIn("--write-vintage", command)
-        self.assertEqual(command[command.index("--vintage-mode") + 1], "sec_latest_writer")
-        self.assertEqual(command[command.index("--vintage-market") + 1], "usa")
-        self.assertEqual(command[command.index("--vintage-available-at-utc") + 1], launch_timestamp)
-        self.assertEqual(command[command.index("--vintage-ingested-at-utc") + 1], launch_timestamp)
-        self.assertEqual(command[command.index("--vintage-run-id") + 1], vintage_run_id)
-        self.assertEqual(command[command.index("--vintage-yahoo-aware-action") + 1], "plan_only")
-        self.assertNotIn("write", command[command.index("--vintage-yahoo-aware-action") + 1])
+        self.assertNotIn("--write-vintage", command)
+        self.assertNotIn("--vintage-mode", command)
+        self.assertNotIn("--vintage-market", command)
+        self.assertNotIn("--vintage-available-at-utc", command)
+        self.assertNotIn("--vintage-ingested-at-utc", command)
+        self.assertNotIn("--vintage-run-id", command)
+        self.assertNotIn("--vintage-yahoo-aware-action", command)
         self.assertEqual(command[command.index("--osakedata-db") + 1], str(OSAKEDATA_DB))
         self.assertIn("2026-05-10", command[command.index("--run-id") + 1])
-        self.assertIn("2026-05-10", command[command.index("--vintage-run-id") + 1])
 
     def test_build_usa_vintage_preflight_command(self):
         command = build_usa_vintage_preflight_command()

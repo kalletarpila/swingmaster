@@ -12,6 +12,7 @@ from swingmaster.fundamentals.reported_yahoo_vintage_metadata import (
     build_yahoo_source_hash,
     build_yahoo_vintage_metadata,
 )
+from swingmaster.fundamentals.reported_vintage_policy import VINTAGE_PROVENANCE_WRITES_ENABLED
 
 
 def write_yahoo_quarterly_rows_with_optional_vintage(
@@ -32,6 +33,8 @@ def write_yahoo_quarterly_rows_with_optional_vintage(
     rows = [dict(row) for row in normalized_rows]
     if not write_vintage:
         return write_normalized_quarterly_rows_with_optional_vintage(conn, rows)
+    if not VINTAGE_PROVENANCE_WRITES_ENABLED:
+        return write_normalized_quarterly_rows_with_optional_vintage(conn, rows, write_vintage=True)
 
     _require_vintage_inputs(available_at_utc=available_at_utc, ingested_at_utc=ingested_at_utc, run_id=run_id)
     if yahoo_quarterly_rows_by_key is None:
@@ -105,6 +108,8 @@ def write_yahoo_fallback_enriched_rows_with_optional_vintage(
     rows = [dict(row) for row in normalized_rows]
     if not write_vintage:
         return write_normalized_quarterly_rows_with_optional_vintage(conn, rows)
+    if not VINTAGE_PROVENANCE_WRITES_ENABLED:
+        return write_normalized_quarterly_rows_with_optional_vintage(conn, rows, write_vintage=True)
 
     _require_vintage_inputs(available_at_utc=available_at_utc, ingested_at_utc=ingested_at_utc, run_id=run_id)
     if enrichment_audit_rows_by_key is None:

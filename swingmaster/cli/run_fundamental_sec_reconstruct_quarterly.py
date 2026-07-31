@@ -18,6 +18,7 @@ from swingmaster.fundamentals.sec_reconstruct_quarterly import (
 from swingmaster.fundamentals.sec_reconstruction_provenance import (
     build_sec_contributing_facts_by_reconstructed_rows,
 )
+from swingmaster.fundamentals.reported_vintage_policy import reject_vintage_write
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", required=True, help="Deterministic run identifier")
     parser.add_argument("--retrieved-at-utc", required=True, help="Deterministic retrieved timestamp")
     parser.add_argument("--dry-run", action="store_true", help="Reconstruct without writing rows")
-    parser.add_argument("--write-vintage", action="store_true", help="Opt in to latest/vintage/provenance writes")
+    parser.add_argument("--write-vintage", action="store_true", help="Retired; exits with VINTAGE_DISABLED")
     parser.add_argument("--vintage-market", help="Vintage market; required with --write-vintage")
     parser.add_argument("--vintage-available-at-utc", help="PIT availability timestamp; required with --write-vintage")
     parser.add_argument("--vintage-ingested-at-utc", help="Ingestion timestamp; required with --write-vintage")
@@ -64,12 +65,7 @@ def run_sec_reconstruct_quarterly(
 ) -> tuple[int, list[dict[str, Any]]]:
     normalized_ticker = ticker.upper()
     if write_vintage:
-        _validate_vintage_args(
-            vintage_market=vintage_market,
-            vintage_available_at_utc=vintage_available_at_utc,
-            vintage_ingested_at_utc=vintage_ingested_at_utc,
-            vintage_run_id=vintage_run_id,
-        )
+        reject_vintage_write()
 
     with sqlite3.connect(str(db_path)) as conn:
         sec_fact_rows = load_sec_fact_rows(conn, normalized_ticker)

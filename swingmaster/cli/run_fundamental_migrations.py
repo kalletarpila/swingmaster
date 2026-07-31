@@ -47,6 +47,14 @@ TTM_COMPONENT_COLUMNS = (
     ("lifecycle_component_lifecycle", "REAL"),
     ("consistency_component_lifecycle", "REAL"),
 )
+TTM_EFFECTIVE_DATE_COLUMNS = (
+    ("effective_trading_date", "TEXT"),
+    ("effective_date_status", "TEXT"),
+    ("effective_date_policy", "TEXT"),
+    ("effective_date_source_period_end", "TEXT"),
+    ("effective_date_match_confidence", "TEXT"),
+    ("effective_date_component_count", "INTEGER"),
+)
 PERCENTILE_LIFECYCLE_COLUMNS = (
     ("sector_rank_blended", "INTEGER"),
     ("industry_rank_blended", "INTEGER"),
@@ -278,6 +286,16 @@ def get_quarter_earnings_match_migration_file_path() -> Path:
     )
 
 
+def get_ttm_effective_date_migration_file_path() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent
+        / "infra"
+        / "sqlite"
+        / "migrations"
+        / "031_rc_fundamental_ttm_effective_date.sql"
+    )
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -300,11 +318,13 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_quarterly_vintage_migration_file_path(),
         get_earnings_event_migration_file_path(),
         get_quarter_earnings_match_migration_file_path(),
+        get_ttm_effective_date_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")
         conn.executescript(sql_text)
     ensure_ttm_component_columns(conn)
+    ensure_ttm_effective_date_columns(conn)
     ensure_percentile_lifecycle_columns(conn)
     ensure_valuation_v2_columns(conn)
     ensure_valuation_v21_columns(conn)
@@ -327,6 +347,28 @@ def ensure_ttm_component_columns(conn: sqlite3.Connection) -> None:
             continue
         conn.execute(f"ALTER TABLE rc_fundamental_ttm ADD COLUMN {column_name} {column_type}")
         existing_columns.add(column_name)
+
+
+def ensure_ttm_effective_date_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_ttm)
+            """
+        )
+    }
+    for column_name, column_type in TTM_EFFECTIVE_DATE_COLUMNS:
+        if column_name in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE rc_fundamental_ttm ADD COLUMN {column_name} {column_type}")
+        existing_columns.add(column_name)
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_fundamental_ttm_ticker_effective_date
+        ON rc_fundamental_ttm(ticker, effective_trading_date)
+        """
+    )
 
 
 def ensure_percentile_lifecycle_columns(conn: sqlite3.Connection) -> None:
@@ -448,6 +490,15 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
     ]
     if missing_ttm_columns:
         raise RuntimeError(f"FUNDAMENTAL_TTM_COLUMNS_MISSING:{','.join(missing_ttm_columns)}")
+
+    missing_ttm_effective_date_columns = [
+        column_name for column_name, _column_type in TTM_EFFECTIVE_DATE_COLUMNS if column_name not in ttm_columns
+    ]
+    if missing_ttm_effective_date_columns:
+        raise RuntimeError(
+            "FUNDAMENTAL_TTM_EFFECTIVE_DATE_COLUMNS_MISSING:"
+            + ",".join(missing_ttm_effective_date_columns)
+        )
 
     percentile_columns = {
         str(row[1])

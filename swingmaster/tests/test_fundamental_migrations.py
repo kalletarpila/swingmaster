@@ -11,6 +11,7 @@ from swingmaster.cli.run_fundamental_migrations import (
     TTM_COMPONENT_COLUMNS,
     QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS,
     QUARTERLY_VINTAGE_REQUIRED_COLUMNS,
+    TTM_SCORE_EFFECTIVE_DATE_COLUMNS,
     VALUATION_V2_COLUMNS,
     VALUATION_V21_COLUMNS,
     VALUATION_V22_COLUMNS,
@@ -63,6 +64,8 @@ def test_run_migration_creates_required_tables_and_is_idempotent(tmp_path: Path)
             )
         }
         for column_name, _column_type in TTM_COMPONENT_COLUMNS:
+            assert column_name in ttm_columns
+        for column_name, _column_type in TTM_SCORE_EFFECTIVE_DATE_COLUMNS:
             assert column_name in ttm_columns
         table_row = conn.execute(
             """

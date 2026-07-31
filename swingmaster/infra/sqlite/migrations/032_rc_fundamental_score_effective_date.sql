@@ -1,0 +1,2 @@
+-- Fundamental score effective-date schema changes are applied by the migration
+-- runner to keep ALTER TABLE idempotent across SQLite versions.

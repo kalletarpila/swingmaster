@@ -80,10 +80,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--summary-json", required=True)
     parser.add_argument("--output-csv", required=True)
     parser.add_argument("--resume-from-json", default=None)
+    parser.add_argument("--retry-failed-on-resume", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--prebatch-backup", default=None)
     parser.add_argument("--skip-prebatch-backup", action="store_true")
+    parser.add_argument("--progress-log", default=None)
     parser.add_argument("--json", action="store_true", dest="json_output")
     return parser.parse_args(argv)
 
@@ -180,6 +182,7 @@ def run_batch(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     checkpoint_path = validate_temp_path(Path(args.checkpoint_json))
     summary_path = validate_temp_path(Path(args.summary_json))
     csv_path = validate_temp_path(Path(args.output_csv))
+    progress_log_path = validate_temp_path(Path(args.progress_log)) if args.progress_log else None
     current_db_identity = db_identity(db_path)
     resume_rows: dict[str, dict[str, Any]] = {}
     resume_payload: dict[str, Any] | None = None
@@ -199,6 +202,11 @@ def run_batch(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         previous = results_by_ticker.get(ticker)
         if previous is not None and previous.get("transaction_status") in {"DRY_RUN", "COMMITTED"} and previous.get("source_status") not in FAILED_SOURCE_STATUSES:
             _write_checkpoint(checkpoint_path, summary_path, csv_path, run_id, current_db_identity, audit_identity, backup_info, execution_mode, selected, results_by_ticker, started_at)
+            _write_progress(progress_log_path, selected, results_by_ticker, ticker, resumed=True)
+            continue
+        if previous is not None and previous.get("source_status") in FAILED_SOURCE_STATUSES and not args.retry_failed_on_resume:
+            _write_checkpoint(checkpoint_path, summary_path, csv_path, run_id, current_db_identity, audit_identity, backup_info, execution_mode, selected, results_by_ticker, started_at)
+            _write_progress(progress_log_path, selected, results_by_ticker, ticker, resumed=True)
             continue
         if index > 0 and args.sleep_max_seconds > 0:
             time.sleep(_jitter(args.sleep_min_seconds, args.sleep_max_seconds))
@@ -213,6 +221,7 @@ def run_batch(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         )
         results_by_ticker[ticker] = row
         _write_checkpoint(checkpoint_path, summary_path, csv_path, run_id, current_db_identity, audit_identity, backup_info, execution_mode, selected, results_by_ticker, started_at)
+        _write_progress(progress_log_path, selected, results_by_ticker, ticker, resumed=False)
         if stop:
             exit_code = 1
             break
@@ -231,6 +240,8 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("MAX_RETRIES_MUST_BE_NON_NEGATIVE")
     for attr in ("checkpoint_json", "summary_json", "output_csv"):
         validate_temp_path(Path(getattr(args, attr)))
+    if args.progress_log:
+        validate_temp_path(Path(args.progress_log))
     if args.prebatch_backup:
         validate_temp_path(Path(args.prebatch_backup), must_exist=args.skip_prebatch_backup)
     if args.skip_prebatch_backup and not args.prebatch_backup and not args.resume_from_json:
@@ -514,6 +525,30 @@ def _write_checkpoint(
     _write_json_atomic(checkpoint_path, payload)
     _write_json_atomic(summary_path, payload["summary"])
     _write_csv_atomic(csv_path, payload["per_ticker_results"])
+
+
+def _write_progress(
+    progress_log_path: Path | None,
+    selected: list[str],
+    results_by_ticker: dict[str, dict[str, Any]],
+    ticker: str,
+    *,
+    resumed: bool,
+) -> None:
+    if progress_log_path is None:
+        return
+    rows = [results_by_ticker[item] for item in selected if item in results_by_ticker]
+    failed = sum(1 for row in rows if row.get("source_status") in FAILED_SOURCE_STATUSES or row.get("transaction_status") in {"FAILED", "VERIFICATION_FAILED"})
+    inserted = sum(int(row.get("inserted_count") or 0) for row in rows)
+    updated = sum(int(row.get("updated_count") or 0) for row in rows)
+    unchanged = sum(int(row.get("unchanged_count") or 0) for row in rows)
+    message = (
+        f"{utc_now_text()} processed={len(rows)}/{len(selected)} ticker={ticker} resumed={resumed} "
+        f"failed={failed} inserted={inserted} updated={updated} unchanged={unchanged}"
+    )
+    progress_log_path.parent.mkdir(parents=True, exist_ok=True)
+    with progress_log_path.open("a", encoding="utf-8") as handle:
+        handle.write(message + "\n")
 
 
 def _write_json_atomic(path: Path, payload: Any) -> None:

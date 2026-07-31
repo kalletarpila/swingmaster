@@ -220,6 +220,7 @@ def test_batch_resume_skips_success_and_retries_failure_without_duplicate_entrie
                 "MSFT",
                 "--resume-from-json",
                 str(checkpoint),
+                "--retry-failed-on-resume",
                 "--rate-limit-backoff-seconds",
                 "0",
             )
@@ -228,6 +229,53 @@ def test_batch_resume_skips_success_and_retries_failure_without_duplicate_entrie
 
     assert calls == ["MSFT", "MSFT"]
     assert [row["ticker"] for row in resumed["per_ticker_results"]] == ["AAPL", "MSFT"]
+
+
+def test_batch_resume_preserves_failure_without_explicit_retry_and_logs_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = _db(tmp_path)
+    temp_root = tmp_path / "temp"
+    temp_root.mkdir()
+    monkeypatch.setattr(backfill_yahoo_earnings_events, "temp_root", lambda: temp_root)
+    calls: list[str] = []
+
+    def fake_fetch(**kwargs: object) -> YahooEarningsResult:
+        ticker = str(kwargs["ticker"])
+        calls.append(ticker)
+        return _source_result(db_path, ticker)
+
+    monkeypatch.setattr(backfill_yahoo_earnings_events, "fetch_yahoo_earnings_events", fake_fetch)
+    checkpoint = temp_root / "checkpoint.json"
+    args = backfill_yahoo_earnings_events.parse_args(
+        _args(db_path, temp_root, "--ticker", "AAPL", "--checkpoint-json", str(checkpoint), "--progress-log", str(temp_root / "progress.log"))
+    )
+    first, _ = backfill_yahoo_earnings_events.run_batch(args)
+    payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+    payload["per_ticker_results"][0]["source_status"] = "SOURCE_FAILED"
+    payload["per_ticker_results"][0]["transaction_status"] = "NOT_STARTED"
+    checkpoint.write_text(json.dumps(payload), encoding="utf-8")
+    calls.clear()
+
+    resumed, _ = backfill_yahoo_earnings_events.run_batch(
+        backfill_yahoo_earnings_events.parse_args(
+            _args(
+                db_path,
+                temp_root,
+                "--ticker",
+                "AAPL",
+                "--resume-from-json",
+                str(checkpoint),
+                "--progress-log",
+                str(temp_root / "progress.log"),
+            )
+        )
+    )
+
+    assert calls == []
+    assert resumed["summary"]["failed_tickers"] == 1
+    assert "processed=1/1" in (temp_root / "progress.log").read_text(encoding="utf-8")
 
 
 def test_batch_rejects_paths_outside_temp_and_incompatible_audit(

@@ -2,7 +2,9 @@
 
 ## Purpose
 
-`rc_earnings_event` is the canonical table for quarterly earnings announcement events observed from external sources. It is separate from quarterly financial statement rows because Yahoo earnings-date output describes announcement timestamps and EPS fields, not a trustworthy fiscal `period_end_date`. Matching an announcement to an exact fiscal quarter belongs in a later phase.
+`rc_earnings_event` is the canonical table for quarterly earnings announcement events observed from external sources. It is separate from quarterly financial statement rows because Yahoo earnings-date output describes announcement timestamps and EPS fields, not a trustworthy fiscal `period_end_date`.
+
+Later persistence of deterministic quarter-to-event matches is documented in [Earnings Event Quarter Match Persistence](earnings_event_quarter_match_persistence.md).
 
 This phase adds the schema, read-only planning, Yahoo source parsing, diagnostics, and tests. It does not write earnings events to the real `fundamentals_usa.db`.
 
@@ -174,9 +176,4 @@ The repository still has an unresolved Python mismatch: `pyproject.toml` declare
 
 ## Next Phase
 
-Later work should add:
-
-- guarded write/apply path for `rc_earnings_event`
-- full ticker-universe backfill
-- coverage audit across the universe
-- later matching from announcement events to quarterly fundamentals rows
+Later work should wire downstream retrospective research consumers to the persisted quarter-to-event association where appropriate.

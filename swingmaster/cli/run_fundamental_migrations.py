@@ -23,6 +23,7 @@ REQUIRED_TABLES = (
     "rc_fundamental_quarterly_vintage",
     "rc_fundamental_quarterly_field_provenance",
     "rc_earnings_event",
+    "rc_fundamental_quarter_earnings_match",
 )
 SCHEMA_VERSION = 1
 TTM_COMPONENT_COLUMNS = (
@@ -149,6 +150,27 @@ EARNINGS_EVENT_REQUIRED_COLUMNS = (
     "created_at_utc",
     "updated_at_utc",
 )
+QUARTER_EARNINGS_MATCH_REQUIRED_COLUMNS = (
+    "id",
+    "market",
+    "ticker",
+    "period_end_date",
+    "earnings_event_id",
+    "announcement_at",
+    "announcement_date",
+    "announcement_session",
+    "effective_trading_date",
+    "effective_date_status",
+    "reporting_delay_days",
+    "matching_status",
+    "matching_confidence",
+    "matching_method",
+    "candidate_count",
+    "availability_policy",
+    "matcher_version",
+    "created_at_utc",
+    "updated_at_utc",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -246,6 +268,16 @@ def get_earnings_event_migration_file_path() -> Path:
     )
 
 
+def get_quarter_earnings_match_migration_file_path() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent
+        / "infra"
+        / "sqlite"
+        / "migrations"
+        / "030_rc_fundamental_quarter_earnings_match.sql"
+    )
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -267,6 +299,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_missing_period_recovery_check_migration_file_path(),
         get_quarterly_vintage_migration_file_path(),
         get_earnings_event_migration_file_path(),
+        get_quarter_earnings_match_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")
@@ -525,6 +558,22 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
     if missing_earnings_event_columns:
         raise RuntimeError(
             "EARNINGS_EVENT_COLUMNS_MISSING:" + ",".join(missing_earnings_event_columns)
+        )
+
+    quarter_earnings_match_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_quarter_earnings_match)
+            """
+        )
+    }
+    missing_quarter_earnings_match_columns = [
+        column_name for column_name in QUARTER_EARNINGS_MATCH_REQUIRED_COLUMNS if column_name not in quarter_earnings_match_columns
+    ]
+    if missing_quarter_earnings_match_columns:
+        raise RuntimeError(
+            "QUARTER_EARNINGS_MATCH_COLUMNS_MISSING:" + ",".join(missing_quarter_earnings_match_columns)
         )
 
     return len(REQUIRED_TABLES)

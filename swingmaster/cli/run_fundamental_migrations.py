@@ -9,7 +9,9 @@ REQUIRED_TABLES = (
     "rc_fundamental_schema_version",
     "rc_fundamental_run",
     "rc_fundamental_statement_raw",
+    "rc_earnings_calendar",
     "rc_fundamental_quarterly",
+    "rc_fundamental_quarter_ingestion_status",
     "rc_fundamental_quarter_state",
     "rc_fundamental_quarterly_enrichment_audit",
     "rc_fundamental_ttm",
@@ -188,6 +190,60 @@ QUARTER_EARNINGS_MATCH_REQUIRED_COLUMNS = (
     "created_at_utc",
     "updated_at_utc",
 )
+QUARTER_INGESTION_STATUS_REQUIRED_COLUMNS = (
+    "id",
+    "market",
+    "ticker",
+    "period_end_date",
+    "earnings_event_id",
+    "announcement_date",
+    "effective_trading_date",
+    "ingestion_status",
+    "basic_status",
+    "quarter_basic_complete",
+    "ttm_input_complete",
+    "score_history_complete",
+    "valuation_input_ready",
+    "historical_research_ready",
+    "available_basic_field_count",
+    "missing_basic_fields",
+    "missing_core_fields_json",
+    "missing_ttm_fields_json",
+    "missing_score_fields_json",
+    "data_quality_warnings_json",
+    "supported_source_field_count",
+    "source_non_null_field_count",
+    "persisted_matching_field_count",
+    "retry_recommendation",
+    "last_fetch_status",
+    "last_fetch_source",
+    "last_source_observed_at_utc",
+    "last_checked_at_utc",
+    "assessment_policy_version",
+    "ingestion_evidence_type",
+    "run_id",
+    "assessed_at_utc",
+    "created_at_utc",
+    "updated_at_utc",
+)
+EARNINGS_CALENDAR_REQUIRED_COLUMNS = (
+    "id",
+    "market",
+    "ticker",
+    "estimated_announcement_at",
+    "estimated_announcement_date",
+    "estimated_session",
+    "calendar_status",
+    "source",
+    "source_observed_at_utc",
+    "first_observed_at_utc",
+    "last_observed_at_utc",
+    "previous_estimated_announcement_at",
+    "date_change_count",
+    "completed_earnings_event_id",
+    "created_at_utc",
+    "updated_at_utc",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -325,6 +381,26 @@ def get_ttm_net_debt_to_ebit_migration_file_path() -> Path:
     )
 
 
+def get_quarter_ingestion_status_migration_file_path() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent
+        / "infra"
+        / "sqlite"
+        / "migrations"
+        / "034_rc_fundamental_quarter_ingestion_status.sql"
+    )
+
+
+def get_earnings_calendar_migration_file_path() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent
+        / "infra"
+        / "sqlite"
+        / "migrations"
+        / "035_rc_earnings_calendar.sql"
+    )
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -350,6 +426,8 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_ttm_effective_date_migration_file_path(),
         get_score_effective_date_migration_file_path(),
         get_ttm_net_debt_to_ebit_migration_file_path(),
+        get_quarter_ingestion_status_migration_file_path(),
+        get_earnings_calendar_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")
@@ -363,6 +441,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
     ensure_valuation_v21_columns(conn)
     ensure_valuation_v22_columns(conn)
     ensure_quarterly_enrichment_audit_v2_columns(conn)
+    ensure_quarter_ingestion_status_schema(conn)
     conn.commit()
 
 
@@ -520,6 +599,98 @@ def ensure_quarterly_enrichment_audit_v2_columns(conn: sqlite3.Connection) -> No
             continue
         conn.execute(f"ALTER TABLE rc_fundamental_quarterly_enrichment_audit ADD COLUMN {column_name} {column_type}")
         existing_columns.add(column_name)
+
+
+def ensure_quarter_ingestion_status_schema(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_quarter_ingestion_status)
+            """
+        )
+    }
+    if "id" in existing_columns and set(QUARTER_INGESTION_STATUS_REQUIRED_COLUMNS).issubset(existing_columns):
+        _create_quarter_ingestion_status_indexes(conn)
+        return
+
+    conn.execute("ALTER TABLE rc_fundamental_quarter_ingestion_status RENAME TO rc_fundamental_quarter_ingestion_status_legacy")
+    conn.executescript(get_quarter_ingestion_status_migration_file_path().read_text(encoding="utf-8"))
+    legacy_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_quarter_ingestion_status_legacy)
+            """
+        )
+    }
+    select_exprs = []
+    for column in QUARTER_INGESTION_STATUS_REQUIRED_COLUMNS:
+        if column == "id":
+            select_exprs.append("NULL AS id")
+        elif column in legacy_columns:
+            select_exprs.append(column)
+        elif column == "basic_status":
+            select_exprs.append(
+                "CASE WHEN quarter_basic_complete = 1 THEN 'BASIC_COMPLETE' ELSE 'FUNDAMENTALS_PARTIAL' END AS basic_status"
+            )
+        elif column == "ingestion_status":
+            select_exprs.append("'UNKNOWN_HISTORICAL_INGEST_COMPLETENESS' AS ingestion_status")
+        elif column == "valuation_input_ready":
+            select_exprs.append("0 AS valuation_input_ready")
+        elif column == "historical_research_ready":
+            select_exprs.append("0 AS historical_research_ready")
+        elif column == "available_basic_field_count":
+            select_exprs.append("0 AS available_basic_field_count")
+        elif column == "missing_basic_fields":
+            select_exprs.append("'[]' AS missing_basic_fields")
+        elif column in {"supported_source_field_count", "source_non_null_field_count", "persisted_matching_field_count"}:
+            select_exprs.append("NULL AS " + column)
+        elif column in {"last_fetch_status", "last_fetch_source", "last_source_observed_at_utc"}:
+            select_exprs.append("NULL AS " + column)
+        elif column == "last_checked_at_utc":
+            select_exprs.append("assessed_at_utc AS last_checked_at_utc")
+        elif column == "ingestion_evidence_type":
+            select_exprs.append("'CURRENT_DB_STATE_ONLY' AS ingestion_evidence_type")
+        elif column == "created_at_utc":
+            select_exprs.append("assessed_at_utc AS created_at_utc")
+        else:
+            select_exprs.append("NULL AS " + column)
+    insert_columns = ", ".join(QUARTER_INGESTION_STATUS_REQUIRED_COLUMNS)
+    conn.execute(
+        f"""
+        INSERT OR REPLACE INTO rc_fundamental_quarter_ingestion_status ({insert_columns})
+        SELECT {', '.join(select_exprs)}
+        FROM rc_fundamental_quarter_ingestion_status_legacy
+        """
+    )
+    conn.execute("DROP TABLE rc_fundamental_quarter_ingestion_status_legacy")
+    _create_quarter_ingestion_status_indexes(conn)
+
+
+def _create_quarter_ingestion_status_indexes(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_fundamental_qis_market_period
+        ON rc_fundamental_quarter_ingestion_status(market, period_end_date);
+        CREATE INDEX IF NOT EXISTS idx_fundamental_qis_ticker_period
+        ON rc_fundamental_quarter_ingestion_status(ticker, period_end_date);
+        CREATE INDEX IF NOT EXISTS idx_fundamental_qis_ingestion_status
+        ON rc_fundamental_quarter_ingestion_status(ingestion_status);
+        CREATE INDEX IF NOT EXISTS idx_fundamental_qis_basic_status
+        ON rc_fundamental_quarter_ingestion_status(basic_status);
+        CREATE INDEX IF NOT EXISTS idx_fundamental_qis_quarter_basic
+        ON rc_fundamental_quarter_ingestion_status(quarter_basic_complete);
+        CREATE INDEX IF NOT EXISTS idx_fundamental_qis_ttm_input
+        ON rc_fundamental_quarter_ingestion_status(ttm_input_complete);
+        CREATE INDEX IF NOT EXISTS idx_fundamental_qis_score_history
+        ON rc_fundamental_quarter_ingestion_status(score_history_complete);
+        CREATE INDEX IF NOT EXISTS idx_fundamental_qis_last_checked
+        ON rc_fundamental_quarter_ingestion_status(last_checked_at_utc);
+        CREATE INDEX IF NOT EXISTS idx_fundamental_qis_earnings_event
+        ON rc_fundamental_quarter_ingestion_status(earnings_event_id);
+        """
+    )
 
 
 def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
@@ -714,6 +885,41 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
     if missing_quarter_earnings_match_columns:
         raise RuntimeError(
             "QUARTER_EARNINGS_MATCH_COLUMNS_MISSING:" + ",".join(missing_quarter_earnings_match_columns)
+        )
+
+    quarter_ingestion_status_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_quarter_ingestion_status)
+            """
+        )
+    }
+    missing_quarter_ingestion_status_columns = [
+        column_name
+        for column_name in QUARTER_INGESTION_STATUS_REQUIRED_COLUMNS
+        if column_name not in quarter_ingestion_status_columns
+    ]
+    if missing_quarter_ingestion_status_columns:
+        raise RuntimeError(
+            "QUARTER_INGESTION_STATUS_COLUMNS_MISSING:"
+            + ",".join(missing_quarter_ingestion_status_columns)
+        )
+
+    earnings_calendar_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_earnings_calendar)
+            """
+        )
+    }
+    missing_earnings_calendar_columns = [
+        column_name for column_name in EARNINGS_CALENDAR_REQUIRED_COLUMNS if column_name not in earnings_calendar_columns
+    ]
+    if missing_earnings_calendar_columns:
+        raise RuntimeError(
+            "EARNINGS_CALENDAR_COLUMNS_MISSING:" + ",".join(missing_earnings_calendar_columns)
         )
 
     return len(REQUIRED_TABLES)

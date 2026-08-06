@@ -6,6 +6,8 @@ Runtime artifacts:
 
 ```text
 temp/fundamental_quarter_completeness_audit/20260806T_full/
+temp/fundamental_quarter_ingestion_status/20260806T_apply/
+temp/fundamental_quarter_ingestion_status/20260806T_apply_idempotency/
 ```
 
 This phase was read-only for `fundamentals_usa.db`. It added reusable audit code, a CLI, tests, and this design note, but did not create production tables, run migrations, run schedulers, fetch Yahoo/SEC data, or update current TTM, score, valuation, percentile, snapshot, state, report, or UI behavior.
@@ -97,42 +99,50 @@ Valuation readiness should be independent. A quarter can be research-useful and 
 
 Historical snapshot logic requires an available effective-dated TTM row as the base. Score, percentiles, quarterly context, and valuation are attached when available; missing score makes snapshots partial, while valuation and percentiles are optional context.
 
-## Lightweight Completeness Policy
+## Canonical Readiness Policy
 
-Policy version: `fundamental_quarter_completeness_v1`
+Policy version: `fundamental_quarter_readiness_v2`
 
-`BASIC_COMPLETE`:
+Readiness uses three separate concepts. They must not be collapsed into one `BASIC_COMPLETE` flag.
 
-- valid ticker and `period_end_date`;
-- non-empty financial row;
-- `revenue` present;
-- at least one profitability field from `gross_profit`, `operating_income`, `ebit`, `net_income`;
-- `free_cashflow` present;
-- positive `shares_outstanding`.
+`quarter_basic_complete` means the individual quarterly row has the essential raw inputs used by the current TTM and score model:
 
-`BASIC_PARTIAL`:
+```text
+valid period_end_date
+AND revenue IS NOT NULL
+AND ebit IS NOT NULL
+AND (
+    free_cashflow IS NOT NULL
+    OR (
+        operating_cashflow IS NOT NULL
+        AND capex IS NOT NULL
+    )
+)
+AND cash IS NOT NULL
+AND total_debt IS NOT NULL
+AND shares_outstanding IS NOT NULL
+```
 
-- valid period and non-empty financial row;
-- enough information for partial research, either revenue/EBIT/FCF TTM contribution or at least four meaningful core financial fields;
-- at least one important consumer may still be missing inputs.
+This deliberately does not require `ebitda`, `currency`, `gross_profit`, `operating_income`, or `net_income`.
 
-`BASIC_INCOMPLETE`:
+`ttm_input_complete` means the actual four component quarters used by the current TTM row exist and every one of those four rows has `quarter_basic_complete = 1`. The permissive TTM builder may still produce partial TTM rows when this is false; the field is quality metadata, not a production gate.
 
-- valid period and some financial information exists;
-- too few core values for normal TTM/score usefulness.
+`score_history_complete` means enough valid quarterly and TTM history exists to calculate the current score model's underlying metrics without missing-history fallbacks:
 
-`EMPTY_OR_PLACEHOLDER`:
+```text
+revenue_growth_ttm_yoy
+ebit_margin_ttm
+ebit_margin_trend_4q
+fcf_margin_ttm
+fcf_margin_trend_4q
+net_debt_to_ebit
+share_dilution_yoy
+```
 
-- no meaningful non-zero financial values.
+The inspected TTM builder produces YoY and four-quarter trend metrics from the current four quarterly rows plus the immediately preceding four rows in ticker-sorted period order. The code does not enforce calendar-quarter continuity; it uses row order. The audit therefore requires eight ordered component rows with `quarter_basic_complete = 1` and a matching TTM row whose listed score-history metrics are all non-null.
 
-`NOT_ASSESSABLE`:
+Other diagnostics remain separate:
 
-- malformed identity or period prevents assessment.
-
-Consumer readiness is separate:
-
-- `ttm_ready`: revenue, EBIT, and FCF are present for the row-level contribution.
-- `score_input_ready`: same practical row-level gate as TTM readiness; the score formula itself tolerates missing factors.
 - `valuation_input_ready`: positive `shares_outstanding`; price and TTM freshness are outside the quarter row.
 - `historical_research_ready`: valid, non-empty row with any useful financial information.
 
@@ -142,25 +152,21 @@ Consumer readiness is separate:
 | --- | ---: | ---: |
 | total quarter rows | 156030 | 100.0000 |
 | distinct tickers | 2936 | n/a |
-| `BASIC_COMPLETE` | 81340 | 52.1310 |
-| `BASIC_PARTIAL` | 67501 | 43.2616 |
-| `BASIC_INCOMPLETE` | 5846 | 3.7467 |
-| `EMPTY_OR_PLACEHOLDER` | 1343 | 0.8607 |
-| `NOT_ASSESSABLE` | 0 | 0.0000 |
-| `ttm_ready` | 79454 | 50.9223 |
-| `score_input_ready` | 79454 | 50.9223 |
+| `quarter_basic_complete` | 43989 | 28.1927 |
+| `ttm_input_complete` | 31792 | 20.3756 |
+| `score_history_complete` | 22798 | 14.6113 |
 | `valuation_input_ready` | 131357 | 84.1870 |
 
 Retry recommendations:
 
 | Recommendation | Count | Rationale |
 | --- | ---: | --- |
-| `NO_ACTION` | 81340 | basic-complete rows |
-| `RETRY_YAHOO` | 14299 | local evidence suggests missing income-side values, often after SEC-flavored runs |
-| `RETRY_SEC` | 30382 | missing balance/cash-flow values likely worth SEC enrichment |
-| `RETRY_YAHOO_AND_SEC` | 16953 | broad missing income, cash-flow, and balance fields |
-| `MANUAL_REVIEW` | 218 | malformed or ambiguous local evidence |
-| `NOT_RETRYABLE` | 12838 | mostly old unmatched sparse history where operational value is low |
+| `NO_ACTION` | 43989 | rows with `quarter_basic_complete = 1` |
+| `RETRY_YAHOO` | 19361 | local evidence suggests missing income-side values, often after SEC-flavored runs |
+| `RETRY_SEC` | 66090 | missing balance/cash-flow values likely worth SEC enrichment |
+| `RETRY_YAHOO_AND_SEC` | 11637 | broad missing income, cash-flow, and balance fields |
+| `MANUAL_REVIEW` | 341 | malformed or ambiguous local evidence |
+| `NOT_RETRYABLE` | 14612 | mostly old unmatched sparse history where operational value is low |
 
 ## Missing Field Findings
 
@@ -180,7 +186,7 @@ Retry recommendations:
 | `shares_outstanding` | 131484 | 24546 | 126 | 15.7316 |
 | `currency` | 0 | 156030 | 0 | 100.0000 |
 
-Structurally sparse fields that should not be part of `BASIC_COMPLETE`: `ebitda`, `currency`, `gross_profit`, and `total_debt`.
+Structurally sparse or non-required fields that should not be part of `quarter_basic_complete`: `ebitda`, `currency`, `gross_profit`, `operating_income`, and `net_income`.
 
 Most frequent missing combinations:
 
@@ -261,33 +267,26 @@ Retain one next-event estimate per `(market, ticker, source)` initially. If Yaho
 
 ## Future Quarter Ingestion Status Table
 
-Proposed table: `rc_fundamental_quarter_ingestion_status`
+Implemented table: `rc_fundamental_quarter_ingestion_status`
 
 ```sql
 CREATE TABLE rc_fundamental_quarter_ingestion_status (
-    id INTEGER PRIMARY KEY,
-    market TEXT NOT NULL,
     ticker TEXT NOT NULL,
+    market TEXT NOT NULL,
     period_end_date TEXT NOT NULL,
-    earnings_event_id INTEGER,
-    announcement_date TEXT,
-    effective_trading_date TEXT,
-    ingestion_status TEXT NOT NULL,
-    basic_status TEXT NOT NULL,
-    ttm_ready INTEGER NOT NULL,
-    score_input_ready INTEGER NOT NULL,
-    valuation_input_ready INTEGER NOT NULL,
-    supported_source_field_count INTEGER,
-    source_non_null_field_count INTEGER,
-    persisted_matching_field_count INTEGER,
-    missing_core_fields TEXT NOT NULL,
-    last_fetch_status TEXT,
-    last_fetch_source TEXT,
-    last_source_observed_at_utc TEXT,
-    last_checked_at_utc TEXT NOT NULL,
-    created_at_utc TEXT NOT NULL,
+    quarter_basic_complete INTEGER NOT NULL DEFAULT 0,
+    ttm_input_complete INTEGER NOT NULL DEFAULT 0,
+    score_history_complete INTEGER NOT NULL DEFAULT 0,
+    missing_core_fields_json TEXT NOT NULL DEFAULT '[]',
+    missing_ttm_fields_json TEXT NOT NULL DEFAULT '[]',
+    missing_score_fields_json TEXT NOT NULL DEFAULT '[]',
+    data_quality_warnings_json TEXT NOT NULL DEFAULT '[]',
+    retry_recommendation TEXT NOT NULL,
+    assessment_policy_version TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    assessed_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
-    UNIQUE (market, ticker, period_end_date)
+    PRIMARY KEY (ticker, market, period_end_date)
 );
 ```
 
@@ -296,7 +295,7 @@ Operational statuses:
 - `NOT_PUBLISHED`;
 - `PUBLISHED_DATA_NOT_FETCHED`;
 - `FUNDAMENTALS_PARTIAL`;
-- `BASIC_COMPLETE`;
+- `QUARTER_BASIC_COMPLETE`;
 - `INGEST_COMPLETE`;
 - `FETCH_FAILED`;
 - `NOT_ASSESSABLE`;
@@ -334,14 +333,14 @@ PUBLISHED_DATA_NOT_FETCHED -> FETCH_FAILED
 Completeness assessment owns:
 
 ```text
-FUNDAMENTALS_PARTIAL -> BASIC_COMPLETE
+FUNDAMENTALS_PARTIAL -> QUARTER_BASIC_COMPLETE
 any fetched row -> NOT_ASSESSABLE
 ```
 
 Source-to-persistence comparison owns:
 
 ```text
-BASIC_COMPLETE/FUNDAMENTALS_PARTIAL -> INGEST_COMPLETE
+QUARTER_BASIC_COMPLETE/FUNDAMENTALS_PARTIAL -> INGEST_COMPLETE
 ```
 
 ## Integration Boundaries
@@ -351,7 +350,7 @@ The next implementation should be additive:
 1. Add migrations for the two new status tables only.
 2. Extend Yahoo earnings-date refresh to persist the next future estimate without changing completed-event backfill behavior.
 3. Extend completed earnings-event refresh to mark publication only when reported EPS appears.
-4. After normal quarter update, run the read-only completeness assessor and upsert status.
+4. After normal quarter update, run the completeness assessor and upsert `quarter_basic_complete`, `ttm_input_complete`, and `score_history_complete`.
 5. Add source-to-persistence comparison for the latest successful request before assigning `INGEST_COMPLETE`.
 6. Add scheduler/UI diagnostics that surface latest-quarter and last-four-quarter issues without blocking unrelated research workflows.
 

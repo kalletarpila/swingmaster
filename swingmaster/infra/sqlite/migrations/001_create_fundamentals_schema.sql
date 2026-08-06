@@ -63,6 +63,76 @@ ON rc_fundamental_quarterly(ticker);
 CREATE INDEX IF NOT EXISTS idx_fundamental_quarterly_period
 ON rc_fundamental_quarterly(period_end_date);
 
+CREATE TABLE IF NOT EXISTS rc_fundamental_quarter_ingestion_status (
+    id INTEGER PRIMARY KEY,
+    market TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    period_end_date TEXT NOT NULL,
+    earnings_event_id INTEGER,
+    announcement_date TEXT,
+    effective_trading_date TEXT,
+    ingestion_status TEXT NOT NULL,
+    basic_status TEXT NOT NULL,
+    quarter_basic_complete INTEGER NOT NULL DEFAULT 0,
+    ttm_input_complete INTEGER NOT NULL DEFAULT 0,
+    score_history_complete INTEGER NOT NULL DEFAULT 0,
+    valuation_input_ready INTEGER NOT NULL DEFAULT 0,
+    historical_research_ready INTEGER NOT NULL DEFAULT 0,
+    available_basic_field_count INTEGER NOT NULL DEFAULT 0,
+    missing_basic_fields TEXT NOT NULL DEFAULT '[]',
+    missing_core_fields_json TEXT NOT NULL DEFAULT '[]',
+    missing_ttm_fields_json TEXT NOT NULL DEFAULT '[]',
+    missing_score_fields_json TEXT NOT NULL DEFAULT '[]',
+    data_quality_warnings_json TEXT NOT NULL DEFAULT '[]',
+    supported_source_field_count INTEGER,
+    source_non_null_field_count INTEGER,
+    persisted_matching_field_count INTEGER,
+    retry_recommendation TEXT NOT NULL,
+    last_fetch_status TEXT,
+    last_fetch_source TEXT,
+    last_source_observed_at_utc TEXT,
+    last_checked_at_utc TEXT NOT NULL,
+    assessment_policy_version TEXT NOT NULL,
+    ingestion_evidence_type TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    assessed_at_utc TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    UNIQUE (market, ticker, period_end_date)
+);
+
+CREATE TABLE IF NOT EXISTS rc_earnings_calendar (
+    id INTEGER PRIMARY KEY,
+    market TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    estimated_announcement_at TEXT,
+    estimated_announcement_date TEXT,
+    estimated_session TEXT NOT NULL DEFAULT 'UNKNOWN',
+    calendar_status TEXT NOT NULL,
+    source TEXT NOT NULL,
+    source_observed_at_utc TEXT NOT NULL,
+    first_observed_at_utc TEXT NOT NULL,
+    last_observed_at_utc TEXT NOT NULL,
+    previous_estimated_announcement_at TEXT,
+    date_change_count INTEGER NOT NULL DEFAULT 0,
+    completed_earnings_event_id INTEGER,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    UNIQUE (market, ticker, source)
+);
+
+CREATE INDEX IF NOT EXISTS idx_earnings_calendar_market_status
+ON rc_earnings_calendar(market, calendar_status);
+
+CREATE INDEX IF NOT EXISTS idx_earnings_calendar_ticker
+ON rc_earnings_calendar(ticker);
+
+CREATE INDEX IF NOT EXISTS idx_earnings_calendar_estimated_date
+ON rc_earnings_calendar(estimated_announcement_date);
+
+CREATE INDEX IF NOT EXISTS idx_earnings_calendar_completed_event
+ON rc_earnings_calendar(completed_earnings_event_id);
+
 CREATE TABLE IF NOT EXISTS rc_fundamental_ttm (
     ticker TEXT NOT NULL,
     as_of_date TEXT NOT NULL,

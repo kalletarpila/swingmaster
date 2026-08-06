@@ -1,0 +1,41 @@
+CREATE TABLE IF NOT EXISTS rc_fundamental_quarter_ingestion_status (
+    id INTEGER PRIMARY KEY,
+    market TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    period_end_date TEXT NOT NULL,
+    earnings_event_id INTEGER,
+    announcement_date TEXT,
+    effective_trading_date TEXT,
+
+    ingestion_status TEXT NOT NULL,
+    basic_status TEXT NOT NULL,
+
+    quarter_basic_complete INTEGER NOT NULL DEFAULT 0,
+    ttm_input_complete INTEGER NOT NULL DEFAULT 0,
+    score_history_complete INTEGER NOT NULL DEFAULT 0,
+    valuation_input_ready INTEGER NOT NULL DEFAULT 0,
+    historical_research_ready INTEGER NOT NULL DEFAULT 0,
+
+    available_basic_field_count INTEGER NOT NULL DEFAULT 0,
+    missing_basic_fields TEXT NOT NULL DEFAULT '[]',
+    missing_core_fields_json TEXT NOT NULL DEFAULT '[]',
+    missing_ttm_fields_json TEXT NOT NULL DEFAULT '[]',
+    missing_score_fields_json TEXT NOT NULL DEFAULT '[]',
+    data_quality_warnings_json TEXT NOT NULL DEFAULT '[]',
+    supported_source_field_count INTEGER,
+    source_non_null_field_count INTEGER,
+    persisted_matching_field_count INTEGER,
+    retry_recommendation TEXT NOT NULL,
+    last_fetch_status TEXT,
+    last_fetch_source TEXT,
+    last_source_observed_at_utc TEXT,
+    last_checked_at_utc TEXT NOT NULL,
+    assessment_policy_version TEXT NOT NULL,
+    ingestion_evidence_type TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    assessed_at_utc TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+
+    UNIQUE (market, ticker, period_end_date)
+);

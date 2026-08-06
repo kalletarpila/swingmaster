@@ -3,7 +3,11 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+import json
 
+import pytest
+
+from swingmaster.cli import refresh_yahoo_earnings_calendar
 from swingmaster.cli.run_fundamental_migrations import run_migration
 from swingmaster.fundamentals.earnings_calendar import (
     EarningsCalendarEstimate,
@@ -126,3 +130,155 @@ def test_yahoo_parser_ignores_completed_rows_and_uses_new_york_date() -> None:
     assert estimate.estimated_announcement_date == "2026-08-07"
     assert estimate.estimated_session == "BEFORE_MARKET"
     assert new_york_today_from_utc(datetime(2026, 8, 6, 3, 0, tzinfo=timezone.utc)) == "2026-08-05"
+
+
+def test_calendar_refresh_timeout_then_success_and_resume(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "refresh.db"
+    _seed_calendar_db(db_path, ["AAPL", "MSFT"])
+    root = _temp_root("timeout_resume")
+    calls: list[str] = []
+
+    def fake_fetch(ticker: str, **_kwargs: object) -> list[dict[str, object]]:
+        calls.append(ticker)
+        if ticker == "AAPL" and calls.count("AAPL") == 1:
+            raise TimeoutError("timed out")
+        return [{"Earnings Date": "2026-08-10 16:00:00", "Reported EPS": None}]
+
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar, "fetch_yahoo_earnings_calendar_rows", fake_fetch)
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar.time, "sleep", lambda _seconds: None)
+    assert (
+        refresh_yahoo_earnings_calendar.main(
+            [
+                "--fundamentals-db",
+                str(db_path),
+                "--dry-run",
+                "--output-root",
+                str(root),
+                "--max-retries",
+                "3",
+                "--sleep-min-seconds",
+                "0",
+                "--sleep-max-seconds",
+                "0",
+            ]
+        )
+        == 0
+    )
+    checkpoint = json.loads((root / "calendar_checkpoint.json").read_text(encoding="utf-8"))
+    assert [row["result_status"] for row in checkpoint["attempt_rows"][:2]] == ["TIMEOUT", "SUCCESS"]
+
+    second_root = _temp_root("timeout_resume_second")
+    assert (
+        refresh_yahoo_earnings_calendar.main(
+            [
+                "--fundamentals-db",
+                str(db_path),
+                "--dry-run",
+                "--output-root",
+                str(second_root),
+                "--resume-from-json",
+                str(root / "calendar_checkpoint.json"),
+                "--sleep-min-seconds",
+                "0",
+                "--sleep-max-seconds",
+                "0",
+            ]
+        )
+        == 0
+    )
+    assert calls.count("AAPL") == 2
+
+
+def test_calendar_refresh_failures_do_not_overwrite_existing_row(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "preserve.db"
+    _seed_calendar_db(db_path, ["AAPL"])
+    with sqlite3.connect(str(db_path)) as conn:
+        upsert_earnings_calendar(
+            conn,
+            market="usa",
+            ticker="AAPL",
+            estimate=EarningsCalendarEstimate("AAPL", "2026-08-10", "2026-08-10", "UNKNOWN"),
+            observed_at_utc="2026-08-06T00:00:00Z",
+            today_new_york="2026-08-06",
+        )
+        before = conn.execute("SELECT calendar_status, estimated_announcement_date FROM rc_earnings_calendar").fetchone()
+
+    def fake_fetch(_ticker: str, **_kwargs: object) -> list[dict[str, object]]:
+        raise ConnectionError("network unreachable")
+
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar, "fetch_yahoo_earnings_calendar_rows", fake_fetch)
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar.time, "sleep", lambda _seconds: None)
+    root = _temp_root("preserve_failure")
+    exit_code = refresh_yahoo_earnings_calendar.main(
+        [
+            "--fundamentals-db",
+            str(db_path),
+            "--apply",
+            "--output-root",
+            str(root),
+            "--max-retries",
+            "1",
+            "--sleep-min-seconds",
+            "0",
+            "--sleep-max-seconds",
+            "0",
+            "--stop-after-consecutive-failures",
+            "10",
+        ]
+    )
+    assert exit_code == 0
+    with sqlite3.connect(str(db_path)) as conn:
+        after = conn.execute("SELECT calendar_status, estimated_announcement_date FROM rc_earnings_calendar").fetchone()
+    assert after == before
+    attempts = (root / "calendar_attempts.csv").read_text(encoding="utf-8")
+    assert "NETWORK_ERROR" in attempts
+
+
+def test_calendar_refresh_repeated_timeout_rate_limit_parse_and_interrupt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    assert refresh_yahoo_earnings_calendar._classify_exception(TimeoutError("timeout")) == "TIMEOUT"
+    assert refresh_yahoo_earnings_calendar._classify_exception(RuntimeError("429 too many requests")) == "RATE_LIMITED"
+    assert refresh_yahoo_earnings_calendar._classify_exception(ConnectionError("DNS resolve failed")) == "NETWORK_ERROR"
+    assert refresh_yahoo_earnings_calendar._classify_exception(ValueError("parse failed")) == "PARSE_ERROR"
+
+    db_path = tmp_path / "interrupt.db"
+    _seed_calendar_db(db_path, ["AAPL"])
+
+    def interrupted(_ticker: str, **_kwargs: object) -> list[dict[str, object]]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar, "fetch_yahoo_earnings_calendar_rows", interrupted)
+    root = _temp_root("interrupt")
+    assert (
+        refresh_yahoo_earnings_calendar.main(
+            [
+                "--fundamentals-db",
+                str(db_path),
+                "--dry-run",
+                "--output-root",
+                str(root),
+                "--sleep-min-seconds",
+                "0",
+                "--sleep-max-seconds",
+                "0",
+            ]
+        )
+        == 130
+    )
+    payload = json.loads((root / "calendar_checkpoint.json").read_text(encoding="utf-8"))
+    assert payload["attempt_rows"][-1]["result_status"] == "INTERRUPTED"
+
+
+def _seed_calendar_db(db_path: Path, tickers: list[str]) -> None:
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        for ticker in tickers:
+            conn.execute(
+                "INSERT INTO rc_fundamental_quarterly(ticker, period_end_date, run_id) VALUES (?, '2026-06-30', 'TEST')",
+                (ticker,),
+            )
+
+
+def _temp_root(name: str) -> Path:
+    root = Path("/home/kalle/projects/swingmaster/temp/yahoo_earnings_calendar_reliability/tests") / name
+    root.mkdir(parents=True, exist_ok=True)
+    return root

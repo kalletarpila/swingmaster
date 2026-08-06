@@ -7,12 +7,19 @@ Runtime artifacts:
 ```text
 temp/earnings_calendar_and_ingestion_status/20260806T_apply/
 temp/earnings_calendar_and_ingestion_status/20260806T_apply_idempotency/
+temp/yahoo_earnings_calendar_reliability/20260806T_live_probe_aapl/
+temp/yahoo_earnings_calendar_reliability/20260806T_live_probe_aapl_escalated/
+temp/yahoo_earnings_calendar_reliability/20260806T_pilot20_dry_run/
+temp/yahoo_earnings_calendar_reliability/20260806T_full_dry_run/
+temp/yahoo_earnings_calendar_reliability/20260806T_full_apply/
+temp/yahoo_earnings_calendar_reliability/20260806T_idempotency_first20/
 ```
 
 Backup:
 
 ```text
 temp/earnings_calendar_and_ingestion_status/20260806T_apply/backups/fundamentals_usa.db.pre_calendar_ingestion_status.bak
+temp/yahoo_earnings_calendar_reliability/20260806T_full_apply/backups/fundamentals_usa.db.pre_earnings_calendar.bak
 ```
 
 ## Readiness Policy
@@ -106,8 +113,43 @@ persisted_matching_field_count = source_non_null_field_count
 
 The historical backfill does not meet this contract.
 
+## Yahoo Calendar Reliability
+
+The Yahoo calendar refresh is intentionally guarded:
+
+- exactly one of `--dry-run` or `--apply` is required
+- per-request timeout is passed to yfinance's underlying `cache_get(...)`
+- total attempts per ticker are bounded by `--max-retries`
+- per-ticker and per-run elapsed guards can stop a run with checkpoint artifacts
+- consecutive failures can stop a run before broad source drift overwrites operational state
+- source failures do not call `upsert_earnings_calendar(...)`, so existing calendar rows are preserved
+- progress is printed per ticker and checkpoint JSON is rewritten after each ticker
+- row and attempt CSV files are written for post-run diagnostics
+
+Installed yfinance at test time was `1.5.2`. `Ticker.get_earnings_dates(...)` did not expose a timeout parameter, so the refresh uses the same Yahoo calendar HTML endpoint through yfinance's data layer with an explicit timeout. yfinance can still perform internal cookie, crumb, consent, and retry requests; the operational guard is therefore total attempts plus elapsed-time checkpointing, not a claim that each ticker can only perform one HTTP request.
+
+Observed reliability runs on 2026-08-06:
+
+- non-escalated AAPL dry-run: failed with DNS/connect error for `guce.yahoo.com`, confirming sandbox network blocking is diagnosed as `NETWORK_ERROR`
+- escalated AAPL dry-run: 1/1 source success, future estimate found
+- escalated 20-ticker dry-run pilot: 20/20 source success, 20 future estimates, 0 failures
+- escalated full-universe dry-run: 2935/2936 source success; one transient `PARSE_ERROR` for `SRPT`; no timeouts, rate limits, or network errors
+- escalated full-universe apply: 2936/2936 source success; 2936 inserted calendar rows; 0 source/parse/timeout/rate-limit/network failures
+- 20-ticker apply idempotency smoke: 20/20 unchanged; 0 inserts and 0 updates
+
+Post-apply `rc_earnings_calendar` status distribution:
+
+```text
+COMPLETED_EVENT_FOUND  2806
+DUE_TODAY              4
+NO_CURRENT_ESTIMATE    106
+UPCOMING               20
+```
+
+Post-apply `PRAGMA quick_check` returned `ok`.
+
 ## Current Limits
 
-Yahoo live pilot was attempted as a 20-ticker dry-run but was interrupted after it did not complete promptly in this environment. No calendar rows were written; `rc_earnings_calendar` row count remained `0`.
+Yahoo calendar rows are current observations from Yahoo Finance, not guaranteed future truth. Future estimate dates can move, and completed event reconciliation still belongs to `rc_earnings_event`.
 
-Scheduler activation and broad automatic quarter fetching remain blocked until a successful Yahoo pilot and explicit approval for full-universe egress.
+Scheduler activation and broad automatic quarter fetching remain separate decisions. This phase only hardens and runs the Yahoo earnings-calendar refresh.

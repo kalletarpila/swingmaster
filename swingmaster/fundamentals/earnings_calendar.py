@@ -204,11 +204,31 @@ def _row_value(row: Mapping[str, Any], key: str) -> Any:
 
 
 def _date_part(value: str | None) -> str | None:
-    if not value:
+    if value is None:
+        return None
+    if hasattr(value, "date"):
+        try:
+            return value.date().isoformat()
+        except Exception:
+            pass
+    text = str(value).strip()
+    if not text:
         return None
     try:
-        return date.fromisoformat(value[:10]).isoformat()
+        return date.fromisoformat(text[:10]).isoformat()
     except ValueError:
+        pass
+    cleaned = (
+        text.replace(" EDT", "")
+        .replace(" EST", "")
+        .replace(" America/New_York", "")
+        .replace(" at ", " ")
+    )
+    try:
+        from dateutil import parser
+
+        return parser.parse(cleaned, fuzzy=True).date().isoformat()
+    except Exception:
         return None
 
 

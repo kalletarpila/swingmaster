@@ -749,12 +749,13 @@ def _insert_ttm_row(
             fcf_margin_ttm,
             fcf_margin_trend_4q,
             net_debt,
+            net_debt_to_ebit,
             net_debt_to_ebitda,
             share_dilution_yoy,
             lifecycle_class,
             fundamental_score,
             run_id
-        ) VALUES (?, ?, ?, 1000.0, ?, NULL, NULL, ?, ?, NULL, NULL, ?, NULL, NULL, ?, ?, ?, NULL, 'TTM_RUN_V1')
+        ) VALUES (?, ?, ?, 1000.0, ?, NULL, NULL, ?, ?, NULL, NULL, ?, NULL, NULL, ?, ?, ?, ?, NULL, 'TTM_RUN_V1')
         """,
         (
             ticker,
@@ -764,6 +765,7 @@ def _insert_ttm_row(
             ebit_margin_ttm,
             ebit_margin_trend_4q,
             fcf_margin_ttm,
+            net_debt_to_ebitda,
             net_debt_to_ebitda,
             share_dilution_yoy,
             lifecycle_class,

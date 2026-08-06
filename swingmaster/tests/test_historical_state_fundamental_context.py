@@ -386,7 +386,7 @@ def _insert_ttm(conn: sqlite3.Connection, ticker: str, as_of_date: str, effectiv
             growth_component, margin_component, margin_trend_component, fcf_component,
             consistency_component, consistency_component_lifecycle, leverage_component, dilution_component,
             revenue_growth_ttm_yoy, ebit_margin_ttm, ebit_margin_trend_4q,
-            fcf_margin_ttm, fcf_margin_trend_4q, net_debt_to_ebitda, share_dilution_yoy,
+            fcf_margin_ttm, fcf_margin_trend_4q, net_debt_to_ebit, share_dilution_yoy,
             ebit_ttm, fcf_ttm,
             effective_trading_date, effective_date_status, effective_date_policy,
             score_effective_trading_date, score_effective_date_status, score_effective_date_policy,

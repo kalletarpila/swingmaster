@@ -25,7 +25,7 @@ FACTOR_SPECS = (
     ("margin_pct", "ebit_margin_ttm", True),
     ("margin_trend_pct", "ebit_margin_trend_4q", True),
     ("fcf_pct", "fcf_margin_ttm", True),
-    ("leverage_pct", "net_debt_to_ebitda", False),
+    ("leverage_pct", "net_debt_to_ebit", False),
     ("dilution_pct", "share_dilution_yoy", False),
 )
 SECTIONED_METRICS: tuple[str | None, ...] = (
@@ -50,7 +50,7 @@ SECTIONED_METRICS: tuple[str | None, ...] = (
     "ebit_margin_trend_4q",
     "fcf_margin_ttm",
     "fcf_margin_trend_4q",
-    "net_debt_to_ebitda",
+    "net_debt_to_ebit",
     "share_dilution_yoy",
     None,
     "fundamental_score_percentile_global",
@@ -94,7 +94,7 @@ SECTIONED_METRICS: tuple[str | None, ...] = (
     "consistency_delta_qoq",
     "growth_pct_global_delta_qoq",
     "shares_outstanding_delta_4q",
-    "net_debt_to_ebitda_delta_4q",
+    "net_debt_to_ebit_delta_4q",
     None,
     "percentile_delta_4q",
     "score_delta_4q",
@@ -566,7 +566,7 @@ def load_latest_quarter_rows(conn: sqlite3.Connection, ticker: str, quarters: in
                 ebit_margin_trend_4q,
                 fcf_margin_ttm,
                 fcf_margin_trend_4q,
-                net_debt_to_ebitda,
+                net_debt_to_ebit,
                 share_dilution_yoy
             FROM rc_fundamental_ttm
             WHERE ticker = ?
@@ -615,7 +615,7 @@ def load_peer_rows_by_date(conn: sqlite3.Connection, as_of_dates: list[str]) -> 
                 ebit_margin_ttm,
                 ebit_margin_trend_4q,
                 fcf_margin_ttm,
-                net_debt_to_ebitda,
+                net_debt_to_ebit,
                 share_dilution_yoy
             FROM rc_fundamental_ttm
             WHERE as_of_date IN ({placeholders})
@@ -812,7 +812,7 @@ def build_snapshot_matrix(
         latest_quarterly["shares_outstanding"] if latest_quarterly is not None else None,
         earliest_quarterly["shares_outstanding"] if earliest_quarterly is not None else None,
     )
-    net_debt_to_ebitda_delta_4q = _delta_formatted(latest_row["net_debt_to_ebitda"], earliest_row["net_debt_to_ebitda"])
+    net_debt_to_ebit_delta_4q = _delta_formatted(latest_row["net_debt_to_ebit"], earliest_row["net_debt_to_ebit"])
     lifecycle_transition_4q = ""
     if earliest_row["lifecycle_class"] is not None and latest_row["lifecycle_class"] is not None:
         lifecycle_transition_4q = f"{earliest_row['lifecycle_class']} to {latest_row['lifecycle_class']}"
@@ -853,7 +853,7 @@ def build_snapshot_matrix(
                 "ebit_margin_trend_4q": _format_optional_float(_coerce_optional_float(row["ebit_margin_trend_4q"])),
                 "fcf_margin_ttm": _format_optional_float(_coerce_optional_float(row["fcf_margin_ttm"])),
                 "fcf_margin_trend_4q": _format_optional_float(_coerce_optional_float(row["fcf_margin_trend_4q"])),
-                "net_debt_to_ebitda": _format_optional_float(_coerce_optional_float(row["net_debt_to_ebitda"])),
+                "net_debt_to_ebit": _format_optional_float(_coerce_optional_float(row["net_debt_to_ebit"])),
                 "share_dilution_yoy": _format_optional_float(_coerce_optional_float(row["share_dilution_yoy"])),
                 "fundamental_score_percentile_global": _format_optional_float(_coerce_optional_float(stored_row["fundamental_score_percentile_global"] if stored_row is not None else None)),
                 "fundamental_score_percentile_sector": _format_optional_float(_coerce_optional_float(stored_row["fundamental_score_percentile_sector"] if stored_row is not None else None)),
@@ -894,7 +894,7 @@ def build_snapshot_matrix(
                 "consistency_delta_qoq": "",
                 "growth_pct_global_delta_qoq": "",
                 "shares_outstanding_delta_4q": shares_outstanding_delta_4q if is_last_quarter else "",
-                "net_debt_to_ebitda_delta_4q": net_debt_to_ebitda_delta_4q if is_last_quarter else "",
+                "net_debt_to_ebit_delta_4q": net_debt_to_ebit_delta_4q if is_last_quarter else "",
                 "sector_rank_position": _format_rank_position(
                     int(stored_row["sector_rank"]) if stored_row is not None and stored_row["sector_rank"] is not None else None,
                     int(stored_row["sector_size"]) if stored_row is not None and stored_row["sector_size"] is not None else None,

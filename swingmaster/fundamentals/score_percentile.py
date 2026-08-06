@@ -40,7 +40,7 @@ FACTOR_COLUMNS = {
     "margin_trend": "ebit_margin_trend_4q",
     "fcf": "fcf_margin_ttm",
     "consistency": "consistency_component_lifecycle",
-    "leverage": "net_debt_to_ebitda",
+    "leverage": "net_debt_to_ebit",
     "dilution": "share_dilution_yoy",
 }
 HIGHER_IS_BETTER_FACTORS = {"growth", "margin", "margin_trend", "fcf", "consistency"}
@@ -136,7 +136,7 @@ class PercentileSnapshotRow:
     ebit_margin_ttm: float | None
     ebit_margin_trend_4q: float | None
     fcf_margin_ttm: float | None
-    net_debt_to_ebitda: float | None
+    net_debt_to_ebit: float | None
     share_dilution_yoy: float | None
     consistency_component_lifecycle: float | None
     fundamental_score_lifecycle: float
@@ -177,7 +177,7 @@ def load_latest_percentile_snapshot(
                 t.ebit_margin_ttm,
                 t.ebit_margin_trend_4q,
                 t.fcf_margin_ttm,
-                t.net_debt_to_ebitda,
+                t.net_debt_to_ebit,
                 t.share_dilution_yoy,
                 t.consistency_component_lifecycle,
                 t.fundamental_score_lifecycle,
@@ -211,7 +211,7 @@ def load_latest_percentile_snapshot(
                 ebit_margin_ttm=_coerce_optional_float(row["ebit_margin_ttm"]),
                 ebit_margin_trend_4q=_coerce_optional_float(row["ebit_margin_trend_4q"]),
                 fcf_margin_ttm=_coerce_optional_float(row["fcf_margin_ttm"]),
-                net_debt_to_ebitda=_coerce_optional_float(row["net_debt_to_ebitda"]),
+                net_debt_to_ebit=_coerce_optional_float(row["net_debt_to_ebit"]),
                 share_dilution_yoy=_coerce_optional_float(row["share_dilution_yoy"]),
                 consistency_component_lifecycle=_coerce_optional_float(row["consistency_component_lifecycle"]),
                 fundamental_score_lifecycle=float(row["fundamental_score_lifecycle"]),

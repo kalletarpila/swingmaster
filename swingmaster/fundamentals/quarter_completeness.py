@@ -17,29 +17,29 @@ ASSESSMENT_POLICY_VERSION = "fundamental_quarter_completeness_v1"
 DEFAULT_MARKET = "usa"
 
 IDENTITY_AND_PERIOD_FIELDS = ("ticker", "period_end_date")
-INCOME_STATEMENT_CORE_FIELDS = ("revenue", "gross_profit", "operating_income", "ebit", "ebitda", "net_income")
+INCOME_STATEMENT_CORE_FIELDS = ("revenue", "gross_profit", "operating_income", "ebit", "net_income")
 BALANCE_SHEET_CORE_FIELDS = ("cash", "total_debt")
 CASH_FLOW_CORE_FIELDS = ("operating_cashflow", "capex", "free_cashflow")
 SHARE_AND_EPS_CORE_FIELDS = ("shares_outstanding",)
-DERIVED_OR_OPTIONAL_FIELDS: tuple[str, ...] = ()
+DERIVED_OR_OPTIONAL_FIELDS = ("ebitda",)
 SOURCE_OR_OPERATIONAL_METADATA_FIELDS = ("currency", "run_id")
-FINANCIAL_FIELDS = (
+CORE_FIELDS = (
     *INCOME_STATEMENT_CORE_FIELDS,
     *CASH_FLOW_CORE_FIELDS,
     *BALANCE_SHEET_CORE_FIELDS,
     *SHARE_AND_EPS_CORE_FIELDS,
 )
-CORE_FIELDS = FINANCIAL_FIELDS
-TTM_CONSUMER_FIELDS = ("revenue", "ebit", "free_cashflow", "ebitda", "gross_profit", "cash", "total_debt", "shares_outstanding")
+FINANCIAL_FIELDS = (*CORE_FIELDS, *DERIVED_OR_OPTIONAL_FIELDS)
+TTM_CONSUMER_FIELDS = ("revenue", "ebit", "free_cashflow", "gross_profit", "cash", "total_debt", "shares_outstanding")
 SCORE_CRITICAL_QUARTER_FIELDS = ("revenue", "ebit", "free_cashflow")
-SCORE_USEFUL_QUARTER_FIELDS = ("gross_profit", "ebitda", "cash", "total_debt", "shares_outstanding")
+SCORE_USEFUL_QUARTER_FIELDS = ("gross_profit", "cash", "total_debt", "shares_outstanding")
 VALUATION_QUARTER_FIELDS = ("shares_outstanding", "cash", "total_debt")
 SOURCE_FIELD_IMPORTANCE = {
     "revenue": "core_ttm_score_snapshot",
     "gross_profit": "optional_ttm_margin_trend",
     "operating_income": "core_normalization_fallback",
     "ebit": "core_ttm_score_valuation",
-    "ebitda": "optional_leverage_preferred_denominator",
+    "ebitda": "deprecated_optional_not_used_for_active_leverage",
     "net_income": "core_research_context",
     "operating_cashflow": "core_fcf_derivation",
     "capex": "core_fcf_derivation",

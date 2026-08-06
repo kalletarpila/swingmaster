@@ -214,7 +214,7 @@ def _insert_ttm_row(
             fcf_margin_ttm,
             fcf_margin_trend_4q,
             net_debt,
-            net_debt_to_ebitda,
+            net_debt_to_ebit,
             share_dilution_yoy,
             lifecycle_class,
             fundamental_score,

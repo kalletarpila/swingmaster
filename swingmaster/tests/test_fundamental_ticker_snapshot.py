@@ -216,7 +216,7 @@ def test_build_snapshot_matrix_cli_output_and_csv(monkeypatch, capsys, tmp_path:
     assert "consistency_delta_qoq;;0.00;0.00;0.00" in output
     assert "growth_pct_global_delta_qoq;;0.00;0.00;0.00" in output
     assert "shares_outstanding_delta_4q;;;;1.50" in output
-    assert "net_debt_to_ebitda_delta_4q;;;;-1.20" in output
+    assert "net_debt_to_ebit_delta_4q;;;;-1.20" in output
     assert "percentile_delta_4q;;;;0.80" in output
     assert "score_delta_4q;;;;0.20" in output
     assert "lifecycle_transition_4q;;;;SCALING to SCALING" in output
@@ -3538,7 +3538,7 @@ def _insert_ttm_row(
         INSERT INTO rc_fundamental_ttm (
             ticker, as_of_date, latest_period_end_date,
             revenue_growth_ttm_yoy, ebit_margin_ttm, ebit_margin_trend_4q, fcf_margin_ttm, fcf_margin_trend_4q,
-            net_debt_to_ebitda, share_dilution_yoy, lifecycle_class,
+            net_debt_to_ebit, share_dilution_yoy, lifecycle_class,
             fundamental_score, fundamental_score_lifecycle,
             growth_component, margin_component, margin_trend_component, fcf_component,
             consistency_component, leverage_component, dilution_component, run_id

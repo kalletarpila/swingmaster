@@ -60,7 +60,7 @@ TTM_FIELDS = (
     "ebit_margin_trend_4q",
     "fcf_margin_ttm",
     "fcf_margin_trend_4q",
-    "net_debt_to_ebitda",
+    "net_debt_to_ebit",
     "share_dilution_yoy",
 )
 SCORE_FIELDS = (

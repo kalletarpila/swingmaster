@@ -24,7 +24,7 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
                     ebit_margin_ttm,
                     ebit_margin_trend_4q,
                     fcf_margin_ttm,
-                    net_debt_to_ebitda,
+                    net_debt_to_ebit,
                     share_dilution_yoy,
                     lifecycle_class,
                     fundamental_score
@@ -42,7 +42,7 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
                     ebit_margin_ttm,
                     ebit_margin_trend_4q,
                     fcf_margin_ttm,
-                    net_debt_to_ebitda,
+                    net_debt_to_ebit,
                     share_dilution_yoy,
                     lifecycle_class,
                     fundamental_score
@@ -77,7 +77,7 @@ def explain_score_components(
     margin_component = float(_margin_component(row["ebit_margin_ttm"]))
     margin_trend_component = float(_margin_trend_component(row["ebit_margin_trend_4q"]))
     fcf_component = float(_fcf_component(row["fcf_margin_ttm"]))
-    leverage_component = float(_leverage_component(row["net_debt_to_ebitda"]))
+    leverage_component = float(_leverage_component(row["net_debt_to_ebit"]))
     dilution_component = float(_dilution_component(row["share_dilution_yoy"]))
     lifecycle_component = float(_lifecycle_component(row["lifecycle_class"]))
     consistency_component = float(compute_consistency_component(ttm_series_history or [row]))

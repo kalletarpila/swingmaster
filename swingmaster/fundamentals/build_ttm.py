@@ -55,7 +55,6 @@ def build_ttm_rows(quarterly_rows: list[sqlite3.Row], run_id: str) -> list[dict[
         revenue_ttm = _sum_window(current_4q, "revenue")
         ebit_ttm = _sum_window(current_4q, "ebit")
         fcf_ttm = _sum_window(current_4q, "free_cashflow")
-        ebitda_ttm = _sum_window(current_4q, "ebitda")
         gross_profit_ttm = _sum_window(current_4q, "gross_profit")
 
         ebit_margin_ttm = _safe_divide(ebit_ttm, revenue_ttm)
@@ -75,7 +74,7 @@ def build_ttm_rows(quarterly_rows: list[sqlite3.Row], run_id: str) -> list[dict[
         previous_gross_margin_ttm = _safe_divide(previous_gross_profit_ttm, previous_revenue_ttm)
 
         net_debt = _calculate_net_debt(current_row["total_debt"], current_row["cash"])
-        net_debt_to_ebitda = _calculate_net_debt_to_ebitda(net_debt, ebitda_ttm, ebit_ttm)
+        net_debt_to_ebit = _calculate_net_debt_to_ebit(net_debt, ebit_ttm)
         share_dilution_yoy = _calculate_share_dilution(quarterly_rows, index)
 
         latest_period_end_date = str(current_row["period_end_date"])
@@ -95,7 +94,7 @@ def build_ttm_rows(quarterly_rows: list[sqlite3.Row], run_id: str) -> list[dict[
                 "fcf_margin_ttm": fcf_margin_ttm,
                 "fcf_margin_trend_4q": _safe_delta(fcf_margin_ttm, previous_fcf_margin_ttm),
                 "net_debt": net_debt,
-                "net_debt_to_ebitda": net_debt_to_ebitda,
+                "net_debt_to_ebit": net_debt_to_ebit,
                 "share_dilution_yoy": share_dilution_yoy,
                 "lifecycle_class": None,
                 "fundamental_score": None,
@@ -139,14 +138,7 @@ def _calculate_net_debt(total_debt: float | None, cash: float | None) -> float |
     return float(total_debt - cash)
 
 
-def _calculate_net_debt_to_ebitda(
-    net_debt: float | None,
-    ebitda_ttm: float | None,
-    ebit_ttm: float | None,
-) -> float | None:
-    primary_value = _safe_divide(net_debt, ebitda_ttm)
-    if primary_value is not None:
-        return primary_value
+def _calculate_net_debt_to_ebit(net_debt: float | None, ebit_ttm: float | None) -> float | None:
     return _safe_divide(net_debt, ebit_ttm)
 
 
@@ -178,7 +170,7 @@ def insert_ttm_rows(conn: sqlite3.Connection, ttm_rows: list[dict[str, Any]]) ->
             fcf_margin_ttm,
             fcf_margin_trend_4q,
             net_debt,
-            net_debt_to_ebitda,
+            net_debt_to_ebit,
             share_dilution_yoy,
             lifecycle_class,
             fundamental_score,
@@ -201,7 +193,7 @@ def insert_ttm_rows(conn: sqlite3.Connection, ttm_rows: list[dict[str, Any]]) ->
                 row["fcf_margin_ttm"],
                 row["fcf_margin_trend_4q"],
                 row["net_debt"],
-                row["net_debt_to_ebitda"],
+                row["net_debt_to_ebit"],
                 row["share_dilution_yoy"],
                 row["lifecycle_class"],
                 row["fundamental_score"],

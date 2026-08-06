@@ -264,7 +264,7 @@ def _insert_score(
         INSERT INTO rc_fundamental_ttm (
             ticker, as_of_date, latest_period_end_date,
             revenue_growth_ttm_yoy, ebit_margin_ttm, ebit_margin_trend_4q,
-            fcf_margin_ttm, net_debt_to_ebitda, share_dilution_yoy,
+            fcf_margin_ttm, net_debt_to_ebit, share_dilution_yoy,
             consistency_component_lifecycle, lifecycle_class,
             fundamental_score_lifecycle, score_rule_lifecycle,
             score_effective_trading_date, score_effective_date_status,

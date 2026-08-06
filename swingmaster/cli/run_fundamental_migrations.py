@@ -61,6 +61,9 @@ TTM_SCORE_EFFECTIVE_DATE_COLUMNS = (
     ("score_effective_date_policy", "TEXT"),
     ("score_effective_date_source_ttm_as_of_date", "TEXT"),
 )
+TTM_NET_DEBT_TO_EBIT_COLUMNS = (
+    ("net_debt_to_ebit", "REAL"),
+)
 PERCENTILE_LIFECYCLE_COLUMNS = (
     ("sector_rank_blended", "INTEGER"),
     ("industry_rank_blended", "INTEGER"),
@@ -312,6 +315,16 @@ def get_score_effective_date_migration_file_path() -> Path:
     )
 
 
+def get_ttm_net_debt_to_ebit_migration_file_path() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent
+        / "infra"
+        / "sqlite"
+        / "migrations"
+        / "033_rc_fundamental_ttm_net_debt_to_ebit.sql"
+    )
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -336,6 +349,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_quarter_earnings_match_migration_file_path(),
         get_ttm_effective_date_migration_file_path(),
         get_score_effective_date_migration_file_path(),
+        get_ttm_net_debt_to_ebit_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")
@@ -343,6 +357,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
     ensure_ttm_component_columns(conn)
     ensure_ttm_effective_date_columns(conn)
     ensure_score_effective_date_columns(conn)
+    ensure_ttm_net_debt_to_ebit_columns(conn)
     ensure_percentile_lifecycle_columns(conn)
     ensure_valuation_v2_columns(conn)
     ensure_valuation_v21_columns(conn)
@@ -409,6 +424,22 @@ def ensure_score_effective_date_columns(conn: sqlite3.Connection) -> None:
         ON rc_fundamental_ttm(ticker, score_effective_trading_date)
         """
     )
+
+
+def ensure_ttm_net_debt_to_ebit_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_ttm)
+            """
+        )
+    }
+    for column_name, column_type in TTM_NET_DEBT_TO_EBIT_COLUMNS:
+        if column_name in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE rc_fundamental_ttm ADD COLUMN {column_name} {column_type}")
+        existing_columns.add(column_name)
 
 
 def ensure_percentile_lifecycle_columns(conn: sqlite3.Connection) -> None:
@@ -547,6 +578,15 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
         raise RuntimeError(
             "FUNDAMENTAL_SCORE_EFFECTIVE_DATE_COLUMNS_MISSING:"
             + ",".join(missing_score_effective_date_columns)
+        )
+
+    missing_ttm_net_debt_to_ebit_columns = [
+        column_name for column_name, _column_type in TTM_NET_DEBT_TO_EBIT_COLUMNS if column_name not in ttm_columns
+    ]
+    if missing_ttm_net_debt_to_ebit_columns:
+        raise RuntimeError(
+            "FUNDAMENTAL_TTM_NET_DEBT_TO_EBIT_COLUMNS_MISSING:"
+            + ",".join(missing_ttm_net_debt_to_ebit_columns)
         )
 
     percentile_columns = {

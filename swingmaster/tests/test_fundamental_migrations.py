@@ -65,6 +65,7 @@ def test_run_migration_creates_required_tables_and_is_idempotent(tmp_path: Path)
         }
         for column_name, _column_type in TTM_COMPONENT_COLUMNS:
             assert column_name in ttm_columns
+        assert "net_debt_to_ebit" in ttm_columns
         for column_name, _column_type in TTM_SCORE_EFFECTIVE_DATE_COLUMNS:
             assert column_name in ttm_columns
         table_row = conn.execute(

@@ -17,11 +17,11 @@ This phase was read-only for `fundamentals_usa.db`. It added reusable audit code
 | Group | Fields |
 | --- | --- |
 | `IDENTITY_AND_PERIOD` | `ticker`, `period_end_date` |
-| `INCOME_STATEMENT_CORE` | `revenue`, `gross_profit`, `operating_income`, `ebit`, `ebitda`, `net_income` |
+| `INCOME_STATEMENT_CORE` | `revenue`, `gross_profit`, `operating_income`, `ebit`, `net_income` |
 | `CASH_FLOW_CORE` | `operating_cashflow`, `capex`, `free_cashflow` |
 | `BALANCE_SHEET_CORE` | `cash`, `total_debt` |
 | `SHARE_AND_EPS_CORE` | `shares_outstanding` |
-| `DERIVED_OR_OPTIONAL` | none in the current quarterly table |
+| `DERIVED_OR_OPTIONAL` | `ebitda` |
 | `SOURCE_OR_OPERATIONAL_METADATA` | `currency`, `run_id` |
 
 The table is narrow and latest-state oriented. It has no market column, no persisted source-observed timestamp, and no retained per-row source response. Duplicate prevention is the natural primary key. Latest writes use `INSERT OR REPLACE`.
@@ -49,7 +49,7 @@ Vintage/provenance tables exist and contain old rows, but `VINTAGE_PROVENANCE_WR
 | `revenue` | core | summed over non-null quarters; zero blocks ratios/growth denominator | no revenue TTM if all four are null; margins and growth may be null |
 | `ebit` | core | summed over non-null quarters | no EBIT TTM if all four are null; margin/valuation may be unavailable |
 | `free_cashflow` | core | summed over non-null quarters | FCF TTM and FCF margins/trends may be null |
-| `ebitda` | optional | summed over non-null quarters | leverage denominator falls back to EBIT |
+| `ebitda` | optional/deprecated for active leverage | not used by active TTM leverage | no active score effect |
 | `gross_profit` | optional | summed over non-null quarters | gross margin trend may be null |
 | `cash` | optional for TTM row | current-quarter value only | net debt and leverage may be null |
 | `total_debt` | optional for TTM row | current-quarter value only | net debt and leverage may be null |
@@ -61,7 +61,7 @@ The builder requires at least four quarterly rows per ticker, but individual met
 
 `swingmaster/fundamentals/score.py` reads TTM metrics:
 
-`revenue_growth_ttm_yoy`, `ebit_margin_ttm`, `ebit_margin_trend_4q`, `fcf_margin_ttm`, `net_debt_to_ebitda`, `share_dilution_yoy`, `lifecycle_class`, and recent history for the consistency component.
+`revenue_growth_ttm_yoy`, `ebit_margin_ttm`, `ebit_margin_trend_4q`, `fcf_margin_ttm`, `net_debt_to_ebit`, `share_dilution_yoy`, `lifecycle_class`, and recent history for the consistency component.
 
 Missing factors are tolerated:
 
@@ -71,7 +71,7 @@ Missing factors are tolerated:
 | `ebit_margin_ttm` | margin component `0` |
 | `ebit_margin_trend_4q` | default trend component `6` |
 | `fcf_margin_ttm` | FCF component `0` |
-| `net_debt_to_ebitda` | default leverage component `8` |
+| `net_debt_to_ebit` | default leverage component `8` |
 | `share_dilution_yoy` | default dilution component `5` |
 | `lifecycle_class` | lifecycle component `0` |
 | insufficient consistency history | consistency component `0` |
@@ -356,4 +356,3 @@ The next implementation should be additive:
 6. Add scheduler/UI diagnostics that surface latest-quarter and last-four-quarter issues without blocking unrelated research workflows.
 
 Do not reactivate vintage/provenance, do not make incomplete optional data block normal screens, and do not use ingestion timestamps as market availability dates.
-

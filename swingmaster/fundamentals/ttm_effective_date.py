@@ -39,6 +39,7 @@ FINANCIAL_HASH_COLUMNS = (
     "fcf_margin_ttm",
     "fcf_margin_trend_4q",
     "net_debt",
+    "net_debt_to_ebit",
     "net_debt_to_ebitda",
     "share_dilution_yoy",
     "lifecycle_class",

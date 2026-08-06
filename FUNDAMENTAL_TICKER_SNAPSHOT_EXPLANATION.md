@@ -227,7 +227,7 @@ Variables:
 - `ebit_margin_trend_4q`
 - `fcf_margin_ttm`
 - `fcf_margin_trend_4q`
-- `net_debt_to_ebitda`
+- `net_debt_to_ebit`
 - `share_dilution_yoy`
 
 These are direct inputs or near-direct inputs into scoring.
@@ -242,7 +242,7 @@ Examples:
 - high `ebit_margin_ttm` = stronger operating profitability
 - positive `ebit_margin_trend_4q` = margins improving
 - high `fcf_margin_ttm` = earnings converting to cash
-- lower `net_debt_to_ebitda` is better
+- lower `net_debt_to_ebit` is better
 - lower or negative `share_dilution_yoy` is better
 
 ---
@@ -369,7 +369,7 @@ Variables:
 - `margin_trend_delta_4q`
 - `fcf_margin_trend_delta_4q`
 - `shares_outstanding_delta_4q`
-- `net_debt_to_ebitda_delta_4q`
+- `net_debt_to_ebit_delta_4q`
 - `percentile_delta_4q`
 - `score_delta_4q`
 - `lifecycle_transition_4q`
@@ -381,7 +381,7 @@ Meaning:
 - `margin_trend_delta_4q`: latest minus earliest `ebit_margin_trend_4q`
 - `fcf_margin_trend_delta_4q`: latest minus earliest `fcf_margin_trend_4q`
 - `shares_outstanding_delta_4q`: latest minus earliest quarterly share count
-- `net_debt_to_ebitda_delta_4q`: latest minus earliest leverage ratio
+- `net_debt_to_ebit_delta_4q`: latest minus earliest leverage ratio
 - `percentile_delta_4q`: latest lifecycle-weighted blended percentile minus earliest baseline blended percentile
 - `score_delta_4q`: latest lifecycle score minus earliest lifecycle score
 - `lifecycle_transition_4q`: first lifecycle label to latest lifecycle label
@@ -722,7 +722,7 @@ Based on `fcf_margin_ttm`:
 
 ### Leverage component
 
-Based on `net_debt_to_ebitda`:
+Based on `net_debt_to_ebit`:
 
 - `NULL` -> `8`
 - `<= 0` -> `15`
@@ -907,7 +907,7 @@ The percentile system operates on the latest available fundamental snapshot per 
 - `margin_trend` -> `ebit_margin_trend_4q`
 - `fcf` -> `fcf_margin_ttm`
 - `consistency` -> `consistency_component_lifecycle`
-- `leverage` -> `net_debt_to_ebitda`
+- `leverage` -> `net_debt_to_ebit`
 - `dilution` -> `share_dilution_yoy`
 
 ### Higher-is-better factors

@@ -27,7 +27,7 @@ RAW_FACTOR_ROWS = (
     "ebit_margin_ttm",
     "ebit_margin_trend_4q",
     "fcf_margin_ttm",
-    "net_debt_to_ebitda",
+    "net_debt_to_ebit",
     "share_dilution_yoy",
     "lifecycle_class",
 )
@@ -102,7 +102,7 @@ def build_explain_rows(
                 "ebit_margin_ttm": row["ebit_margin_ttm"],
                 "ebit_margin_trend_4q": row["ebit_margin_trend_4q"],
                 "fcf_margin_ttm": row["fcf_margin_ttm"],
-                "net_debt_to_ebitda": row["net_debt_to_ebitda"],
+                "net_debt_to_ebit": row["net_debt_to_ebit"],
                 "share_dilution_yoy": row["share_dilution_yoy"],
                 "lifecycle_class": row["lifecycle_class"],
                 **breakdown,

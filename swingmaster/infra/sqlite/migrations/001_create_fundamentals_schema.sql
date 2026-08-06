@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS rc_fundamental_ttm (
     fcf_margin_trend_4q REAL,
     net_debt REAL,
     net_debt_to_ebitda REAL,
+    net_debt_to_ebit REAL,
     share_dilution_yoy REAL,
     lifecycle_class TEXT,
     growth_component REAL,

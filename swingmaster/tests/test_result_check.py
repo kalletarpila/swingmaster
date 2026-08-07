@@ -340,6 +340,22 @@ def test_calendar_selector_missing_metadata_enters_bounded_maintenance(tmp_path:
     assert selected["maintenance_backlog_remaining"] == 7
 
 
+def test_calendar_selector_default_maintenance_limit_is_one_hundred(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    active = [f"D{i:03d}" for i in range(125)]
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=active,
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+    )
+
+    assert result_check.DEFAULT_CALENDAR_MAINTENANCE_LIMIT == 100
+    assert selected["calendar_maintenance"] == active[:100]
+    assert selected["maintenance_backlog_remaining"] == 25
+
+
 def test_calendar_selector_past_expected_date_remains_in_result_grace(tmp_path: Path) -> None:
     fundamentals_db = _migrated_db(tmp_path)
     _insert_calendar(fundamentals_db, "PAST", "DATE_PASSED_EVENT_NOT_FOUND", "2026-08-04")

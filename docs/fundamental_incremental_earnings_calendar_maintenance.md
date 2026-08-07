@@ -95,7 +95,7 @@ Expected dates on `decision_date` or in the recent past belong to `DUE_FOR_RESUL
 `CALENDAR_MAINTENANCE` selects a capped deterministic backlog after due/result and confirmation tickers are removed. The default cap is:
 
 ```text
---calendar-maintenance-limit 50
+--calendar-maintenance-limit 100
 ```
 
 Maintenance priority is:

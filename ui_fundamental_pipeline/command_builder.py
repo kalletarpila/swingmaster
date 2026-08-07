@@ -127,7 +127,7 @@ def build_usa_result_check_command(
     event_watch_days_after: int = 5,
     ohlcv_stale_days: int = 14,
     calendar_confirmation_days_before: int = 7,
-    calendar_maintenance_limit: int = 50,
+    calendar_maintenance_limit: int = 100,
     calendar_stale_days: int = 45,
     calendar_failure_retry_days: int = 3,
 ) -> list[str]:

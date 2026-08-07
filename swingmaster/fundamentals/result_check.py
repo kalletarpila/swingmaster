@@ -115,6 +115,7 @@ def run_manual_result_check(
             CHECK_STATUS_SUCCESS,
             active_tickers=len(active_tickers),
             due_for_result_check_count=len(calendar_selection["due_for_result_check"]),
+            due_for_confirmation_watch_count=len(calendar_selection["due_for_confirmation_watch"]),
             due_for_confirmation_count=len(calendar_selection["due_for_confirmation"]),
             maintenance_selected_count=len(calendar_selection["calendar_maintenance"]),
             unique_provider_check_ticker_count=len(calendar_selection["selected_tickers"]),
@@ -182,6 +183,7 @@ def run_manual_result_check(
         "candidate_hash": plan["candidate_hash"],
         "completed_event_refresh_candidate_count": len(event_candidates),
         "due_for_result_check_count": len(calendar_selection["due_for_result_check"]),
+        "due_for_confirmation_watch_count": len(calendar_selection["due_for_confirmation_watch"]),
         "due_for_confirmation_count": len(calendar_selection["due_for_confirmation"]),
         "maintenance_selected_count": len(calendar_selection["calendar_maintenance"]),
         "unique_provider_check_ticker_count": len(calendar_selection["selected_tickers"]),
@@ -252,6 +254,7 @@ def select_calendar_refresh_candidates(
     if not active:
         return {
             "due_for_result_check": [],
+            "due_for_confirmation_watch": [],
             "due_for_confirmation": [],
             "calendar_maintenance": [],
             "selected_tickers": [],
@@ -262,6 +265,7 @@ def select_calendar_refresh_candidates(
     confirmation_latest = decision_date + timedelta(days=max(confirmation_days_before, 0))
 
     due_for_result: list[str] = []
+    due_for_confirmation_watch: list[str] = []
     due_for_confirmation: list[str] = []
     maintenance_candidates: list[tuple[int, date, str]] = []
     for ticker in active:
@@ -275,7 +279,14 @@ def select_calendar_refresh_candidates(
             due_for_result.append(ticker)
             continue
         if estimated is not None and decision_date < estimated <= confirmation_latest:
-            due_for_confirmation.append(ticker)
+            due_for_confirmation_watch.append(ticker)
+            if _confirmation_check_due(
+                row=row,
+                decision_date=decision_date,
+                estimated_date=estimated,
+                failure_retry_days=failure_retry_days,
+            ):
+                due_for_confirmation.append(ticker)
             continue
         maintenance_key = _maintenance_key(
             ticker=ticker,
@@ -298,11 +309,31 @@ def select_calendar_refresh_candidates(
             break
     return {
         "due_for_result_check": sorted(dict.fromkeys(due_for_result)),
+        "due_for_confirmation_watch": sorted(dict.fromkeys(due_for_confirmation_watch)),
         "due_for_confirmation": sorted(dict.fromkeys(due_for_confirmation)),
         "calendar_maintenance": maintenance,
         "selected_tickers": sorted(selected),
         "maintenance_backlog_remaining": max(len(maintenance_candidates) - len(maintenance), 0),
     }
+
+
+def _confirmation_check_due(
+    *,
+    row: sqlite3.Row | None,
+    decision_date: date,
+    estimated_date: date,
+    failure_retry_days: int,
+) -> bool:
+    last_checked = _last_calendar_checked_date(row)
+    check_status = _row_text(row, "calendar_check_status")
+    days_until = (estimated_date - decision_date).days
+    if check_status and check_status != "SUCCESS":
+        retry_days = 1 if days_until <= 3 else max(failure_retry_days, 0)
+        return last_checked is None or (decision_date - last_checked).days >= retry_days
+    if last_checked is None:
+        return True
+    cadence_days = 1 if days_until <= 3 else 2
+    return (decision_date - last_checked).days >= cadence_days
 
 
 def _calendar_state_by_ticker(fundamentals_db: Path, tickers: list[str]) -> dict[str, sqlite3.Row]:
@@ -335,9 +366,7 @@ def _maintenance_key(
     estimated = _parse_optional_date(_row_text(row, "estimated_announcement_date"))
     status = _row_text(row, "calendar_status")
     check_status = _row_text(row, "calendar_check_status")
-    last_checked = _parse_optional_date(
-        _row_text(row, "calendar_last_checked_at_utc") or _row_text(row, "last_observed_at_utc")
-    )
+    last_checked = _last_calendar_checked_date(row)
     sort_date = last_checked or date.min
     if check_status and check_status != "SUCCESS":
         if last_checked is None or (decision_date - last_checked).days >= max(failure_retry_days, 0):
@@ -352,6 +381,10 @@ def _maintenance_key(
     if status in {"NO_CURRENT_ESTIMATE", "CALENDAR_CHECK_FAILED"}:
         return (5, sort_date, ticker)
     return None
+
+
+def _last_calendar_checked_date(row: Mapping[str, Any] | None) -> date | None:
+    return _parse_optional_date(_row_text(row, "calendar_last_checked_at_utc") or _row_text(row, "last_observed_at_utc"))
 
 
 def _parse_optional_date(value: str | None) -> date | None:

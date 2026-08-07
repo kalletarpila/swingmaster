@@ -67,7 +67,7 @@ decision_date
 
 The default `--event-watch-days-after` remains `5`.
 
-`DUE_FOR_CONFIRMATION` selects active tickers whose stored expected date is approaching:
+`DUE_FOR_CONFIRMATION` starts from active tickers whose stored expected date is approaching:
 
 ```text
 decision_date + 1
@@ -76,6 +76,21 @@ decision_date + calendar_confirmation_days_before
 ```
 
 The default `--calendar-confirmation-days-before` is `7`.
+
+This approaching-date window is only the watch window. It does not automatically mean every watched ticker gets a provider call every time the user presses `Check for New Results`.
+
+Successful confirmation checks use this cadence:
+
+```text
+expected date 4-7 days away -> provider check at most once every 2 calendar days
+expected date 1-3 days away -> provider check at most once per calendar day
+```
+
+Same-day repeated `Check for New Results` runs therefore do not refetch successfully confirmed future tickers solely because they remain inside the 7-day watch window.
+
+Rows whose new `calendar_last_checked_at_utc` field is still `NULL` after migration use the existing `last_observed_at_utc` as the freshness fallback. This avoids an immediate bootstrap burst for rows that were already refreshed recently before the check-state columns existed. If both timestamps are unavailable, the ticker is treated as needing confirmation.
+
+Expected dates on `decision_date` or in the recent past belong to `DUE_FOR_RESULT_CHECK`. They are not suppressed by the future-confirmation cadence.
 
 `CALENDAR_MAINTENANCE` selects a capped deterministic backlog after due/result and confirmation tickers are removed. The default cap is:
 
@@ -99,11 +114,13 @@ The default stale threshold is:
 --calendar-stale-days 45
 ```
 
-The default retry delay for previous provider failures is:
+The default retry delay for previous non-imminent provider failures is:
 
 ```text
 --calendar-failure-retry-days 3
 ```
+
+For watched tickers whose expected date is 1-3 days away, failed provider checks retry the next calendar day. This avoids letting the default 3-day maintenance retry delay skip an imminent announcement window. Result-due tickers are still handled by `DUE_FOR_RESULT_CHECK`.
 
 ## Provider Behavior
 
@@ -120,6 +137,7 @@ Completed-event refresh remains a separate bounded stage for due/recent calendar
 ```text
 active_fetch_count
 due_for_result_check_count
+due_for_confirmation_watch_count
 due_for_confirmation_count
 maintenance_selected_count
 unique_provider_check_ticker_count
@@ -129,7 +147,7 @@ candidate_count
 maintenance_backlog_remaining
 ```
 
-This makes it visible when the workflow processed a bounded candidate set instead of the full USA universe.
+`due_for_confirmation_watch_count` is the count under watch. `due_for_confirmation_count` is the smaller count that actually needs a future-confirmation provider call now. This makes it visible when the workflow processed a bounded candidate set instead of the full USA universe.
 
 ## Limitations
 

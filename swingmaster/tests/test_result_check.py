@@ -189,7 +189,7 @@ def test_calendar_selector_normal_day_bounds_provider_work_to_due_and_maintenanc
     for ticker in active[30:130]:
         _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-11-15")
     for ticker in active[:20]:
-        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-08-12")
+        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-08-12", last_observed_at_utc="2026-08-05T00:00:00Z")
     for ticker in active[20:30]:
         _insert_calendar(fundamentals_db, ticker, "DATE_PASSED_EVENT_NOT_FOUND", "2026-08-05")
 
@@ -202,6 +202,7 @@ def test_calendar_selector_normal_day_bounds_provider_work_to_due_and_maintenanc
     )
 
     assert len(selected["due_for_confirmation"]) == 20
+    assert len(selected["due_for_confirmation_watch"]) == 20
     assert len(selected["due_for_result_check"]) == 10
     assert len(selected["calendar_maintenance"]) == 50
     assert len(selected["selected_tickers"]) == 80
@@ -214,7 +215,7 @@ def test_calendar_selector_earnings_season_prioritizes_due_and_caps_maintenance(
     for ticker in active[:150]:
         _insert_calendar(fundamentals_db, ticker, "DATE_PASSED_EVENT_NOT_FOUND", "2026-08-06")
     for ticker in active[150:310]:
-        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-08-10")
+        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-08-10", last_observed_at_utc="2026-08-06T00:00:00Z")
 
     selected = result_check.select_calendar_refresh_candidates(
         fundamentals_db=fundamentals_db,
@@ -233,7 +234,7 @@ def test_calendar_selector_earnings_season_prioritizes_due_and_caps_maintenance(
 
 def test_calendar_selector_date_moved_later_is_no_longer_due_after_successful_refresh(tmp_path: Path) -> None:
     fundamentals_db = _migrated_db(tmp_path)
-    _insert_calendar(fundamentals_db, "MOVE", "UPCOMING", "2026-08-08")
+    _insert_calendar(fundamentals_db, "MOVE", "UPCOMING", "2026-08-08", last_observed_at_utc="2026-08-06T00:00:00Z")
 
     before = result_check.select_calendar_refresh_candidates(
         fundamentals_db=fundamentals_db,
@@ -364,6 +365,161 @@ def test_calendar_selector_repeat_same_day_skips_fresh_non_due_rows(tmp_path: Pa
         event_watch_days_after=5,
     )
 
+    assert selected["selected_tickers"] == []
+
+
+def test_calendar_selector_same_day_repeat_suppresses_future_confirmation_provider_calls(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    active = [f"R{i:03d}" for i in range(100)]
+    for ticker in active:
+        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-08-12")
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=active,
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+        maintenance_limit=50,
+    )
+
+    assert len(selected["due_for_confirmation_watch"]) == 100
+    assert selected["due_for_confirmation"] == []
+    assert selected["selected_tickers"] == []
+
+
+def test_calendar_selector_confirmation_cadence_for_four_to_seven_days_away(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    _insert_calendar(fundamentals_db, "YDAY", "UPCOMING", "2026-08-12", last_observed_at_utc="2026-08-06T00:00:00Z")
+    _insert_calendar(fundamentals_db, "OLD", "UPCOMING", "2026-08-12", last_observed_at_utc="2026-08-05T00:00:00Z")
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["YDAY", "OLD"],
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+    )
+
+    assert selected["due_for_confirmation_watch"] == ["OLD", "YDAY"]
+    assert selected["due_for_confirmation"] == ["OLD"]
+    assert selected["selected_tickers"] == ["OLD"]
+
+
+def test_calendar_selector_confirmation_cadence_for_one_to_three_days_away(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    _insert_calendar(fundamentals_db, "TODAY", "UPCOMING", "2026-08-09", last_observed_at_utc="2026-08-07T00:00:00Z")
+    _insert_calendar(fundamentals_db, "YDAY", "UPCOMING", "2026-08-09", last_observed_at_utc="2026-08-06T00:00:00Z")
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["TODAY", "YDAY"],
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+    )
+
+    assert selected["due_for_confirmation_watch"] == ["TODAY", "YDAY"]
+    assert selected["due_for_confirmation"] == ["YDAY"]
+    assert selected["selected_tickers"] == ["YDAY"]
+
+
+def test_calendar_selector_result_due_exempt_from_future_confirmation_freshness(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    _insert_calendar(fundamentals_db, "DUE", "DUE_TODAY", "2026-08-07")
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["DUE"],
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+    )
+
+    assert selected["due_for_result_check"] == ["DUE"]
+    assert selected["due_for_confirmation"] == []
+    assert selected["selected_tickers"] == ["DUE"]
+
+
+def test_calendar_selector_imminent_failure_retries_next_day(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    _insert_calendar(
+        fundamentals_db,
+        "SOON",
+        "UPCOMING",
+        "2026-08-09",
+        last_observed_at_utc="2026-08-06T00:00:00Z",
+        check_status="TIMEOUT",
+        failure_count=1,
+    )
+    _insert_calendar(
+        fundamentals_db,
+        "LATER",
+        "UPCOMING",
+        "2026-08-12",
+        last_observed_at_utc="2026-08-06T00:00:00Z",
+        check_status="TIMEOUT",
+        failure_count=1,
+    )
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["SOON", "LATER"],
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+        failure_retry_days=3,
+    )
+
+    assert selected["due_for_confirmation_watch"] == ["LATER", "SOON"]
+    assert selected["due_for_confirmation"] == ["SOON"]
+    assert selected["selected_tickers"] == ["SOON"]
+
+
+def test_calendar_selector_deduplicates_result_due_before_failure_retry_and_maintenance(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    _insert_calendar(
+        fundamentals_db,
+        "DUP",
+        "DATE_PASSED_EVENT_NOT_FOUND",
+        "2026-08-06",
+        last_observed_at_utc="2026-08-01T00:00:00Z",
+        check_status="TIMEOUT",
+        failure_count=2,
+    )
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["DUP"],
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+        maintenance_limit=50,
+    )
+
+    assert selected["due_for_result_check"] == ["DUP"]
+    assert selected["due_for_confirmation"] == []
+    assert selected["calendar_maintenance"] == []
+    assert selected["selected_tickers"] == ["DUP"]
+
+
+def test_calendar_selector_new_check_state_null_uses_existing_last_observed_freshness(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    _insert_calendar(fundamentals_db, "BOOT", "UPCOMING", "2026-08-12")
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        conn.execute(
+            """
+            UPDATE rc_earnings_calendar
+            SET calendar_last_checked_at_utc = NULL,
+                calendar_check_status = NULL
+            WHERE ticker = 'BOOT'
+            """
+        )
+        conn.commit()
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["BOOT"],
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+    )
+
+    assert selected["due_for_confirmation_watch"] == ["BOOT"]
+    assert selected["due_for_confirmation"] == []
     assert selected["selected_tickers"] == []
 
 

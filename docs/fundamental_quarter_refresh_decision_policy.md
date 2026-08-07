@@ -2,64 +2,78 @@
 
 Date: 2026-08-07
 
-This phase adds a read-only decision audit for a future USA quarterly fundamentals refresh scheduler. It does not activate scheduler behavior, run provider fetches, or write production data.
+This phase implements a read-only decision audit for a future USA quarterly fundamentals refresh scheduler. It does not activate scheduler behavior, run provider fetches, or write production data.
 
 ## Purpose
 
 The audit answers:
 
 ```text
-If an automated quarterly fundamentals scheduler were active now, which tickers would it attempt to refresh, why, and which tickers would it deliberately leave alone?
+If an automated quarterly fundamentals scheduler were active for a decision date, which tickers would it attempt to refresh, why, and which tickers would it deliberately leave alone?
 ```
 
 The implementation is:
 
 ```bash
-.venv/bin/python -m swingmaster.cli.audit_fundamental_quarter_refresh_decisions --fundamentals-db fundamentals_usa.db
+.venv/bin/python -m swingmaster.cli.audit_fundamental_quarter_refresh_decisions \
+  --fundamentals-db fundamentals_usa.db \
+  --ohlcv-db /home/kalle/projects/rawcandle/data/osakedata.db \
+  --decision-date 2026-08-07 \
+  --ohlcv-stale-days 14
 ```
 
 Runtime artifacts are written only under `temp/`.
 
-## Security Activity
+## Market-Data Activity
 
-Historical securities must remain queryable. Delisted, acquired, merged, inactive, quarterly, TTM, score, earnings-event, percentile, valuation, and other historical rows must not be deleted merely because live refresh is disabled.
+Historical securities must remain queryable. Quarterly fundamentals, TTM, score, percentile, valuation, earnings-event, quarter-match, OHLCV, and other historical rows must not be deleted merely because live refresh is disabled.
 
-The lightweight activity model is:
+This phase uses only operational market-data recency for live fetch eligibility. It does not claim that a stale security is legally delisted, acquired, merged, or otherwise subject to a corporate action.
 
-```text
-security_status:
-    ACTIVE
-    DELISTED
-    ACQUIRED_OR_MERGED
-    INACTIVE_OTHER
-    UNKNOWN
-
-fundamental_fetch_enabled:
-    1 / 0
-```
-
-Semantics:
+The canonical activity signal comes from read-only `osakedata`:
 
 ```text
-ACTIVE                  -> fundamental_fetch_enabled = 1
-DELISTED               -> fundamental_fetch_enabled = 0
-ACQUIRED_OR_MERGED     -> fundamental_fetch_enabled = 0
-INACTIVE_OTHER         -> fundamental_fetch_enabled = 0
-UNKNOWN                -> fundamental_fetch_enabled = 1
+/home/kalle/projects/rawcandle/data/osakedata.db
+table: osakedata
+ticker column: osake
+date column: pvm
+market column: market
 ```
 
-`UNKNOWN` does not automatically disable fetching. The audit does not infer inactive status from `NO_CURRENT_ESTIMATE`, Yahoo empty response, fetch failures, or missing recent fundamentals alone.
+Rule:
 
-Current local evidence inspection found no canonical production security/listing-status table in `fundamentals_usa.db`. The existing read-only ticker cleanup audit has local delisting concepts (`active_status`, `delisted_status`) derived from Yahoo metadata and dependency inventory, but it is not a persisted security master. This phase reuses that local metadata interpretation where it is explicit and otherwise classifies securities as `UNKNOWN`.
+```text
+latest_ohlcv_date exists
+AND age from decision_date <= ohlcv_stale_days
+    -> market_data_activity_status = ACTIVE
+    -> fundamental_fetch_enabled = 1
 
-Future dedicated listing-status refresh can populate the model safely by writing an explicit security activity table after reviewed evidence from exchange/listing status, delisting notices, corporate-action feeds, or trusted provider lifecycle data.
+latest_ohlcv_date is missing
+OR age from decision_date > ohlcv_stale_days
+    -> market_data_activity_status = STALE_OR_INACTIVE
+    -> fundamental_fetch_enabled = 0
+```
+
+The exposed activity fields are:
+
+```text
+market
+ticker
+latest_ohlcv_date
+ohlcv_age_days
+market_data_activity_status
+fundamental_fetch_enabled
+last_assessed_at_utc
+```
+
+No external delisting, merger, acquisition, or exchange-listing discovery is implemented in this phase. `osakedata.db` is opened read-only and is not modified.
 
 ## Scheduler Order
 
-The future scheduler contract begins with activity eligibility:
+The future scheduler contract begins with operational fetch eligibility:
 
 ```text
-security active/fetch eligibility
+market-data activity / fetch eligibility
 -> earnings calendar
 -> completed earnings events
 -> quarter refresh decision
@@ -74,7 +88,7 @@ if fundamental_fetch_enabled = 0:
     eligible_for_future_auto_fetch = false
 ```
 
-This suppresses `DUE_TODAY`, `DATE_PASSED_EVENT_NOT_FOUND`, `PUBLISHED_DATA_NOT_FETCHED`, `RETRY_PARTIAL_QUARTER`, and `RETRY_FETCH_FAILED` traffic for known inactive historical securities.
+This suppresses `DUE_TODAY`, `DATE_PASSED_EVENT_NOT_FOUND`, `PUBLISHED_DATA_NOT_FETCHED`, `RETRY_PARTIAL_QUARTER`, and `RETRY_FETCH_FAILED` traffic for operationally stale securities.
 
 ## Calendar Semantics
 
@@ -90,8 +104,8 @@ Calendar status interpretation:
 
 - `UPCOMING`: no refresh; wait.
 - `DUE_TODAY`: watch for a completed event; do not fetch solely from the date.
-- `DATE_PASSED_EVENT_NOT_FOUND`: review calendar/event coverage.
-- `NO_CURRENT_ESTIMATE`: review source coverage, irregular reporting, or inactive status evidence; do not fetch automatically.
+- `DATE_PASSED_EVENT_NOT_FOUND`: review calendar/event coverage unless suppressed by stale OHLCV.
+- `NO_CURRENT_ESTIMATE`: review source coverage unless suppressed by stale OHLCV.
 
 ## Completed Event Confirmation
 
@@ -156,36 +170,36 @@ AND shares_outstanding IS NOT NULL
 
 The active leverage metric is `net_debt_to_ebit`; the deprecated `net_debt_to_ebitda` is not part of this policy.
 
-## Grace Window
-
-Exact historical provider-availability latency cannot be reconstructed from current local tables without treating ingestion timestamps as market availability, which would be incorrect for backfilled data.
-
-Recommended conservative operational policy:
-
-```text
-completed event confirmed
-AND safe fiscal period resolved
-AND quarter missing
--> FETCH_NEW_QUARTER
-
-if fetch returns empty or partial:
--> RETRY_* with bounded retry cadence
-
-continue retry for 3-5 calendar days after confirmed event
--> then REVIEW_AMBIGUOUS_PERIOD or manual stale-missing-quarter review
-```
-
-This phase does not implement fetch attempts or retry scheduling.
-
 ## Production Audit
 
 Full read-only audit artifact root:
 
 ```text
-temp/quarter_refresh_decision_audit/20260807T_full_v2/
+temp/quarter_refresh_decision_audit/20260807T_ohlcv_v2/
 ```
 
-Status inputs:
+Inputs:
+
+```text
+decision_date:      2026-08-07
+ohlcv_stale_days:   14
+fundamentals rows:  read-only
+osakedata rows:     read-only
+```
+
+Market-data activity:
+
+```text
+active_fetch_count       2868
+stale_or_inactive_count  68
+no_ohlcv_count           0
+ohlcv_age_0_7_days       2861
+ohlcv_age_8_14_days      7
+ohlcv_age_15_30_days     26
+ohlcv_age_over_30_days   42
+```
+
+Calendar status inputs:
 
 ```text
 UPCOMING                     2258
@@ -194,69 +208,51 @@ NO_CURRENT_ESTIMATE          634
 DATE_PASSED_EVENT_NOT_FOUND  4
 ```
 
-Decision counts:
+Decision counts after OHLCV suppression:
 
 ```text
-NO_ACTION_UPCOMING           2258
+NO_ACTION_INACTIVE_SECURITY  68
+NO_ACTION_UPCOMING           2250
 WATCH_DUE_TODAY              40
-REVIEW_NO_CALENDAR_ESTIMATE  634
-REVIEW_DATE_PASSED_NO_EVENT  4
+REVIEW_NO_CALENDAR_ESTIMATE  577
+REVIEW_DATE_PASSED_NO_EVENT  1
 ```
 
 Priority counts:
 
 ```text
-P3_WATCH     40
-P4_REVIEW    638
-P5_NO_ACTION 2258
+P3_WATCH      40
+P4_REVIEW     578
+P5_NO_ACTION  2318
 ```
 
 Auto-fetch eligible count: `0`.
 
-Security activity counts:
+Previous `REVIEW_DATE_PASSED_NO_EVENT` cases suppressed by stale OHLCV:
 
 ```text
-ACTIVE                  0
-DELISTED                0
-ACQUIRED_OR_MERGED      0
-INACTIVE_OTHER          0
-UNKNOWN                 2936
-fundamental_fetch_enabled=0  0
+NUVL
+OLPX
+TBRG
 ```
 
-Inactive diagnostics:
+Previous `REVIEW_NO_CALENDAR_ESTIMATE` cases suppressed by stale OHLCV:
 
 ```text
-inactive_but_calendar_upcoming_count: 0
+ACLX, ALTS, AMWD, APLS, ASGN, BK, BLD, BTM, CPRX, CSGS, CTLP, CTRA, CUK, CVGW,
+CWAN, DAWN, EEX, EHAB, EKSO, ESPR, EVTV, EWCZ, EXPI, FFIC, FOLD, GDEN, GTLS,
+HOTH, HTBK, IAC, JHG, KW, MASI, MCW, MEG, NSA, PKST, PRA, PSTG, QVCGA, SEM,
+SEMR, SLNO, SNCY, STEL, STKL, STSS, TERN, THR, TIVC, TMHC, TPH, UDMY, USEG,
+VRE, VSCO, WSR
+```
+
+Other inactive diagnostics:
+
+```text
+inactive_but_calendar_upcoming_count: 8
 inactive_but_due_today_count: 0
 inactive_with_fetch_candidate_count_before_suppression: 0
 ```
-
-Session coverage:
-
-```text
-UNKNOWN 2936
-```
-
-Session data is not yet sufficient for clock-aware scheduling.
-
-`NO_CURRENT_ESTIMATE` local breakdown:
-
-```text
-completed event older than 60 days: 523
-completed event 15-60 days old:     5
-no completed event:                 106
-```
-
-The four `DATE_PASSED_EVENT_NOT_FOUND` tickers are `DMLP`, `NUVL`, `OLPX`, and `TBRG`; each had estimated date `2026-08-06`, no completed event in the local completed-event table, latest DB period `2026-03-31`, and decision `REVIEW_DATE_PASSED_NO_EVENT`.
-
-All 40 `DUE_TODAY` tickers were classified as `WATCH_DUE_TODAY`; their latest completed events, when present, were older historical events and did not confirm the current expected event.
-
-## False-Positive Findings
-
-The initial audit draft would have produced false P2 retry candidates by allowing the latest historical completed event to confirm a current `DUE_TODAY` calendar row. The final logic prevents that by requiring the completed event date to be on or after the estimated announcement date.
-
-No P1/P2 candidates remain under current local evidence, so no automatic fetch should run now.
 
 ## Plan-Only Scheduler Contract
 
@@ -274,6 +270,9 @@ decision
 priority
 event_date
 period_end_date
+latest_ohlcv_date
+ohlcv_age_days
+market_data_activity_status
 missing_fields
 planned_action
 reason
@@ -281,13 +280,13 @@ reason
 
 Write boundaries for a later scheduler:
 
-1. refresh security activity status from trusted sources;
-2. refresh earnings calendar;
-3. refresh completed earnings events;
+1. assess market-data activity from read-only OHLCV;
+2. refresh earnings calendar for activity-enabled tickers;
+3. refresh completed earnings events for activity-enabled tickers;
 4. build read-only quarter refresh decisions;
 5. select P1/P2 only where `fundamental_fetch_enabled = 1`;
 6. fetch quarterly fundamentals for selected candidates;
 7. reassess quarter completeness;
 8. rebuild TTM/score/valuation only after persisted fundamentals change.
 
-This phase implements only step 4 and plan artifacts. It does not activate automation.
+This phase implements only step 4 and audit artifacts. It does not activate automation.

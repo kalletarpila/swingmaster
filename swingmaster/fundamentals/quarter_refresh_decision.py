@@ -4,25 +4,20 @@ import csv
 import json
 import sqlite3
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from swingmaster.fundamentals.earnings_events import normalize_ticker, repository_root
-from swingmaster.fundamentals.ticker_cleanup_audit import (
-    infer_delisted_status,
-    load_yahoo_metadata,
-)
 
 
-AUDIT_VERSION = "quarter_refresh_decision_v1"
+AUDIT_VERSION = "quarter_refresh_decision_v2"
 DEFAULT_MARKET = "usa"
+DEFAULT_OHLCV_DB_PATH = Path("/home/kalle/projects/rawcandle/data/osakedata.db")
+DEFAULT_OHLCV_STALE_DAYS = 14
 
-SECURITY_ACTIVE = "ACTIVE"
-SECURITY_DELISTED = "DELISTED"
-SECURITY_ACQUIRED_OR_MERGED = "ACQUIRED_OR_MERGED"
-SECURITY_INACTIVE_OTHER = "INACTIVE_OTHER"
-SECURITY_UNKNOWN = "UNKNOWN"
+MARKET_DATA_ACTIVE = "ACTIVE"
+MARKET_DATA_STALE_OR_INACTIVE = "STALE_OR_INACTIVE"
 
 DECISION_NO_ACTION_INACTIVE_SECURITY = "NO_ACTION_INACTIVE_SECURITY"
 DECISION_NO_ACTION_UPCOMING = "NO_ACTION_UPCOMING"
@@ -55,9 +50,13 @@ PRIORITY_ORDER = {
 class QuarterRefreshDecisionRow:
     market: str
     ticker: str
-    security_status: str
+    decision_date: str
+    ohlcv_stale_days: int
+    latest_ohlcv_date: str | None
+    ohlcv_age_days: int | None
+    market_data_activity_status: str
     fundamental_fetch_enabled: int
-    security_status_evidence: str
+    last_assessed_at_utc: str
     calendar_status: str | None
     estimated_announcement_at: str | None
     estimated_announcement_date: str | None
@@ -74,6 +73,7 @@ class QuarterRefreshDecisionRow:
     ingestion_status: str | None
     last_fetch_status: str | None
     missing_basic_fields: str | None
+    decision_before_activity_suppression: str
     decision: str
     decision_priority: str
     decision_priority_rank: int
@@ -113,9 +113,13 @@ def classify_quarter_refresh_decision(
     *,
     market: str,
     ticker: str,
-    security_status: str,
+    decision_date: str | date,
+    ohlcv_stale_days: int,
+    latest_ohlcv_date: str | None,
+    ohlcv_age_days: int | None,
+    market_data_activity_status: str,
     fundamental_fetch_enabled: int,
-    security_status_evidence: str,
+    last_assessed_at_utc: str,
     calendar: Mapping[str, Any] | None,
     latest_event: Mapping[str, Any] | None,
     latest_db_period_end_date: str | None,
@@ -150,9 +154,13 @@ def classify_quarter_refresh_decision(
         return _row(
             market=market,
             ticker=ticker,
-            security_status=security_status,
+            decision_date=str(decision_date),
+            ohlcv_stale_days=ohlcv_stale_days,
+            latest_ohlcv_date=latest_ohlcv_date,
+            ohlcv_age_days=ohlcv_age_days,
+            market_data_activity_status=market_data_activity_status,
             fundamental_fetch_enabled=fundamental_fetch_enabled,
-            security_status_evidence=security_status_evidence,
+            last_assessed_at_utc=last_assessed_at_utc,
             calendar=calendar,
             latest_event=latest_event,
             latest_db_period_end_date=latest_db_period_end_date,
@@ -161,7 +169,8 @@ def classify_quarter_refresh_decision(
             target_period_end_date=target_period,
             quarter_status=matched_quarter_status,
             decision=DECISION_NO_ACTION_INACTIVE_SECURITY,
-            reason="Security is explicitly inactive for live fundamentals fetching.",
+            reason="Latest OHLCV data is missing or stale, so live fundamentals fetching is disabled.",
+            decision_before_activity_suppression=pre_suppression[0],
             eligible=0,
             inactive_with_fetch_candidate_before_suppression=1 if _is_auto_fetch_candidate(pre_suppression) else 0,
         )
@@ -170,9 +179,13 @@ def classify_quarter_refresh_decision(
     return _row(
         market=market,
         ticker=ticker,
-        security_status=security_status,
+        decision_date=str(decision_date),
+        ohlcv_stale_days=ohlcv_stale_days,
+        latest_ohlcv_date=latest_ohlcv_date,
+        ohlcv_age_days=ohlcv_age_days,
+        market_data_activity_status=market_data_activity_status,
         fundamental_fetch_enabled=fundamental_fetch_enabled,
-        security_status_evidence=security_status_evidence,
+        last_assessed_at_utc=last_assessed_at_utc,
         calendar=calendar,
         latest_event=latest_event,
         latest_db_period_end_date=latest_db_period_end_date,
@@ -182,6 +195,7 @@ def classify_quarter_refresh_decision(
         quarter_status=matched_quarter_status,
         decision=decision,
         reason=reason,
+        decision_before_activity_suppression=decision,
         eligible=1 if _is_auto_fetch_candidate((decision, reason)) else 0,
         inactive_with_fetch_candidate_before_suppression=0,
     )
@@ -190,11 +204,24 @@ def classify_quarter_refresh_decision(
 def build_quarter_refresh_decisions(
     conn: sqlite3.Connection,
     *,
+    ohlcv_conn: sqlite3.Connection | None = None,
     tickers: list[str] | None = None,
     market: str = DEFAULT_MARKET,
+    decision_date: str | date | None = None,
+    ohlcv_stale_days: int = DEFAULT_OHLCV_STALE_DAYS,
+    assessed_at_utc: str | None = None,
 ) -> list[QuarterRefreshDecisionRow]:
+    parsed_decision_date = _parse_date(decision_date) if decision_date is not None else datetime.now(timezone.utc).date()
+    assessed = assessed_at_utc or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     selected = _select_tickers(conn, tickers=tickers, market=market)
-    metadata = load_yahoo_metadata(conn)
+    activity = load_market_data_activity(
+        ohlcv_conn,
+        tickers=selected,
+        market=market,
+        decision_date=parsed_decision_date,
+        ohlcv_stale_days=ohlcv_stale_days,
+        assessed_at_utc=assessed,
+    )
     calendars = _calendar_by_ticker(conn, selected, market)
     latest_events = _latest_completed_event_by_ticker(conn, selected, market)
     latest_quarters = _latest_quarter_by_ticker(conn, selected)
@@ -204,7 +231,7 @@ def build_quarter_refresh_decisions(
 
     rows: list[QuarterRefreshDecisionRow] = []
     for ticker in selected:
-        security_status, fetch_enabled, evidence = classify_security_fetch_eligibility(ticker, metadata.get(ticker))
+        activity_row = activity[ticker]
         latest_event = latest_events.get(ticker)
         match = matches.get(int(latest_event["id"])) if latest_event is not None else None
         matched_period = str(match["period_end_date"]) if match is not None else None
@@ -215,9 +242,13 @@ def build_quarter_refresh_decisions(
             classify_quarter_refresh_decision(
                 market=market,
                 ticker=ticker,
-                security_status=security_status,
-                fundamental_fetch_enabled=fetch_enabled,
-                security_status_evidence=evidence,
+                decision_date=str(parsed_decision_date),
+                ohlcv_stale_days=ohlcv_stale_days,
+                latest_ohlcv_date=activity_row["latest_ohlcv_date"],
+                ohlcv_age_days=activity_row["ohlcv_age_days"],
+                market_data_activity_status=activity_row["market_data_activity_status"],
+                fundamental_fetch_enabled=activity_row["fundamental_fetch_enabled"],
+                last_assessed_at_utc=activity_row["last_assessed_at_utc"],
                 calendar=calendars.get(ticker),
                 latest_event=latest_event,
                 latest_db_period_end_date=latest_quarters.get(ticker),
@@ -232,23 +263,22 @@ def build_quarter_refresh_decisions(
 def summarize_quarter_refresh_decisions(rows: list[QuarterRefreshDecisionRow]) -> dict[str, Any]:
     decision_counts = _counts(row.decision for row in rows)
     priority_counts = _counts(row.decision_priority for row in rows)
-    security_counts = _counts(row.security_status for row in rows)
     calendar_counts = _counts(row.calendar_status or "NO_CALENDAR_ROW" for row in rows)
     return {
         "audit_version": AUDIT_VERSION,
         "total_tickers": len(rows),
+        "decision_date": _single_value(row.decision_date for row in rows),
+        "ohlcv_stale_days": _single_value(row.ohlcv_stale_days for row in rows),
         "decision_counts": decision_counts,
         "priority_counts": priority_counts,
         "calendar_status_counts": calendar_counts,
-        "active_security_count": security_counts.get(SECURITY_ACTIVE, 0),
-        "inactive_security_count": sum(
-            security_counts.get(status, 0)
-            for status in (SECURITY_DELISTED, SECURITY_ACQUIRED_OR_MERGED, SECURITY_INACTIVE_OTHER)
-        ),
-        "unknown_security_status_count": security_counts.get(SECURITY_UNKNOWN, 0),
-        "delisted_count": security_counts.get(SECURITY_DELISTED, 0),
-        "acquired_or_merged_count": security_counts.get(SECURITY_ACQUIRED_OR_MERGED, 0),
-        "inactive_other_count": security_counts.get(SECURITY_INACTIVE_OTHER, 0),
+        "active_fetch_count": sum(row.fundamental_fetch_enabled for row in rows),
+        "stale_or_inactive_count": sum(1 for row in rows if row.market_data_activity_status == MARKET_DATA_STALE_OR_INACTIVE),
+        "no_ohlcv_count": sum(1 for row in rows if row.latest_ohlcv_date is None),
+        "ohlcv_age_0_7_days": sum(1 for row in rows if row.ohlcv_age_days is not None and 0 <= row.ohlcv_age_days <= 7),
+        "ohlcv_age_8_14_days": sum(1 for row in rows if row.ohlcv_age_days is not None and 8 <= row.ohlcv_age_days <= 14),
+        "ohlcv_age_15_30_days": sum(1 for row in rows if row.ohlcv_age_days is not None and 15 <= row.ohlcv_age_days <= 30),
+        "ohlcv_age_over_30_days": sum(1 for row in rows if row.ohlcv_age_days is not None and row.ohlcv_age_days > 30),
         "inactive_but_calendar_upcoming_count": sum(
             1 for row in rows if row.fundamental_fetch_enabled == 0 and row.calendar_status == "UPCOMING"
         ),
@@ -258,6 +288,18 @@ def summarize_quarter_refresh_decisions(rows: list[QuarterRefreshDecisionRow]) -
         "inactive_with_fetch_candidate_count_before_suppression": sum(
             row.inactive_with_fetch_candidate_before_suppression for row in rows
         ),
+        "suppressed_review_no_calendar_estimate_tickers": [
+            row.ticker
+            for row in rows
+            if row.decision == DECISION_NO_ACTION_INACTIVE_SECURITY
+            and row.decision_before_activity_suppression == DECISION_REVIEW_NO_CALENDAR_ESTIMATE
+        ],
+        "suppressed_review_date_passed_no_event_tickers": [
+            row.ticker
+            for row in rows
+            if row.decision == DECISION_NO_ACTION_INACTIVE_SECURITY
+            and row.decision_before_activity_suppression == DECISION_REVIEW_DATE_PASSED_NO_EVENT
+        ],
         "eligible_for_future_auto_fetch_count": sum(row.eligible_for_future_auto_fetch for row in rows),
         "manual_review_count": sum(1 for row in rows if row.decision_priority == PRIORITY_P4_REVIEW),
         "no_action_count": sum(1 for row in rows if row.decision_priority == PRIORITY_P5_NO_ACTION),
@@ -288,16 +330,51 @@ def summarize_quarter_refresh_decisions(rows: list[QuarterRefreshDecisionRow]) -
     }
 
 
-def classify_security_fetch_eligibility(ticker: str, metadata: Mapping[str, Any] | None) -> tuple[str, int, str]:
-    metadata = metadata or {}
-    name = " ".join(str(metadata.get(key) or "") for key in ("longName", "shortName")).upper()
-    if any(term in name for term in ("ACQUIRED", "MERGED", "MERGER")):
-        return SECURITY_ACQUIRED_OR_MERGED, 0, "local Yahoo metadata name indicates acquisition or merger"
-    delisted, delisted_date = infer_delisted_status(metadata)
-    if delisted:
-        suffix = f"; delisted_date={delisted_date}" if delisted_date else ""
-        return SECURITY_DELISTED, 0, "local Yahoo metadata indicates delisted" + suffix
-    return SECURITY_UNKNOWN, 1, "no explicit local listing-status evidence; fetching remains enabled"
+def load_market_data_activity(
+    ohlcv_conn: sqlite3.Connection | None,
+    *,
+    tickers: list[str],
+    market: str,
+    decision_date: date,
+    ohlcv_stale_days: int,
+    assessed_at_utc: str,
+) -> dict[str, dict[str, Any]]:
+    latest_dates = _latest_ohlcv_dates(ohlcv_conn, tickers=tickers, market=market)
+    return {
+        ticker: classify_market_data_activity(
+            market=market,
+            ticker=ticker,
+            latest_ohlcv_date=latest_dates.get(ticker),
+            decision_date=decision_date,
+            ohlcv_stale_days=ohlcv_stale_days,
+            assessed_at_utc=assessed_at_utc,
+        )
+        for ticker in tickers
+    }
+
+
+def classify_market_data_activity(
+    *,
+    market: str,
+    ticker: str,
+    latest_ohlcv_date: str | None,
+    decision_date: date,
+    ohlcv_stale_days: int,
+    assessed_at_utc: str,
+) -> dict[str, Any]:
+    age_days = None
+    if latest_ohlcv_date:
+        age_days = (decision_date - _parse_date(latest_ohlcv_date)).days
+    active = age_days is not None and age_days <= ohlcv_stale_days
+    return {
+        "market": market,
+        "ticker": ticker,
+        "latest_ohlcv_date": latest_ohlcv_date,
+        "ohlcv_age_days": age_days,
+        "market_data_activity_status": MARKET_DATA_ACTIVE if active else MARKET_DATA_STALE_OR_INACTIVE,
+        "fundamental_fetch_enabled": 1 if active else 0,
+        "last_assessed_at_utc": assessed_at_utc,
+    }
 
 
 def write_decision_artifacts(rows: list[QuarterRefreshDecisionRow], root: Path) -> dict[str, str]:
@@ -375,9 +452,13 @@ def _row(
     *,
     market: str,
     ticker: str,
-    security_status: str,
+    decision_date: str,
+    ohlcv_stale_days: int,
+    latest_ohlcv_date: str | None,
+    ohlcv_age_days: int | None,
+    market_data_activity_status: str,
     fundamental_fetch_enabled: int,
-    security_status_evidence: str,
+    last_assessed_at_utc: str,
     calendar: Mapping[str, Any] | None,
     latest_event: Mapping[str, Any] | None,
     latest_db_period_end_date: str | None,
@@ -387,6 +468,7 @@ def _row(
     quarter_status: Mapping[str, Any] | None,
     decision: str,
     reason: str,
+    decision_before_activity_suppression: str,
     eligible: int,
     inactive_with_fetch_candidate_before_suppression: int,
 ) -> QuarterRefreshDecisionRow:
@@ -394,9 +476,13 @@ def _row(
     return QuarterRefreshDecisionRow(
         market=market,
         ticker=ticker,
-        security_status=security_status,
+        decision_date=decision_date,
+        ohlcv_stale_days=ohlcv_stale_days,
+        latest_ohlcv_date=latest_ohlcv_date,
+        ohlcv_age_days=ohlcv_age_days,
+        market_data_activity_status=market_data_activity_status,
         fundamental_fetch_enabled=int(fundamental_fetch_enabled),
-        security_status_evidence=security_status_evidence,
+        last_assessed_at_utc=last_assessed_at_utc,
         calendar_status=_text(calendar, "calendar_status"),
         estimated_announcement_at=_text(calendar, "estimated_announcement_at"),
         estimated_announcement_date=_text(calendar, "estimated_announcement_date"),
@@ -413,6 +499,7 @@ def _row(
         ingestion_status=_text(quarter_status, "ingestion_status"),
         last_fetch_status=_text(quarter_status, "last_fetch_status"),
         missing_basic_fields=_text(quarter_status, "missing_basic_fields"),
+        decision_before_activity_suppression=decision_before_activity_suppression,
         decision=decision,
         decision_priority=priority,
         decision_priority_rank=PRIORITY_ORDER[priority],
@@ -494,6 +581,31 @@ def _select_tickers(conn: sqlite3.Connection, *, tickers: list[str] | None, mark
         (market, market),
     ).fetchall()
     return [normalize_ticker(str(row[0])) for row in rows]
+
+
+def _latest_ohlcv_dates(
+    conn: sqlite3.Connection | None,
+    *,
+    tickers: list[str],
+    market: str,
+) -> dict[str, str]:
+    if conn is None or not tickers:
+        return {}
+    selected = set(tickers)
+    result: dict[str, str] = {}
+    for row in conn.execute(
+        """
+        SELECT osake, MAX(pvm) AS latest_ohlcv_date
+        FROM osakedata
+        WHERE market = ?
+        GROUP BY osake
+        """,
+        (market,),
+    ):
+        ticker = normalize_ticker(str(row["osake"]))
+        if ticker in selected and row["latest_ohlcv_date"]:
+            result[ticker] = str(row["latest_ohlcv_date"])
+    return result
 
 
 def _calendar_by_ticker(conn: sqlite3.Connection, tickers: list[str], market: str) -> dict[str, sqlite3.Row]:
@@ -600,6 +712,15 @@ def _counts(values: Iterable[str]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _single_value(values: Iterable[Any]) -> Any:
+    unique = sorted({value for value in values if value is not None})
+    if not unique:
+        return None
+    if len(unique) == 1:
+        return unique[0]
+    return unique
+
+
 def _text(row: Mapping[str, Any] | None, key: str) -> str | None:
     if row is None:
         return None
@@ -619,3 +740,9 @@ def _value(row: Mapping[str, Any], key: str) -> Any:
         return row[key]
     except (KeyError, IndexError):
         return None
+
+
+def _parse_date(value: str | date) -> date:
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(value[:10])

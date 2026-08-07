@@ -125,9 +125,13 @@ def test_inactive_security_suppresses_fetch_candidates() -> None:
     row = classify_quarter_refresh_decision(
         market="usa",
         ticker="OLD",
-        security_status="DELISTED",
+        decision_date="2026-08-07",
+        ohlcv_stale_days=14,
+        latest_ohlcv_date="2026-07-01",
+        ohlcv_age_days=37,
+        market_data_activity_status="STALE_OR_INACTIVE",
         fundamental_fetch_enabled=0,
-        security_status_evidence="test",
+        last_assessed_at_utc="2026-08-07T00:00:00Z",
         calendar={"calendar_status": "DUE_TODAY", "estimated_announcement_date": "2026-08-07"},
         latest_event={"id": 1, "announcement_date": "2026-08-07"},
         latest_db_period_end_date="2026-03-31",
@@ -139,6 +143,7 @@ def test_inactive_security_suppresses_fetch_candidates() -> None:
     assert row.decision_priority == PRIORITY_P5_NO_ACTION
     assert row.inactive_with_fetch_candidate_before_suppression == 1
     assert row.eligible_for_future_auto_fetch == 0
+    assert row.decision_before_activity_suppression == DECISION_FETCH_NEW_QUARTER
 
 
 def test_summary_is_deterministic_and_counts_auto_fetch(tmp_path: Path) -> None:
@@ -154,7 +159,66 @@ def test_summary_is_deterministic_and_counts_auto_fetch(tmp_path: Path) -> None:
     assert summary["fetch_new_quarter"] == 1
     assert summary["eligible_for_future_auto_fetch_count"] == 1
     assert summary["no_action_upcoming"] == 1
-    assert summary["unknown_security_status_count"] == 2
+    assert summary["active_fetch_count"] == 2
+    assert summary["stale_or_inactive_count"] == 0
+
+
+def test_stale_ohlcv_suppresses_previous_review_decisions(tmp_path: Path) -> None:
+    db_path = _db(tmp_path)
+    _seed_ticker(db_path, "OLD1", calendar_status="NO_CURRENT_ESTIMATE", estimated_date=None)
+    _seed_ticker(db_path, "OLD2", calendar_status="DATE_PASSED_EVENT_NOT_FOUND", estimated_date="2026-08-06")
+    ohlcv_path = db_path.with_name("osakedata.db")
+    _seed_ohlcv(ohlcv_path, ["OLD1", "OLD2"], latest_date="2026-07-01")
+
+    with open_readonly_db(db_path) as conn, open_readonly_db(ohlcv_path) as ohlcv_conn:
+        rows = build_quarter_refresh_decisions(
+            conn,
+            ohlcv_conn=ohlcv_conn,
+            decision_date="2026-08-07",
+            ohlcv_stale_days=14,
+        )
+
+    by_ticker = {row.ticker: row for row in rows}
+    assert by_ticker["OLD1"].decision == DECISION_NO_ACTION_INACTIVE_SECURITY
+    assert by_ticker["OLD1"].decision_before_activity_suppression == DECISION_REVIEW_NO_CALENDAR_ESTIMATE
+    assert by_ticker["OLD2"].decision == DECISION_NO_ACTION_INACTIVE_SECURITY
+    assert by_ticker["OLD2"].decision_before_activity_suppression == DECISION_REVIEW_DATE_PASSED_NO_EVENT
+    summary = summarize_quarter_refresh_decisions(rows)
+    assert summary["active_fetch_count"] == 0
+    assert summary["stale_or_inactive_count"] == 2
+    assert summary["no_ohlcv_count"] == 0
+    assert summary["ohlcv_age_over_30_days"] == 2
+    assert summary["suppressed_review_no_calendar_estimate_tickers"] == ["OLD1"]
+    assert summary["suppressed_review_date_passed_no_event_tickers"] == ["OLD2"]
+
+
+def test_missing_and_bucketed_ohlcv_activity_counts(tmp_path: Path) -> None:
+    db_path = _db(tmp_path)
+    for ticker in ("A0", "A8", "A15", "A31", "MISS"):
+        _seed_ticker(db_path, ticker, calendar_status="UPCOMING", estimated_date="2026-10-29")
+    ohlcv_path = db_path.with_name("osakedata.db")
+    _seed_ohlcv(ohlcv_path, ["A0"], latest_date="2026-08-07")
+    _append_ohlcv(ohlcv_path, "A8", latest_date="2026-07-30")
+    _append_ohlcv(ohlcv_path, "A15", latest_date="2026-07-23")
+    _append_ohlcv(ohlcv_path, "A31", latest_date="2026-07-07")
+
+    with open_readonly_db(db_path) as conn, open_readonly_db(ohlcv_path) as ohlcv_conn:
+        summary = summarize_quarter_refresh_decisions(
+            build_quarter_refresh_decisions(
+                conn,
+                ohlcv_conn=ohlcv_conn,
+                decision_date="2026-08-07",
+                ohlcv_stale_days=14,
+            )
+        )
+
+    assert summary["active_fetch_count"] == 2
+    assert summary["stale_or_inactive_count"] == 3
+    assert summary["no_ohlcv_count"] == 1
+    assert summary["ohlcv_age_0_7_days"] == 1
+    assert summary["ohlcv_age_8_14_days"] == 1
+    assert summary["ohlcv_age_15_30_days"] == 1
+    assert summary["ohlcv_age_over_30_days"] == 1
 
 
 def test_readonly_build_does_not_write_database(tmp_path: Path) -> None:
@@ -175,6 +239,10 @@ def test_cli_writes_temp_only_artifacts_and_filters(tmp_path: Path) -> None:
             [
                 "--fundamentals-db",
                 str(db_path),
+                "--ohlcv-db",
+                str(_ohlcv_db(tmp_path, ["AAPL"])),
+                "--decision-date",
+                "2026-08-07",
                 "--output-root",
                 str(root),
                 "--decision",
@@ -190,7 +258,16 @@ def test_cli_writes_temp_only_artifacts_and_filters(tmp_path: Path) -> None:
     assert payload["total_tickers"] == 1
     with pytest.raises(ValueError, match="RUNTIME_PATH_OUTSIDE_TEMP"):
         audit_fundamental_quarter_refresh_decisions.main(
-            ["--fundamentals-db", str(db_path), "--output-root", str(tmp_path / "outside")]
+            [
+                "--fundamentals-db",
+                str(db_path),
+                "--ohlcv-db",
+                str(_ohlcv_db(tmp_path, ["AAPL"])),
+                "--decision-date",
+                "2026-08-07",
+                "--output-root",
+                str(tmp_path / "outside"),
+            ]
         )
 
 
@@ -201,8 +278,59 @@ def _db(tmp_path: Path) -> Path:
 
 
 def _decisions(db_path: Path) -> dict[str, object]:
+    ohlcv_path = db_path.with_name("osakedata.db")
+    _seed_ohlcv(ohlcv_path, _fundamental_tickers(db_path), latest_date="2026-08-07")
     with open_readonly_db(db_path) as conn:
-        return {row.ticker: row for row in build_quarter_refresh_decisions(conn)}
+        with open_readonly_db(ohlcv_path) as ohlcv_conn:
+            return {
+                row.ticker: row
+                for row in build_quarter_refresh_decisions(
+                    conn,
+                    ohlcv_conn=ohlcv_conn,
+                    decision_date="2026-08-07",
+                    ohlcv_stale_days=14,
+                )
+            }
+
+
+def _ohlcv_db(tmp_path: Path, tickers: list[str], *, latest_date: str = "2026-08-07") -> Path:
+    path = tmp_path / "osakedata_cli.db"
+    _seed_ohlcv(path, tickers, latest_date=latest_date)
+    return path
+
+
+def _seed_ohlcv(path: Path, tickers: list[str], *, latest_date: str) -> None:
+    with sqlite3.connect(str(path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS osakedata (
+                id INTEGER PRIMARY KEY,
+                osake TEXT,
+                pvm TEXT,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                market TEXT NOT NULL DEFAULT 'usa',
+                sector TEXT,
+                industry TEXT
+            )
+            """
+        )
+        conn.execute("DELETE FROM osakedata")
+        for ticker in tickers:
+            conn.execute("INSERT INTO osakedata(osake, pvm, close, volume, market) VALUES (?, ?, 1, 100, 'usa')", (ticker, latest_date))
+
+
+def _append_ohlcv(path: Path, ticker: str, *, latest_date: str) -> None:
+    with sqlite3.connect(str(path)) as conn:
+        conn.execute("INSERT INTO osakedata(osake, pvm, close, volume, market) VALUES (?, ?, 1, 100, 'usa')", (ticker, latest_date))
+
+
+def _fundamental_tickers(db_path: Path) -> list[str]:
+    with sqlite3.connect(str(db_path)) as conn:
+        return [str(row[0]) for row in conn.execute("SELECT DISTINCT ticker FROM rc_fundamental_quarterly")]
 
 
 def _seed_ticker(db_path: Path, ticker: str, *, calendar_status: str, estimated_date: str | None) -> None:

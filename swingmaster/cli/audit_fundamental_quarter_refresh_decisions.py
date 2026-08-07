@@ -8,6 +8,8 @@ from typing import Any
 
 from swingmaster.fundamentals.earnings_events import default_fundamentals_usa_db_path
 from swingmaster.fundamentals.quarter_refresh_decision import (
+    DEFAULT_OHLCV_DB_PATH,
+    DEFAULT_OHLCV_STALE_DAYS,
     PRIORITY_ORDER,
     build_quarter_refresh_decisions,
     open_readonly_db,
@@ -24,7 +26,10 @@ from swingmaster.fundamentals.quarter_refresh_decision import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Read-only USA quarterly fundamentals refresh decision audit")
     parser.add_argument("--fundamentals-db", default=str(default_fundamentals_usa_db_path()))
+    parser.add_argument("--ohlcv-db", default=str(DEFAULT_OHLCV_DB_PATH))
     parser.add_argument("--market", default="usa")
+    parser.add_argument("--decision-date", required=True)
+    parser.add_argument("--ohlcv-stale-days", type=int, default=DEFAULT_OHLCV_STALE_DAYS)
     parser.add_argument("--ticker", action="append", default=[])
     parser.add_argument("--tickers-file")
     parser.add_argument("--decision", action="append", default=[])
@@ -41,8 +46,15 @@ def main(argv: list[str] | None = None) -> int:
     output_root = _output_root(args.output_root)
     tickers = _selected_tickers(args)
 
-    with open_readonly_db(Path(args.fundamentals_db)) as conn:
-        rows = build_quarter_refresh_decisions(conn, tickers=tickers, market=args.market)
+    with open_readonly_db(Path(args.fundamentals_db)) as conn, open_readonly_db(Path(args.ohlcv_db)) as ohlcv_conn:
+        rows = build_quarter_refresh_decisions(
+            conn,
+            ohlcv_conn=ohlcv_conn,
+            tickers=tickers,
+            market=args.market,
+            decision_date=args.decision_date,
+            ohlcv_stale_days=args.ohlcv_stale_days,
+        )
 
     rows = _filter_rows(rows, decisions=set(args.decision or []), min_priority=args.min_priority)
     summary = summarize_quarter_refresh_decisions(rows)
@@ -106,14 +118,15 @@ def _print_summary(payload: dict[str, Any]) -> None:
     print("priority_counts:")
     for key, value in summary["priority_counts"].items():
         print(f"  {key}: {value}")
-    print("security:")
+    print("market_data_activity:")
     for key in (
-        "active_security_count",
-        "inactive_security_count",
-        "unknown_security_status_count",
-        "delisted_count",
-        "acquired_or_merged_count",
-        "inactive_other_count",
+        "active_fetch_count",
+        "stale_or_inactive_count",
+        "no_ohlcv_count",
+        "ohlcv_age_0_7_days",
+        "ohlcv_age_8_14_days",
+        "ohlcv_age_15_30_days",
+        "ohlcv_age_over_30_days",
         "inactive_but_calendar_upcoming_count",
         "inactive_but_due_today_count",
         "inactive_with_fetch_candidate_count_before_suppression",

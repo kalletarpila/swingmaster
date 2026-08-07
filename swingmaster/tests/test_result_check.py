@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,18 @@ def _ohlcv_db(tmp_path: Path) -> Path:
     return db_path
 
 
+def _ohlcv_db_for(tmp_path: Path, tickers: list[str], latest_date: str = "2026-08-30") -> Path:
+    db_path = tmp_path / "osakedata_backlog.db"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("CREATE TABLE osakedata (market TEXT NOT NULL, osake TEXT NOT NULL, pvm TEXT NOT NULL)")
+        conn.executemany(
+            "INSERT INTO osakedata (market, osake, pvm) VALUES ('usa', ?, ?)",
+            [(ticker, latest_date) for ticker in tickers],
+        )
+        conn.commit()
+    return db_path
+
+
 def _insert_quarter(db_path: Path, ticker: str, period: str = "2026-03-31") -> None:
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -38,6 +51,50 @@ def _insert_quarter(db_path: Path, ticker: str, period: str = "2026-03-31") -> N
             ) VALUES (?, ?, 100, 10, 8, 20, 5, 10, 'FIXTURE')
             """,
             (ticker, period),
+        )
+        conn.commit()
+
+
+def _insert_partial_quarter(db_path: Path, ticker: str, period: str) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_quarterly (
+                ticker, period_end_date, revenue, ebit, free_cashflow, cash, total_debt, shares_outstanding, run_id
+            ) VALUES (?, ?, NULL, 10, 8, 20, 5, 10, 'FIXTURE')
+            """,
+            (ticker, period),
+        )
+        conn.commit()
+
+
+def _insert_ingestion_status(
+    db_path: Path,
+    ticker: str,
+    period: str,
+    *,
+    quarter_basic_complete: int,
+    ingestion_status: str = "UNKNOWN_HISTORICAL_INGEST_COMPLETENESS",
+    missing_basic_fields: str = "[]",
+) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_quarter_ingestion_status (
+                market, ticker, period_end_date, ingestion_status, basic_status,
+                quarter_basic_complete, ttm_input_complete, score_history_complete,
+                valuation_input_ready, historical_research_ready, missing_basic_fields,
+                missing_core_fields_json, missing_ttm_fields_json, missing_score_fields_json,
+                data_quality_warnings_json, retry_recommendation, last_checked_at_utc,
+                assessment_policy_version, ingestion_evidence_type, run_id, assessed_at_utc,
+                created_at_utc, updated_at_utc
+            ) VALUES (
+                'usa', ?, ?, ?, 'TEST', ?, 0, 0, 0, 0, ?, '[]', '[]', '[]', '[]',
+                'TEST', '2026-08-07T00:00:00Z', 'test', 'CURRENT_DB_STATE_ONLY',
+                'TEST', '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z'
+            )
+            """,
+            (ticker, period, ingestion_status, quarter_basic_complete, missing_basic_fields),
         )
         conn.commit()
 
@@ -83,6 +140,22 @@ def _insert_calendar(
         conn.commit()
 
 
+def _set_calendar_status(db_path: Path, ticker: str, status: str, estimated_date: str | None) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            UPDATE rc_earnings_calendar
+            SET estimated_announcement_at = ?,
+                estimated_announcement_date = ?,
+                calendar_status = ?,
+                updated_at_utc = '2026-08-07T00:00:00Z'
+            WHERE market = 'usa' AND ticker = ?
+            """,
+            (f"{estimated_date}T20:00:00Z" if estimated_date else None, estimated_date, status, ticker),
+        )
+        conn.commit()
+
+
 def _insert_event_and_match(db_path: Path, ticker: str, event_date: str, period: str, event_id: int = 1) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -109,6 +182,47 @@ def _insert_event_and_match(db_path: Path, ticker: str, event_date: str, period:
             (ticker, period, event_id, f"{event_date}T20:00:00Z", event_date, event_date),
         )
         conn.commit()
+
+
+def _mock_result_check_provider_stages(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        result_check,
+        "_run_calendar_refresh",
+        lambda root, db, tickers: {
+            "stage": {"stage": "calendar_refresh", "status": "SUCCESS", "selected_tickers": len(tickers)},
+            "summary": {"selected_tickers": len(tickers), "inserted_count": 0, "updated_count": 0},
+        },
+    )
+    monkeypatch.setattr(
+        result_check,
+        "_run_completed_event_refresh",
+        lambda root, db, tickers: {
+            "stage": {"stage": "completed_event_refresh", "status": "SUCCESS", "selected_tickers": len(tickers)},
+            "summary": {"selected_tickers": len(tickers), "failed_tickers": 0, "results": []},
+        },
+    )
+    monkeypatch.setattr(
+        result_check,
+        "_run_match_rebuild",
+        lambda root, db, enabled: {
+            "stage": {"stage": "event_match_rebuild", "status": "SUCCESS", "enabled": enabled},
+            "summary": {"mocked": True},
+        },
+    )
+
+
+def _run_check(fundamentals_db: Path, ohlcv_db: Path, decision_date: date, label: str) -> dict[str, object]:
+    return result_check.run_manual_result_check(
+        fundamentals_db=fundamentals_db,
+        ohlcv_db=ohlcv_db,
+        decision_date=decision_date,
+        ohlcv_stale_days=60,
+        output_root=Path.cwd() / "temp" / label,
+    )
+
+
+def _candidate_pairs(plan: dict[str, object]) -> list[tuple[str, str]]:
+    return sorted((str(row["ticker"]), str(row["target_period_end_date"])) for row in plan["candidates"])
 
 
 def test_result_check_builds_executable_plan_after_completed_event(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -537,6 +651,170 @@ def test_calendar_selector_new_check_state_null_uses_existing_last_observed_fres
     assert selected["due_for_confirmation_watch"] == ["BOOT"]
     assert selected["due_for_confirmation"] == []
     assert selected["selected_tickers"] == []
+
+
+def test_result_check_reconstructs_accumulated_backlog_for_fourteen_days_without_update(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    tickers = ["A", "B", "C", "D"]
+    ohlcv_db = _ohlcv_db_for(tmp_path, tickers)
+    _mock_result_check_provider_stages(monkeypatch)
+    for ticker in tickers:
+        _insert_quarter(fundamentals_db, ticker, "2026-03-31")
+        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-10-15")
+
+    discovered: dict[str, str] = {}
+    plans: dict[int, dict[str, object]] = {}
+    for day_index in range(1, 15):
+        current = date(2026, 8, 1) + timedelta(days=day_index - 1)
+        if day_index in {1, 3, 6, 12}:
+            ticker = {1: "A", 3: "B", 6: "C", 12: "D"}[day_index]
+            event_id = day_index
+            event_date = current.isoformat()
+            _set_calendar_status(fundamentals_db, ticker, "DUE_TODAY", event_date)
+            _insert_event_and_match(fundamentals_db, ticker, event_date, "2026-06-30", event_id=event_id)
+            _set_calendar_status(fundamentals_db, ticker, "UPCOMING", "2026-10-15")
+            discovered[ticker] = "2026-06-30"
+
+        result = _run_check(fundamentals_db, ohlcv_db, current, f"pytest_backlog_14d_day_{day_index}")
+        plans[day_index] = result["plan"]
+        assert _candidate_pairs(result["plan"]) == sorted(discovered.items())
+
+    assert _candidate_pairs(plans[8])[:1] == [("A", "2026-06-30")]
+    assert _candidate_pairs(plans[14]) == [("A", "2026-06-30"), ("B", "2026-06-30"), ("C", "2026-06-30"), ("D", "2026-06-30")]
+
+
+def test_result_check_reconstructs_mixed_unresolved_decisions_after_calendar_window_expires(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    tickers = ["NEW", "PART", "FAIL"]
+    ohlcv_db = _ohlcv_db_for(tmp_path, tickers)
+    _mock_result_check_provider_stages(monkeypatch)
+    for ticker in tickers:
+        _insert_quarter(fundamentals_db, ticker, "2026-03-31")
+        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-10-15")
+        _insert_event_and_match(fundamentals_db, ticker, "2026-08-01", "2026-06-30", event_id={"NEW": 11, "PART": 12, "FAIL": 13}[ticker])
+    _insert_partial_quarter(fundamentals_db, "PART", "2026-06-30")
+    _insert_ingestion_status(
+        fundamentals_db,
+        "PART",
+        "2026-06-30",
+        quarter_basic_complete=0,
+        missing_basic_fields='["revenue"]',
+    )
+    _insert_partial_quarter(fundamentals_db, "FAIL", "2026-06-30")
+    _insert_ingestion_status(
+        fundamentals_db,
+        "FAIL",
+        "2026-06-30",
+        quarter_basic_complete=0,
+        ingestion_status="FETCH_FAILED",
+    )
+
+    result = _run_check(fundamentals_db, ohlcv_db, date(2026, 8, 21), "pytest_backlog_mixed_day_21")
+    decisions = {row["ticker"]: row["decision"] for row in result["plan"]["candidates"]}
+
+    assert decisions == {
+        "FAIL": "RETRY_FETCH_FAILED",
+        "NEW": "FETCH_NEW_QUARTER",
+        "PART": "RETRY_PARTIAL_QUARTER",
+    }
+    assert _candidate_pairs(result["plan"]) == [("FAIL", "2026-06-30"), ("NEW", "2026-06-30"), ("PART", "2026-06-30")]
+
+
+def test_successful_update_naturally_removes_candidate_without_ack(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    tickers = ["DONE", "OPEN"]
+    ohlcv_db = _ohlcv_db_for(tmp_path, tickers)
+    _mock_result_check_provider_stages(monkeypatch)
+    for index, ticker in enumerate(tickers, start=1):
+        _insert_quarter(fundamentals_db, ticker, "2026-03-31")
+        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-10-15")
+        _insert_event_and_match(fundamentals_db, ticker, "2026-08-01", "2026-06-30", event_id=index)
+
+    before = _run_check(fundamentals_db, ohlcv_db, date(2026, 8, 14), "pytest_backlog_before_update")
+    assert _candidate_pairs(before["plan"]) == [("DONE", "2026-06-30"), ("OPEN", "2026-06-30")]
+
+    _insert_quarter(fundamentals_db, "DONE", "2026-06-30")
+    _insert_ingestion_status(fundamentals_db, "DONE", "2026-06-30", quarter_basic_complete=1)
+
+    after = _run_check(fundamentals_db, ohlcv_db, date(2026, 8, 15), "pytest_backlog_after_update")
+    assert _candidate_pairs(after["plan"]) == [("OPEN", "2026-06-30")]
+
+
+def test_stale_plan_is_not_backlog_storage_for_fresh_day_fourteen_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    ohlcv_db = _ohlcv_db_for(tmp_path, ["A", "B"])
+    _mock_result_check_provider_stages(monkeypatch)
+    for ticker in ("A", "B"):
+        _insert_quarter(fundamentals_db, ticker, "2026-03-31")
+        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-10-15")
+
+    _insert_event_and_match(fundamentals_db, "A", "2026-08-01", "2026-06-30", event_id=1)
+    day_1 = _run_check(fundamentals_db, ohlcv_db, date(2026, 8, 1), "pytest_stale_plan_day_1")
+    assert _candidate_pairs(day_1["plan"]) == [("A", "2026-06-30")]
+
+    _insert_event_and_match(fundamentals_db, "B", "2026-08-03", "2026-06-30", event_id=2)
+    day_14 = _run_check(fundamentals_db, ohlcv_db, date(2026, 8, 14), "pytest_stale_plan_day_14")
+
+    assert day_14["artifact_paths"]["plan_json"] != day_1["artifact_paths"]["plan_json"]
+    assert _candidate_pairs(day_14["plan"]) == [("A", "2026-06-30"), ("B", "2026-06-30")]
+
+
+def test_unresolved_candidate_persists_for_thirty_days_without_update(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    ohlcv_db = _ohlcv_db_for(tmp_path, ["LONG"], latest_date="2026-08-30")
+    _mock_result_check_provider_stages(monkeypatch)
+    _insert_quarter(fundamentals_db, "LONG", "2026-03-31")
+    _insert_calendar(fundamentals_db, "LONG", "UPCOMING", "2026-10-15")
+    _insert_event_and_match(fundamentals_db, "LONG", "2026-08-01", "2026-06-30", event_id=30)
+
+    result = _run_check(fundamentals_db, ohlcv_db, date(2026, 8, 30), "pytest_backlog_30d")
+
+    assert _candidate_pairs(result["plan"]) == [("LONG", "2026-06-30")]
+
+
+def test_calendar_moves_and_duplicate_events_do_not_hide_or_duplicate_unresolved_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    ohlcv_db = _ohlcv_db_for(tmp_path, ["MOVE"])
+    _mock_result_check_provider_stages(monkeypatch)
+    _insert_quarter(fundamentals_db, "MOVE", "2026-03-31")
+    _insert_calendar(fundamentals_db, "MOVE", "DUE_TODAY", "2026-08-01")
+    _insert_event_and_match(fundamentals_db, "MOVE", "2026-08-01", "2026-06-30", event_id=41)
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        conn.execute(
+            """
+            INSERT INTO rc_earnings_event (
+                id, market, ticker, announcement_at, announcement_date, announcement_session, is_reported,
+                reported_eps, estimated_eps, surprise_pct, source, source_observed_at_utc, source_timezone,
+                created_at_utc, updated_at_utc
+            ) VALUES (40, 'usa', 'MOVE', '2026-08-01T20:01:00Z', '2026-08-01', 'AMC', 1,
+                1.0, 0.9, 10.0, 'fixture', '2026-08-01T00:00:00Z', 'UTC',
+                '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')
+            """
+        )
+        conn.commit()
+    _set_calendar_status(fundamentals_db, "MOVE", "UPCOMING", "2026-11-01")
+
+    result = _run_check(fundamentals_db, ohlcv_db, date(2026, 8, 20), "pytest_backlog_calendar_moved_duplicate")
+
+    assert _candidate_pairs(result["plan"]) == [("MOVE", "2026-06-30")]
 
 
 def test_partial_event_refresh_disables_executable_plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

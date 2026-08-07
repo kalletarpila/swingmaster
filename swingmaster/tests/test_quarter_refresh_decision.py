@@ -84,6 +84,31 @@ def test_completed_event_complete_quarter_no_action_even_when_ttm_or_score_incom
     assert row.eligible_for_future_auto_fetch == 0
 
 
+def test_matched_completed_event_still_fetches_after_calendar_moves_to_next_upcoming(tmp_path: Path) -> None:
+    db_path = _db(tmp_path)
+    _seed_ticker(db_path, "AAPL", calendar_status="UPCOMING", estimated_date="2026-10-29")
+    _seed_event(db_path, "AAPL", 7, "2026-08-07")
+    _seed_match(db_path, "AAPL", event_id=7, period="2026-06-30")
+
+    row = _decisions(db_path)["AAPL"]
+
+    assert row.decision == DECISION_FETCH_NEW_QUARTER
+    assert row.target_period_end_date == "2026-06-30"
+    assert row.matched_latest_event_period_end_date == "2026-06-30"
+
+
+def test_matched_completed_event_still_fetches_after_calendar_has_no_current_estimate(tmp_path: Path) -> None:
+    db_path = _db(tmp_path)
+    _seed_ticker(db_path, "AAPL", calendar_status="NO_CURRENT_ESTIMATE", estimated_date=None)
+    _seed_event(db_path, "AAPL", 7, "2026-08-07")
+    _seed_match(db_path, "AAPL", event_id=7, period="2026-06-30")
+
+    row = _decisions(db_path)["AAPL"]
+
+    assert row.decision == DECISION_FETCH_NEW_QUARTER
+    assert row.target_period_end_date == "2026-06-30"
+
+
 def test_completed_event_partial_quarter_retries(tmp_path: Path) -> None:
     db_path = _db(tmp_path)
     _seed_ticker(db_path, "AAPL", calendar_status="DUE_TODAY", estimated_date="2026-08-07")

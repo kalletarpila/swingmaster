@@ -134,7 +134,7 @@ def classify_quarter_refresh_decision(
     latest_event_id = _int(latest_event, "id")
     latest_event_date = _text(latest_event, "announcement_date")
     target_period = matched_latest_event_period_end_date or detected_source_period_end_date
-    event_confirms_calendar = _event_confirms_calendar(
+    event_confirms_calendar = matched_latest_event_period_end_date is not None or _event_confirms_calendar(
         calendar_status=calendar_status,
         estimated_announcement_date=estimated_announcement_date,
         latest_event_date=latest_event_date,
@@ -427,6 +427,16 @@ def _classify_fetch_decision_without_security(
     target_period_end_date: str | None,
     quarter_status: Mapping[str, Any] | None,
 ) -> tuple[str, str]:
+    if latest_event_id is not None:
+        if target_period_end_date is None:
+            return DECISION_REVIEW_AMBIGUOUS_PERIOD, "Completed event exists but fiscal period cannot be resolved safely."
+        if quarter_status is None:
+            return DECISION_FETCH_NEW_QUARTER, "Completed event confirms publication and target quarter is missing."
+        if _fetch_failed(quarter_status):
+            return DECISION_RETRY_FETCH_FAILED, "Target quarter has a recorded fetch failure."
+        if int(_value(quarter_status, "quarter_basic_complete") or 0) == 1:
+            return DECISION_NO_ACTION_COMPLETE, "Target quarter exists and quarter_basic_complete is true."
+        return DECISION_RETRY_PARTIAL_QUARTER, "Target quarter exists but quarter_basic_complete is false."
     if calendar_status == "UPCOMING":
         return DECISION_NO_ACTION_UPCOMING, "Next expected earnings event is still upcoming."
     if calendar_status == "DATE_PASSED_EVENT_NOT_FOUND" and latest_event_id is None:
@@ -435,17 +445,7 @@ def _classify_fetch_decision_without_security(
         return DECISION_REVIEW_NO_CALENDAR_ESTIMATE, "No current Yahoo next-event estimate is available."
     if calendar_status == "DUE_TODAY" and latest_event_id is None:
         return DECISION_WATCH_DUE_TODAY, "Calendar event is due today but publication is not confirmed."
-    if latest_event_id is None:
-        return DECISION_REVIEW_NO_CALENDAR_ESTIMATE, "No completed event confirms a current quarter publication."
-    if target_period_end_date is None:
-        return DECISION_REVIEW_AMBIGUOUS_PERIOD, "Completed event exists but fiscal period cannot be resolved safely."
-    if quarter_status is None:
-        return DECISION_FETCH_NEW_QUARTER, "Completed event confirms publication and target quarter is missing."
-    if _fetch_failed(quarter_status):
-        return DECISION_RETRY_FETCH_FAILED, "Target quarter has a recorded fetch failure."
-    if int(_value(quarter_status, "quarter_basic_complete") or 0) == 1:
-        return DECISION_NO_ACTION_COMPLETE, "Target quarter exists and quarter_basic_complete is true."
-    return DECISION_RETRY_PARTIAL_QUARTER, "Target quarter exists but quarter_basic_complete is false."
+    return DECISION_REVIEW_NO_CALENDAR_ESTIMATE, "No completed event confirms a current quarter publication."
 
 
 def _row(

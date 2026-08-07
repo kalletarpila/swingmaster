@@ -130,6 +130,35 @@ A failed provider call records only check-state metadata. It does not delete or 
 
 Completed-event refresh remains a separate bounded stage for due/recent calendar candidates. If completed events are found, the existing earnings-event match rebuild and plan-generation logic are used. `rc_earnings_event` stores completed announcement evidence, and `rc_fundamental_quarter_earnings_match` maps completed events to deterministic target quarters for executable `plan.json` rows.
 
+## Unresolved Backlog Reconstruction
+
+`plan.json` is an execution artifact, not persistent backlog storage. A stale plan can expire without losing pending work.
+
+Every fresh `Check for New Results` rebuilds executable candidates from persisted database state:
+
+```text
+rc_earnings_event
+-> rc_fundamental_quarter_earnings_match
+-> rc_fundamental_quarterly
+-> rc_fundamental_quarter_ingestion_status
+-> fresh plan.json
+```
+
+Once a completed event has a deterministic quarter match, the unresolved candidate remains reconstructable even if the original expected earnings date is outside the result-watch window or the current calendar row has moved to the next upcoming earnings estimate.
+
+Candidate removal is natural:
+
+```text
+target quarter missing -> FETCH_NEW_QUARTER
+target quarter present but quarter_basic_complete = 0 -> RETRY_PARTIAL_QUARTER
+target quarter has FETCH_FAILED status -> RETRY_FETCH_FAILED
+target quarter present and quarter_basic_complete = 1 -> NO_ACTION_COMPLETE
+```
+
+USA does not need a manual acknowledgement flag or `new_quarter_available` to clear these candidates. A successful fundamentals update persists the target quarter and ingestion status, so the next fresh check no longer emits that ticker + target-period pair. Still-unresolved candidates remain in future fresh plans for 7, 14, or 30 days because they are derived from persisted event/match/fundamentals state rather than a short-lived result-watch window.
+
+No separate pending queue is required for the daily-check / weekly-update operating model as long as completed events and quarter matches are persisted.
+
 ## Operational Summary
 
 `Check for New Results` now reports:

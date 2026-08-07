@@ -61,7 +61,7 @@ Added migrations:
 
 `rc_fundamental_quarter_ingestion_status` stores one current status row per `(market, ticker, period_end_date)` with `basic_status`, `ingestion_status`, the five readiness fields, missing-field diagnostics, earnings-match metadata, source-comparison counters, and evidence metadata.
 
-`rc_earnings_calendar` stores one current Yahoo calendar row per `(market, ticker, source)` with estimate date/time, New York-local status, date-change tracking, and completed-event reconciliation.
+`rc_earnings_calendar` stores one current Yahoo calendar row per `(market, ticker, source)` with estimate date/time, New York-local next-event status, date-change tracking, and completed-event reconciliation metadata.
 
 ## Historical Backfill
 
@@ -89,15 +89,14 @@ Backfill result for `fundamentals_usa.db`:
 
 ## Calendar Policy
 
-Calendar status uses New York-local date semantics:
+Calendar status uses New York-local date semantics and answers the next expected earnings event for the ticker:
 
 - future estimate: `UPCOMING`
 - estimate date equals New York current date: `DUE_TODAY`
 - estimate date passed without completed event: `DATE_PASSED_EVENT_NOT_FOUND`
-- completed reported event with `reported_eps IS NOT NULL`: `COMPLETED_EVENT_FOUND`
 - no future estimate: `NO_CURRENT_ESTIMATE`
 
-An estimate is not publication evidence. Completed earnings events remain owned by the completed-event flow.
+An estimate is not publication evidence. Completed earnings events remain owned by the completed-event flow and may be referenced by `completed_earnings_event_id`, but a completed historical event must not suppress a valid next future estimate. `COMPLETED_EVENT_FOUND` is retained as a legacy/transition status value, not as the normal persistent current calendar status.
 
 ## INGEST_COMPLETE Evidence
 
@@ -147,6 +146,44 @@ UPCOMING               20
 ```
 
 Post-apply `PRAGMA quick_check` returned `ok`.
+
+## Calendar Semantics Correction
+
+The 2026-08-07 semantic audit found that the low post-apply future-event status coverage was an implementation artifact, not a Yahoo source limitation.
+
+Recorded full-run source diagnostics showed:
+
+```text
+returned completed rows: 2807
+returned future/unreported rows: 2512
+returned both completed and future rows: 2491
+returned completed-only rows: 316
+returned future-only rows: 21
+returned neither: 108
+```
+
+The parser selected future estimates correctly, but completed-event reconciliation previously dominated the persisted status. This produced `COMPLETED_EVENT_FOUND` for 2488 rows where the source result was `SUCCESS_FUTURE_ESTIMATE`.
+
+The corrected one-row contract is:
+
+```text
+rc_earnings_calendar = the next expected earnings event for the ticker
+```
+
+Historical completed events belong in `rc_earnings_event`. Calendar rows may retain `completed_earnings_event_id` as reconciliation metadata while still using `UPCOMING` or `DUE_TODAY` for the next future estimate.
+
+After recomputing statuses on 2026-08-07 without re-fetching Yahoo:
+
+```text
+UPCOMING                     2258
+DUE_TODAY                    40
+NO_CURRENT_ESTIMATE          634
+DATE_PASSED_EVENT_NOT_FOUND  4
+```
+
+Rows changed: `2810`. Future-event coverage after correction: `2298 / 2936`.
+
+The 32-ticker read-only live sample confirmed the recorded pattern: typical Yahoo responses contained 24 completed rows and 1 future unreported row, and the parser selected the nearest future estimate. The current wrapper calls `fetch_yahoo_earnings_calendar_rows(..., limit=12)`, which maps to Yahoo `size=25`; sample requests with `limit=8` and `limit=12` returned the same row/future/completed/selected-estimate content.
 
 ## Current Limits
 

@@ -139,14 +139,12 @@ def _calendar_status(
     completed_event_id: int | None,
     today_new_york: str,
 ) -> str:
-    if completed_event_id is not None:
-        return "COMPLETED_EVENT_FOUND"
     if estimate is None or estimate.estimated_announcement_date is None:
         return "NO_CURRENT_ESTIMATE"
     if estimate.estimated_announcement_date == today_new_york:
         return "DUE_TODAY"
     if estimate.estimated_announcement_date < today_new_york:
-        return "DATE_PASSED_EVENT_NOT_FOUND"
+        return "NO_CURRENT_ESTIMATE" if completed_event_id is not None else "DATE_PASSED_EVENT_NOT_FOUND"
     return "UPCOMING"
 
 

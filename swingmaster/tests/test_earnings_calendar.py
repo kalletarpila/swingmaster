@@ -112,8 +112,98 @@ def test_calendar_completed_event_and_no_estimate(tmp_path: Path) -> None:
             observed_at_utc="2026-08-06T13:00:00Z",
             today_new_york="2026-08-06",
         )
-        assert completed == "COMPLETED_EVENT_FOUND"
-        assert conn.execute("SELECT completed_earnings_event_id FROM rc_earnings_calendar").fetchone()[0] == 42
+        assert completed == "UPCOMING"
+        status, completed_id = conn.execute("SELECT calendar_status, completed_earnings_event_id FROM rc_earnings_calendar").fetchone()
+        assert status == "UPCOMING"
+        assert completed_id == 42
+
+
+def test_completed_reconciliation_without_next_estimate_is_no_current_estimate(tmp_path: Path) -> None:
+    db_path = tmp_path / "calendar_completed_no_next.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO rc_earnings_event (
+                id, market, ticker, announcement_at, announcement_date, announcement_session,
+                is_reported, reported_eps, source, source_observed_at_utc, source_timezone,
+                created_at_utc, updated_at_utc
+            ) VALUES (
+                42, 'usa', 'MSFT', '2026-08-05T16:05:00-04:00', '2026-08-05', 'AFTER_MARKET',
+                1, 2.50, 'YAHOO_FINANCE', '2026-08-05T21:00:00Z', 'America/New_York',
+                '2026-08-05T21:00:00Z', '2026-08-05T21:00:00Z'
+            )
+            """
+        )
+        status = upsert_earnings_calendar(
+            conn,
+            market="usa",
+            ticker="MSFT",
+            estimate=None,
+            observed_at_utc="2026-08-06T13:00:00Z",
+            today_new_york="2026-08-06",
+        )
+        row = conn.execute("SELECT calendar_status, estimated_announcement_date, completed_earnings_event_id FROM rc_earnings_calendar").fetchone()
+        assert status == "NO_CURRENT_ESTIMATE"
+        assert row == ("NO_CURRENT_ESTIMATE", None, 42)
+
+
+def test_completed_reconciliation_does_not_suppress_due_today(tmp_path: Path) -> None:
+    db_path = tmp_path / "calendar_completed_due_today.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO rc_earnings_event (
+                id, market, ticker, announcement_at, announcement_date, announcement_session,
+                is_reported, reported_eps, source, source_observed_at_utc, source_timezone,
+                created_at_utc, updated_at_utc
+            ) VALUES (
+                42, 'usa', 'AAPL', '2026-05-01T16:05:00-04:00', '2026-05-01', 'AFTER_MARKET',
+                1, 1.50, 'YAHOO_FINANCE', '2026-05-01T21:00:00Z', 'America/New_York',
+                '2026-05-01T21:00:00Z', '2026-05-01T21:00:00Z'
+            )
+            """
+        )
+        status = upsert_earnings_calendar(
+            conn,
+            market="usa",
+            ticker="AAPL",
+            estimate=EarningsCalendarEstimate("AAPL", "2026-08-06 16:00:00", "2026-08-06", "AFTER_MARKET"),
+            observed_at_utc="2026-08-06T13:00:00Z",
+            today_new_york="2026-08-06",
+        )
+        row = conn.execute("SELECT calendar_status, estimated_announcement_date, completed_earnings_event_id FROM rc_earnings_calendar").fetchone()
+        assert status == "DUE_TODAY"
+        assert row == ("DUE_TODAY", "2026-08-06", 42)
+
+
+def test_passed_estimate_with_completed_event_is_no_current_estimate(tmp_path: Path) -> None:
+    db_path = tmp_path / "calendar_past_completed.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO rc_earnings_event (
+                id, market, ticker, announcement_at, announcement_date, announcement_session,
+                is_reported, reported_eps, source, source_observed_at_utc, source_timezone,
+                created_at_utc, updated_at_utc
+            ) VALUES (
+                42, 'usa', 'AAPL', '2026-08-05T16:05:00-04:00', '2026-08-05', 'AFTER_MARKET',
+                1, 1.50, 'YAHOO_FINANCE', '2026-08-05T21:00:00Z', 'America/New_York',
+                '2026-08-05T21:00:00Z', '2026-08-05T21:00:00Z'
+            )
+            """
+        )
+        status = upsert_earnings_calendar(
+            conn,
+            market="usa",
+            ticker="AAPL",
+            estimate=EarningsCalendarEstimate("AAPL", "2026-08-05 16:00:00", "2026-08-05", "AFTER_MARKET"),
+            observed_at_utc="2026-08-06T13:00:00Z",
+            today_new_york="2026-08-06",
+        )
+        assert status == "NO_CURRENT_ESTIMATE"
 
 
 def test_yahoo_parser_ignores_completed_rows_and_uses_new_york_date() -> None:
@@ -130,6 +220,128 @@ def test_yahoo_parser_ignores_completed_rows_and_uses_new_york_date() -> None:
     assert estimate.estimated_announcement_date == "2026-08-07"
     assert estimate.estimated_session == "BEFORE_MARKET"
     assert new_york_today_from_utc(datetime(2026, 8, 6, 3, 0, tzinfo=timezone.utc)) == "2026-08-05"
+
+
+def test_yahoo_parser_selects_nearest_future_from_larger_result_set() -> None:
+    rows = [
+        {"Earnings Date": "2026-07-01 16:00:00", "Reported EPS": 1.23},
+        {"Earnings Date": "2026-11-01 16:00:00", "Reported EPS": None},
+        {"Earnings Date": "2026-08-10 08:00:00 BMO", "Reported EPS": None},
+        {"Earnings Date": "2026-08-06 16:00:00 AMC", "Reported EPS": 1.30},
+        {"Earnings Date": "2026-09-15 16:00:00", "Reported EPS": None},
+    ]
+    estimate = select_future_yahoo_estimate(rows, today_new_york="2026-08-06", ticker="AAPL")
+    assert estimate is not None
+    assert estimate.estimated_announcement_at == "2026-08-10 08:00:00 BMO"
+    assert estimate.estimated_session == "BEFORE_MARKET"
+
+
+def test_calendar_refresh_future_wins_over_historical_completed_event(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "future_wins.db"
+    _seed_calendar_db(db_path, ["AAPL"])
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO rc_earnings_event (
+                id, market, ticker, announcement_at, announcement_date, announcement_session,
+                is_reported, reported_eps, source, source_observed_at_utc, source_timezone,
+                created_at_utc, updated_at_utc
+            ) VALUES (
+                7, 'usa', 'AAPL', '2026-05-01T16:05:00-04:00', '2026-05-01', 'AFTER_MARKET',
+                1, 1.50, 'YAHOO_FINANCE', '2026-05-01T21:00:00Z', 'America/New_York',
+                '2026-05-01T21:00:00Z', '2026-05-01T21:00:00Z'
+            )
+            """
+        )
+
+    def fake_fetch(_ticker: str, **_kwargs: object) -> list[dict[str, object]]:
+        return [
+            {"Earnings Date": "2026-05-01 16:00:00", "Reported EPS": 1.50},
+            {"Earnings Date": "2026-08-10 16:00:00", "Reported EPS": None},
+        ]
+
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar, "fetch_yahoo_earnings_calendar_rows", fake_fetch)
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar.time, "sleep", lambda _seconds: None)
+    root = _temp_root("future_wins")
+    assert (
+        refresh_yahoo_earnings_calendar.main(
+            [
+                "--fundamentals-db",
+                str(db_path),
+                "--apply",
+                "--output-root",
+                str(root),
+                "--sleep-min-seconds",
+                "0",
+                "--sleep-max-seconds",
+                "0",
+            ]
+        )
+        == 0
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute("SELECT calendar_status, estimated_announcement_date, completed_earnings_event_id FROM rc_earnings_calendar").fetchone()
+    assert row == ("UPCOMING", "2026-08-10", 7)
+
+
+def test_calendar_refresh_completed_only_response(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "completed_only.db"
+    _seed_calendar_db(db_path, ["AAPL"])
+
+    def fake_fetch(_ticker: str, **_kwargs: object) -> list[dict[str, object]]:
+        return [{"Earnings Date": "2026-05-01 16:00:00", "Reported EPS": 1.50}]
+
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar, "fetch_yahoo_earnings_calendar_rows", fake_fetch)
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar.time, "sleep", lambda _seconds: None)
+    root = _temp_root("completed_only")
+    assert (
+        refresh_yahoo_earnings_calendar.main(
+            [
+                "--fundamentals-db",
+                str(db_path),
+                "--apply",
+                "--output-root",
+                str(root),
+                "--sleep-min-seconds",
+                "0",
+                "--sleep-max-seconds",
+                "0",
+            ]
+        )
+        == 0
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute("SELECT calendar_status, estimated_announcement_date FROM rc_earnings_calendar").fetchone() == ("NO_CURRENT_ESTIMATE", None)
+
+
+def test_calendar_refresh_future_only_response(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "future_only.db"
+    _seed_calendar_db(db_path, ["AAPL"])
+
+    def fake_fetch(_ticker: str, **_kwargs: object) -> list[dict[str, object]]:
+        return [{"Earnings Date": "2026-08-10 16:00:00", "Reported EPS": None}]
+
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar, "fetch_yahoo_earnings_calendar_rows", fake_fetch)
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar.time, "sleep", lambda _seconds: None)
+    root = _temp_root("future_only")
+    assert (
+        refresh_yahoo_earnings_calendar.main(
+            [
+                "--fundamentals-db",
+                str(db_path),
+                "--apply",
+                "--output-root",
+                str(root),
+                "--sleep-min-seconds",
+                "0",
+                "--sleep-max-seconds",
+                "0",
+            ]
+        )
+        == 0
+    )
+    with sqlite3.connect(str(db_path)) as conn:
+        assert conn.execute("SELECT calendar_status, estimated_announcement_date FROM rc_earnings_calendar").fetchone() == ("UPCOMING", "2026-08-10")
 
 
 def test_calendar_refresh_timeout_then_success_and_resume(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

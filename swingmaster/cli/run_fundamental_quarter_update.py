@@ -157,7 +157,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _summary(**items: object) -> None:
     for key, value in items.items():
-        if str(key).startswith("_"):
+        if str(key).startswith("_") or key in {"candidate_results", "failed_candidates"}:
             continue
         print(f"SUMMARY {key}={value}")
 
@@ -2754,8 +2754,12 @@ def run_fundamental_quarter_update(
         "NO_NEW_DATA": 0,
         "MANUAL_REVIEW": 0,
     }
+    candidate_results: list[dict[str, object]] = []
+    failed_candidates: list[dict[str, object]] = []
     for row in rows:
         current_ticker = str(row["ticker"]).upper()
+        current_market = str(row["market"]).lower()
+        current_target_period = str(row["detected_source_period_end_date"])
         tickers_processed += 1
         try:
             process_kwargs: dict[str, object] = {
@@ -2777,6 +2781,19 @@ def run_fundamental_quarter_update(
             process_summary = process_ticker(**process_kwargs)
             post_result = str(process_summary.get("post_update_result") or "MANUAL_REVIEW")
             post_update_result_counts[post_result] = post_update_result_counts.get(post_result, 0) + 1
+            candidate_results.append(
+                {
+                    "ticker": current_ticker,
+                    "market": current_market,
+                    "target_period_end_date": str(process_summary.get("target_period_end_date") or current_target_period),
+                    "status": "SUCCESS",
+                    "post_update_result": post_result,
+                    "target_quarter_exists": int(process_summary.get("target_quarter_exists") or 0),
+                    "target_quarter_basic_complete": int(process_summary.get("target_quarter_basic_complete") or 0),
+                    "target_ttm_input_complete": process_summary.get("target_ttm_input_complete"),
+                    "target_score_history_complete": process_summary.get("target_score_history_complete"),
+                }
+            )
             if vintage_mode == VINTAGE_MODE_SEC_LATEST_WRITER:
                 merge_sec_latest_writer_vintage_summary(
                     vintage_summary,
@@ -2830,6 +2847,18 @@ def run_fundamental_quarter_update(
             print(f"ERROR ticker={current_ticker} step={step_name} message={message}")
             tickers_failed += 1
             post_update_result_counts["FETCH_FAILED"] += 1
+            failed_candidate = {
+                "ticker": current_ticker,
+                "market": current_market,
+                "target_period_end_date": current_target_period,
+                "status": "FAILED",
+                "post_update_result": "FETCH_FAILED",
+                "failure_step": step_name,
+                "error_message": message,
+                "retry_recommendation": "RERUN_CHECK_THEN_PLAN_UPDATE" if plan_mode else "RERUN_LEGACY_QUARTER_UPDATE",
+            }
+            failed_candidates.append(failed_candidate)
+            candidate_results.append(failed_candidate)
             if vintage_mode == VINTAGE_MODE_SEC_LATEST_WRITER:
                 vintage_summary["vintage_rows_failed"] = int(vintage_summary.get("vintage_rows_failed", 0) or 0) + 1
                 vintage_summary["vintage_error_summary"] = message
@@ -2877,6 +2906,10 @@ def run_fundamental_quarter_update(
         "fetch_failed_count": post_update_result_counts["FETCH_FAILED"],
         "no_new_data_count": post_update_result_counts["NO_NEW_DATA"],
         "manual_review_count": post_update_result_counts["MANUAL_REVIEW"],
+        "candidate_results": candidate_results,
+        "failed_candidates": failed_candidates,
+        "candidate_results_json": json.dumps(candidate_results, sort_keys=True, separators=(",", ":"), ensure_ascii=True),
+        "failed_candidates_json": json.dumps(failed_candidates, sort_keys=True, separators=(",", ":"), ensure_ascii=True),
     }
     if plan_payload is not None:
         summary["plan_candidate_hash"] = plan_payload["candidate_hash"]

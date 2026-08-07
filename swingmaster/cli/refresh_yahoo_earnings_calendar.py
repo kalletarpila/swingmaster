@@ -17,6 +17,7 @@ from swingmaster.fundamentals.earnings_calendar import (
     _date_part,
     _is_completed_yahoo_row,
     new_york_today_from_utc,
+    record_earnings_calendar_check_failure,
     select_future_yahoo_estimate,
     upsert_earnings_calendar,
 )
@@ -164,6 +165,16 @@ def main(argv: list[str] | None = None) -> int:
             estimate = None
             result_status = exc.status
             _increment_failure_count(counts, result_status)
+            if args.apply:
+                with sqlite3.connect(str(db_path)) as conn:
+                    record_earnings_calendar_check_failure(
+                        conn,
+                        market="usa",
+                        ticker=ticker,
+                        observed_at_utc=observed_at,
+                        failure_status=result_status,
+                    )
+                    conn.commit()
             rows.append({"ticker": ticker, "result_status": result_status, "error": str(exc), "elapsed_seconds": round(time.perf_counter() - ticker_started, 3)})
             _write_checkpoint(checkpoint_json, counts, rows, attempt_rows)
             consecutive_failures += 1
@@ -178,6 +189,16 @@ def main(argv: list[str] | None = None) -> int:
             estimate = None
             result_status = _classify_exception(exc)
             _increment_failure_count(counts, result_status)
+            if args.apply:
+                with sqlite3.connect(str(db_path)) as conn:
+                    record_earnings_calendar_check_failure(
+                        conn,
+                        market="usa",
+                        ticker=ticker,
+                        observed_at_utc=observed_at,
+                        failure_status=result_status,
+                    )
+                    conn.commit()
             rows.append({"ticker": ticker, "result_status": result_status, "error": str(exc), "elapsed_seconds": round(time.perf_counter() - ticker_started, 3)})
             _write_checkpoint(checkpoint_json, counts, rows, attempt_rows)
             consecutive_failures += 1

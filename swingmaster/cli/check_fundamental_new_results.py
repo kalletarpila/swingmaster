@@ -6,6 +6,10 @@ from pathlib import Path
 
 from swingmaster.fundamentals.earnings_events import default_fundamentals_usa_db_path
 from swingmaster.fundamentals.result_check import (
+    DEFAULT_CALENDAR_CONFIRMATION_DAYS_BEFORE,
+    DEFAULT_CALENDAR_FAILURE_RETRY_DAYS,
+    DEFAULT_CALENDAR_MAINTENANCE_LIMIT,
+    DEFAULT_CALENDAR_STALE_DAYS,
     DEFAULT_OHLCV_DB_PATH,
     DEFAULT_OHLCV_STALE_DAYS,
     run_manual_result_check,
@@ -20,6 +24,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--decision-date", required=True)
     parser.add_argument("--ohlcv-stale-days", type=int, default=DEFAULT_OHLCV_STALE_DAYS)
     parser.add_argument("--event-watch-days-after", type=int, default=5)
+    parser.add_argument("--calendar-confirmation-days-before", type=int, default=DEFAULT_CALENDAR_CONFIRMATION_DAYS_BEFORE)
+    parser.add_argument("--calendar-maintenance-limit", type=int, default=DEFAULT_CALENDAR_MAINTENANCE_LIMIT)
+    parser.add_argument("--calendar-stale-days", type=int, default=DEFAULT_CALENDAR_STALE_DAYS)
+    parser.add_argument("--calendar-failure-retry-days", type=int, default=DEFAULT_CALENDAR_FAILURE_RETRY_DAYS)
     parser.add_argument("--output-root")
     parser.add_argument("--ticker", action="append", default=[])
     parser.add_argument("--tickers-file")
@@ -39,6 +47,10 @@ def main(argv: list[str] | None = None) -> int:
         decision_date=args.decision_date,
         ohlcv_stale_days=args.ohlcv_stale_days,
         event_watch_days_after=args.event_watch_days_after,
+        calendar_confirmation_days_before=args.calendar_confirmation_days_before,
+        calendar_maintenance_limit=args.calendar_maintenance_limit,
+        calendar_stale_days=args.calendar_stale_days,
+        calendar_failure_retry_days=args.calendar_failure_retry_days,
         output_root=Path(args.output_root) if args.output_root else None,
         tickers=tickers or None,
     )

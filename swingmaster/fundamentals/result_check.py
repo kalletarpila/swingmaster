@@ -35,6 +35,10 @@ EXECUTABLE_DECISIONS = {
     DECISION_RETRY_PARTIAL_QUARTER,
     DECISION_RETRY_FETCH_FAILED,
 }
+DEFAULT_CALENDAR_CONFIRMATION_DAYS_BEFORE = 7
+DEFAULT_CALENDAR_MAINTENANCE_LIMIT = 50
+DEFAULT_CALENDAR_STALE_DAYS = 45
+DEFAULT_CALENDAR_FAILURE_RETRY_DAYS = 3
 
 
 def utc_now_text() -> str:
@@ -60,6 +64,10 @@ def run_manual_result_check(
     decision_date: str | date,
     ohlcv_stale_days: int = DEFAULT_OHLCV_STALE_DAYS,
     event_watch_days_after: int = 5,
+    calendar_confirmation_days_before: int = DEFAULT_CALENDAR_CONFIRMATION_DAYS_BEFORE,
+    calendar_maintenance_limit: int = DEFAULT_CALENDAR_MAINTENANCE_LIMIT,
+    calendar_stale_days: int = DEFAULT_CALENDAR_STALE_DAYS,
+    calendar_failure_retry_days: int = DEFAULT_CALENDAR_FAILURE_RETRY_DAYS,
     output_root: Path | None = None,
     tickers: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -91,7 +99,30 @@ def run_manual_result_check(
             stages=[_stage("ohlcv_activity", CHECK_STATUS_FAILED, error=str(exc))],
         )
 
-    calendar_summary = _run_calendar_refresh(root, fundamentals_db, active_tickers)
+    calendar_selection = select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=active_tickers,
+        decision_date=parsed_decision_date,
+        event_watch_days_after=event_watch_days_after,
+        confirmation_days_before=calendar_confirmation_days_before,
+        maintenance_limit=calendar_maintenance_limit,
+        calendar_stale_days=calendar_stale_days,
+        failure_retry_days=calendar_failure_retry_days,
+    )
+    stages.append(
+        _stage(
+            "calendar_candidate_selection",
+            CHECK_STATUS_SUCCESS,
+            active_tickers=len(active_tickers),
+            due_for_result_check_count=len(calendar_selection["due_for_result_check"]),
+            due_for_confirmation_count=len(calendar_selection["due_for_confirmation"]),
+            maintenance_selected_count=len(calendar_selection["calendar_maintenance"]),
+            unique_provider_check_ticker_count=len(calendar_selection["selected_tickers"]),
+            maintenance_backlog_remaining=calendar_selection["maintenance_backlog_remaining"],
+        )
+    )
+
+    calendar_summary = _run_calendar_refresh(root, fundamentals_db, calendar_selection["selected_tickers"])
     stages.append(calendar_summary["stage"])
     if calendar_summary["stage"]["status"] == CHECK_STATUS_FAILED:
         return _write_failed_plan(
@@ -150,6 +181,13 @@ def run_manual_result_check(
         "candidate_count": len(executable_rows),
         "candidate_hash": plan["candidate_hash"],
         "completed_event_refresh_candidate_count": len(event_candidates),
+        "due_for_result_check_count": len(calendar_selection["due_for_result_check"]),
+        "due_for_confirmation_count": len(calendar_selection["due_for_confirmation"]),
+        "maintenance_selected_count": len(calendar_selection["calendar_maintenance"]),
+        "unique_provider_check_ticker_count": len(calendar_selection["selected_tickers"]),
+        "maintenance_backlog_remaining": calendar_selection["maintenance_backlog_remaining"],
+        "calendar_rows_changed": _calendar_rows_changed(calendar_summary.get("summary", {})),
+        "completed_events_changed": _completed_events_changed(event_summary.get("summary", {})),
         "output_root": str(root),
     }
     paths = _write_artifacts(
@@ -197,6 +235,159 @@ def select_completed_event_refresh_candidates(
         if earliest <= parsed <= decision_date:
             output.append(normalized)
     return sorted(dict.fromkeys(output))
+
+
+def select_calendar_refresh_candidates(
+    *,
+    fundamentals_db: Path,
+    active_tickers: list[str],
+    decision_date: date,
+    event_watch_days_after: int,
+    confirmation_days_before: int = DEFAULT_CALENDAR_CONFIRMATION_DAYS_BEFORE,
+    maintenance_limit: int = DEFAULT_CALENDAR_MAINTENANCE_LIMIT,
+    calendar_stale_days: int = DEFAULT_CALENDAR_STALE_DAYS,
+    failure_retry_days: int = DEFAULT_CALENDAR_FAILURE_RETRY_DAYS,
+) -> dict[str, Any]:
+    active = sorted(dict.fromkeys(normalize_ticker(ticker) for ticker in active_tickers))
+    if not active:
+        return {
+            "due_for_result_check": [],
+            "due_for_confirmation": [],
+            "calendar_maintenance": [],
+            "selected_tickers": [],
+            "maintenance_backlog_remaining": 0,
+        }
+    by_ticker = _calendar_state_by_ticker(fundamentals_db, active)
+    result_earliest = decision_date - timedelta(days=max(event_watch_days_after, 0))
+    confirmation_latest = decision_date + timedelta(days=max(confirmation_days_before, 0))
+
+    due_for_result: list[str] = []
+    due_for_confirmation: list[str] = []
+    maintenance_candidates: list[tuple[int, date, str]] = []
+    for ticker in active:
+        row = by_ticker.get(ticker)
+        status = _row_text(row, "calendar_status")
+        estimated = _parse_optional_date(_row_text(row, "estimated_announcement_date"))
+        if estimated is not None and result_earliest <= estimated <= decision_date:
+            due_for_result.append(ticker)
+            continue
+        if status == "DUE_TODAY":
+            due_for_result.append(ticker)
+            continue
+        if estimated is not None and decision_date < estimated <= confirmation_latest:
+            due_for_confirmation.append(ticker)
+            continue
+        maintenance_key = _maintenance_key(
+            ticker=ticker,
+            row=row,
+            decision_date=decision_date,
+            calendar_stale_days=calendar_stale_days,
+            failure_retry_days=failure_retry_days,
+        )
+        if maintenance_key is not None:
+            maintenance_candidates.append(maintenance_key)
+
+    selected = set(due_for_result) | set(due_for_confirmation)
+    maintenance: list[str] = []
+    for _priority, _last_checked, ticker in sorted(maintenance_candidates):
+        if ticker in selected:
+            continue
+        maintenance.append(ticker)
+        selected.add(ticker)
+        if len(maintenance) >= max(maintenance_limit, 0):
+            break
+    return {
+        "due_for_result_check": sorted(dict.fromkeys(due_for_result)),
+        "due_for_confirmation": sorted(dict.fromkeys(due_for_confirmation)),
+        "calendar_maintenance": maintenance,
+        "selected_tickers": sorted(selected),
+        "maintenance_backlog_remaining": max(len(maintenance_candidates) - len(maintenance), 0),
+    }
+
+
+def _calendar_state_by_ticker(fundamentals_db: Path, tickers: list[str]) -> dict[str, sqlite3.Row]:
+    selected = set(tickers)
+    with sqlite3.connect(f"file:{fundamentals_db.resolve().as_posix()}?mode=ro", uri=True) as conn:
+        conn.row_factory = sqlite3.Row
+        return {
+            normalize_ticker(str(row["ticker"])): row
+            for row in conn.execute(
+                """
+                SELECT *
+                FROM rc_earnings_calendar
+                WHERE market = 'usa'
+                """
+            )
+            if normalize_ticker(str(row["ticker"])) in selected
+        }
+
+
+def _maintenance_key(
+    *,
+    ticker: str,
+    row: sqlite3.Row | None,
+    decision_date: date,
+    calendar_stale_days: int,
+    failure_retry_days: int,
+) -> tuple[int, date, str] | None:
+    if row is None:
+        return (0, date.min, ticker)
+    estimated = _parse_optional_date(_row_text(row, "estimated_announcement_date"))
+    status = _row_text(row, "calendar_status")
+    check_status = _row_text(row, "calendar_check_status")
+    last_checked = _parse_optional_date(
+        _row_text(row, "calendar_last_checked_at_utc") or _row_text(row, "last_observed_at_utc")
+    )
+    sort_date = last_checked or date.min
+    if check_status and check_status != "SUCCESS":
+        if last_checked is None or (decision_date - last_checked).days >= max(failure_retry_days, 0):
+            return (1, sort_date, ticker)
+        return None
+    if estimated is None:
+        return (2, sort_date, ticker)
+    if estimated < decision_date:
+        return (3, sort_date, ticker)
+    if last_checked is None or (decision_date - last_checked).days >= max(calendar_stale_days, 0):
+        return (4, sort_date, ticker)
+    if status in {"NO_CURRENT_ESTIMATE", "CALENDAR_CHECK_FAILED"}:
+        return (5, sort_date, ticker)
+    return None
+
+
+def _parse_optional_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return _parse_date(value)
+    except ValueError:
+        return None
+
+
+def _row_text(row: Mapping[str, Any] | None, key: str) -> str | None:
+    if row is None:
+        return None
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return None
+    return str(value) if value is not None else None
+
+
+def _calendar_rows_changed(payload: Mapping[str, Any]) -> int:
+    return int(payload.get("inserted_count") or 0) + int(payload.get("updated_count") or 0)
+
+
+def _completed_events_changed(payload: Mapping[str, Any]) -> int:
+    total = 0
+    for row in payload.get("results", []) or []:
+        if not isinstance(row, Mapping):
+            continue
+        summary = row.get("summary", {})
+        if not isinstance(summary, Mapping):
+            continue
+        total += int(summary.get("inserted_count") or 0)
+        total += int(summary.get("updated_count") or 0)
+    return total
 
 
 def candidate_hash(candidate_rows: list[Mapping[str, Any]]) -> str:

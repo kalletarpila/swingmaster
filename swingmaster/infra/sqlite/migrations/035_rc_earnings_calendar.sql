@@ -13,6 +13,10 @@ CREATE TABLE IF NOT EXISTS rc_earnings_calendar (
     previous_estimated_announcement_at TEXT,
     date_change_count INTEGER NOT NULL DEFAULT 0,
     completed_earnings_event_id INTEGER,
+    calendar_last_checked_at_utc TEXT,
+    calendar_check_status TEXT,
+    calendar_last_failed_at_utc TEXT,
+    calendar_failure_count INTEGER NOT NULL DEFAULT 0,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
     UNIQUE (market, ticker, source)

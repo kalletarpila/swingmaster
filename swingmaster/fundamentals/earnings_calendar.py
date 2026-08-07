@@ -16,6 +16,7 @@ CALENDAR_STATUSES = {
     "COMPLETED_EVENT_FOUND",
     "DATE_CHANGED",
     "NO_CURRENT_ESTIMATE",
+    "CALENDAR_CHECK_FAILED",
 }
 
 
@@ -67,9 +68,13 @@ def upsert_earnings_calendar(
             previous_estimated_announcement_at,
             date_change_count,
             completed_earnings_event_id,
+            calendar_last_checked_at_utc,
+            calendar_check_status,
+            calendar_last_failed_at_utc,
+            calendar_failure_count,
             created_at_utc,
             updated_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(market, ticker, source) DO UPDATE SET
             estimated_announcement_at = excluded.estimated_announcement_at,
             estimated_announcement_date = excluded.estimated_announcement_date,
@@ -80,6 +85,10 @@ def upsert_earnings_calendar(
             previous_estimated_announcement_at = excluded.previous_estimated_announcement_at,
             date_change_count = excluded.date_change_count,
             completed_earnings_event_id = excluded.completed_earnings_event_id,
+            calendar_last_checked_at_utc = excluded.calendar_last_checked_at_utc,
+            calendar_check_status = excluded.calendar_check_status,
+            calendar_last_failed_at_utc = excluded.calendar_last_failed_at_utc,
+            calendar_failure_count = excluded.calendar_failure_count,
             updated_at_utc = excluded.updated_at_utc
         """,
         (
@@ -96,11 +105,79 @@ def upsert_earnings_calendar(
             previous_estimate if changed else (existing["previous_estimated_announcement_at"] if existing else None),
             date_change_count,
             completed_event_id,
+            observed_at_utc,
+            "SUCCESS",
+            None,
+            0,
             created_at,
             observed_at_utc,
         ),
     )
     return status
+
+
+def record_earnings_calendar_check_failure(
+    conn: sqlite3.Connection,
+    *,
+    market: str,
+    ticker: str,
+    observed_at_utc: str,
+    failure_status: str,
+) -> None:
+    normalized = normalize_ticker(ticker)
+    existing = _load_existing(conn, market, normalized, SOURCE_YAHOO)
+    if existing is None:
+        conn.execute(
+            """
+            INSERT INTO rc_earnings_calendar (
+                market,
+                ticker,
+                estimated_announcement_at,
+                estimated_announcement_date,
+                estimated_session,
+                calendar_status,
+                source,
+                source_observed_at_utc,
+                first_observed_at_utc,
+                last_observed_at_utc,
+                previous_estimated_announcement_at,
+                date_change_count,
+                completed_earnings_event_id,
+                calendar_last_checked_at_utc,
+                calendar_check_status,
+                calendar_last_failed_at_utc,
+                calendar_failure_count,
+                created_at_utc,
+                updated_at_utc
+            ) VALUES (?, ?, NULL, NULL, 'UNKNOWN', 'CALENDAR_CHECK_FAILED', ?, ?, ?, ?, NULL, 0, NULL, ?, ?, ?, 1, ?, ?)
+            """,
+            (
+                market,
+                normalized,
+                SOURCE_YAHOO,
+                observed_at_utc,
+                observed_at_utc,
+                observed_at_utc,
+                observed_at_utc,
+                failure_status,
+                observed_at_utc,
+                observed_at_utc,
+                observed_at_utc,
+            ),
+        )
+        return
+    conn.execute(
+        """
+        UPDATE rc_earnings_calendar
+        SET calendar_last_checked_at_utc = ?,
+            calendar_check_status = ?,
+            calendar_last_failed_at_utc = ?,
+            calendar_failure_count = COALESCE(calendar_failure_count, 0) + 1,
+            updated_at_utc = ?
+        WHERE market = ? AND ticker = ? AND source = ?
+        """,
+        (observed_at_utc, failure_status, observed_at_utc, observed_at_utc, market, normalized, SOURCE_YAHOO),
+    )
 
 
 def select_future_yahoo_estimate(rows: list[Mapping[str, Any]], *, today_new_york: str, ticker: str) -> EarningsCalendarEstimate | None:

@@ -126,6 +126,10 @@ def build_usa_result_check_command(
     output_root: Path | None = None,
     event_watch_days_after: int = 5,
     ohlcv_stale_days: int = 14,
+    calendar_confirmation_days_before: int = 7,
+    calendar_maintenance_limit: int = 50,
+    calendar_stale_days: int = 45,
+    calendar_failure_retry_days: int = 3,
 ) -> list[str]:
     command = [
         str(PYTHON_EXECUTABLE),
@@ -140,6 +144,14 @@ def build_usa_result_check_command(
         str(ohlcv_stale_days),
         "--event-watch-days-after",
         str(event_watch_days_after),
+        "--calendar-confirmation-days-before",
+        str(calendar_confirmation_days_before),
+        "--calendar-maintenance-limit",
+        str(calendar_maintenance_limit),
+        "--calendar-stale-days",
+        str(calendar_stale_days),
+        "--calendar-failure-retry-days",
+        str(calendar_failure_retry_days),
         "--json",
     ]
     if output_root is not None:

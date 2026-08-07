@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from swingmaster.cli.run_fundamental_migrations import run_migration
+from swingmaster.fundamentals.earnings_calendar import record_earnings_calendar_check_failure
 from swingmaster.fundamentals import result_check
 
 
@@ -41,18 +42,43 @@ def _insert_quarter(db_path: Path, ticker: str, period: str = "2026-03-31") -> N
         conn.commit()
 
 
-def _insert_calendar(db_path: Path, ticker: str, status: str, estimated_date: str | None) -> None:
+def _insert_calendar(
+    db_path: Path,
+    ticker: str,
+    status: str,
+    estimated_date: str | None,
+    *,
+    last_observed_at_utc: str = "2026-08-07T00:00:00Z",
+    check_status: str | None = "SUCCESS",
+    failure_count: int = 0,
+    source: str = "fixture",
+) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
             """
             INSERT INTO rc_earnings_calendar (
                 market, ticker, estimated_announcement_at, estimated_announcement_date, estimated_session,
                 calendar_status, source, source_observed_at_utc, first_observed_at_utc, last_observed_at_utc,
+                calendar_last_checked_at_utc, calendar_check_status, calendar_failure_count,
                 created_at_utc, updated_at_utc
-            ) VALUES ('usa', ?, ?, ?, 'AMC', ?, 'fixture', '2026-08-07T00:00:00Z',
-                '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z')
+            ) VALUES ('usa', ?, ?, ?, 'AMC', ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?)
             """,
-            (ticker, f"{estimated_date}T20:00:00Z" if estimated_date else None, estimated_date, status),
+            (
+                ticker,
+                f"{estimated_date}T20:00:00Z" if estimated_date else None,
+                estimated_date,
+                status,
+                source,
+                last_observed_at_utc,
+                last_observed_at_utc,
+                last_observed_at_utc,
+                last_observed_at_utc,
+                check_status,
+                failure_count,
+                last_observed_at_utc,
+                last_observed_at_utc,
+            ),
         )
         conn.commit()
 
@@ -155,6 +181,190 @@ def test_completed_event_candidate_selection_uses_due_today_and_recent_passed(tm
     )
 
     assert selected == ["AAPL", "MSFT"]
+
+
+def test_calendar_selector_normal_day_bounds_provider_work_to_due_and_maintenance(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    active = [f"T{i:04d}" for i in range(3000)]
+    for ticker in active[30:130]:
+        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-11-15")
+    for ticker in active[:20]:
+        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-08-12")
+    for ticker in active[20:30]:
+        _insert_calendar(fundamentals_db, ticker, "DATE_PASSED_EVENT_NOT_FOUND", "2026-08-05")
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=active,
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+        maintenance_limit=50,
+    )
+
+    assert len(selected["due_for_confirmation"]) == 20
+    assert len(selected["due_for_result_check"]) == 10
+    assert len(selected["calendar_maintenance"]) == 50
+    assert len(selected["selected_tickers"]) == 80
+    assert len(selected["selected_tickers"]) < 3000
+
+
+def test_calendar_selector_earnings_season_prioritizes_due_and_caps_maintenance(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    active = [f"E{i:04d}" for i in range(500)]
+    for ticker in active[:150]:
+        _insert_calendar(fundamentals_db, ticker, "DATE_PASSED_EVENT_NOT_FOUND", "2026-08-06")
+    for ticker in active[150:310]:
+        _insert_calendar(fundamentals_db, ticker, "UPCOMING", "2026-08-10")
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=active,
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+        maintenance_limit=25,
+    )
+
+    assert len(selected["due_for_result_check"]) == 150
+    assert len(selected["due_for_confirmation"]) == 160
+    assert len(selected["calendar_maintenance"]) == 25
+    assert len(selected["selected_tickers"]) == 335
+    assert selected["selected_tickers"] == sorted(selected["selected_tickers"])
+
+
+def test_calendar_selector_date_moved_later_is_no_longer_due_after_successful_refresh(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    _insert_calendar(fundamentals_db, "MOVE", "UPCOMING", "2026-08-08")
+
+    before = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["MOVE"],
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+    )
+    assert before["due_for_confirmation"] == ["MOVE"]
+
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        conn.execute(
+            """
+            UPDATE rc_earnings_calendar
+            SET estimated_announcement_date = '2026-08-17',
+                estimated_announcement_at = '2026-08-17T20:00:00Z',
+                last_observed_at_utc = '2026-08-07T12:00:00Z',
+                calendar_last_checked_at_utc = '2026-08-07T12:00:00Z',
+                calendar_check_status = 'SUCCESS'
+            WHERE ticker = 'MOVE'
+            """
+        )
+        conn.commit()
+
+    after = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["MOVE"],
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+    )
+    assert after["selected_tickers"] == []
+
+
+def test_calendar_selector_provider_failure_preserves_date_and_defers_retry(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    _insert_calendar(
+        fundamentals_db,
+        "FAIL",
+        "UPCOMING",
+        "2026-09-01",
+        last_observed_at_utc="2026-08-01T00:00:00Z",
+        check_status="TIMEOUT",
+        failure_count=1,
+    )
+
+    same_day = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["FAIL"],
+        decision_date=result_check._parse_date("2026-08-02"),
+        event_watch_days_after=5,
+        failure_retry_days=3,
+    )
+    assert same_day["selected_tickers"] == []
+
+    retry = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["FAIL"],
+        decision_date=result_check._parse_date("2026-08-04"),
+        event_watch_days_after=5,
+        failure_retry_days=3,
+    )
+    assert retry["calendar_maintenance"] == ["FAIL"]
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        assert conn.execute("SELECT estimated_announcement_date FROM rc_earnings_calendar WHERE ticker='FAIL'").fetchone()[0] == "2026-09-01"
+
+
+def test_calendar_failure_record_preserves_existing_future_estimate(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    _insert_calendar(fundamentals_db, "KEEP", "UPCOMING", "2026-09-01", source="YAHOO_FINANCE")
+
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        record_earnings_calendar_check_failure(
+            conn,
+            market="usa",
+            ticker="KEEP",
+            observed_at_utc="2026-08-07T12:00:00Z",
+            failure_status="TIMEOUT",
+        )
+        conn.commit()
+        row = conn.execute(
+            """
+            SELECT estimated_announcement_date, calendar_status, calendar_check_status, calendar_failure_count
+            FROM rc_earnings_calendar
+            WHERE ticker = 'KEEP'
+            """
+        ).fetchone()
+
+    assert row == ("2026-09-01", "UPCOMING", "TIMEOUT", 1)
+
+
+def test_calendar_selector_missing_metadata_enters_bounded_maintenance(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    active = [f"M{i:03d}" for i in range(12)]
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=active,
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+        maintenance_limit=5,
+    )
+
+    assert selected["calendar_maintenance"] == active[:5]
+    assert selected["maintenance_backlog_remaining"] == 7
+
+
+def test_calendar_selector_past_expected_date_remains_in_result_grace(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    _insert_calendar(fundamentals_db, "PAST", "DATE_PASSED_EVENT_NOT_FOUND", "2026-08-04")
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["PAST"],
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=3,
+    )
+
+    assert selected["due_for_result_check"] == ["PAST"]
+
+
+def test_calendar_selector_repeat_same_day_skips_fresh_non_due_rows(tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    _insert_calendar(fundamentals_db, "FRESH", "UPCOMING", "2026-10-20")
+
+    selected = result_check.select_calendar_refresh_candidates(
+        fundamentals_db=fundamentals_db,
+        active_tickers=["FRESH"],
+        decision_date=result_check._parse_date("2026-08-07"),
+        event_watch_days_after=5,
+    )
+
+    assert selected["selected_tickers"] == []
 
 
 def test_partial_event_refresh_disables_executable_plan(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -241,8 +241,18 @@ EARNINGS_CALENDAR_REQUIRED_COLUMNS = (
     "previous_estimated_announcement_at",
     "date_change_count",
     "completed_earnings_event_id",
+    "calendar_last_checked_at_utc",
+    "calendar_check_status",
+    "calendar_last_failed_at_utc",
+    "calendar_failure_count",
     "created_at_utc",
     "updated_at_utc",
+)
+EARNINGS_CALENDAR_CHECK_STATE_COLUMNS = (
+    ("calendar_last_checked_at_utc", "TEXT"),
+    ("calendar_check_status", "TEXT"),
+    ("calendar_last_failed_at_utc", "TEXT"),
+    ("calendar_failure_count", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 
@@ -442,6 +452,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
     ensure_valuation_v22_columns(conn)
     ensure_quarterly_enrichment_audit_v2_columns(conn)
     ensure_quarter_ingestion_status_schema(conn)
+    ensure_earnings_calendar_check_state_columns(conn)
     conn.commit()
 
 
@@ -666,6 +677,26 @@ def ensure_quarter_ingestion_status_schema(conn: sqlite3.Connection) -> None:
     )
     conn.execute("DROP TABLE rc_fundamental_quarter_ingestion_status_legacy")
     _create_quarter_ingestion_status_indexes(conn)
+
+
+def ensure_earnings_calendar_check_state_columns(conn: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_earnings_calendar)
+            """
+        )
+    }
+    for column_name, column_type in EARNINGS_CALENDAR_CHECK_STATE_COLUMNS:
+        if column_name not in columns:
+            conn.execute(f"ALTER TABLE rc_earnings_calendar ADD COLUMN {column_name} {column_type}")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_earnings_calendar_check_status
+        ON rc_earnings_calendar(market, calendar_check_status, calendar_last_checked_at_utc)
+        """
+    )
 
 
 def _create_quarter_ingestion_status_indexes(conn: sqlite3.Connection) -> None:

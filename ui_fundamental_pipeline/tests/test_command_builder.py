@@ -60,6 +60,10 @@ class TestCommandBuilder(unittest.TestCase):
         self.assertEqual(command[command.index("--decision-date") + 1], "2026-08-07")
         self.assertEqual(command[command.index("--ohlcv-stale-days") + 1], "14")
         self.assertEqual(command[command.index("--event-watch-days-after") + 1], "5")
+        self.assertEqual(command[command.index("--calendar-confirmation-days-before") + 1], "7")
+        self.assertEqual(command[command.index("--calendar-maintenance-limit") + 1], "50")
+        self.assertEqual(command[command.index("--calendar-stale-days") + 1], "45")
+        self.assertEqual(command[command.index("--calendar-failure-retry-days") + 1], "3")
         self.assertIn("--json", command)
 
     def test_build_usa_update_command_with_retired_vintage_options_remains_latest_only(self):

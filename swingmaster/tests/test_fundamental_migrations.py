@@ -6,6 +6,7 @@ from pathlib import Path
 from swingmaster.cli.run_fundamental_migrations import (
     PERCENTILE_LIFECYCLE_COLUMNS,
     QUARTERLY_FIELD_PROVENANCE_REQUIRED_COLUMNS,
+    EARNINGS_CALENDAR_CHECK_STATE_COLUMNS,
     REQUIRED_TABLES,
     SCHEMA_VERSION,
     TTM_COMPONENT_COLUMNS,
@@ -108,6 +109,16 @@ def test_run_migration_creates_required_tables_and_is_idempotent(tmp_path: Path)
             """
         ).fetchone()
         assert quarter_state_row == ("rc_fundamental_quarter_state",)
+        earnings_calendar_columns = {
+            str(row[1])
+            for row in conn.execute(
+                """
+                PRAGMA table_info(rc_earnings_calendar)
+                """
+            )
+        }
+        for column_name, _column_type in EARNINGS_CALENDAR_CHECK_STATE_COLUMNS:
+            assert column_name in earnings_calendar_columns
 
 
 def test_run_migration_creates_reporting_frequency_and_recovery_tables(tmp_path: Path) -> None:

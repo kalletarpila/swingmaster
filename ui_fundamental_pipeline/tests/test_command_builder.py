@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from ui_fundamental_pipeline.command_builder import (
     UsaQuarterUpdateVintageOptions,
@@ -8,6 +9,7 @@ from ui_fundamental_pipeline.command_builder import (
     UsaYahooAwareApplyOptions,
     build_fin_classification_ttm_commands,
     build_fin_update_command,
+    build_usa_result_check_command,
     build_score_percentile_command,
     build_snapshot_command,
     build_usa_update_command,
@@ -36,6 +38,29 @@ class TestCommandBuilder(unittest.TestCase):
         self.assertNotIn("--write-vintage", command)
         self.assertNotIn("--vintage-mode", command)
         self.assertNotIn("--vintage-yahoo-aware-action", command)
+        self.assertNotIn("--quarter-refresh-plan-json", command)
+
+    def test_build_usa_update_command_with_quarter_refresh_plan(self):
+        command = build_usa_update_command(
+            "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+            quarter_refresh_plan_json=Path("temp/fundamental_result_check/plan.json"),
+        )
+
+        self.assertIn("--quarter-refresh-plan-json", command)
+        self.assertEqual(command[command.index("--quarter-refresh-plan-json") + 1], "temp/fundamental_result_check/plan.json")
+
+    def test_build_usa_result_check_command(self):
+        command = build_usa_result_check_command(decision_date="2026-08-07")
+
+        self.assertIn("check_fundamental_new_results.py", " ".join(command))
+        self.assertIn("--fundamentals-db", command)
+        self.assertIn("fundamentals_usa.db", " ".join(command))
+        self.assertIn("--ohlcv-db", command)
+        self.assertEqual(command[command.index("--ohlcv-db") + 1], str(OSAKEDATA_DB))
+        self.assertEqual(command[command.index("--decision-date") + 1], "2026-08-07")
+        self.assertEqual(command[command.index("--ohlcv-stale-days") + 1], "14")
+        self.assertEqual(command[command.index("--event-watch-days-after") + 1], "5")
+        self.assertIn("--json", command)
 
     def test_build_usa_update_command_with_retired_vintage_options_remains_latest_only(self):
         source_run_id = "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY"

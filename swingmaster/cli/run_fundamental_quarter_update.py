@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 from collections.abc import Callable, Mapping
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,15 @@ from swingmaster.fundamentals.reported_vintage_policy import (
     VINTAGE_DISABLED_STATUS,
     reject_vintage_write,
 )
+from swingmaster.fundamentals.result_check import (
+    CHECK_STATUS_SUCCESS,
+    EXECUTABLE_DECISIONS,
+    PLAN_VERSION,
+    candidate_hash,
+    validate_candidate_hash,
+    validate_temp_path,
+)
+from swingmaster.fundamentals.quarter_completeness import assess_quarter_completeness
 from swingmaster.fundamentals.lifecycle import run_lifecycle_classification
 from swingmaster.fundamentals.score import run_fundamental_scoring
 
@@ -96,6 +106,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--market", default=None, help="Optional market filter")
     parser.add_argument("--ticker", default=None, help="Optional single ticker filter")
     parser.add_argument("--limit", type=int, default=None, help="Optional ticker limit after deterministic ordering")
+    parser.add_argument("--quarter-refresh-plan-json", default=None, help="USA-only explicit result-check plan under temp/")
     parser.add_argument(
         "--osakedata-db",
         default=None,
@@ -2204,22 +2215,26 @@ def run_quarterly_refresh(
     ticker: str,
     market: str,
     child_run_ids: dict[str, str],
+    target_period_end_date: str | None = None,
     sec_vintage_options: dict[str, object] | None = None,
     yahoo_fallback_vintage_options: dict[str, object] | None = None,
     sec_latest_writer_vintage_options: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     if market == "usa":
         retrieved_at_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        detected_source_period_end_date = target_period_end_date
         with sqlite3.connect(str(db_path)) as conn:
-            state_row = conn.execute(
-                """
-                SELECT detected_source_period_end_date
-                FROM rc_fundamental_quarter_state
-                WHERE ticker = ?
-                """,
-                (ticker.upper(),),
-            ).fetchone()
-            detected_source_period_end_date = str(state_row[0]) if state_row is not None and state_row[0] is not None else None
+            if detected_source_period_end_date is None:
+                row = conn.execute(
+                    """
+                    SELECT detected_source_period_end_date
+                    FROM rc_fundamental_quarter_state
+                    WHERE market = 'usa'
+                      AND ticker = ?
+                    """,
+                    (ticker.upper(),),
+                ).fetchone()
+                detected_source_period_end_date = row[0] if row is not None else None
             if detected_source_period_end_date is None:
                 raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_DETECTED_DATE_MISSING:{ticker}")
             sec_refresh_required = not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date)
@@ -2347,6 +2362,8 @@ def process_ticker(
     row: sqlite3.Row,
     child_run_ids: dict[str, str],
     skip_ack: bool,
+    target_period_end_date: str | None = None,
+    execution_source: str = "quarter_state",
     sec_vintage_options: dict[str, object] | None = None,
     yahoo_fallback_vintage_options: dict[str, object] | None = None,
     sec_latest_writer_vintage_options: dict[str, object] | None = None,
@@ -2354,15 +2371,16 @@ def process_ticker(
 ) -> dict[str, object]:
     ticker = str(row["ticker"]).upper()
     market = str(row["market"]).lower()
-    detected_source_period_end_date = row["detected_source_period_end_date"]
+    detected_source_period_end_date = target_period_end_date or row["detected_source_period_end_date"]
     if detected_source_period_end_date is None:
         raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_DETECTED_DATE_MISSING:{ticker}")
 
-    print(f"TICKER {ticker} market={market} detected_period={detected_source_period_end_date}")
+    print(f"TICKER {ticker} market={market} detected_period={detected_source_period_end_date} execution_source={execution_source}")
     quarterly_refresh_summary = run_quarterly_refresh(
         db_path=db_path,
         ticker=ticker,
         market=market,
+        target_period_end_date=str(detected_source_period_end_date),
         child_run_ids=child_run_ids,
         sec_vintage_options=sec_vintage_options,
         yahoo_fallback_vintage_options=yahoo_fallback_vintage_options,
@@ -2454,12 +2472,19 @@ def process_ticker(
                 conn.commit()
             else:
                 post_run_guard_summary.update(_yahoo_aware_execution_result(YAHOO_AWARE_EXEC_NOT_REQUESTED))
+    target_assessment = reassess_target_quarter(
+        db_path=db_path,
+        ticker=ticker,
+        market=market,
+        target_period_end_date=str(detected_source_period_end_date),
+    )
     return {
         "quarterly_refresh_mode": 1 if quarterly_refresh_summary else 0,
         "ttm_rows_written": int(ttm_summary["rows_written"]),
         "lifecycle_rows_written": lifecycle_rows_written,
         "score_rows_written": score_rows_written,
         "ack_rows_written": ack_rows_written,
+        **target_assessment,
         "sec_latest_writer_vintage_summary": sec_latest_writer_vintage_summary,
         "vintage_post_run_guard_summary": post_run_guard_summary,
     }
@@ -2482,6 +2507,134 @@ def _extract_enrich_summary(summary: Mapping[str, Any]) -> Mapping[str, object] 
     return None
 
 
+def reassess_target_quarter(
+    *,
+    db_path: Path,
+    ticker: str,
+    market: str,
+    target_period_end_date: str,
+) -> dict[str, object]:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT *
+            FROM rc_fundamental_quarterly
+            WHERE ticker = ?
+              AND period_end_date = ?
+            """,
+            (ticker.upper(), target_period_end_date),
+        ).fetchone()
+        status = conn.execute(
+            """
+            SELECT quarter_basic_complete, ttm_input_complete, score_history_complete
+            FROM rc_fundamental_quarter_ingestion_status
+            WHERE market = ?
+              AND ticker = ?
+              AND period_end_date = ?
+            """,
+            (market, ticker.upper(), target_period_end_date),
+        ).fetchone()
+    if row is None:
+        return {
+            "target_period_end_date": target_period_end_date,
+            "target_quarter_exists": 0,
+            "target_quarter_basic_complete": 0,
+            "target_ttm_input_complete": None,
+            "target_score_history_complete": None,
+            "post_update_result": "NO_NEW_DATA",
+        }
+    assessment = assess_quarter_completeness(dict(row), market=market)
+    quarter_basic = int(assessment.quarter_basic_complete)
+    return {
+        "target_period_end_date": target_period_end_date,
+        "target_quarter_exists": 1,
+        "target_quarter_basic_complete": quarter_basic,
+        "target_ttm_input_complete": None if status is None else status["ttm_input_complete"],
+        "target_score_history_complete": None if status is None else status["score_history_complete"],
+        "post_update_result": "UPDATED_COMPLETE" if quarter_basic else "UPDATED_PARTIAL",
+    }
+
+
+def load_plan_rows(
+    *,
+    plan_path: Path | None,
+    db_path: Path,
+    ticker: str | None,
+    limit: int | None,
+    max_age_hours: int = 2,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    if plan_path is None:
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_PLAN_PATH_REQUIRED")
+    resolved = validate_temp_path(plan_path, must_exist=True)
+    plan = json.loads(resolved.read_text(encoding="utf-8"))
+    validate_quarter_refresh_plan(plan, db_path=db_path, max_age_hours=max_age_hours)
+    rows = [dict(row) for row in plan.get("candidates", [])]
+    if ticker is not None:
+        rows = [row for row in rows if str(row["ticker"]).upper() == ticker.strip().upper()]
+    rows.sort(key=lambda row: (str(row["ticker"]), str(row["target_period_end_date"])))
+    if limit is not None:
+        rows = rows[:limit]
+    execution_rows = [
+        {
+            "ticker": str(row["ticker"]).upper(),
+            "market": "usa",
+            "latest_db_period_end_date": None,
+            "detected_source_period_end_date": str(row["target_period_end_date"]),
+            "new_quarter_available": 0,
+            "decision": str(row["decision"]),
+        }
+        for row in rows
+    ]
+    return plan, execution_rows
+
+
+def validate_quarter_refresh_plan(plan: Mapping[str, Any], *, db_path: Path, max_age_hours: int = 2) -> None:
+    if plan.get("plan_version") != PLAN_VERSION:
+        raise RuntimeError("INVALID_RESULT_CHECK_PLAN_VERSION")
+    if plan.get("check_status") != CHECK_STATUS_SUCCESS:
+        raise RuntimeError("RESULT_CHECK_PLAN_NOT_SUCCESS")
+    if str(plan.get("fundamentals_db")) != str(db_path.resolve()):
+        raise RuntimeError("RESULT_CHECK_PLAN_DB_MISMATCH")
+    created_at = _parse_plan_timestamp(str(plan.get("created_at_utc") or ""))
+    if datetime.now(timezone.utc) - created_at > timedelta(hours=max_age_hours):
+        raise RuntimeError("STALE_RESULT_CHECK_PLAN")
+    date.fromisoformat(str(plan.get("decision_date")))
+    rows = [dict(row) for row in plan.get("candidates", [])]
+    if int(plan.get("candidate_count") or 0) != len(rows):
+        raise RuntimeError("RESULT_CHECK_PLAN_CANDIDATE_COUNT_MISMATCH")
+    if not validate_candidate_hash(plan):
+        raise RuntimeError("RESULT_CHECK_PLAN_CANDIDATE_HASH_MISMATCH")
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        ticker = str(row.get("ticker") or "").upper()
+        period = str(row.get("target_period_end_date") or "")
+        if not ticker or not period:
+            raise RuntimeError("RESULT_CHECK_PLAN_TARGET_PERIOD_REQUIRED")
+        key = (ticker, period)
+        if key in seen:
+            raise RuntimeError(f"RESULT_CHECK_PLAN_DUPLICATE_CANDIDATE:{ticker},{period}")
+        seen.add(key)
+        if str(row.get("market") or "").lower() != "usa":
+            raise RuntimeError("RESULT_CHECK_PLAN_NON_USA_ROW")
+        if str(row.get("decision")) not in EXECUTABLE_DECISIONS:
+            raise RuntimeError("RESULT_CHECK_PLAN_NON_EXECUTABLE_DECISION")
+        if int(row.get("fundamental_fetch_enabled") or 0) != 1:
+            raise RuntimeError("RESULT_CHECK_PLAN_INACTIVE_ROW")
+        if int(row.get("eligible_for_execution") or 0) != 1:
+            raise RuntimeError("RESULT_CHECK_PLAN_ROW_NOT_EXECUTION_ELIGIBLE")
+
+
+def _parse_plan_timestamp(value: str) -> datetime:
+    if not value:
+        raise RuntimeError("RESULT_CHECK_PLAN_CREATED_AT_REQUIRED")
+    normalized = value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def run_fundamental_quarter_update(
     db_path: Path,
     osakedata_db_path: Path | None,
@@ -2491,6 +2644,7 @@ def run_fundamental_quarter_update(
     limit: int | None,
     dry_run: bool,
     skip_ack: bool,
+    quarter_refresh_plan_json: Path | None = None,
     write_vintage: bool = False,
     vintage_market: str | None = None,
     vintage_available_at_utc: str | None = None,
@@ -2548,7 +2702,21 @@ def run_fundamental_quarter_update(
         )
         if not dry_run and final_mixed_execution_runner is None and final_mixed_inputs_by_key is None:
             raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_INPUTS_REQUIRED")
-    rows = load_eligible_rows(db_path, market, ticker, limit)
+    plan_mode = quarter_refresh_plan_json is not None
+    plan_payload: dict[str, Any] | None = None
+    if plan_mode:
+        if market is not None and market.strip().lower() != "usa":
+            raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_PLAN_MODE_USA_ONLY")
+        plan_payload, rows = load_plan_rows(
+            plan_path=quarter_refresh_plan_json,
+            db_path=db_path,
+            ticker=ticker,
+            limit=limit,
+        )
+        market = "usa"
+        skip_ack = True
+    else:
+        rows = load_eligible_rows(db_path, market, ticker, limit)
     market_label = market.strip().lower() if market is not None else "ALL"
     strict_single_ticker_mode = ticker is not None
     if dry_run:
@@ -2566,7 +2734,11 @@ def run_fundamental_quarter_update(
             "dry_run": 1,
             "skip_ack": 1 if skip_ack else 0,
             "run_id": run_id,
+            "execution_mode": "quarter_refresh_plan" if plan_mode else "quarter_state",
         }
+        if plan_payload is not None:
+            summary["plan_candidate_hash"] = plan_payload["candidate_hash"]
+            summary["plan_candidate_count"] = plan_payload["candidate_count"]
         summary.update(vintage_summary)
         _summary(**summary)
         return summary
@@ -2575,6 +2747,13 @@ def run_fundamental_quarter_update(
     tickers_processed = 0
     tickers_succeeded = 0
     tickers_failed = 0
+    post_update_result_counts = {
+        "UPDATED_COMPLETE": 0,
+        "UPDATED_PARTIAL": 0,
+        "FETCH_FAILED": 0,
+        "NO_NEW_DATA": 0,
+        "MANUAL_REVIEW": 0,
+    }
     for row in rows:
         current_ticker = str(row["ticker"]).upper()
         tickers_processed += 1
@@ -2592,7 +2771,12 @@ def run_fundamental_quarter_update(
             if sec_latest_writer_vintage_options is not None:
                 process_kwargs["sec_latest_writer_vintage_options"] = sec_latest_writer_vintage_options
                 process_kwargs["vintage_yahoo_aware_action"] = vintage_yahoo_aware_action
+            if plan_mode:
+                process_kwargs["target_period_end_date"] = str(row["detected_source_period_end_date"])
+                process_kwargs["execution_source"] = "quarter_refresh_plan"
             process_summary = process_ticker(**process_kwargs)
+            post_result = str(process_summary.get("post_update_result") or "MANUAL_REVIEW")
+            post_update_result_counts[post_result] = post_update_result_counts.get(post_result, 0) + 1
             if vintage_mode == VINTAGE_MODE_SEC_LATEST_WRITER:
                 merge_sec_latest_writer_vintage_summary(
                     vintage_summary,
@@ -2645,6 +2829,7 @@ def run_fundamental_quarter_update(
             print(f"TICKER {current_ticker}=FAILED")
             print(f"ERROR ticker={current_ticker} step={step_name} message={message}")
             tickers_failed += 1
+            post_update_result_counts["FETCH_FAILED"] += 1
             if vintage_mode == VINTAGE_MODE_SEC_LATEST_WRITER:
                 vintage_summary["vintage_rows_failed"] = int(vintage_summary.get("vintage_rows_failed", 0) or 0) + 1
                 vintage_summary["vintage_error_summary"] = message
@@ -2686,7 +2871,16 @@ def run_fundamental_quarter_update(
         "valuation_as_of_date": valuation_as_of_date,
         "valuation_rows_written": valuation_rows_written,
         "run_id": run_id,
+        "execution_mode": "quarter_refresh_plan" if plan_mode else "quarter_state",
+        "updated_complete_count": post_update_result_counts["UPDATED_COMPLETE"],
+        "updated_partial_count": post_update_result_counts["UPDATED_PARTIAL"],
+        "fetch_failed_count": post_update_result_counts["FETCH_FAILED"],
+        "no_new_data_count": post_update_result_counts["NO_NEW_DATA"],
+        "manual_review_count": post_update_result_counts["MANUAL_REVIEW"],
     }
+    if plan_payload is not None:
+        summary["plan_candidate_hash"] = plan_payload["candidate_hash"]
+        summary["plan_candidate_count"] = plan_payload["candidate_count"]
     summary.update(vintage_summary)
     _summary(**summary)
     if not strict_single_ticker_mode and tickers_failed > 0:
@@ -2708,6 +2902,7 @@ def main() -> None:
             limit=args.limit,
             dry_run=args.dry_run,
             skip_ack=args.skip_ack,
+            quarter_refresh_plan_json=resolve_optional_db_path(args.quarter_refresh_plan_json),
             write_vintage=args.write_vintage,
             vintage_market=args.vintage_market,
             vintage_available_at_utc=args.vintage_available_at_utc,

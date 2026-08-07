@@ -8,6 +8,7 @@ try:
         CLI_MISSING_PERIOD_RECOVERY_CHECK,
         CLI_QUARTER_UPDATE,
         CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT,
+        CLI_RESULT_CHECK,
         CLI_REPORTING_FREQUENCY_AUDIT,
         CLI_SCORE_PERCENTILE,
         CLI_TTM_BATCH,
@@ -28,6 +29,7 @@ except ImportError:  # pragma: no cover
         CLI_MISSING_PERIOD_RECOVERY_CHECK,
         CLI_QUARTER_UPDATE,
         CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT,
+        CLI_RESULT_CHECK,
         CLI_REPORTING_FREQUENCY_AUDIT,
         CLI_SCORE_PERCENTILE,
         CLI_TTM_BATCH,
@@ -99,6 +101,7 @@ class UsaYahooAwareRecoveryOptions:
 def build_usa_update_command(
     run_id: str,
     vintage_options: UsaQuarterUpdateVintageOptions | None = None,
+    quarter_refresh_plan_json: Path | None = None,
 ) -> list[str]:
     command = [
         str(PYTHON_EXECUTABLE),
@@ -112,6 +115,35 @@ def build_usa_update_command(
         "--market",
         "usa",
     ]
+    if quarter_refresh_plan_json is not None:
+        command.extend(["--quarter-refresh-plan-json", str(quarter_refresh_plan_json)])
+    return command
+
+
+def build_usa_result_check_command(
+    *,
+    decision_date: str,
+    output_root: Path | None = None,
+    event_watch_days_after: int = 5,
+    ohlcv_stale_days: int = 14,
+) -> list[str]:
+    command = [
+        str(PYTHON_EXECUTABLE),
+        str(CLI_RESULT_CHECK),
+        "--fundamentals-db",
+        str(FUNDAMENTALS_USA_DB),
+        "--ohlcv-db",
+        str(OSAKEDATA_DB),
+        "--decision-date",
+        decision_date,
+        "--ohlcv-stale-days",
+        str(ohlcv_stale_days),
+        "--event-watch-days-after",
+        str(event_watch_days_after),
+        "--json",
+    ]
+    if output_root is not None:
+        command.extend(["--output-root", str(output_root)])
     return command
 
 

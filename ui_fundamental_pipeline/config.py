@@ -22,6 +22,7 @@ PYTHON_EXECUTABLE = PROJECT_ROOT / ".venv" / "bin" / "python"
 
 # CLI scripts
 CLI_QUARTER_UPDATE = PROJECT_ROOT / "swingmaster" / "cli" / "run_fundamental_quarter_update.py"
+CLI_RESULT_CHECK = PROJECT_ROOT / "swingmaster" / "cli" / "check_fundamental_new_results.py"
 CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT = (
     PROJECT_ROOT / "swingmaster" / "cli" / "preflight_quarter_update_vintage_readiness.py"
 )
@@ -127,6 +128,7 @@ def validate_config() -> bool:
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
         CLI_QUARTER_UPDATE,
+        CLI_RESULT_CHECK,
         CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT,
         CLI_YAHOO_BATCH_FIN,
         CLI_REPORTING_FREQUENCY_AUDIT,
@@ -147,6 +149,7 @@ def get_missing_paths() -> list:
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
         CLI_QUARTER_UPDATE,
+        CLI_RESULT_CHECK,
         CLI_QUARTER_UPDATE_VINTAGE_PREFLIGHT,
         CLI_YAHOO_BATCH_FIN,
         CLI_REPORTING_FREQUENCY_AUDIT,

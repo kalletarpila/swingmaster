@@ -182,30 +182,19 @@ class TestSwingMasterApp(unittest.TestCase):
         self.assertTrue(callable(app._run_usa_snapshots))
         self.assertTrue(callable(app._run_fin_snapshots))
 
-    def test_usa_vintage_update_value_still_uses_latest_only_command(self):
-        """Test retired USA vintage opt-in cannot trigger preflight or write flags."""
+    def test_usa_update_without_result_check_plan_is_blocked(self):
+        """Test USA update requires a successful result-check plan."""
         app = SwingMasterApp(self.mock_page)
-        app.usa_panel.vintage_write_checkbox.value = True
-        captured = {}
-
-        def _capture(target):
-            captured["target"] = target
-
-        app._run_in_background = _capture
         with patch.object(app, "_execute_single_command") as execute_single:
             app._run_usa_update()
-            captured["target"]()
 
-        execute_single.assert_called_once()
-        update_command, status_prefix, market = execute_single.call_args[0]
-        self.assertEqual(status_prefix, "USA Quarter Update")
-        self.assertEqual(market, "usa")
-        self.assertNotIn("--write-vintage", update_command)
-        self.assertNotIn("--vintage-yahoo-aware-action", update_command)
+        execute_single.assert_not_called()
+        self.assertEqual(app.usa_panel.status_badge.value, "Run Check for New Results first.")
 
-    def test_usa_default_update_uses_single_command_without_vintage(self):
-        """Test default USA update keeps vintage flags omitted."""
+    def test_usa_plan_update_uses_single_command_without_vintage(self):
+        """Test USA update uses the last successful result-check plan."""
         app = SwingMasterApp(self.mock_page)
+        app.latest_usa_plan_path = "temp/fundamental_result_check/plan.json"
         app.usa_panel.vintage_write_checkbox.value = False
         captured = {}
 
@@ -222,6 +211,66 @@ class TestSwingMasterApp(unittest.TestCase):
         self.assertEqual(status_prefix, "USA Quarter Update")
         self.assertEqual(market, "usa")
         self.assertNotIn("--write-vintage", command)
+        self.assertIn("--quarter-refresh-plan-json", command)
+        self.assertEqual(command[command.index("--quarter-refresh-plan-json") + 1], "temp/fundamental_result_check/plan.json")
+
+    def test_usa_panel_exposes_result_check_and_disables_update_initially(self):
+        """Test USA manual workflow starts at result check."""
+        app = SwingMasterApp(self.mock_page)
+
+        self.assertIsNotNone(app.usa_panel.result_check_btn)
+        self.assertTrue(app.usa_panel.quarter_update_btn.disabled)
+
+    def test_successful_usa_result_check_enables_update(self):
+        """Test successful result check stores plan state and enables update."""
+        app = SwingMasterApp(self.mock_page)
+
+        def _execute(command, on_output, on_summary, cwd=None):
+            on_summary(
+                {
+                    "check_status": "SUCCESS",
+                    "candidate_count": 2,
+                    "candidate_hash": "abc",
+                    "plan_json": "temp/fundamental_result_check/plan.json",
+                    "candidates_csv": "",
+                    "active_fetch_count": 10,
+                    "stale_or_inactive_count": 1,
+                }
+            )
+            return 0, []
+
+        app.executor.execute = _execute
+        with patch("ui_fundamental_pipeline.main.resolve_latest_close_as_of_date", return_value="2026-08-07"):
+            app._execute_usa_result_check()
+
+        self.assertEqual(app.latest_usa_plan_path, "temp/fundamental_result_check/plan.json")
+        self.assertEqual(app.latest_usa_candidate_count, 2)
+        self.assertFalse(app.usa_panel.quarter_update_btn.disabled)
+        self.assertIn("ready_to_update=2", app.usa_panel.status_badge.value)
+
+    def test_zero_candidate_usa_result_check_keeps_update_disabled(self):
+        """Test successful zero-candidate result check does not enable update."""
+        app = SwingMasterApp(self.mock_page)
+
+        def _execute(command, on_output, on_summary, cwd=None):
+            on_summary(
+                {
+                    "check_status": "SUCCESS",
+                    "candidate_count": 0,
+                    "candidate_hash": "abc",
+                    "plan_json": "temp/fundamental_result_check/plan.json",
+                    "candidates_csv": "",
+                }
+            )
+            return 0, []
+
+        app.executor.execute = _execute
+        with patch("ui_fundamental_pipeline.main.resolve_latest_close_as_of_date", return_value="2026-08-07"):
+            app._execute_usa_result_check()
+
+        self.assertIsNone(app.latest_usa_plan_path)
+        self.assertTrue(app.usa_panel.quarter_update_btn.disabled)
+        self.assertIn("ready_to_update=0", app.usa_panel.status_badge.value)
 
 
 class TestMainFunction(unittest.TestCase):

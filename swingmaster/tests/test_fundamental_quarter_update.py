@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import sqlite3
+import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from swingmaster.cli import run_fundamental_quarter_update
 from swingmaster.cli.run_fundamental_migrations import run_migration
+from swingmaster.fundamentals.result_check import PLAN_VERSION, candidate_hash
 
 
 def _insert_state_row(
@@ -116,6 +119,47 @@ def _mock_usa_valuation(monkeypatch: pytest.MonkeyPatch) -> None:
         "run_fundamental_valuation",
         lambda **_kwargs: {"rows_written": 0},
     )
+
+
+def _write_plan(
+    name: str,
+    db_path: Path,
+    candidates: list[dict],
+    *,
+    check_status: str = "SUCCESS",
+    created_at_utc: str | None = None,
+) -> Path:
+    plan_path = Path.cwd() / "temp" / name / "plan.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "plan_version": PLAN_VERSION,
+        "created_at_utc": created_at_utc
+        or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "decision_date": "2026-08-07",
+        "fundamentals_db": str(db_path.resolve()),
+        "ohlcv_db": str((Path.cwd() / "temp" / name / "osakedata.db").resolve()),
+        "ohlcv_stale_days": 14,
+        "candidate_count": len(candidates),
+        "candidate_hash": candidate_hash(candidates),
+        "check_status": check_status,
+        "stages": [{"stage": "fixture", "status": check_status}],
+        "candidates": candidates,
+    }
+    plan_path.write_text(json.dumps(payload), encoding="utf-8")
+    return plan_path
+
+
+def _candidate(ticker: str = "AAPL", decision: str = "FETCH_NEW_QUARTER") -> dict:
+    return {
+        "market": "usa",
+        "ticker": ticker,
+        "decision": decision,
+        "priority": "P1_FETCH_NOW",
+        "fundamental_fetch_enabled": 1,
+        "target_period_end_date": "2026-06-30",
+        "planned_action": "PLAN_FETCH_QUARTERLY_FUNDAMENTALS",
+        "eligible_for_execution": 1,
+    }
 
 
 def test_loads_only_flagged_rows(tmp_path: Path) -> None:
@@ -451,6 +495,206 @@ def test_child_run_id_derivation_is_correct() -> None:
         "sec_reconstruct": "USA_QUARTER_UPDATE_20260505__SEC_QUARTERLY_RECON",
         "quarterly": "USA_QUARTER_UPDATE_20260505__QUARTERLY",
     }
+
+
+def test_plan_mode_runs_usa_candidate_without_quarter_state_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "quarter_update_plan.db"
+    run_migration(db_path)
+    _insert_state_row(db_path, "AAPL", "usa", "2025-12-31", "2026-03-31", 0)
+    plan_path = _write_plan("pytest_quarter_update_plan", db_path, [_candidate()])
+    captured: list[dict] = []
+
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "load_eligible_rows",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("quarter_state must not be read")),
+    )
+
+    def _fake_process_ticker(**kwargs):
+        captured.append(kwargs)
+        return {"post_update_result": "UPDATED_COMPLETE"}
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "process_ticker", _fake_process_ticker)
+    _mock_usa_valuation(monkeypatch)
+
+    summary = run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "osakedata.db",
+        run_id="BASE",
+        market="usa",
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    assert len(captured) == 1
+    assert captured[0]["target_period_end_date"] == "2026-06-30"
+    assert captured[0]["execution_source"] == "quarter_refresh_plan"
+    assert captured[0]["skip_ack"] is True
+    assert summary["execution_mode"] == "quarter_refresh_plan"
+    assert summary["plan_candidate_count"] == 1
+    assert summary["updated_complete_count"] == 1
+
+
+def test_plan_mode_does_not_require_quarter_state_row(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_no_state.db"
+    run_migration(db_path)
+    plan_path = _write_plan("pytest_quarter_update_plan_no_state", db_path, [_candidate("MSFT")])
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "process_ticker",
+        lambda **kwargs: calls.append(str(kwargs["row"]["ticker"])) or {"post_update_result": "NO_NEW_DATA"},
+    )
+    _mock_usa_valuation(monkeypatch)
+
+    summary = run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "osakedata.db",
+        run_id="BASE",
+        market="usa",
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    assert calls == ["MSFT"]
+    assert summary["no_new_data_count"] == 1
+
+
+def test_plan_mode_rejects_stale_plan(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_stale.db"
+    run_migration(db_path)
+    stale = datetime.now(timezone.utc) - timedelta(hours=3)
+    plan_path = _write_plan(
+        "pytest_quarter_update_plan_stale",
+        db_path,
+        [_candidate()],
+        created_at_utc=stale.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    )
+
+    with pytest.raises(RuntimeError, match="STALE_RESULT_CHECK_PLAN"):
+        run_fundamental_quarter_update.run_fundamental_quarter_update(
+            db_path=db_path,
+            osakedata_db_path=tmp_path / "osakedata.db",
+            run_id="BASE",
+            market="usa",
+            ticker=None,
+            limit=None,
+            dry_run=True,
+            skip_ack=False,
+            quarter_refresh_plan_json=plan_path,
+        )
+
+
+def test_plan_mode_rejects_non_executable_decision(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_bad_decision.db"
+    run_migration(db_path)
+    row = _candidate(decision="REVIEW_NO_CALENDAR_ESTIMATE")
+    row["planned_action"] = "MANUAL_REVIEW_SOURCE_COVERAGE"
+    plan_path = _write_plan("pytest_quarter_update_plan_bad_decision", db_path, [row])
+
+    with pytest.raises(RuntimeError, match="RESULT_CHECK_PLAN_NON_EXECUTABLE_DECISION"):
+        run_fundamental_quarter_update.run_fundamental_quarter_update(
+            db_path=db_path,
+            osakedata_db_path=tmp_path / "osakedata.db",
+            run_id="BASE",
+            market="usa",
+            ticker=None,
+            limit=None,
+            dry_run=True,
+            skip_ack=False,
+            quarter_refresh_plan_json=plan_path,
+        )
+
+
+def test_plan_mode_rejects_duplicate_ticker_target(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_duplicate.db"
+    run_migration(db_path)
+    plan_path = _write_plan("pytest_quarter_update_plan_duplicate", db_path, [_candidate(), _candidate()])
+
+    with pytest.raises(RuntimeError, match="RESULT_CHECK_PLAN_DUPLICATE_CANDIDATE"):
+        run_fundamental_quarter_update.load_plan_rows(
+            plan_path=plan_path,
+            db_path=db_path,
+            ticker=None,
+            limit=None,
+        )
+
+
+def test_plan_mode_rejects_wrong_db(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_right.db"
+    other_db_path = tmp_path / "quarter_update_plan_wrong.db"
+    run_migration(db_path)
+    run_migration(other_db_path)
+    plan_path = _write_plan("pytest_quarter_update_plan_wrong_db", other_db_path, [_candidate()])
+
+    with pytest.raises(RuntimeError, match="RESULT_CHECK_PLAN_DB_MISMATCH"):
+        run_fundamental_quarter_update.load_plan_rows(
+            plan_path=plan_path,
+            db_path=db_path,
+            ticker=None,
+            limit=None,
+        )
+
+
+def test_plan_mode_rejects_inactive_row(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_inactive.db"
+    run_migration(db_path)
+    row = _candidate()
+    row["fundamental_fetch_enabled"] = 0
+    plan_path = _write_plan("pytest_quarter_update_plan_inactive", db_path, [row])
+
+    with pytest.raises(RuntimeError, match="RESULT_CHECK_PLAN_INACTIVE_ROW"):
+        run_fundamental_quarter_update.load_plan_rows(
+            plan_path=plan_path,
+            db_path=db_path,
+            ticker=None,
+            limit=None,
+        )
+
+
+def test_plan_mode_rejects_missing_target_period(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_missing_target.db"
+    run_migration(db_path)
+    row = _candidate()
+    row["target_period_end_date"] = None
+    plan_path = _write_plan("pytest_quarter_update_plan_missing_target", db_path, [row])
+
+    with pytest.raises(RuntimeError, match="RESULT_CHECK_PLAN_TARGET_PERIOD_REQUIRED"):
+        run_fundamental_quarter_update.load_plan_rows(
+            plan_path=plan_path,
+            db_path=db_path,
+            ticker=None,
+            limit=None,
+        )
+
+
+def test_plan_mode_accepts_retry_decisions(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_retry.db"
+    run_migration(db_path)
+    plan_path = _write_plan(
+        "pytest_quarter_update_plan_retry",
+        db_path,
+        [_candidate("AAPL", "RETRY_PARTIAL_QUARTER"), _candidate("MSFT", "RETRY_FETCH_FAILED")],
+    )
+
+    _plan, rows = run_fundamental_quarter_update.load_plan_rows(
+        plan_path=plan_path,
+        db_path=db_path,
+        ticker=None,
+        limit=None,
+    )
+
+    assert [row["ticker"] for row in rows] == ["AAPL", "MSFT"]
+    assert [row["detected_source_period_end_date"] for row in rows] == ["2026-06-30", "2026-06-30"]
 
 
 def test_invalid_state_missing_detected_date_fails(tmp_path: Path) -> None:

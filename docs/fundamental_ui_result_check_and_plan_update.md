@@ -1,0 +1,218 @@
+# Manual USA Fundamentals Result Check
+
+## Previous Flow
+
+The old USA quarter update UI launched `run_fundamental_quarter_update.py` directly. Its default selection came from `rc_fundamental_quarter_state` where `new_quarter_available = 1`.
+
+That table remains in place for FIN, diagnostics, rollback, and legacy CLI usage. RawCandle is not changed by this workflow.
+
+## New Manual UI Flow
+
+The USA panel now starts with:
+
+```text
+Check for New Results
+-> inspect result-check artifacts and executable candidates
+-> Update Fundamentals
+-> Update Percentiles
+-> Ticker Snapshot
+```
+
+This is manual only. There is no scheduler, cron, systemd timer, or unattended overnight update behavior.
+
+FIN/OMXH keeps its existing quarter-state-driven behavior.
+
+## Result-Check Stages
+
+`swingmaster.fundamentals.result_check.run_manual_result_check` is the reusable application layer used by the CLI and UI.
+
+The check performs these stages:
+
+```text
+OHLCV activity assessment
+earnings calendar refresh for fetch-enabled USA tickers
+completed-event candidate selection
+completed earnings-event refresh for targeted candidates
+earnings-event/quarter match rebuild when event refresh succeeds
+quarter-refresh decision rebuild
+plan/artifact write under temp/
+```
+
+OHLCV activity reuses the existing operational rule:
+
+```text
+latest_ohlcv_date exists and age <= ohlcv_stale_days -> fundamental_fetch_enabled = 1
+otherwise -> fundamental_fetch_enabled = 0
+```
+
+The default threshold is 14 calendar days. `osakedata.db` is read only.
+
+## Completed-Event Candidates
+
+The check does not refresh completed events for all USA tickers. It targets active/fetch-enabled tickers whose calendar state is:
+
+```text
+DUE_TODAY
+DATE_PASSED_EVENT_NOT_FOUND within --event-watch-days-after of decision_date
+```
+
+Far-future `UPCOMING`, stale/inactive tickers, and old `NO_CURRENT_ESTIMATE` rows are not completed-event refresh candidates in this phase.
+
+## Plan Contract
+
+Artifacts are written under:
+
+```text
+temp/fundamental_result_check/<UTC_TIMESTAMP>/
+```
+
+The directory contains:
+
+```text
+plan.json
+candidates.csv
+manual_review.csv
+summary.json
+calendar_refresh_summary.json
+completed_event_refresh_summary.json
+```
+
+`plan.json` includes:
+
+```text
+plan_version
+created_at_utc
+decision_date
+fundamentals_db
+ohlcv_db
+ohlcv_stale_days
+candidate_count
+candidate_hash
+check_status
+candidates
+```
+
+Executable candidate decisions are limited to:
+
+```text
+FETCH_NEW_QUARTER
+RETRY_PARTIAL_QUARTER
+RETRY_FETCH_FAILED
+```
+
+Manual-review, watch, and no-action rows are never executable.
+
+## Target Period Safety
+
+An executable candidate must have a non-null deterministic `target_period_end_date`. The preferred evidence is `rc_fundamental_quarter_earnings_match`.
+
+The workflow does not infer fiscal quarter ends from approximate announcement-date math. If a completed event cannot be safely mapped to a period, the row remains manual review with no executable action.
+
+## Failure Policy
+
+If the material calendar refresh stage fails, the check returns:
+
+```text
+check_status = FAILED
+candidate_count = 0
+```
+
+If a bounded completed-event subset has failures, the check returns:
+
+```text
+check_status = PARTIAL
+candidate_count = 0
+```
+
+The first implementation deliberately disables `Update Fundamentals` for `PARTIAL`; the user must run a successful check again.
+
+## Plan-Mode Executor
+
+`run_fundamental_quarter_update.py` supports USA-only plan execution:
+
+```bash
+.venv/bin/python swingmaster/cli/run_fundamental_quarter_update.py \
+  --db fundamentals_usa.db \
+  --market usa \
+  --run-id USA_QUARTER_UPDATE_... \
+  --quarter-refresh-plan-json temp/fundamental_result_check/.../plan.json
+```
+
+Before provider calls or DB writes, plan mode validates:
+
+```text
+path is under repository temp/
+plan_version
+check_status = SUCCESS
+fundamentals_db matches
+created_at_utc age <= 2 hours
+decision_date parses
+candidate_count and candidate_hash match rows
+market = usa
+decision is executable
+fundamental_fetch_enabled = 1
+eligible_for_execution = 1
+target_period_end_date is non-null
+no duplicate ticker/target rows
+```
+
+Plan mode does not call `load_eligible_rows()` and does not require `rc_fundamental_quarter_state.new_quarter_available = 1`. It also does not acknowledge/reset quarter-state rows.
+
+## Update Behavior
+
+All executable plan decisions use the existing USA source precedence:
+
+```text
+SEC fetch/reconstruction
+-> generic quarterly
+-> Yahoo fallback insert/enrich
+-> target-quarter verification
+-> TTM
+-> lifecycle
+-> score
+-> valuation
+```
+
+`FETCH_NEW_QUARTER` fills a missing target quarter. `RETRY_PARTIAL_QUARTER` reruns the same safe fill path without deleting existing values. `RETRY_FETCH_FAILED` uses the same explicit target and provider path.
+
+After provider work, the executor reassesses:
+
+```text
+quarter_basic_complete
+ttm_input_complete
+score_history_complete
+```
+
+`ttm_input_complete` and `score_history_complete` remain quality metadata, not hard gates.
+
+## UI Controls
+
+The USA panel shows:
+
+```text
+Check for New Results
+compact status/count summary
+first executable candidates
+Update Fundamentals
+Run USA Score Percentile
+Generate USA Snapshots
+```
+
+`Update Fundamentals` is disabled until a successful check produces at least one executable candidate. The UI stores only:
+
+```text
+latest_plan_path
+latest_plan_created_at
+latest_candidate_count
+latest_candidate_hash
+```
+
+The plan JSON remains the canonical execution input.
+
+Percentiles remain a separate manual step and are not run automatically by `Update Fundamentals`.
+
+## Rollback
+
+To roll back operationally, do not use `Check for New Results` in the USA UI and continue using legacy CLI mode without `--quarter-refresh-plan-json`. FIN is already unchanged.
+
+The quarter-state table and `new_quarter_available` column are intentionally retained until a later RawCandle flag retirement phase.

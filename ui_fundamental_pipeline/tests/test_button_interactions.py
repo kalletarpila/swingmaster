@@ -160,8 +160,8 @@ class TestMarketPanelButtons(unittest.TestCase):
 
     def test_buttons_disabled_when_ui_locked(self):
         """Test that buttons are disabled when UI is locked."""
-        # Initially enabled
-        self.assertFalse(self.panel.quarter_update_btn.disabled)
+        # USA update is initially disabled until a result-check plan is ready.
+        self.assertTrue(self.panel.quarter_update_btn.disabled)
         self.assertFalse(self.panel.percentile_btn.disabled)
         self.assertFalse(self.panel.snapshot_btn.disabled)
 
@@ -177,11 +177,14 @@ class TestMarketPanelButtons(unittest.TestCase):
         # Re-enable buttons
         self.panel.disable_buttons(False)
 
-        # All buttons should be enabled
-        self.assertFalse(self.panel.quarter_update_btn.disabled)
-        self.assertFalse(self.panel.vintage_write_checkbox.disabled)
+        # Non-plan actions should be enabled; USA update remains gated by result check.
+        self.assertTrue(self.panel.quarter_update_btn.disabled)
+        self.assertTrue(self.panel.vintage_write_checkbox.disabled)
         self.assertFalse(self.panel.percentile_btn.disabled)
         self.assertFalse(self.panel.snapshot_btn.disabled)
+
+        self.panel.set_quarter_update_available(True, "ready")
+        self.assertFalse(self.panel.quarter_update_btn.disabled)
 
     def test_ticker_input_validation_on_snapshot(self):
         """Test that ticker input is validated before snapshot."""

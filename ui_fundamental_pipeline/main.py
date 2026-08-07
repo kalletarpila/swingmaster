@@ -1,7 +1,9 @@
 """Swing Master UI for running fundamental CLI workflows."""
 from __future__ import annotations
 
+import csv
 from datetime import datetime
+from pathlib import Path
 import threading
 from typing import Optional
 
@@ -18,6 +20,7 @@ try:
         build_fin_update_command,
         build_score_percentile_command,
         build_single_ticker_snapshot_command,
+        build_usa_result_check_command,
         build_usa_update_command,
         build_usa_sec_vintage_recovery_apply_command,
         build_usa_sec_vintage_recovery_dry_run_command,
@@ -73,6 +76,7 @@ except ImportError:  # pragma: no cover
         build_fin_update_command,
         build_score_percentile_command,
         build_single_ticker_snapshot_command,
+        build_usa_result_check_command,
         build_usa_update_command,
         build_usa_sec_vintage_recovery_apply_command,
         build_usa_sec_vintage_recovery_dry_run_command,
@@ -128,6 +132,10 @@ class SwingMasterApp:
         self.current_worker: Optional[threading.Thread] = None
         self.stop_requested = False
         self.last_usa_quarter_update_summary: dict = {}
+        self.latest_usa_plan_path: str | None = None
+        self.latest_usa_plan_created_at: str | None = None
+        self.latest_usa_candidate_count: int = 0
+        self.latest_usa_candidate_hash: str | None = None
 
         self._setup_page()
 
@@ -142,6 +150,7 @@ class SwingMasterApp:
             on_score_percentile=self._run_usa_percentile,
             on_snapshot=self._run_usa_snapshots,
             on_lock=self._lock_ui,
+            on_result_check=self._run_usa_result_check,
             on_yahoo_aware_apply=self._run_usa_yahoo_aware_apply,
             on_vintage_recovery=self._run_usa_vintage_recovery,
         )
@@ -535,7 +544,65 @@ class SwingMasterApp:
         self.snapshot_browser.refresh_file_list()
         self._lock_ui(False)
 
+    def _execute_usa_result_check(self) -> None:
+        self.output_panel.clear_output()
+        self.latest_usa_plan_path = None
+        self.latest_usa_plan_created_at = None
+        self.latest_usa_candidate_count = 0
+        self.latest_usa_candidate_hash = None
+        self.usa_panel.set_quarter_update_available(False, "Run Check for New Results first.")
+        self._set_progress(0, 1, "USA Result Check")
+        decision_date = resolve_latest_close_as_of_date("usa")
+        command = build_usa_result_check_command(decision_date=decision_date)
+        exit_code, _ = self.executor.execute(
+            command=command,
+            on_output=self._ui_callback(self.output_panel.add_line),
+            on_summary=self._ui_callback(lambda summary: self._handle_summary("usa", summary)),
+        )
+        summary = self.output_panel._current_summary.copy()
+        check_status = str(summary.get("check_status") or "")
+        candidate_count = int(summary.get("candidate_count") or 0)
+        plan_path = str(summary.get("plan_json") or "")
+        candidate_rows = self._read_candidate_preview(str(summary.get("candidates_csv") or ""))
+        self.usa_panel.set_result_check_details(summary, candidate_rows)
+        candidate_hash = str(summary.get("candidate_hash") or "")
+        if exit_code == 0 and check_status == "SUCCESS" and candidate_count > 0 and plan_path:
+            self.latest_usa_plan_path = plan_path
+            self.latest_usa_plan_created_at = str(summary.get("created_at_utc") or "")
+            self.latest_usa_candidate_count = candidate_count
+            self.latest_usa_candidate_hash = candidate_hash
+            self.usa_panel.set_quarter_update_available(True, f"{candidate_count} candidate(s) ready.")
+            self.usa_panel.set_status(f"USA Result Check: SUCCESS ready_to_update={candidate_count}", "green")
+        elif check_status == "SUCCESS":
+            self.usa_panel.set_quarter_update_available(False, "No executable candidates.")
+            self.usa_panel.set_status("USA Result Check: SUCCESS ready_to_update=0", "green")
+        elif check_status == "PARTIAL":
+            self.usa_panel.set_quarter_update_available(False, "Partial check; run check again before updating.")
+            self.usa_panel.set_status("USA Result Check: PARTIAL update disabled", "orange")
+        else:
+            self.usa_panel.set_quarter_update_available(False, "Result check failed.")
+            self.usa_panel.set_status(f"USA Result Check: exit={exit_code} update disabled", "red")
+        self._set_progress(1, 1, "USA Result Check")
+        self._lock_ui(False)
+
+    def _run_usa_result_check(self) -> None:
+        self._run_in_background(self._execute_usa_result_check)
+
+    def _read_candidate_preview(self, candidates_csv: str, limit: int = 20) -> list[dict]:
+        if not candidates_csv:
+            return []
+        path = Path(candidates_csv)
+        try:
+            with path.open("r", encoding="utf-8", newline="") as handle:
+                return [row for idx, row in enumerate(csv.DictReader(handle)) if idx < limit]
+        except Exception:
+            return []
+
     def _run_usa_update(self) -> None:
+        if not self.latest_usa_plan_path:
+            self.usa_panel.set_status("Run Check for New Results first.", "red")
+            self._lock_ui(False)
+            return
         run_id = get_run_id_usa()
         if self.usa_panel.is_vintage_write_enabled():
             launch_timestamp_utc = get_utc_launch_timestamp()
@@ -555,7 +622,7 @@ class SwingMasterApp:
                 )
             )
             return
-        command = build_usa_update_command(run_id=run_id)
+        command = build_usa_update_command(run_id=run_id, quarter_refresh_plan_json=Path(self.latest_usa_plan_path))
         self._run_in_background(lambda: self._execute_single_command(command, "USA Quarter Update", "usa"))
 
     def _run_usa_yahoo_aware_apply(self) -> None:

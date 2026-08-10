@@ -663,10 +663,51 @@ def resolve_latest_close_as_of_date(osakedata_db_path: Path, market: str) -> str
     return str(row[0])
 
 
-def should_run_usa_valuation(market: str | None) -> bool:
+def should_run_usa_valuation(market: str | None, *, material_fundamentals_change_count: int) -> bool:
+    if material_fundamentals_change_count <= 0:
+        return False
     if market is None:
         return True
     return market.strip().lower() == "usa"
+
+
+def quarterly_refresh_rows_written(summary: Mapping[str, object] | None) -> int:
+    if not isinstance(summary, Mapping):
+        return 0
+    total = 0
+    sec_summary = summary.get("sec_refresh_summary")
+    if isinstance(sec_summary, Mapping):
+        total += _int_value(sec_summary.get("rows_written"))
+    enrich_summary = summary.get("summary")
+    if isinstance(enrich_summary, Mapping):
+        total += _int_value(enrich_summary.get("rows_updated"))
+        total += _int_value(enrich_summary.get("rows_inserted"))
+    yahoo_quarterly_summary = summary.get("yahoo_quarterly_summary")
+    if isinstance(yahoo_quarterly_summary, Mapping):
+        total += _int_value(yahoo_quarterly_summary.get("rows_written"))
+    quarterly_bridge_summary = summary.get("quarterly_bridge_summary")
+    if isinstance(quarterly_bridge_summary, Mapping):
+        total += _int_value(quarterly_bridge_summary.get("rows_written"))
+    return total
+
+
+def candidate_material_fundamentals_changed(summary: Mapping[str, object], post_update_result: str) -> bool:
+    if post_update_result == "UPDATED_COMPLETE":
+        return True
+    if _int_value(summary.get("material_fundamentals_changed")) > 0:
+        return True
+    if _int_value(summary.get("quarterly_rows_written")) > 0:
+        return True
+    if _int_value(summary.get("ttm_rows_written")) > 0:
+        return True
+    return False
+
+
+def _int_value(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def load_eligible_rows(
@@ -2478,12 +2519,21 @@ def process_ticker(
         market=market,
         target_period_end_date=str(detected_source_period_end_date),
     )
+    quarterly_rows_written = quarterly_refresh_rows_written(quarterly_refresh_summary)
+    ttm_rows_written = int(ttm_summary["rows_written"])
+    material_fundamentals_changed = int(
+        quarterly_rows_written > 0
+        or ttm_rows_written > 0
+        or target_assessment.get("post_update_result") == "UPDATED_COMPLETE"
+    )
     return {
         "quarterly_refresh_mode": 1 if quarterly_refresh_summary else 0,
-        "ttm_rows_written": int(ttm_summary["rows_written"]),
+        "quarterly_rows_written": quarterly_rows_written,
+        "ttm_rows_written": ttm_rows_written,
         "lifecycle_rows_written": lifecycle_rows_written,
         "score_rows_written": score_rows_written,
         "ack_rows_written": ack_rows_written,
+        "material_fundamentals_changed": material_fundamentals_changed,
         **target_assessment,
         "sec_latest_writer_vintage_summary": sec_latest_writer_vintage_summary,
         "vintage_post_run_guard_summary": post_run_guard_summary,
@@ -2756,6 +2806,7 @@ def run_fundamental_quarter_update(
     }
     candidate_results: list[dict[str, object]] = []
     failed_candidates: list[dict[str, object]] = []
+    material_fundamentals_change_count = 0
     for row in rows:
         current_ticker = str(row["ticker"]).upper()
         current_market = str(row["market"]).lower()
@@ -2781,6 +2832,9 @@ def run_fundamental_quarter_update(
             process_summary = process_ticker(**process_kwargs)
             post_result = str(process_summary.get("post_update_result") or "MANUAL_REVIEW")
             post_update_result_counts[post_result] = post_update_result_counts.get(post_result, 0) + 1
+            material_changed = candidate_material_fundamentals_changed(process_summary, post_result)
+            if material_changed:
+                material_fundamentals_change_count += 1
             candidate_results.append(
                 {
                     "ticker": current_ticker,
@@ -2792,6 +2846,9 @@ def run_fundamental_quarter_update(
                     "target_quarter_basic_complete": int(process_summary.get("target_quarter_basic_complete") or 0),
                     "target_ttm_input_complete": process_summary.get("target_ttm_input_complete"),
                     "target_score_history_complete": process_summary.get("target_score_history_complete"),
+                    "quarterly_rows_written": int(process_summary.get("quarterly_rows_written") or 0),
+                    "ttm_rows_written": int(process_summary.get("ttm_rows_written") or 0),
+                    "material_fundamentals_changed": 1 if material_changed else 0,
                 }
             )
             if vintage_mode == VINTAGE_MODE_SEC_LATEST_WRITER:
@@ -2872,7 +2929,9 @@ def run_fundamental_quarter_update(
 
     valuation_as_of_date = ""
     valuation_rows_written = 0
-    if should_run_usa_valuation(market):
+    valuation_status = "SKIPPED"
+    valuation_skip_reason = "NON_USA_OR_NO_MATERIAL_FUNDAMENTALS_CHANGE"
+    if should_run_usa_valuation(market, material_fundamentals_change_count=material_fundamentals_change_count):
         if osakedata_db_path is None:
             raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_OSAKEDATA_DB_REQUIRED_FOR_USA_VALUATION")
         valuation_as_of_date = resolve_latest_close_as_of_date(osakedata_db_path, market="usa")
@@ -2887,7 +2946,11 @@ def run_fundamental_quarter_update(
             replace=True,
         )
         valuation_rows_written = int(valuation_summary["rows_written"])
+        valuation_status = "SUCCESS"
+        valuation_skip_reason = ""
         print(f"STEP valuation=OK as_of_date={valuation_as_of_date} rows_written={valuation_rows_written}")
+    else:
+        print(f"STEP valuation=SKIPPED reason={valuation_skip_reason}")
 
     summary = {
         "tickers_total": len(rows),
@@ -2899,6 +2962,9 @@ def run_fundamental_quarter_update(
         "skip_ack": 1 if skip_ack else 0,
         "valuation_as_of_date": valuation_as_of_date,
         "valuation_rows_written": valuation_rows_written,
+        "valuation_status": valuation_status,
+        "valuation_skip_reason": valuation_skip_reason,
+        "material_fundamentals_change_count": material_fundamentals_change_count,
         "run_id": run_id,
         "execution_mode": "quarter_refresh_plan" if plan_mode else "quarter_state",
         "updated_complete_count": post_update_result_counts["UPDATED_COMPLETE"],

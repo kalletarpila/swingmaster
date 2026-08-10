@@ -170,10 +170,12 @@ SEC fetch/reconstruction
 -> TTM
 -> lifecycle
 -> score
--> valuation
+-> valuation, only when at least one candidate materially changed quarterly/TTM fundamentals inputs
 ```
 
 `FETCH_NEW_QUARTER` fills a missing target quarter. `RETRY_PARTIAL_QUARTER` reruns the same safe fill path without deleting existing values. `RETRY_FETCH_FAILED` uses the same explicit target and provider path.
+
+The quarter-update executor is not the independent daily price-driven valuation refresh path. Its USA valuation step runs once at batch end only when the batch records a material fundamentals change, such as quarterly rows written, Yahoo fallback rows inserted/updated, TTM rows written, or a target quarter becoming complete. Zero-candidate plans, all-failed batches, and all-partial/no-write batches skip valuation.
 
 After provider work, the executor reassesses:
 

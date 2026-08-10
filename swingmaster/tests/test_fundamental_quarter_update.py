@@ -121,6 +121,19 @@ def _mock_usa_valuation(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _capture_usa_valuation(monkeypatch: pytest.MonkeyPatch, calls: list[dict]) -> None:
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "resolve_latest_close_as_of_date",
+        lambda *_args, **_kwargs: "2026-05-08",
+    )
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_fundamental_valuation",
+        lambda **kwargs: calls.append(kwargs) or {"rows_written": 7},
+    )
+
+
 def _write_plan(
     name: str,
     db_path: Path,
@@ -201,6 +214,25 @@ def test_limit_works_after_deterministic_sorting(tmp_path: Path) -> None:
 
     rows = run_fundamental_quarter_update.load_eligible_rows(db_path, None, None, 2)
     assert [str(row["ticker"]) for row in rows] == ["AAPL", "LRCX"]
+
+
+def test_usa_valuation_gate_requires_usa_market_and_material_change() -> None:
+    assert run_fundamental_quarter_update.should_run_usa_valuation(
+        "usa",
+        material_fundamentals_change_count=1,
+    )
+    assert run_fundamental_quarter_update.should_run_usa_valuation(
+        None,
+        material_fundamentals_change_count=1,
+    )
+    assert not run_fundamental_quarter_update.should_run_usa_valuation(
+        "usa",
+        material_fundamentals_change_count=0,
+    )
+    assert not run_fundamental_quarter_update.should_run_usa_valuation(
+        "omxh",
+        material_fundamentals_change_count=1,
+    )
 
 
 def test_dry_run_runs_nothing_and_writes_nothing(
@@ -567,6 +599,198 @@ def test_plan_mode_does_not_require_quarter_state_row(monkeypatch: pytest.Monkey
 
     assert calls == ["MSFT"]
     assert summary["no_new_data_count"] == 1
+
+
+def test_plan_mode_zero_candidates_skips_usa_valuation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_zero_candidates.db"
+    run_migration(db_path)
+    plan_path = _write_plan("pytest_quarter_update_zero_candidates", db_path, [])
+    valuation_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "process_ticker",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("no candidate should be processed")),
+    )
+    _capture_usa_valuation(monkeypatch, valuation_calls)
+
+    summary = run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=None,
+        run_id="BASE",
+        market="usa",
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    assert valuation_calls == []
+    assert summary["tickers_total"] == 0
+    assert summary["material_fundamentals_change_count"] == 0
+    assert summary["valuation_status"] == "SKIPPED"
+    assert summary["valuation_rows_written"] == 0
+
+
+def test_plan_mode_all_failed_candidates_skip_usa_valuation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_failed_candidates.db"
+    run_migration(db_path)
+    plan_path = _write_plan("pytest_quarter_update_failed_candidates", db_path, [_candidate("AAPL"), _candidate("MSFT")])
+    valuation_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "process_ticker",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_RAW_NOT_USABLE")),
+    )
+    _capture_usa_valuation(monkeypatch, valuation_calls)
+
+    with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_BATCH_FAILED:tickers_failed=2"):
+        run_fundamental_quarter_update.run_fundamental_quarter_update(
+            db_path=db_path,
+            osakedata_db_path=None,
+            run_id="BASE",
+            market="usa",
+            ticker=None,
+            limit=None,
+            dry_run=False,
+            skip_ack=False,
+            quarter_refresh_plan_json=plan_path,
+        )
+
+    assert valuation_calls == []
+
+
+def test_plan_mode_all_partial_without_writes_skips_usa_valuation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_partial_no_writes.db"
+    run_migration(db_path)
+    plan_path = _write_plan("pytest_quarter_update_partial_no_writes", db_path, [_candidate("AAPL")])
+    valuation_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "process_ticker",
+        lambda **kwargs: {
+            "target_period_end_date": "2026-06-30",
+            "target_quarter_exists": 1,
+            "target_quarter_basic_complete": 0,
+            "target_ttm_input_complete": 0,
+            "target_score_history_complete": 0,
+            "post_update_result": "UPDATED_PARTIAL",
+            "quarterly_rows_written": 0,
+            "ttm_rows_written": 0,
+        },
+    )
+    _capture_usa_valuation(monkeypatch, valuation_calls)
+
+    summary = run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=None,
+        run_id="BASE",
+        market="usa",
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    assert valuation_calls == []
+    assert summary["updated_partial_count"] == 1
+    assert summary["material_fundamentals_change_count"] == 0
+    assert summary["valuation_status"] == "SKIPPED"
+
+
+def test_plan_mode_material_quarterly_update_runs_usa_valuation_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_material_quarterly.db"
+    run_migration(db_path)
+    plan_path = _write_plan("pytest_quarter_update_material_quarterly", db_path, [_candidate("AAPL")])
+    valuation_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "process_ticker",
+        lambda **kwargs: {
+            "target_period_end_date": "2026-06-30",
+            "target_quarter_exists": 1,
+            "target_quarter_basic_complete": 0,
+            "target_ttm_input_complete": 0,
+            "target_score_history_complete": 0,
+            "post_update_result": "UPDATED_PARTIAL",
+            "quarterly_rows_written": 1,
+            "ttm_rows_written": 0,
+        },
+    )
+    _capture_usa_valuation(monkeypatch, valuation_calls)
+
+    summary = run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "osakedata.db",
+        run_id="BASE",
+        market="usa",
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    assert len(valuation_calls) == 1
+    assert summary["material_fundamentals_change_count"] == 1
+    assert summary["valuation_status"] == "SUCCESS"
+    assert summary["valuation_rows_written"] == 7
+
+
+def test_plan_mode_mixed_batch_runs_usa_valuation_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_mixed_valuation.db"
+    run_migration(db_path)
+    plan_path = _write_plan("pytest_quarter_update_mixed_valuation", db_path, [_candidate("AAPL"), _candidate("MSFT")])
+    valuation_calls: list[dict] = []
+
+    def _process_ticker(**kwargs):
+        ticker = str(kwargs["row"]["ticker"])
+        if ticker == "AAPL":
+            return {
+                "target_period_end_date": "2026-06-30",
+                "target_quarter_exists": 1,
+                "target_quarter_basic_complete": 1,
+                "target_ttm_input_complete": 1,
+                "target_score_history_complete": 1,
+                "post_update_result": "UPDATED_COMPLETE",
+                "quarterly_rows_written": 1,
+                "ttm_rows_written": 1,
+            }
+        return {
+            "target_period_end_date": "2026-06-30",
+            "target_quarter_exists": 1,
+            "target_quarter_basic_complete": 0,
+            "target_ttm_input_complete": 0,
+            "target_score_history_complete": 0,
+            "post_update_result": "UPDATED_PARTIAL",
+            "quarterly_rows_written": 0,
+            "ttm_rows_written": 0,
+        }
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "process_ticker", _process_ticker)
+    _capture_usa_valuation(monkeypatch, valuation_calls)
+
+    summary = run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "osakedata.db",
+        run_id="BASE",
+        market="usa",
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    assert len(valuation_calls) == 1
+    assert summary["updated_complete_count"] == 1
+    assert summary["updated_partial_count"] == 1
+    assert summary["material_fundamentals_change_count"] == 1
 
 
 def test_plan_mode_rejects_stale_plan(tmp_path: Path) -> None:

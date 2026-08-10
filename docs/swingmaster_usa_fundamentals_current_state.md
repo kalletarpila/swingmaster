@@ -49,7 +49,7 @@ The strongest repo-level operational description is in [FUNDAMENTAL_PIPELINE_MEM
 | `swingmaster/fundamentals/lifecycle.py` | Lifecycle classification | `active by repo evidence` | `classify_lifecycle`, `run_lifecycle_classification` | reads TTM | yes | Updates `lifecycle_class` |
 | `swingmaster/fundamentals/score.py` | Rule-based scoring | `active by repo evidence` | `calculate_fundamental_score`, `run_fundamental_scoring` | reads TTM | yes | Writes both baseline and lifecycle-weighted score components |
 | `swingmaster/fundamentals/score_percentile.py` | Cross-sectional percentile system | `active by repo evidence` | `load_latest_percentile_snapshot`, `build_percentile_rows`, `run_fundamental_score_percentile` | reads `osakedata` metadata | yes | Separate explicit step |
-| `swingmaster/cli/run_fundamental_valuation.py` | Deterministic valuation from TTM + quarterly + osakedata prices | `active by repo evidence` | `run_fundamental_valuation`, `build_valuation_row` | reads `osakedata` close prices | yes | Called automatically in USA quarter update |
+| `swingmaster/cli/run_fundamental_valuation.py` | Deterministic valuation from TTM + quarterly + osakedata prices | `active by repo evidence` | `run_fundamental_valuation`, `build_valuation_row` | reads `osakedata` close prices | yes | Called by USA quarter update only after material fundamentals input changes |
 | `swingmaster/cli/run_fundamental_ticker_snapshot.py` | Downstream read/export of stored fundamentals | `active by repo evidence` | `build_snapshot_matrix`, `load_latest_valuation_snapshot` | reads fundamentals DB and optional external DBs | no fundamentals writes | Consumes stored fundamentals |
 | `ui_fundamental_pipeline/` | UI wrapper for quarter update, percentile, snapshot flows | `active by repo evidence` | `SwingMasterApp`, `build_usa_update_command` | no provider calls directly | launches CLIs | UI integration exists |
 
@@ -576,7 +576,7 @@ Confirmed code differences:
 - USA quarter update path:
   - SEC first
   - Yahoo fallback enrich
-  - automatic valuation at end if `osakedata-db` is supplied
+  - valuation at end only when at least one candidate materially changed quarterly or TTM fundamentals inputs and `osakedata-db` is supplied
 - OMXH path:
   - Yahoo raw audit -> Yahoo quarterly -> generic quarterly bridge
 - percentile minimum universe and industry thresholds differ by market in `score_percentile.py`

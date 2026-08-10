@@ -10,6 +10,14 @@ import pytest
 from swingmaster.cli import run_fundamental_quarter_update
 from swingmaster.cli.run_fundamental_migrations import run_migration
 from swingmaster.fundamentals.result_check import PLAN_VERSION, candidate_hash
+from swingmaster.fundamentals.quarter_refresh_decision import (
+    DECISION_NO_ACTION_COMPLETE,
+    DECISION_RETRY_FETCH_FAILED,
+    DECISION_RETRY_PARTIAL_QUARTER,
+    DECISION_REVIEW_HISTORICAL_PARTIAL,
+    build_quarter_refresh_decisions,
+    open_readonly_db,
+)
 
 
 def _insert_state_row(
@@ -173,6 +181,137 @@ def _candidate(ticker: str = "AAPL", decision: str = "FETCH_NEW_QUARTER") -> dic
         "planned_action": "PLAN_FETCH_QUARTERLY_FUNDAMENTALS",
         "eligible_for_execution": 1,
     }
+
+
+def _seed_earnings_context(db_path: Path, ticker: str, *, event_id: int = 7, period: str = "2026-06-30") -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO rc_fundamental_quarterly(ticker, period_end_date, run_id)
+            VALUES (?, '2026-03-31', 'FIXTURE')
+            """,
+            (ticker,),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO rc_earnings_calendar (
+                market, ticker, estimated_announcement_at, estimated_announcement_date, estimated_session,
+                calendar_status, source, source_observed_at_utc, first_observed_at_utc, last_observed_at_utc,
+                date_change_count, created_at_utc, updated_at_utc
+            ) VALUES (
+                'usa', ?, '2026-08-07T16:00:00-04:00', '2026-08-07', 'UNKNOWN',
+                'DUE_TODAY', 'YAHOO_FINANCE', '2026-08-07T00:00:00Z',
+                '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z',
+                0, '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z'
+            )
+            """,
+            (ticker,),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO rc_earnings_event (
+                id, market, ticker, announcement_at, announcement_date, announcement_session,
+                is_reported, reported_eps, source, source_observed_at_utc, source_timezone,
+                created_at_utc, updated_at_utc
+            ) VALUES (?, 'usa', ?, '2026-08-07T16:00:00-04:00', '2026-08-07',
+                'UNKNOWN', 1, 1.23, 'YAHOO_FINANCE', '2026-08-07T00:00:00Z',
+                'America/New_York', '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z')
+            """,
+            (event_id, ticker),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO rc_fundamental_quarter_earnings_match (
+                market, ticker, period_end_date, earnings_event_id, announcement_at, announcement_date,
+                announcement_session, effective_date_status, reporting_delay_days, matching_status,
+                matching_confidence, matching_method, candidate_count, availability_policy, matcher_version,
+                created_at_utc, updated_at_utc
+            ) VALUES ('usa', ?, ?, ?, '2026-08-07T16:00:00-04:00', '2026-08-07',
+                'UNKNOWN', 'RESOLVED', 1, 'MATCHED', 'HIGH', 'nearest', 1,
+                'event_effective_date', 'test', '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z')
+            """,
+            (ticker, period, event_id),
+        )
+        conn.commit()
+
+
+def _seed_ohlcv(path: Path, tickers: list[str]) -> None:
+    with sqlite3.connect(str(path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS osakedata (
+                id INTEGER PRIMARY KEY,
+                osake TEXT,
+                pvm TEXT,
+                close REAL,
+                volume INTEGER,
+                market TEXT NOT NULL DEFAULT 'usa'
+            )
+            """
+        )
+        for ticker in tickers:
+            conn.execute(
+                "INSERT INTO osakedata(osake, pvm, close, volume, market) VALUES (?, '2026-08-07', 1, 100, 'usa')",
+                (ticker,),
+            )
+        conn.commit()
+
+
+def _next_decision(db_path: Path, ticker: str) -> str:
+    ohlcv_path = db_path.with_name(f"{ticker.lower()}_osakedata.db")
+    _seed_ohlcv(ohlcv_path, [ticker])
+    with open_readonly_db(db_path) as conn:
+        with open_readonly_db(ohlcv_path) as ohlcv_conn:
+            rows = build_quarter_refresh_decisions(
+                conn,
+                ohlcv_conn=ohlcv_conn,
+                tickers=[ticker],
+                decision_date="2026-08-07",
+                ohlcv_stale_days=14,
+            )
+    assert len(rows) == 1
+    return str(rows[0].decision)
+
+
+def _status_row(db_path: Path, ticker: str, period: str = "2026-06-30") -> dict:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT *
+            FROM rc_fundamental_quarter_ingestion_status
+            WHERE market = 'usa'
+              AND ticker = ?
+              AND period_end_date = ?
+            """,
+            (ticker, period),
+        ).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def _insert_assessment_quarter(db_path: Path, ticker: str, *, complete: bool) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        if complete:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO rc_fundamental_quarterly (
+                    ticker, period_end_date, revenue, ebit, operating_cashflow, capex,
+                    free_cashflow, cash, total_debt, shares_outstanding, run_id
+                ) VALUES (?, '2026-06-30', 100, 10, 8, -3, 5, 20, 2, 1000, 'UPDATED')
+                """,
+                (ticker,),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO rc_fundamental_quarterly (
+                    ticker, period_end_date, revenue, run_id
+                ) VALUES (?, '2026-06-30', 100, 'UPDATED')
+                """,
+                (ticker,),
+            )
+        conn.commit()
 
 
 def test_loads_only_flagged_rows(tmp_path: Path) -> None:
@@ -919,6 +1058,336 @@ def test_plan_mode_accepts_retry_decisions(tmp_path: Path) -> None:
 
     assert [row["ticker"] for row in rows] == ["AAPL", "MSFT"]
     assert [row["detected_source_period_end_date"] for row in rows] == ["2026-06-30", "2026-06-30"]
+
+
+def test_plan_mode_persists_fetch_failed_for_next_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quarter_update_plan_fetch_failed_status.db"
+    run_migration(db_path)
+    _seed_earnings_context(db_path, "AAPL")
+    plan_path = _write_plan("pytest_quarter_update_plan_fetch_failed_status", db_path, [_candidate("AAPL")])
+
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "process_ticker",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("SEC_FETCH_FAILED:https://example.test:Timeout:boom")),
+    )
+
+    with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_BATCH_FAILED:tickers_failed=1"):
+        run_fundamental_quarter_update.run_fundamental_quarter_update(
+            db_path=db_path,
+            osakedata_db_path=None,
+            run_id="RUN",
+            market=None,
+            ticker=None,
+            limit=None,
+            dry_run=False,
+            skip_ack=False,
+            quarter_refresh_plan_json=plan_path,
+        )
+
+    status = _status_row(db_path, "AAPL")
+    assert status["ingestion_status"] == "FETCH_FAILED"
+    assert status["ingestion_evidence_type"] == "MANAGED_UPDATE_ATTEMPT"
+    assert _next_decision(db_path, "AAPL") == DECISION_RETRY_FETCH_FAILED
+
+
+def test_plan_mode_persists_partial_for_next_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quarter_update_plan_partial_status.db"
+    run_migration(db_path)
+    _seed_earnings_context(db_path, "AAPL")
+    plan_path = _write_plan("pytest_quarter_update_plan_partial_status", db_path, [_candidate("AAPL")])
+
+    def fake_process(**_kwargs: object) -> dict[str, object]:
+        _insert_assessment_quarter(db_path, "AAPL", complete=False)
+        return {
+            "target_period_end_date": "2026-06-30",
+            "target_quarter_exists": 1,
+            "target_quarter_basic_complete": 0,
+            "post_update_result": "UPDATED_PARTIAL",
+            "quarterly_rows_written": 0,
+            "ttm_rows_written": 0,
+        }
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "process_ticker", fake_process)
+    calls: list[dict] = []
+    _capture_usa_valuation(monkeypatch, calls)
+
+    summary = run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "unused_osakedata.db",
+        run_id="RUN",
+        market=None,
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    status = _status_row(db_path, "AAPL")
+    assert summary["tickers_succeeded"] == 1
+    assert status["ingestion_status"] == "FUNDAMENTALS_PARTIAL"
+    assert status["quarter_basic_complete"] == 0
+    assert _next_decision(db_path, "AAPL") == DECISION_RETRY_PARTIAL_QUARTER
+    assert calls == []
+
+
+def test_plan_mode_partial_then_complete_updates_status(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quarter_update_plan_partial_then_complete.db"
+    run_migration(db_path)
+    _seed_earnings_context(db_path, "AAPL")
+    _insert_assessment_quarter(db_path, "AAPL", complete=False)
+    run_fundamental_quarter_update.persist_managed_update_ingestion_status(
+        db_path=db_path,
+        ticker="AAPL",
+        market="usa",
+        target_period_end_date="2026-06-30",
+        run_id="OLD",
+        post_update_result="UPDATED_PARTIAL",
+    )
+    plan_path = _write_plan("pytest_quarter_update_plan_partial_then_complete", db_path, [_candidate("AAPL", "RETRY_PARTIAL_QUARTER")])
+
+    def fake_process(**_kwargs: object) -> dict[str, object]:
+        _insert_assessment_quarter(db_path, "AAPL", complete=True)
+        return {
+            "target_period_end_date": "2026-06-30",
+            "target_quarter_exists": 1,
+            "target_quarter_basic_complete": 1,
+            "post_update_result": "UPDATED_COMPLETE",
+            "quarterly_rows_written": 1,
+            "ttm_rows_written": 0,
+        }
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "process_ticker", fake_process)
+    _mock_usa_valuation(monkeypatch)
+
+    run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "unused_osakedata.db",
+        run_id="RUN",
+        market=None,
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    assert _status_row(db_path, "AAPL")["ingestion_status"] == "QUARTER_BASIC_COMPLETE"
+    assert _next_decision(db_path, "AAPL") == DECISION_NO_ACTION_COMPLETE
+
+
+def test_plan_mode_fetch_failed_then_complete_updates_status(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quarter_update_plan_fetch_failed_then_complete.db"
+    run_migration(db_path)
+    _seed_earnings_context(db_path, "AAPL")
+    run_fundamental_quarter_update.persist_managed_update_ingestion_status(
+        db_path=db_path,
+        ticker="AAPL",
+        market="usa",
+        target_period_end_date="2026-06-30",
+        run_id="OLD",
+        post_update_result="FETCH_FAILED",
+        failure_step="quarterly_refresh",
+        error_message="SEC_FETCH_FAILED:timeout",
+    )
+    plan_path = _write_plan("pytest_quarter_update_plan_fetch_failed_then_complete", db_path, [_candidate("AAPL", "RETRY_FETCH_FAILED")])
+
+    def fake_process(**_kwargs: object) -> dict[str, object]:
+        _insert_assessment_quarter(db_path, "AAPL", complete=True)
+        return {
+            "target_period_end_date": "2026-06-30",
+            "target_quarter_exists": 1,
+            "target_quarter_basic_complete": 1,
+            "post_update_result": "UPDATED_COMPLETE",
+            "quarterly_rows_written": 1,
+            "ttm_rows_written": 0,
+        }
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "process_ticker", fake_process)
+    _mock_usa_valuation(monkeypatch)
+
+    run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "unused_osakedata.db",
+        run_id="RUN",
+        market=None,
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    assert _status_row(db_path, "AAPL")["ingestion_status"] == "QUARTER_BASIC_COMPLETE"
+    assert _next_decision(db_path, "AAPL") == DECISION_NO_ACTION_COMPLETE
+
+
+def test_plan_mode_does_not_downgrade_complete_on_transient_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quarter_update_plan_complete_preserved.db"
+    run_migration(db_path)
+    _seed_earnings_context(db_path, "AAPL")
+    _insert_assessment_quarter(db_path, "AAPL", complete=True)
+    run_fundamental_quarter_update.persist_managed_update_ingestion_status(
+        db_path=db_path,
+        ticker="AAPL",
+        market="usa",
+        target_period_end_date="2026-06-30",
+        run_id="OLD",
+        post_update_result="UPDATED_COMPLETE",
+    )
+    plan_path = _write_plan("pytest_quarter_update_plan_complete_preserved", db_path, [_candidate("AAPL", "RETRY_FETCH_FAILED")])
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "process_ticker",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("SEC_FETCH_FAILED:https://example.test:Timeout:boom")),
+    )
+
+    with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_BATCH_FAILED:tickers_failed=1"):
+        run_fundamental_quarter_update.run_fundamental_quarter_update(
+            db_path=db_path,
+            osakedata_db_path=None,
+            run_id="RUN",
+            market=None,
+            ticker=None,
+            limit=None,
+            dry_run=False,
+            skip_ack=False,
+            quarter_refresh_plan_json=plan_path,
+        )
+
+    assert _status_row(db_path, "AAPL")["ingestion_status"] == "QUARTER_BASIC_COMPLETE"
+    assert _next_decision(db_path, "AAPL") == DECISION_NO_ACTION_COMPLETE
+
+
+def test_plan_mode_historical_unknown_unaffected_without_managed_attempt(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_historical_unknown.db"
+    run_migration(db_path)
+    _seed_earnings_context(db_path, "AAPL")
+    _insert_assessment_quarter(db_path, "AAPL", complete=False)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_quarter_ingestion_status (
+                market, ticker, period_end_date, ingestion_status, basic_status,
+                quarter_basic_complete, ttm_input_complete, score_history_complete,
+                valuation_input_ready, historical_research_ready, available_basic_field_count,
+                missing_basic_fields, missing_core_fields_json, missing_ttm_fields_json,
+                missing_score_fields_json, data_quality_warnings_json, retry_recommendation,
+                last_checked_at_utc, assessment_policy_version, ingestion_evidence_type,
+                run_id, assessed_at_utc, created_at_utc, updated_at_utc
+            ) VALUES (
+                'usa', 'AAPL', '2026-06-30', 'UNKNOWN_HISTORICAL_INGEST_COMPLETENESS',
+                'BASIC_PARTIAL', 0, 0, 0, 0, 1, 1, '["ebit"]', '["ebit"]',
+                '[]', '[]', '[]', 'MANUAL_REVIEW', '2026-08-07T00:00:00Z',
+                'test', 'CURRENT_DB_STATE_ONLY', 'HIST', '2026-08-07T00:00:00Z',
+                '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z'
+            )
+            """
+        )
+        conn.commit()
+
+    assert _next_decision(db_path, "AAPL") == DECISION_REVIEW_HISTORICAL_PARTIAL
+
+
+def test_plan_mode_managed_status_upsert_is_idempotent(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_idempotent_status.db"
+    run_migration(db_path)
+    _seed_earnings_context(db_path, "AAPL")
+
+    for run_id in ("RUN1", "RUN2"):
+        run_fundamental_quarter_update.persist_managed_update_ingestion_status(
+            db_path=db_path,
+            ticker="AAPL",
+            market="usa",
+            target_period_end_date="2026-06-30",
+            run_id=run_id,
+            post_update_result="FETCH_FAILED",
+            failure_step="quarterly_refresh",
+            error_message="SEC_FETCH_FAILED:timeout",
+        )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_quarter_ingestion_status").fetchone()[0]
+    status = _status_row(db_path, "AAPL")
+    assert count == 1
+    assert status["ingestion_status"] == "FETCH_FAILED"
+    assert status["run_id"] == "RUN2"
+
+
+def test_plan_mode_mixed_outcomes_persist_matching_statuses(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quarter_update_plan_mixed_status.db"
+    run_migration(db_path)
+    tickers = ["COMP", "PART", "FAIL", "NODATA"]
+    for index, ticker in enumerate(tickers, start=10):
+        _seed_earnings_context(db_path, ticker, event_id=index)
+    plan_path = _write_plan("pytest_quarter_update_plan_mixed_status", db_path, [_candidate(ticker) for ticker in tickers])
+
+    def fake_process(**kwargs: object) -> dict[str, object]:
+        row = kwargs["row"]
+        ticker = str(row["ticker"])
+        if ticker == "FAIL":
+            raise RuntimeError("SEC_FETCH_FAILED:https://example.test:Timeout:boom")
+        if ticker == "NODATA":
+            return {
+                "target_period_end_date": "2026-06-30",
+                "target_quarter_exists": 0,
+                "target_quarter_basic_complete": 0,
+                "post_update_result": "NO_NEW_DATA",
+                "quarterly_rows_written": 0,
+                "ttm_rows_written": 0,
+            }
+        _insert_assessment_quarter(db_path, ticker, complete=ticker == "COMP")
+        return {
+            "target_period_end_date": "2026-06-30",
+            "target_quarter_exists": 1,
+            "target_quarter_basic_complete": 1 if ticker == "COMP" else 0,
+            "post_update_result": "UPDATED_COMPLETE" if ticker == "COMP" else "UPDATED_PARTIAL",
+            "quarterly_rows_written": 1 if ticker == "COMP" else 0,
+            "ttm_rows_written": 0,
+        }
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "process_ticker", fake_process)
+    _mock_usa_valuation(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_BATCH_FAILED:tickers_failed=1"):
+        run_fundamental_quarter_update.run_fundamental_quarter_update(
+            db_path=db_path,
+            osakedata_db_path=tmp_path / "unused_osakedata.db",
+            run_id="RUN",
+            market=None,
+            ticker=None,
+            limit=None,
+            dry_run=False,
+            skip_ack=False,
+            quarter_refresh_plan_json=plan_path,
+        )
+
+    statuses = {ticker: _status_row(db_path, ticker)["ingestion_status"] for ticker in tickers}
+    assert statuses == {
+        "COMP": "QUARTER_BASIC_COMPLETE",
+        "PART": "FUNDAMENTALS_PARTIAL",
+        "FAIL": "FETCH_FAILED",
+        "NODATA": "PUBLISHED_DATA_NOT_FETCHED",
+    }
 
 
 def test_invalid_state_missing_detected_date_fails(tmp_path: Path) -> None:

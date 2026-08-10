@@ -173,6 +173,8 @@ AND shares_outstanding IS NOT NULL
 
 `RETRY_PARTIAL_QUARTER` is reserved for explicit managed partial ingestion evidence, currently `FUNDAMENTALS_PARTIAL` or another non-historical ingestion evidence type. `FETCH_NEW_QUARTER` remains executable when a persisted completed event has a deterministic target period and that target quarter is missing, even if the calendar row has moved forward by 14-30 days or more. `RETRY_FETCH_FAILED` remains executable when either `ingestion_status` or `last_fetch_status` records a fetch failure.
 
+Plan-based USA `Update Fundamentals` writes authoritative managed-attempt status for the target quarter after each candidate attempt. A complete target quarter is persisted as `QUARTER_BASIC_COMPLETE`; an incomplete but present target quarter is persisted as `FUNDAMENTALS_PARTIAL`; a provider/update fetch failure is persisted as `FETCH_FAILED`; and a successful provider interaction that still leaves no usable target-quarter row is persisted as `PUBLISHED_DATA_NOT_FETCHED`. A transient failure does not downgrade an existing complete managed status. Historical unknown rows remain `UNKNOWN_HISTORICAL_INGEST_COMPLETENESS` unless a managed update attempt actually runs for that target quarter.
+
 The active leverage metric is `net_debt_to_ebit`; the deprecated `net_debt_to_ebitda` is not part of this policy.
 
 ## Production Audit

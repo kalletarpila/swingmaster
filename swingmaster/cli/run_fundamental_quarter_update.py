@@ -53,7 +53,7 @@ from swingmaster.fundamentals.result_check import (
     validate_candidate_hash,
     validate_temp_path,
 )
-from swingmaster.fundamentals.quarter_completeness import assess_quarter_completeness
+from swingmaster.fundamentals.quarter_completeness import ASSESSMENT_POLICY_VERSION, assess_quarter_completeness
 from swingmaster.fundamentals.lifecycle import run_lifecycle_classification
 from swingmaster.fundamentals.score import run_fundamental_scoring
 
@@ -97,6 +97,12 @@ YAHOO_AWARE_EXEC_NOT_REQUESTED = "NOT_REQUESTED"
 YAHOO_AWARE_EXEC_COMPLETED = "EXECUTION_COMPLETED"
 YAHOO_AWARE_EXEC_BLOCKED = "EXECUTION_BLOCKED"
 YAHOO_AWARE_EXEC_NO_ACTION = "NO_ACTION_REQUIRED"
+MANAGED_INGESTION_EVIDENCE_TYPE = "MANAGED_UPDATE_ATTEMPT"
+MANAGED_STATUS_COMPLETE = "QUARTER_BASIC_COMPLETE"
+MANAGED_STATUS_PARTIAL = "FUNDAMENTALS_PARTIAL"
+MANAGED_STATUS_FETCH_FAILED = "FETCH_FAILED"
+MANAGED_STATUS_NOT_FETCHED = "PUBLISHED_DATA_NOT_FETCHED"
+MANAGED_COMPLETE_STATUSES = {MANAGED_STATUS_COMPLETE, "INGEST_COMPLETE"}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -689,6 +695,230 @@ def quarterly_refresh_rows_written(summary: Mapping[str, object] | None) -> int:
     if isinstance(quarterly_bridge_summary, Mapping):
         total += _int_value(quarterly_bridge_summary.get("rows_written"))
     return total
+
+
+def _managed_basic_status(assessment: Any | None) -> str:
+    if assessment is None:
+        return "NOT_ASSESSABLE"
+    if getattr(assessment, "quarter_basic_complete", False):
+        return "BASIC_COMPLETE"
+    if getattr(assessment, "historical_research_ready", False):
+        return "BASIC_PARTIAL"
+    return "BASIC_INCOMPLETE"
+
+
+def _managed_retry_recommendation(status: str, assessment: Any | None) -> str:
+    if status in MANAGED_COMPLETE_STATUSES:
+        return "NO_ACTION"
+    if status in {MANAGED_STATUS_FETCH_FAILED, MANAGED_STATUS_NOT_FETCHED}:
+        return "RERUN_CHECK_THEN_PLAN_UPDATE"
+    if assessment is not None and getattr(assessment, "retry_recommendation", None):
+        return str(assessment.retry_recommendation)
+    return "RERUN_CHECK_THEN_PLAN_UPDATE"
+
+
+def _managed_failure_status(*, step_name: str, error_message: str) -> str | None:
+    if step_name != "quarterly_refresh":
+        return None
+    if "MISSING_DETECTED" in error_message:
+        return MANAGED_STATUS_NOT_FETCHED
+    return MANAGED_STATUS_FETCH_FAILED
+
+
+def persist_managed_update_ingestion_status(
+    *,
+    db_path: Path,
+    ticker: str,
+    market: str,
+    target_period_end_date: str,
+    run_id: str,
+    post_update_result: str,
+    failure_step: str | None = None,
+    error_message: str | None = None,
+) -> dict[str, object] | None:
+    if market.strip().lower() != "usa":
+        return None
+    normalized_ticker = ticker.upper()
+    normalized_market = market.strip().lower()
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        quarter_row = conn.execute(
+            """
+            SELECT *
+            FROM rc_fundamental_quarterly
+            WHERE ticker = ?
+              AND period_end_date = ?
+            """,
+            (normalized_ticker, target_period_end_date),
+        ).fetchone()
+        existing_status = conn.execute(
+            """
+            SELECT *
+            FROM rc_fundamental_quarter_ingestion_status
+            WHERE market = ?
+              AND ticker = ?
+              AND period_end_date = ?
+            """,
+            (normalized_market, normalized_ticker, target_period_end_date),
+        ).fetchone()
+        match_row = conn.execute(
+            """
+            SELECT earnings_event_id, announcement_date, effective_trading_date
+            FROM rc_fundamental_quarter_earnings_match
+            WHERE market = ?
+              AND ticker = ?
+              AND period_end_date = ?
+            """,
+            (normalized_market, normalized_ticker, target_period_end_date),
+        ).fetchone()
+
+        existing_ingestion_status = None if existing_status is None else str(existing_status["ingestion_status"])
+        if existing_ingestion_status in MANAGED_COMPLETE_STATUSES and post_update_result != "UPDATED_COMPLETE":
+            return {
+                "status_write_action": "preserved_complete",
+                "ingestion_status": existing_ingestion_status,
+            }
+
+        assessment = assess_quarter_completeness(dict(quarter_row), market=normalized_market) if quarter_row else None
+        if assessment is not None and assessment.quarter_basic_complete:
+            ingestion_status = MANAGED_STATUS_COMPLETE
+        elif assessment is not None and post_update_result in {"UPDATED_COMPLETE", "UPDATED_PARTIAL", "NO_NEW_DATA"}:
+            ingestion_status = MANAGED_STATUS_PARTIAL
+        elif post_update_result == "NO_NEW_DATA":
+            ingestion_status = MANAGED_STATUS_NOT_FETCHED
+        elif post_update_result == "FETCH_FAILED":
+            ingestion_status = _managed_failure_status(
+                step_name=failure_step or "",
+                error_message=error_message or "",
+            )
+            if ingestion_status is None:
+                return None
+        else:
+            return None
+
+        ttm_input_complete = 0 if existing_status is None else int(existing_status["ttm_input_complete"] or 0)
+        score_history_complete = 0 if existing_status is None else int(existing_status["score_history_complete"] or 0)
+        available_basic_field_count = 0
+        missing_basic_fields = "[]"
+        missing_core_fields_json = "[]"
+        data_quality_warnings_json = "[]"
+        quarter_basic_complete = 0
+        valuation_input_ready = 0
+        historical_research_ready = 0
+        if assessment is not None:
+            available_basic_field_count = int(assessment.available_core_field_count)
+            missing_basic_fields = json.dumps(list(assessment.missing_core_fields), sort_keys=True, separators=(",", ":"))
+            missing_core_fields_json = missing_basic_fields
+            data_quality_warnings_json = json.dumps(
+                list(assessment.data_quality_warnings),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            quarter_basic_complete = int(assessment.quarter_basic_complete)
+            valuation_input_ready = int(assessment.valuation_input_ready)
+            historical_research_ready = int(assessment.historical_research_ready)
+
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_quarter_ingestion_status (
+                ticker,
+                market,
+                period_end_date,
+                earnings_event_id,
+                announcement_date,
+                effective_trading_date,
+                ingestion_status,
+                basic_status,
+                quarter_basic_complete,
+                ttm_input_complete,
+                score_history_complete,
+                valuation_input_ready,
+                historical_research_ready,
+                available_basic_field_count,
+                missing_basic_fields,
+                missing_core_fields_json,
+                missing_ttm_fields_json,
+                missing_score_fields_json,
+                data_quality_warnings_json,
+                retry_recommendation,
+                last_fetch_status,
+                last_fetch_source,
+                last_source_observed_at_utc,
+                last_checked_at_utc,
+                assessment_policy_version,
+                ingestion_evidence_type,
+                run_id,
+                assessed_at_utc,
+                created_at_utc,
+                updated_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(market, ticker, period_end_date) DO UPDATE SET
+                earnings_event_id = excluded.earnings_event_id,
+                announcement_date = excluded.announcement_date,
+                effective_trading_date = excluded.effective_trading_date,
+                ingestion_status = excluded.ingestion_status,
+                basic_status = excluded.basic_status,
+                quarter_basic_complete = excluded.quarter_basic_complete,
+                ttm_input_complete = excluded.ttm_input_complete,
+                score_history_complete = excluded.score_history_complete,
+                valuation_input_ready = excluded.valuation_input_ready,
+                historical_research_ready = excluded.historical_research_ready,
+                available_basic_field_count = excluded.available_basic_field_count,
+                missing_basic_fields = excluded.missing_basic_fields,
+                missing_core_fields_json = excluded.missing_core_fields_json,
+                missing_ttm_fields_json = excluded.missing_ttm_fields_json,
+                missing_score_fields_json = excluded.missing_score_fields_json,
+                data_quality_warnings_json = excluded.data_quality_warnings_json,
+                retry_recommendation = excluded.retry_recommendation,
+                last_fetch_status = excluded.last_fetch_status,
+                last_fetch_source = excluded.last_fetch_source,
+                last_source_observed_at_utc = excluded.last_source_observed_at_utc,
+                last_checked_at_utc = excluded.last_checked_at_utc,
+                assessment_policy_version = excluded.assessment_policy_version,
+                ingestion_evidence_type = excluded.ingestion_evidence_type,
+                run_id = excluded.run_id,
+                assessed_at_utc = excluded.assessed_at_utc,
+                updated_at_utc = excluded.updated_at_utc
+            """,
+            (
+                normalized_ticker,
+                normalized_market,
+                target_period_end_date,
+                None if match_row is None else match_row["earnings_event_id"],
+                None if match_row is None else match_row["announcement_date"],
+                None if match_row is None else match_row["effective_trading_date"],
+                ingestion_status,
+                _managed_basic_status(assessment),
+                quarter_basic_complete,
+                ttm_input_complete,
+                score_history_complete,
+                valuation_input_ready,
+                historical_research_ready,
+                available_basic_field_count,
+                missing_basic_fields,
+                missing_core_fields_json,
+                data_quality_warnings_json,
+                _managed_retry_recommendation(ingestion_status, assessment),
+                ingestion_status,
+                "sec_edgar,yahoo_fallback",
+                now,
+                now,
+                ASSESSMENT_POLICY_VERSION,
+                MANAGED_INGESTION_EVIDENCE_TYPE,
+                run_id,
+                now,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+    return {
+        "status_write_action": "upserted",
+        "ingestion_status": ingestion_status,
+        "quarter_basic_complete": quarter_basic_complete,
+        "ingestion_evidence_type": MANAGED_INGESTION_EVIDENCE_TYPE,
+    }
 
 
 def candidate_material_fundamentals_changed(summary: Mapping[str, object], post_update_result: str) -> bool:
@@ -2831,26 +3061,37 @@ def run_fundamental_quarter_update(
                 process_kwargs["execution_source"] = "quarter_refresh_plan"
             process_summary = process_ticker(**process_kwargs)
             post_result = str(process_summary.get("post_update_result") or "MANUAL_REVIEW")
+            managed_status_summary = None
+            if plan_mode and current_market == "usa":
+                managed_status_summary = persist_managed_update_ingestion_status(
+                    db_path=db_path,
+                    ticker=current_ticker,
+                    market=current_market,
+                    target_period_end_date=str(process_summary.get("target_period_end_date") or current_target_period),
+                    run_id=run_id,
+                    post_update_result=post_result,
+                )
             post_update_result_counts[post_result] = post_update_result_counts.get(post_result, 0) + 1
             material_changed = candidate_material_fundamentals_changed(process_summary, post_result)
             if material_changed:
                 material_fundamentals_change_count += 1
-            candidate_results.append(
-                {
-                    "ticker": current_ticker,
-                    "market": current_market,
-                    "target_period_end_date": str(process_summary.get("target_period_end_date") or current_target_period),
-                    "status": "SUCCESS",
-                    "post_update_result": post_result,
-                    "target_quarter_exists": int(process_summary.get("target_quarter_exists") or 0),
-                    "target_quarter_basic_complete": int(process_summary.get("target_quarter_basic_complete") or 0),
-                    "target_ttm_input_complete": process_summary.get("target_ttm_input_complete"),
-                    "target_score_history_complete": process_summary.get("target_score_history_complete"),
-                    "quarterly_rows_written": int(process_summary.get("quarterly_rows_written") or 0),
-                    "ttm_rows_written": int(process_summary.get("ttm_rows_written") or 0),
-                    "material_fundamentals_changed": 1 if material_changed else 0,
-                }
-            )
+            candidate_result = {
+                "ticker": current_ticker,
+                "market": current_market,
+                "target_period_end_date": str(process_summary.get("target_period_end_date") or current_target_period),
+                "status": "SUCCESS",
+                "post_update_result": post_result,
+                "target_quarter_exists": int(process_summary.get("target_quarter_exists") or 0),
+                "target_quarter_basic_complete": int(process_summary.get("target_quarter_basic_complete") or 0),
+                "target_ttm_input_complete": process_summary.get("target_ttm_input_complete"),
+                "target_score_history_complete": process_summary.get("target_score_history_complete"),
+                "quarterly_rows_written": int(process_summary.get("quarterly_rows_written") or 0),
+                "ttm_rows_written": int(process_summary.get("ttm_rows_written") or 0),
+                "material_fundamentals_changed": 1 if material_changed else 0,
+            }
+            if managed_status_summary is not None:
+                candidate_result.update(managed_status_summary)
+            candidate_results.append(candidate_result)
             if vintage_mode == VINTAGE_MODE_SEC_LATEST_WRITER:
                 merge_sec_latest_writer_vintage_summary(
                     vintage_summary,
@@ -2886,7 +3127,7 @@ def run_fundamental_quarter_update(
                 step_name = "ack"
             elif "RAW_NOT_USABLE" in message:
                 step_name = "quarterly_refresh"
-            elif "SEC_REFRESH" in message:
+            elif "SEC_REFRESH" in message or "SEC_FETCH_FAILED" in message or "FUNDAMENTAL_FETCH_FAILED" in message:
                 step_name = "quarterly_refresh"
             elif "FUNDAMENTAL_TTM" in message:
                 step_name = "ttm"
@@ -2904,6 +3145,18 @@ def run_fundamental_quarter_update(
             print(f"ERROR ticker={current_ticker} step={step_name} message={message}")
             tickers_failed += 1
             post_update_result_counts["FETCH_FAILED"] += 1
+            managed_status_summary = None
+            if plan_mode and current_market == "usa":
+                managed_status_summary = persist_managed_update_ingestion_status(
+                    db_path=db_path,
+                    ticker=current_ticker,
+                    market=current_market,
+                    target_period_end_date=current_target_period,
+                    run_id=run_id,
+                    post_update_result="FETCH_FAILED",
+                    failure_step=step_name,
+                    error_message=message,
+                )
             failed_candidate = {
                 "ticker": current_ticker,
                 "market": current_market,
@@ -2914,6 +3167,8 @@ def run_fundamental_quarter_update(
                 "error_message": message,
                 "retry_recommendation": "RERUN_CHECK_THEN_PLAN_UPDATE" if plan_mode else "RERUN_LEGACY_QUARTER_UPDATE",
             }
+            if managed_status_summary is not None:
+                failed_candidate.update(managed_status_summary)
             failed_candidates.append(failed_candidate)
             candidate_results.append(failed_candidate)
             if vintage_mode == VINTAGE_MODE_SEC_LATEST_WRITER:

@@ -150,12 +150,15 @@ Candidate removal is natural:
 
 ```text
 target quarter missing -> FETCH_NEW_QUARTER
-target quarter present but quarter_basic_complete = 0 -> RETRY_PARTIAL_QUARTER
+target quarter present, quarter_basic_complete = 0, and managed ingestion state is retryable -> RETRY_PARTIAL_QUARTER
 target quarter has FETCH_FAILED status -> RETRY_FETCH_FAILED
 target quarter present and quarter_basic_complete = 1 -> NO_ACTION_COMPLETE
+target quarter present with UNKNOWN_HISTORICAL_INGEST_COMPLETENESS and quarter_basic_complete = 0 -> REVIEW_HISTORICAL_PARTIAL
 ```
 
 USA does not need a manual acknowledgement flag or `new_quarter_available` to clear these candidates. A successful fundamentals update persists the target quarter and ingestion status, so the next fresh check no longer emits that ticker + target-period pair. Still-unresolved candidates remain in future fresh plans for 7, 14, or 30 days because they are derived from persisted event/match/fundamentals state rather than a short-lived result-watch window.
+
+Persisted event backlog reconstruction and quarter retry eligibility are separate rules. A completed earnings event with a deterministic match is evaluated before calendar no-action decisions, even after the calendar has moved to a later upcoming estimate. That preserves delayed live work. However, an incomplete historical quarter is not retryable merely because it fails the current completeness definition. `RETRY_PARTIAL_QUARTER` requires explicit managed-ingestion evidence such as `FUNDAMENTALS_PARTIAL`; `UNKNOWN_HISTORICAL_INGEST_COMPLETENESS` is review/maintenance-only until a separate repair workflow chooses to process it.
 
 No separate pending queue is required for the daily-check / weekly-update operating model as long as completed events and quarter matches are persisted.
 

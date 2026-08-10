@@ -705,6 +705,7 @@ def test_result_check_reconstructs_mixed_unresolved_decisions_after_calendar_win
         "2026-06-30",
         quarter_basic_complete=0,
         missing_basic_fields='["revenue"]',
+        ingestion_status="FUNDAMENTALS_PARTIAL",
     )
     _insert_partial_quarter(fundamentals_db, "FAIL", "2026-06-30")
     _insert_ingestion_status(
@@ -724,6 +725,33 @@ def test_result_check_reconstructs_mixed_unresolved_decisions_after_calendar_win
         "PART": "RETRY_PARTIAL_QUARTER",
     }
     assert _candidate_pairs(result["plan"]) == [("FAIL", "2026-06-30"), ("NEW", "2026-06-30"), ("PART", "2026-06-30")]
+
+
+def test_historical_unknown_partial_is_manual_review_not_plan_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    ohlcv_db = _ohlcv_db_for(tmp_path, ["HIST"])
+    _mock_result_check_provider_stages(monkeypatch)
+    _insert_quarter(fundamentals_db, "HIST", "2026-03-31")
+    _insert_calendar(fundamentals_db, "HIST", "UPCOMING", "2026-10-15")
+    _insert_event_and_match(fundamentals_db, "HIST", "2026-08-01", "2026-06-30", event_id=21)
+    _insert_partial_quarter(fundamentals_db, "HIST", "2026-06-30")
+    _insert_ingestion_status(
+        fundamentals_db,
+        "HIST",
+        "2026-06-30",
+        quarter_basic_complete=0,
+        missing_basic_fields='["revenue"]',
+        ingestion_status="UNKNOWN_HISTORICAL_INGEST_COMPLETENESS",
+    )
+
+    result = _run_check(fundamentals_db, ohlcv_db, date(2026, 8, 21), "pytest_historical_unknown_partial")
+
+    assert result["plan"]["candidate_count"] == 0
+    manual_review = Path(result["artifact_paths"]["manual_review_csv"]).read_text(encoding="utf-8")
+    assert "REVIEW_HISTORICAL_PARTIAL" in manual_review
 
 
 def test_successful_update_naturally_removes_candidate_without_ack(

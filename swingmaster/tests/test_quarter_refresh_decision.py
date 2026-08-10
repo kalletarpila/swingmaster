@@ -17,10 +17,12 @@ from swingmaster.fundamentals.quarter_refresh_decision import (
     DECISION_RETRY_PARTIAL_QUARTER,
     DECISION_REVIEW_AMBIGUOUS_PERIOD,
     DECISION_REVIEW_DATE_PASSED_NO_EVENT,
+    DECISION_REVIEW_HISTORICAL_PARTIAL,
     DECISION_REVIEW_NO_CALENDAR_ESTIMATE,
     DECISION_WATCH_DUE_TODAY,
     PRIORITY_P1_FETCH_NOW,
     PRIORITY_P2_RETRY,
+    PRIORITY_P4_REVIEW,
     PRIORITY_P5_NO_ACTION,
     build_quarter_refresh_decisions,
     classify_quarter_refresh_decision,
@@ -115,13 +117,68 @@ def test_completed_event_partial_quarter_retries(tmp_path: Path) -> None:
     _seed_event(db_path, "AAPL", 7, "2026-08-07")
     _seed_match(db_path, "AAPL", event_id=7, period="2026-06-30")
     _seed_quarter(db_path, "AAPL", "2026-06-30", complete=False)
-    _seed_ingestion_status(db_path, "AAPL", "2026-06-30", quarter_basic=0, missing='["revenue","ebit"]')
+    _seed_ingestion_status(
+        db_path,
+        "AAPL",
+        "2026-06-30",
+        quarter_basic=0,
+        missing='["revenue","ebit"]',
+        ingestion_status="FUNDAMENTALS_PARTIAL",
+    )
 
     row = _decisions(db_path)["AAPL"]
     assert row.decision == DECISION_RETRY_PARTIAL_QUARTER
     assert row.decision_priority == PRIORITY_P2_RETRY
     assert row.missing_basic_fields == '["revenue","ebit"]'
     assert row.eligible_for_future_auto_fetch == 1
+
+
+def test_completed_event_historical_unknown_partial_is_review_not_retry(tmp_path: Path) -> None:
+    db_path = _db(tmp_path)
+    _seed_ticker(db_path, "AAPL", calendar_status="DUE_TODAY", estimated_date="2026-08-07")
+    _seed_event(db_path, "AAPL", 7, "2026-08-07")
+    _seed_match(db_path, "AAPL", event_id=7, period="2026-06-30")
+    _seed_quarter(db_path, "AAPL", "2026-06-30", complete=False)
+    _seed_ingestion_status(
+        db_path,
+        "AAPL",
+        "2026-06-30",
+        quarter_basic=0,
+        missing='["revenue","ebit"]',
+        ingestion_status="UNKNOWN_HISTORICAL_INGEST_COMPLETENESS",
+    )
+
+    row = _decisions(db_path)["AAPL"]
+    assert row.decision == DECISION_REVIEW_HISTORICAL_PARTIAL
+    assert row.decision_priority == PRIORITY_P4_REVIEW
+    assert row.eligible_for_future_auto_fetch == 0
+    assert row.planned_action == "MANUAL_REVIEW_HISTORICAL_PARTIAL"
+
+
+def test_recent_unknown_historical_partial_is_not_retryable_by_age(tmp_path: Path) -> None:
+    db_path = _db(tmp_path)
+    _seed_ticker(db_path, "AAPL", calendar_status="DUE_TODAY", estimated_date="2026-08-07")
+    _seed_event(db_path, "AAPL", 7, "2026-08-07")
+    _seed_match(db_path, "AAPL", event_id=7, period="2026-06-30")
+    _seed_quarter(db_path, "AAPL", "2026-06-30", complete=False)
+    _seed_ingestion_status(db_path, "AAPL", "2026-06-30", quarter_basic=0)
+
+    row = _decisions(db_path)["AAPL"]
+    assert row.latest_completed_earnings_event_date == "2026-08-07"
+    assert row.decision == DECISION_REVIEW_HISTORICAL_PARTIAL
+
+
+def test_ancient_unknown_historical_partial_is_not_retryable(tmp_path: Path) -> None:
+    db_path = _db(tmp_path)
+    _seed_ticker(db_path, "OLD", calendar_status="NO_CURRENT_ESTIMATE", estimated_date=None)
+    _seed_event(db_path, "OLD", 7, "2015-05-01")
+    _seed_match(db_path, "OLD", event_id=7, period="2015-03-28")
+    _seed_quarter(db_path, "OLD", "2015-03-28", complete=False)
+    _seed_ingestion_status(db_path, "OLD", "2015-03-28", quarter_basic=0)
+
+    row = _decisions(db_path)["OLD"]
+    assert row.decision == DECISION_REVIEW_HISTORICAL_PARTIAL
+    assert row.eligible_for_future_auto_fetch == 0
 
 
 def test_fetch_failed_has_retry_precedence_over_partial(tmp_path: Path) -> None:
@@ -454,6 +511,7 @@ def _seed_ingestion_status(
     score: int = 0,
     missing: str = "[]",
     ingestion_status: str = "UNKNOWN_HISTORICAL_INGEST_COMPLETENESS",
+    ingestion_evidence_type: str = "CURRENT_DB_STATE_ONLY",
 ) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -468,11 +526,11 @@ def _seed_ingestion_status(
                 created_at_utc, updated_at_utc
             ) VALUES (
                 'usa', ?, ?, ?, 'TEST', ?, ?, ?, 0, 0, ?, '[]', '[]', '[]', '[]',
-                'TEST', '2026-08-07T00:00:00Z', 'test', 'CURRENT_DB_STATE_ONLY',
+                'TEST', '2026-08-07T00:00:00Z', 'test', ?,
                 'TEST', '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z'
             )
             """,
-            (ticker, period, ingestion_status, quarter_basic, ttm, score, missing),
+            (ticker, period, ingestion_status, quarter_basic, ttm, score, missing, ingestion_evidence_type),
         )
 
 

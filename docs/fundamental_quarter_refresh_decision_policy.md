@@ -132,6 +132,7 @@ RETRY_FETCH_FAILED
 REVIEW_DATE_PASSED_NO_EVENT
 REVIEW_NO_CALENDAR_ESTIMATE
 REVIEW_AMBIGUOUS_PERIOD
+REVIEW_HISTORICAL_PARTIAL
 ```
 
 Priority classes:
@@ -140,7 +141,7 @@ Priority classes:
 P1_FETCH_NOW     FETCH_NEW_QUARTER
 P2_RETRY         RETRY_FETCH_FAILED, RETRY_PARTIAL_QUARTER
 P3_WATCH         WATCH_DUE_TODAY, WATCH_POST_EVENT_GRACE
-P4_REVIEW        REVIEW_DATE_PASSED_NO_EVENT, REVIEW_NO_CALENDAR_ESTIMATE, REVIEW_AMBIGUOUS_PERIOD
+P4_REVIEW        REVIEW_DATE_PASSED_NO_EVENT, REVIEW_NO_CALENDAR_ESTIMATE, REVIEW_AMBIGUOUS_PERIOD, REVIEW_HISTORICAL_PARTIAL
 P5_NO_ACTION     NO_ACTION_INACTIVE_SECURITY, NO_ACTION_UPCOMING, NO_ACTION_COMPLETE
 ```
 
@@ -167,6 +168,10 @@ AND shares_outstanding IS NOT NULL
 ```
 
 `ttm_input_complete` and `score_history_complete` are history quality metadata. If the corresponding quarter exists and `quarter_basic_complete = 1`, the decision is `NO_ACTION_COMPLETE` even when TTM or score history is incomplete. This prevents repeated fetching of an already complete current quarter.
+
+`UNKNOWN_HISTORICAL_INGEST_COMPLETENESS` means the row was assessed from current database state without preserved source-response evidence from a managed update. If that row is incomplete, it is not normal weekly retry work merely because a completed earnings event can be matched to it. The decision is `REVIEW_HISTORICAL_PARTIAL`, which is non-executable and surfaces the row for review or future historical maintenance.
+
+`RETRY_PARTIAL_QUARTER` is reserved for explicit managed partial ingestion evidence, currently `FUNDAMENTALS_PARTIAL` or another non-historical ingestion evidence type. `FETCH_NEW_QUARTER` remains executable when a persisted completed event has a deterministic target period and that target quarter is missing, even if the calendar row has moved forward by 14-30 days or more. `RETRY_FETCH_FAILED` remains executable when either `ingestion_status` or `last_fetch_status` records a fetch failure.
 
 The active leverage metric is `net_debt_to_ebit`; the deprecated `net_debt_to_ebitda` is not part of this policy.
 

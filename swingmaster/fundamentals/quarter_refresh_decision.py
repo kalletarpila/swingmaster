@@ -11,7 +11,7 @@ from typing import Any, Iterable, Mapping
 from swingmaster.fundamentals.earnings_events import normalize_ticker, repository_root
 
 
-AUDIT_VERSION = "quarter_refresh_decision_v2"
+AUDIT_VERSION = "quarter_refresh_decision_v3"
 DEFAULT_MARKET = "usa"
 DEFAULT_OHLCV_DB_PATH = Path("/home/kalle/projects/rawcandle/data/osakedata.db")
 DEFAULT_OHLCV_STALE_DAYS = 14
@@ -30,6 +30,7 @@ DECISION_RETRY_FETCH_FAILED = "RETRY_FETCH_FAILED"
 DECISION_REVIEW_DATE_PASSED_NO_EVENT = "REVIEW_DATE_PASSED_NO_EVENT"
 DECISION_REVIEW_NO_CALENDAR_ESTIMATE = "REVIEW_NO_CALENDAR_ESTIMATE"
 DECISION_REVIEW_AMBIGUOUS_PERIOD = "REVIEW_AMBIGUOUS_PERIOD"
+DECISION_REVIEW_HISTORICAL_PARTIAL = "REVIEW_HISTORICAL_PARTIAL"
 
 PRIORITY_P1_FETCH_NOW = "P1_FETCH_NOW"
 PRIORITY_P2_RETRY = "P2_RETRY"
@@ -314,6 +315,7 @@ def summarize_quarter_refresh_decisions(rows: list[QuarterRefreshDecisionRow]) -
         "review_date_passed_no_event": decision_counts.get(DECISION_REVIEW_DATE_PASSED_NO_EVENT, 0),
         "review_no_calendar_estimate": decision_counts.get(DECISION_REVIEW_NO_CALENDAR_ESTIMATE, 0),
         "review_ambiguous_period": decision_counts.get(DECISION_REVIEW_AMBIGUOUS_PERIOD, 0),
+        "review_historical_partial": decision_counts.get(DECISION_REVIEW_HISTORICAL_PARTIAL, 0),
         "session_counts": _counts(row.estimated_session or "UNKNOWN" for row in rows),
         "due_today_tickers": [row.ticker for row in rows if row.calendar_status == "DUE_TODAY"],
         "date_passed_event_not_found_tickers": [
@@ -436,6 +438,11 @@ def _classify_fetch_decision_without_security(
             return DECISION_RETRY_FETCH_FAILED, "Target quarter has a recorded fetch failure."
         if int(_value(quarter_status, "quarter_basic_complete") or 0) == 1:
             return DECISION_NO_ACTION_COMPLETE, "Target quarter exists and quarter_basic_complete is true."
+        if not _managed_partial_retryable(quarter_status):
+            return (
+                DECISION_REVIEW_HISTORICAL_PARTIAL,
+                "Target quarter is incomplete, but ingestion evidence is historical/unknown rather than a managed retryable fetch.",
+            )
         return DECISION_RETRY_PARTIAL_QUARTER, "Target quarter exists but quarter_basic_complete is false."
     if calendar_status == "UPCOMING":
         return DECISION_NO_ACTION_UPCOMING, "Next expected earnings event is still upcoming."
@@ -521,6 +528,7 @@ def priority_for_decision(decision: str) -> str:
         DECISION_REVIEW_DATE_PASSED_NO_EVENT,
         DECISION_REVIEW_NO_CALENDAR_ESTIMATE,
         DECISION_REVIEW_AMBIGUOUS_PERIOD,
+        DECISION_REVIEW_HISTORICAL_PARTIAL,
     }:
         return PRIORITY_P4_REVIEW
     return PRIORITY_P5_NO_ACTION
@@ -536,6 +544,7 @@ def planned_action_for_decision(decision: str) -> str:
         DECISION_REVIEW_DATE_PASSED_NO_EVENT: "MANUAL_REVIEW_CALENDAR_OR_EVENT",
         DECISION_REVIEW_NO_CALENDAR_ESTIMATE: "MANUAL_REVIEW_SOURCE_COVERAGE",
         DECISION_REVIEW_AMBIGUOUS_PERIOD: "MANUAL_REVIEW_PERIOD_MAPPING",
+        DECISION_REVIEW_HISTORICAL_PARTIAL: "MANUAL_REVIEW_HISTORICAL_PARTIAL",
         DECISION_NO_ACTION_INACTIVE_SECURITY: "NO_PROVIDER_TRAFFIC",
         DECISION_NO_ACTION_COMPLETE: "NO_PROVIDER_TRAFFIC",
         DECISION_NO_ACTION_UPCOMING: "NO_PROVIDER_TRAFFIC",
@@ -564,6 +573,18 @@ def _event_confirms_calendar(
 def _fetch_failed(row: Mapping[str, Any]) -> bool:
     values = {str(_value(row, "ingestion_status") or "").upper(), str(_value(row, "last_fetch_status") or "").upper()}
     return "FETCH_FAILED" in values or any(value.endswith("FETCH_FAILED") for value in values)
+
+
+def _managed_partial_retryable(row: Mapping[str, Any]) -> bool:
+    ingestion_status = str(_value(row, "ingestion_status") or "").upper()
+    evidence_type = str(_value(row, "ingestion_evidence_type") or "").upper()
+    if ingestion_status == "FUNDAMENTALS_PARTIAL":
+        return True
+    if ingestion_status == "UNKNOWN_HISTORICAL_INGEST_COMPLETENESS":
+        return False
+    if evidence_type and evidence_type != "CURRENT_DB_STATE_ONLY":
+        return True
+    return False
 
 
 def _select_tickers(conn: sqlite3.Connection, *, tickers: list[str] | None, market: str) -> list[str]:

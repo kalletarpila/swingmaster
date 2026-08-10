@@ -341,6 +341,8 @@ def insert_missing_quarterly_row_from_yahoo_with_metadata(
     for field_name in QUARTERLY_INSERT_FIELDS:
         if field_name in yahoo_columns and field_name in matched_yahoo_row.keys():
             values.append(matched_yahoo_row[field_name])
+        elif field_name == "ebit" and "operating_income" in matched_yahoo_row.keys():
+            values.append(matched_yahoo_row["operating_income"])
         else:
             values.append(None)
     values.append(run_id)

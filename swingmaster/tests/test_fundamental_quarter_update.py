@@ -12,6 +12,7 @@ from swingmaster.cli.run_fundamental_migrations import run_migration
 from swingmaster.fundamentals.result_check import PLAN_VERSION, candidate_hash
 from swingmaster.fundamentals.quarter_refresh_decision import (
     DECISION_NO_ACTION_COMPLETE,
+    DECISION_REFRESH_SEC_CONFIRMATION,
     DECISION_RETRY_FETCH_FAILED,
     DECISION_RETRY_PARTIAL_QUARTER,
     DECISION_REVIEW_HISTORICAL_PARTIAL,
@@ -140,6 +141,12 @@ def _capture_usa_valuation(monkeypatch: pytest.MonkeyPatch, calls: list[dict]) -
         "run_fundamental_valuation",
         lambda **kwargs: calls.append(kwargs) or {"rows_written": 7},
     )
+
+
+def _mock_downstream(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_quarterly_to_ttm", lambda **_kwargs: {"rows_written": 1})
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_lifecycle_step", lambda **_kwargs: 1)
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_score_step", lambda **_kwargs: 1)
 
 
 def _write_plan(
@@ -1272,7 +1279,7 @@ def test_plan_mode_does_not_downgrade_complete_on_transient_failure(
         )
 
     assert _status_row(db_path, "AAPL")["ingestion_status"] == "QUARTER_BASIC_COMPLETE"
-    assert _next_decision(db_path, "AAPL") == DECISION_NO_ACTION_COMPLETE
+    assert _next_decision(db_path, "AAPL") == DECISION_REFRESH_SEC_CONFIRMATION
 
 
 def test_plan_mode_historical_unknown_unaffected_without_managed_attempt(tmp_path: Path) -> None:
@@ -1388,6 +1395,230 @@ def test_plan_mode_mixed_outcomes_persist_matching_statuses(
         "FAIL": "FETCH_FAILED",
         "NODATA": "PUBLISHED_DATA_NOT_FETCHED",
     }
+
+
+def test_plan_mode_sec_first_success_skips_live_yahoo_and_confirms_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quarter_update_sec_first.db"
+    run_migration(db_path)
+    _seed_earnings_context(db_path, "AAPL")
+    plan_path = _write_plan("pytest_quarter_update_sec_first", db_path, [_candidate("AAPL")])
+    calls: list[str] = []
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_sec_raw_bootstrap", lambda **_kwargs: ("0000320193", 10))
+
+    def fake_sec_build(**_kwargs: object) -> tuple[int, int]:
+        calls.append("sec_build")
+        _insert_assessment_quarter(db_path, "AAPL", complete=True)
+        return 1, 1
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_sec_quarterly_build_step", fake_sec_build)
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_yahoo_audit",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("live Yahoo should not run after SEC target success")),
+    )
+    _mock_downstream(monkeypatch)
+    _mock_usa_valuation(monkeypatch)
+
+    run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "unused_osakedata.db",
+        run_id="RUN",
+        market=None,
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    status = _status_row(db_path, "AAPL")
+    assert calls == ["sec_build"]
+    assert status["ingestion_status"] == "QUARTER_BASIC_COMPLETE"
+    assert status["source_confirmation_status"] == "SEC_CONFIRMED"
+    assert _next_decision(db_path, "AAPL") == DECISION_NO_ACTION_COMPLETE
+
+
+def test_plan_mode_sec_missing_yahoo_complete_fast_ingest_creates_sec_followup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quarter_update_yahoo_fast_ingest.db"
+    run_migration(db_path)
+    _seed_earnings_context(db_path, "AAPL")
+    plan_path = _write_plan("pytest_quarter_update_yahoo_fast_ingest", db_path, [_candidate("AAPL")])
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_sec_raw_bootstrap", lambda **_kwargs: ("0000320193", 10))
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_sec_quarterly_build_step", lambda **_kwargs: (0, 0))
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_yahoo_audit",
+        lambda **_kwargs: {"ok_count": 1, "empty_count": 0, "error_count": 0, "rows_written": 1},
+    )
+
+    def fake_yahoo_write(**_kwargs: object) -> dict[str, object]:
+        _insert_yahoo_quarterly_row(
+            db_path,
+            market="usa",
+            symbol="AAPL",
+            period_end_date="2026-06-30",
+            revenue=100,
+            operating_income=10,
+            operating_cashflow=8,
+            capex=-3,
+            free_cashflow=5,
+            cash=20,
+            total_debt=2,
+            shares_outstanding=1000,
+        )
+        return {"rows_written": 1, "rows_normalized": 1, "rows_skipped": 0, "source_run_id": "YRAW"}
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_yahoo_quarterly_write", fake_yahoo_write)
+    _mock_downstream(monkeypatch)
+    _mock_usa_valuation(monkeypatch)
+
+    run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "unused_osakedata.db",
+        run_id="RUN",
+        market=None,
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        quarter = conn.execute(
+            "SELECT revenue, ebit, run_id FROM rc_fundamental_quarterly WHERE ticker='AAPL' AND period_end_date='2026-06-30'"
+        ).fetchone()
+    status = _status_row(db_path, "AAPL")
+    assert quarter == (100.0, 10.0, "RUN__ENRICH")
+    assert status["ingestion_status"] == "QUARTER_BASIC_COMPLETE"
+    assert status["source_confirmation_status"] == "YAHOO_BACKED_SEC_PENDING"
+    assert _next_decision(db_path, "AAPL") == DECISION_REFRESH_SEC_CONFIRMATION
+
+
+def test_plan_mode_yahoo_complete_then_later_sec_confirmation_overwrites_sec_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quarter_update_yahoo_then_sec.db"
+    run_migration(db_path)
+    _seed_earnings_context(db_path, "AAPL")
+    _insert_assessment_quarter(db_path, "AAPL", complete=True)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "UPDATE rc_fundamental_quarterly SET revenue = 100, ebit = 10, run_id = 'YAHOO_FAST' WHERE ticker='AAPL' AND period_end_date='2026-06-30'"
+        )
+        conn.commit()
+    run_fundamental_quarter_update.persist_managed_update_ingestion_status(
+        db_path=db_path,
+        ticker="AAPL",
+        market="usa",
+        target_period_end_date="2026-06-30",
+        run_id="OLD",
+        post_update_result="UPDATED_COMPLETE",
+        source_confirmation={"source_confirmation_status": "YAHOO_BACKED_SEC_PENDING", "source_confirmation_source": "yahoo"},
+    )
+    plan_path = _write_plan("pytest_quarter_update_yahoo_then_sec", db_path, [_candidate("AAPL", "REFRESH_SEC_CONFIRMATION")])
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_sec_raw_bootstrap", lambda **_kwargs: ("0000320193", 10))
+
+    def fake_sec_build(**_kwargs: object) -> tuple[int, int]:
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO rc_fundamental_quarterly (
+                    ticker, period_end_date, revenue, ebit, operating_cashflow, capex,
+                    free_cashflow, cash, total_debt, shares_outstanding, run_id
+                ) VALUES ('AAPL', '2026-06-30', 111, 11, 8, -3, 5, 20, 2, 1000, 'RUN__QUARTERLY')
+                """
+            )
+            conn.commit()
+        return 1, 1
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_sec_quarterly_build_step", fake_sec_build)
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_yahoo_audit",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("live Yahoo should not run after SEC target success")),
+    )
+    _mock_downstream(monkeypatch)
+    _mock_usa_valuation(monkeypatch)
+
+    run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "unused_osakedata.db",
+        run_id="RUN",
+        market=None,
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        quarter = conn.execute(
+            "SELECT revenue, ebit, run_id FROM rc_fundamental_quarterly WHERE ticker='AAPL' AND period_end_date='2026-06-30'"
+        ).fetchone()
+    status = _status_row(db_path, "AAPL")
+    assert quarter == (111.0, 11.0, "RUN__QUARTERLY")
+    assert status["source_confirmation_status"] == "SEC_CONFIRMED"
+    assert _next_decision(db_path, "AAPL") == DECISION_NO_ACTION_COMPLETE
+
+
+def test_plan_mode_sec_error_after_yahoo_complete_keeps_completeness_and_retries_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quarter_update_sec_error_after_yahoo.db"
+    run_migration(db_path)
+    _seed_earnings_context(db_path, "AAPL")
+    _insert_assessment_quarter(db_path, "AAPL", complete=True)
+    run_fundamental_quarter_update.persist_managed_update_ingestion_status(
+        db_path=db_path,
+        ticker="AAPL",
+        market="usa",
+        target_period_end_date="2026-06-30",
+        run_id="OLD",
+        post_update_result="UPDATED_COMPLETE",
+        source_confirmation={"source_confirmation_status": "YAHOO_BACKED_SEC_PENDING", "source_confirmation_source": "yahoo"},
+    )
+    plan_path = _write_plan("pytest_quarter_update_sec_error_after_yahoo", db_path, [_candidate("AAPL", "REFRESH_SEC_CONFIRMATION")])
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_sec_raw_bootstrap",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("SEC_FETCH_FAILED:timeout")),
+    )
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_yahoo_audit", lambda **_kwargs: {"ok_count": 1})
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_yahoo_quarterly_write", lambda **_kwargs: {"rows_written": 0})
+    _mock_downstream(monkeypatch)
+    calls: list[dict] = []
+    _capture_usa_valuation(monkeypatch, calls)
+
+    run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "unused_osakedata.db",
+        run_id="RUN",
+        market=None,
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+    )
+
+    status = _status_row(db_path, "AAPL")
+    assert status["ingestion_status"] == "QUARTER_BASIC_COMPLETE"
+    assert status["source_confirmation_status"] == "SEC_CONFIRMATION_FAILED_RETRYABLE"
+    assert _next_decision(db_path, "AAPL") == DECISION_REFRESH_SEC_CONFIRMATION
+    assert calls
 
 
 def test_invalid_state_missing_detected_date_fails(tmp_path: Path) -> None:

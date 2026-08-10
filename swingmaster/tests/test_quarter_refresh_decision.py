@@ -13,6 +13,7 @@ from swingmaster.fundamentals.quarter_refresh_decision import (
     DECISION_NO_ACTION_COMPLETE,
     DECISION_NO_ACTION_INACTIVE_SECURITY,
     DECISION_NO_ACTION_UPCOMING,
+    DECISION_REFRESH_SEC_CONFIRMATION,
     DECISION_RETRY_FETCH_FAILED,
     DECISION_RETRY_PARTIAL_QUARTER,
     DECISION_REVIEW_AMBIGUOUS_PERIOD,
@@ -83,6 +84,52 @@ def test_completed_event_complete_quarter_no_action_even_when_ttm_or_score_incom
     assert row.quarter_basic_complete == 1
     assert row.ttm_input_complete == 0
     assert row.score_history_complete == 0
+    assert row.eligible_for_future_auto_fetch == 0
+
+
+def test_yahoo_backed_complete_quarter_requires_sec_confirmation_followup(tmp_path: Path) -> None:
+    db_path = _db(tmp_path)
+    _seed_ticker(db_path, "AAPL", calendar_status="DUE_TODAY", estimated_date="2026-08-07")
+    _seed_event(db_path, "AAPL", 7, "2026-08-07")
+    _seed_match(db_path, "AAPL", event_id=7, period="2026-06-30")
+    _seed_quarter(db_path, "AAPL", "2026-06-30")
+    _seed_ingestion_status(
+        db_path,
+        "AAPL",
+        "2026-06-30",
+        quarter_basic=1,
+        ingestion_status="QUARTER_BASIC_COMPLETE",
+        ingestion_evidence_type="MANAGED_UPDATE_ATTEMPT",
+        source_confirmation_status="YAHOO_BACKED_SEC_PENDING",
+    )
+
+    row = _decisions(db_path)["AAPL"]
+
+    assert row.decision == DECISION_REFRESH_SEC_CONFIRMATION
+    assert row.decision_priority == PRIORITY_P2_RETRY
+    assert row.eligible_for_future_auto_fetch == 1
+    assert row.planned_action == "PLAN_REFRESH_SEC_CONFIRMATION"
+
+
+def test_historical_complete_unknown_source_does_not_create_sec_backlog(tmp_path: Path) -> None:
+    db_path = _db(tmp_path)
+    _seed_ticker(db_path, "AAPL", calendar_status="DUE_TODAY", estimated_date="2026-08-07")
+    _seed_event(db_path, "AAPL", 7, "2026-08-07")
+    _seed_match(db_path, "AAPL", event_id=7, period="2026-06-30")
+    _seed_quarter(db_path, "AAPL", "2026-06-30")
+    _seed_ingestion_status(
+        db_path,
+        "AAPL",
+        "2026-06-30",
+        quarter_basic=1,
+        ingestion_status="QUARTER_BASIC_COMPLETE",
+        ingestion_evidence_type="CURRENT_DB_STATE_ONLY",
+        source_confirmation_status="SOURCE_CONFIRMATION_UNKNOWN",
+    )
+
+    row = _decisions(db_path)["AAPL"]
+
+    assert row.decision == DECISION_NO_ACTION_COMPLETE
     assert row.eligible_for_future_auto_fetch == 0
 
 
@@ -512,6 +559,7 @@ def _seed_ingestion_status(
     missing: str = "[]",
     ingestion_status: str = "UNKNOWN_HISTORICAL_INGEST_COMPLETENESS",
     ingestion_evidence_type: str = "CURRENT_DB_STATE_ONLY",
+    source_confirmation_status: str = "SOURCE_CONFIRMATION_UNKNOWN",
 ) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -521,16 +569,26 @@ def _seed_ingestion_status(
                 quarter_basic_complete, ttm_input_complete, score_history_complete,
                 valuation_input_ready, historical_research_ready, missing_basic_fields,
                 missing_core_fields_json, missing_ttm_fields_json, missing_score_fields_json,
-                data_quality_warnings_json, retry_recommendation, last_checked_at_utc,
-                assessment_policy_version, ingestion_evidence_type, run_id, assessed_at_utc,
+                data_quality_warnings_json, retry_recommendation, source_confirmation_status,
+                last_checked_at_utc, assessment_policy_version, ingestion_evidence_type, run_id, assessed_at_utc,
                 created_at_utc, updated_at_utc
             ) VALUES (
                 'usa', ?, ?, ?, 'TEST', ?, ?, ?, 0, 0, ?, '[]', '[]', '[]', '[]',
-                'TEST', '2026-08-07T00:00:00Z', 'test', ?,
+                'TEST', ?, '2026-08-07T00:00:00Z', 'test', ?,
                 'TEST', '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z', '2026-08-07T00:00:00Z'
             )
             """,
-            (ticker, period, ingestion_status, quarter_basic, ttm, score, missing, ingestion_evidence_type),
+            (
+                ticker,
+                period,
+                ingestion_status,
+                quarter_basic,
+                ttm,
+                score,
+                missing,
+                source_confirmation_status,
+                ingestion_evidence_type,
+            ),
         )
 
 

@@ -218,6 +218,10 @@ QUARTER_INGESTION_STATUS_REQUIRED_COLUMNS = (
     "last_fetch_status",
     "last_fetch_source",
     "last_source_observed_at_utc",
+    "source_confirmation_status",
+    "source_confirmation_source",
+    "last_sec_checked_at_utc",
+    "sec_confirmation_run_id",
     "last_checked_at_utc",
     "assessment_policy_version",
     "ingestion_evidence_type",
@@ -657,8 +661,17 @@ def ensure_quarter_ingestion_status_schema(conn: sqlite3.Connection) -> None:
             select_exprs.append("'[]' AS missing_basic_fields")
         elif column in {"supported_source_field_count", "source_non_null_field_count", "persisted_matching_field_count"}:
             select_exprs.append("NULL AS " + column)
-        elif column in {"last_fetch_status", "last_fetch_source", "last_source_observed_at_utc"}:
+        elif column in {
+            "last_fetch_status",
+            "last_fetch_source",
+            "last_source_observed_at_utc",
+            "source_confirmation_source",
+            "last_sec_checked_at_utc",
+            "sec_confirmation_run_id",
+        }:
             select_exprs.append("NULL AS " + column)
+        elif column == "source_confirmation_status":
+            select_exprs.append("'SOURCE_CONFIRMATION_UNKNOWN' AS source_confirmation_status")
         elif column == "last_checked_at_utc":
             select_exprs.append("assessed_at_utc AS last_checked_at_utc")
         elif column == "ingestion_evidence_type":
@@ -720,6 +733,8 @@ def _create_quarter_ingestion_status_indexes(conn: sqlite3.Connection) -> None:
         ON rc_fundamental_quarter_ingestion_status(last_checked_at_utc);
         CREATE INDEX IF NOT EXISTS idx_fundamental_qis_earnings_event
         ON rc_fundamental_quarter_ingestion_status(earnings_event_id);
+        CREATE INDEX IF NOT EXISTS idx_fundamental_qis_source_confirmation
+        ON rc_fundamental_quarter_ingestion_status(source_confirmation_status, last_sec_checked_at_utc);
         """
     )
 

@@ -103,6 +103,17 @@ MANAGED_STATUS_PARTIAL = "FUNDAMENTALS_PARTIAL"
 MANAGED_STATUS_FETCH_FAILED = "FETCH_FAILED"
 MANAGED_STATUS_NOT_FETCHED = "PUBLISHED_DATA_NOT_FETCHED"
 MANAGED_COMPLETE_STATUSES = {MANAGED_STATUS_COMPLETE, "INGEST_COMPLETE"}
+SOURCE_CONFIRMATION_UNKNOWN = "SOURCE_CONFIRMATION_UNKNOWN"
+SOURCE_CONFIRMATION_YAHOO_PENDING_SEC = "YAHOO_BACKED_SEC_PENDING"
+SOURCE_CONFIRMATION_YAHOO_PARTIAL_SEC_PENDING = "YAHOO_PARTIAL_SEC_PENDING"
+SOURCE_CONFIRMATION_SEC_CONFIRMED = "SEC_CONFIRMED"
+SOURCE_CONFIRMATION_SEC_CONFIRMED_YAHOO_ENRICHED = "SEC_CONFIRMED_YAHOO_ENRICHED"
+SOURCE_CONFIRMATION_SEC_FAILED_RETRYABLE = "SEC_CONFIRMATION_FAILED_RETRYABLE"
+SOURCE_CONFIRMATION_SEC_NO_TARGET = "SEC_TARGET_NOT_AVAILABLE"
+SOURCE_CONFIRMATION_CONFIRMED_STATUSES = {
+    SOURCE_CONFIRMATION_SEC_CONFIRMED,
+    SOURCE_CONFIRMATION_SEC_CONFIRMED_YAHOO_ENRICHED,
+}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -697,6 +708,74 @@ def quarterly_refresh_rows_written(summary: Mapping[str, object] | None) -> int:
     return total
 
 
+def _summary_nested_int(summary: Mapping[str, Any] | None, *path: str) -> int:
+    current: Any = summary
+    for key in path:
+        if not isinstance(current, Mapping):
+            return 0
+        current = current.get(key)
+    return _int_value(current)
+
+
+def _source_confirmation_for_refresh(summary: Mapping[str, Any] | None, post_update_result: str) -> dict[str, object]:
+    if not isinstance(summary, Mapping):
+        return {
+            "source_confirmation_status": SOURCE_CONFIRMATION_UNKNOWN,
+            "source_confirmation_source": None,
+        }
+    sec_target_available = bool(summary.get("sec_target_available"))
+    sec_error_message = summary.get("sec_error_message")
+    yahoo_live_attempted = bool(summary.get("yahoo_live_refresh_attempted"))
+    yahoo_inserted = _summary_nested_int(summary, "summary", "rows_inserted") > 0
+    yahoo_enriched = _summary_nested_int(summary, "summary", "fields_filled") > 0
+    sec_checked_at = summary.get("sec_checked_at_utc")
+    sec_run_id = summary.get("sec_run_id")
+
+    if sec_target_available:
+        return {
+            "source_confirmation_status": (
+                SOURCE_CONFIRMATION_SEC_CONFIRMED_YAHOO_ENRICHED if yahoo_enriched else SOURCE_CONFIRMATION_SEC_CONFIRMED
+            ),
+            "source_confirmation_source": "sec_edgar",
+            "last_sec_checked_at_utc": sec_checked_at,
+            "sec_confirmation_run_id": sec_run_id,
+        }
+    if yahoo_inserted and post_update_result == "UPDATED_COMPLETE":
+        return {
+            "source_confirmation_status": SOURCE_CONFIRMATION_YAHOO_PENDING_SEC,
+            "source_confirmation_source": "yahoo",
+            "last_sec_checked_at_utc": sec_checked_at,
+            "sec_confirmation_run_id": sec_run_id,
+        }
+    if sec_error_message and post_update_result == "UPDATED_COMPLETE":
+        return {
+            "source_confirmation_status": SOURCE_CONFIRMATION_SEC_FAILED_RETRYABLE,
+            "source_confirmation_source": "yahoo",
+            "last_sec_checked_at_utc": sec_checked_at,
+            "sec_confirmation_run_id": sec_run_id,
+        }
+    if yahoo_inserted and post_update_result == "UPDATED_PARTIAL":
+        return {
+            "source_confirmation_status": SOURCE_CONFIRMATION_YAHOO_PARTIAL_SEC_PENDING,
+            "source_confirmation_source": "yahoo",
+            "last_sec_checked_at_utc": sec_checked_at,
+            "sec_confirmation_run_id": sec_run_id,
+        }
+    if yahoo_live_attempted:
+        return {
+            "source_confirmation_status": SOURCE_CONFIRMATION_SEC_NO_TARGET,
+            "source_confirmation_source": None,
+            "last_sec_checked_at_utc": sec_checked_at,
+            "sec_confirmation_run_id": sec_run_id,
+        }
+    return {
+        "source_confirmation_status": SOURCE_CONFIRMATION_UNKNOWN,
+        "source_confirmation_source": None,
+        "last_sec_checked_at_utc": sec_checked_at,
+        "sec_confirmation_run_id": sec_run_id,
+    }
+
+
 def _managed_basic_status(assessment: Any | None) -> str:
     if assessment is None:
         return "NOT_ASSESSABLE"
@@ -735,6 +814,7 @@ def persist_managed_update_ingestion_status(
     post_update_result: str,
     failure_step: str | None = None,
     error_message: str | None = None,
+    source_confirmation: Mapping[str, object] | None = None,
 ) -> dict[str, object] | None:
     if market.strip().lower() != "usa":
         return None
@@ -775,9 +855,39 @@ def persist_managed_update_ingestion_status(
 
         existing_ingestion_status = None if existing_status is None else str(existing_status["ingestion_status"])
         if existing_ingestion_status in MANAGED_COMPLETE_STATUSES and post_update_result != "UPDATED_COMPLETE":
+            source_status = SOURCE_CONFIRMATION_SEC_FAILED_RETRYABLE
+            source = None if source_confirmation is None else source_confirmation.get("source_confirmation_source")
+            sec_checked_at = None if source_confirmation is None else source_confirmation.get("last_sec_checked_at_utc")
+            sec_run_id = None if source_confirmation is None else source_confirmation.get("sec_confirmation_run_id")
+            if existing_status is not None:
+                conn.execute(
+                    """
+                    UPDATE rc_fundamental_quarter_ingestion_status
+                    SET source_confirmation_status = ?,
+                        source_confirmation_source = COALESCE(?, source_confirmation_source),
+                        last_sec_checked_at_utc = COALESCE(?, last_sec_checked_at_utc),
+                        sec_confirmation_run_id = COALESCE(?, sec_confirmation_run_id),
+                        updated_at_utc = ?
+                    WHERE market = ?
+                      AND ticker = ?
+                      AND period_end_date = ?
+                    """,
+                    (
+                        source_status,
+                        source,
+                        sec_checked_at,
+                        sec_run_id,
+                        now,
+                        normalized_market,
+                        normalized_ticker,
+                        target_period_end_date,
+                    ),
+                )
+                conn.commit()
             return {
                 "status_write_action": "preserved_complete",
                 "ingestion_status": existing_ingestion_status,
+                "source_confirmation_status": source_status,
             }
 
         assessment = assess_quarter_completeness(dict(quarter_row), market=normalized_market) if quarter_row else None
@@ -818,6 +928,17 @@ def persist_managed_update_ingestion_status(
             quarter_basic_complete = int(assessment.quarter_basic_complete)
             valuation_input_ready = int(assessment.valuation_input_ready)
             historical_research_ready = int(assessment.historical_research_ready)
+        source_confirmation_status = SOURCE_CONFIRMATION_UNKNOWN
+        source_confirmation_source = None
+        last_sec_checked_at_utc = None
+        sec_confirmation_run_id = None
+        if source_confirmation is not None:
+            source_confirmation_status = str(
+                source_confirmation.get("source_confirmation_status") or SOURCE_CONFIRMATION_UNKNOWN
+            )
+            source_confirmation_source = source_confirmation.get("source_confirmation_source")
+            last_sec_checked_at_utc = source_confirmation.get("last_sec_checked_at_utc")
+            sec_confirmation_run_id = source_confirmation.get("sec_confirmation_run_id")
 
         conn.execute(
             """
@@ -845,6 +966,10 @@ def persist_managed_update_ingestion_status(
                 last_fetch_status,
                 last_fetch_source,
                 last_source_observed_at_utc,
+                source_confirmation_status,
+                source_confirmation_source,
+                last_sec_checked_at_utc,
+                sec_confirmation_run_id,
                 last_checked_at_utc,
                 assessment_policy_version,
                 ingestion_evidence_type,
@@ -852,7 +977,7 @@ def persist_managed_update_ingestion_status(
                 assessed_at_utc,
                 created_at_utc,
                 updated_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(market, ticker, period_end_date) DO UPDATE SET
                 earnings_event_id = excluded.earnings_event_id,
                 announcement_date = excluded.announcement_date,
@@ -874,6 +999,10 @@ def persist_managed_update_ingestion_status(
                 last_fetch_status = excluded.last_fetch_status,
                 last_fetch_source = excluded.last_fetch_source,
                 last_source_observed_at_utc = excluded.last_source_observed_at_utc,
+                source_confirmation_status = excluded.source_confirmation_status,
+                source_confirmation_source = excluded.source_confirmation_source,
+                last_sec_checked_at_utc = excluded.last_sec_checked_at_utc,
+                sec_confirmation_run_id = excluded.sec_confirmation_run_id,
                 last_checked_at_utc = excluded.last_checked_at_utc,
                 assessment_policy_version = excluded.assessment_policy_version,
                 ingestion_evidence_type = excluded.ingestion_evidence_type,
@@ -903,6 +1032,10 @@ def persist_managed_update_ingestion_status(
                 ingestion_status,
                 "sec_edgar,yahoo_fallback",
                 now,
+                source_confirmation_status,
+                source_confirmation_source,
+                last_sec_checked_at_utc,
+                sec_confirmation_run_id,
                 now,
                 ASSESSMENT_POLICY_VERSION,
                 MANAGED_INGESTION_EVIDENCE_TYPE,
@@ -918,6 +1051,7 @@ def persist_managed_update_ingestion_status(
         "ingestion_status": ingestion_status,
         "quarter_basic_complete": quarter_basic_complete,
         "ingestion_evidence_type": MANAGED_INGESTION_EVIDENCE_TYPE,
+        "source_confirmation_status": source_confirmation_status,
     }
 
 
@@ -1096,6 +1230,28 @@ def run_sec_quarterly_build_step(db_path: Path, ticker: str, run_id: str, dry_ru
             run_id=run_id,
             dry_run=dry_run,
         )
+
+
+def load_source_confirmation_status(
+    conn: sqlite3.Connection,
+    *,
+    market: str,
+    ticker: str,
+    period_end_date: str,
+) -> str:
+    row = conn.execute(
+        """
+        SELECT source_confirmation_status
+        FROM rc_fundamental_quarter_ingestion_status
+        WHERE market = ?
+          AND ticker = ?
+          AND period_end_date = ?
+        """,
+        (market, ticker.upper(), period_end_date),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return SOURCE_CONFIRMATION_UNKNOWN
+    return str(row[0])
 
 
 def run_sec_latest_writer_vintage_side_write(
@@ -2487,6 +2643,7 @@ def run_quarterly_refresh(
     market: str,
     child_run_ids: dict[str, str],
     target_period_end_date: str | None = None,
+    allow_live_yahoo_fast_ingest: bool = False,
     sec_vintage_options: dict[str, object] | None = None,
     yahoo_fallback_vintage_options: dict[str, object] | None = None,
     sec_latest_writer_vintage_options: dict[str, object] | None = None,
@@ -2508,66 +2665,116 @@ def run_quarterly_refresh(
                 detected_source_period_end_date = row[0] if row is not None else None
             if detected_source_period_end_date is None:
                 raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_DETECTED_DATE_MISSING:{ticker}")
-            sec_refresh_required = not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date)
+            source_confirmation_status = load_source_confirmation_status(
+                conn,
+                market=market,
+                ticker=ticker,
+                period_end_date=detected_source_period_end_date,
+            )
+            target_already_satisfied = usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date)
+            if source_confirmation_status == SOURCE_CONFIRMATION_UNKNOWN:
+                sec_refresh_required = not target_already_satisfied
+            else:
+                sec_refresh_required = source_confirmation_status not in SOURCE_CONFIRMATION_CONFIRMED_STATUSES
 
         sec_refresh_summary: dict[str, Any] | None = None
+        sec_error_message: str | None = None
+        sec_target_available = False
         if sec_refresh_required:
-            cik, rows = run_sec_raw_bootstrap(
-                db_path=db_path,
-                ticker=ticker,
-                run_id=child_run_ids["sec_raw"],
-                retrieved_at_utc=retrieved_at_utc,
-                user_agent=SEC_USER_AGENT,
-                dry_run=False,
-            )
-            sec_reconstruct_summary: dict[str, Any] | None = None
-            if sec_vintage_options is not None:
-                sec_fact_rows_read, reconstructed_rows = run_sec_reconstruct_step(
+            try:
+                cik, rows = run_sec_raw_bootstrap(
                     db_path=db_path,
                     ticker=ticker,
-                    run_id=child_run_ids["sec_reconstruct"],
+                    run_id=child_run_ids["sec_raw"],
                     retrieved_at_utc=retrieved_at_utc,
+                    user_agent=SEC_USER_AGENT,
                     dry_run=False,
-                    sec_vintage_options=sec_vintage_options,
                 )
-                sec_reconstruct_summary = {
-                    "sec_fact_rows_read": sec_fact_rows_read,
-                    "quarterly_rows_reconstructed": len(reconstructed_rows),
-                    "vintage_requested": True,
-                }
-            periods_detected, rows_written = run_sec_quarterly_build_step(
-                db_path=db_path,
-                ticker=ticker,
-                run_id=child_run_ids["quarterly"],
-                dry_run=False,
-            )
-            sec_latest_writer_vintage_summary = None
-            if sec_latest_writer_vintage_options is not None:
-                sec_latest_writer_vintage_summary = run_sec_latest_writer_vintage_side_write(
+                sec_reconstruct_summary: dict[str, Any] | None = None
+                if sec_vintage_options is not None:
+                    sec_fact_rows_read, reconstructed_rows = run_sec_reconstruct_step(
+                        db_path=db_path,
+                        ticker=ticker,
+                        run_id=child_run_ids["sec_reconstruct"],
+                        retrieved_at_utc=retrieved_at_utc,
+                        dry_run=False,
+                        sec_vintage_options=sec_vintage_options,
+                    )
+                    sec_reconstruct_summary = {
+                        "sec_fact_rows_read": sec_fact_rows_read,
+                        "quarterly_rows_reconstructed": len(reconstructed_rows),
+                        "vintage_requested": True,
+                    }
+                periods_detected, rows_written = run_sec_quarterly_build_step(
                     db_path=db_path,
                     ticker=ticker,
-                    latest_run_id=child_run_ids["quarterly"],
-                    source_run_id=child_run_ids["sec_raw"],
-                    market=str(sec_latest_writer_vintage_options["market"]),
-                    available_at_utc=str(sec_latest_writer_vintage_options["available_at_utc"]),
-                    ingested_at_utc=str(sec_latest_writer_vintage_options["ingested_at_utc"]),
-                    vintage_run_id=str(sec_latest_writer_vintage_options["vintage_run_id"]),
+                    run_id=child_run_ids["quarterly"],
+                    dry_run=False,
                 )
-            sec_refresh_summary = {
-                "cik": cik,
-                "rows": rows,
-                "periods_detected": periods_detected,
-                "rows_written": rows_written,
-                "sec_reconstruct_summary": sec_reconstruct_summary,
-                "sec_latest_writer_vintage_summary": sec_latest_writer_vintage_summary,
-            }
-            with sqlite3.connect(str(db_path)) as conn:
-                if not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date):
+                sec_latest_writer_vintage_summary = None
+                if sec_latest_writer_vintage_options is not None:
+                    sec_latest_writer_vintage_summary = run_sec_latest_writer_vintage_side_write(
+                        db_path=db_path,
+                        ticker=ticker,
+                        latest_run_id=child_run_ids["quarterly"],
+                        source_run_id=child_run_ids["sec_raw"],
+                        market=str(sec_latest_writer_vintage_options["market"]),
+                        available_at_utc=str(sec_latest_writer_vintage_options["available_at_utc"]),
+                        ingested_at_utc=str(sec_latest_writer_vintage_options["ingested_at_utc"]),
+                        vintage_run_id=str(sec_latest_writer_vintage_options["vintage_run_id"]),
+                    )
+                with sqlite3.connect(str(db_path)) as conn:
+                    sec_target_available = usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date)
                     latest_quarter = latest_quarter_period_end_date(conn, ticker)
+                sec_refresh_summary = {
+                    "cik": cik,
+                    "rows": rows,
+                    "periods_detected": periods_detected,
+                    "rows_written": rows_written,
+                    "target_available": sec_target_available,
+                    "sec_reconstruct_summary": sec_reconstruct_summary,
+                    "sec_latest_writer_vintage_summary": sec_latest_writer_vintage_summary,
+                }
+                if not sec_target_available:
                     print(
                         f"WARN ticker={ticker.upper()} step=quarterly_refresh_sec "
                         f"message={_build_sec_missing_detected_message(ticker, detected_source_period_end_date, latest_quarter)}"
                     )
+            except Exception as exc:
+                sec_error_message = str(exc)
+                print(f"WARN ticker={ticker.upper()} step=quarterly_refresh_sec message={sec_error_message}")
+
+        yahoo_live_refresh_summary: dict[str, Any] | None = None
+        if allow_live_yahoo_fast_ingest and sec_refresh_required and not sec_target_available:
+            raw_summary = run_yahoo_audit(
+                db_path=db_path,
+                market=market,
+                exchange="US",
+                symbols_arg=ticker,
+                limit=None,
+                run_id=child_run_ids["raw"],
+                dry_run=False,
+            )
+            if int(raw_summary["ok_count"]) > 0:
+                yahoo_quarterly_summary = run_yahoo_quarterly_write(
+                    db_path=db_path,
+                    market=market,
+                    symbol=ticker,
+                    run_id=child_run_ids["yqtr"],
+                    dry_run=False,
+                    replace_symbol=True,
+                )
+            else:
+                yahoo_quarterly_summary = {
+                    "rows_written": 0,
+                    "rows_normalized": 0,
+                    "rows_skipped": 0,
+                    "source_run_id": "",
+                }
+            yahoo_live_refresh_summary = {
+                "raw_summary": raw_summary,
+                "yahoo_quarterly_summary": yahoo_quarterly_summary,
+            }
 
         enrich_summary = run_yahoo_fallback_enrich(
             db_path=db_path,
@@ -2582,12 +2789,20 @@ def run_quarterly_refresh(
         with sqlite3.connect(str(db_path)) as conn:
             if not usa_quarter_satisfies_detected(conn, ticker, detected_source_period_end_date):
                 latest_quarter = latest_quarter_period_end_date(conn, ticker)
+                if sec_error_message is not None:
+                    raise RuntimeError(sec_error_message)
                 raise RuntimeError(
                     _build_enrich_missing_detected_message(ticker, detected_source_period_end_date, latest_quarter)
                 )
         return {
             "mode": "enrich",
             "sec_refresh_required": sec_refresh_required,
+            "sec_target_available": sec_target_available,
+            "sec_error_message": sec_error_message,
+            "sec_checked_at_utc": retrieved_at_utc if sec_refresh_required else None,
+            "sec_run_id": child_run_ids["sec_raw"] if sec_refresh_required else None,
+            "yahoo_live_refresh_attempted": yahoo_live_refresh_summary is not None,
+            "yahoo_live_refresh_summary": yahoo_live_refresh_summary,
             "sec_refresh_summary": sec_refresh_summary,
             "summary": enrich_summary,
         }
@@ -2653,6 +2868,7 @@ def process_ticker(
         market=market,
         target_period_end_date=str(detected_source_period_end_date),
         child_run_ids=child_run_ids,
+        allow_live_yahoo_fast_ingest=execution_source == "quarter_refresh_plan",
         sec_vintage_options=sec_vintage_options,
         yahoo_fallback_vintage_options=yahoo_fallback_vintage_options,
         sec_latest_writer_vintage_options=sec_latest_writer_vintage_options,
@@ -2749,6 +2965,10 @@ def process_ticker(
         market=market,
         target_period_end_date=str(detected_source_period_end_date),
     )
+    source_confirmation = _source_confirmation_for_refresh(
+        quarterly_refresh_summary,
+        str(target_assessment.get("post_update_result") or ""),
+    )
     quarterly_rows_written = quarterly_refresh_rows_written(quarterly_refresh_summary)
     ttm_rows_written = int(ttm_summary["rows_written"])
     material_fundamentals_changed = int(
@@ -2765,6 +2985,7 @@ def process_ticker(
         "ack_rows_written": ack_rows_written,
         "material_fundamentals_changed": material_fundamentals_changed,
         **target_assessment,
+        **source_confirmation,
         "sec_latest_writer_vintage_summary": sec_latest_writer_vintage_summary,
         "vintage_post_run_guard_summary": post_run_guard_summary,
     }
@@ -3070,6 +3291,7 @@ def run_fundamental_quarter_update(
                     target_period_end_date=str(process_summary.get("target_period_end_date") or current_target_period),
                     run_id=run_id,
                     post_update_result=post_result,
+                    source_confirmation=process_summary,
                 )
             post_update_result_counts[post_result] = post_update_result_counts.get(post_result, 0) + 1
             material_changed = candidate_material_fundamentals_changed(process_summary, post_result)
@@ -3156,6 +3378,11 @@ def run_fundamental_quarter_update(
                     post_update_result="FETCH_FAILED",
                     failure_step=step_name,
                     error_message=message,
+                    source_confirmation={
+                        "source_confirmation_status": SOURCE_CONFIRMATION_SEC_FAILED_RETRYABLE,
+                        "last_sec_checked_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                        "sec_confirmation_run_id": child_run_ids["sec_raw"],
+                    },
                 )
             failed_candidate = {
                 "ticker": current_ticker,

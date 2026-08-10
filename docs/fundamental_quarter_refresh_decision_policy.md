@@ -175,6 +175,24 @@ AND shares_outstanding IS NOT NULL
 
 Plan-based USA `Update Fundamentals` writes authoritative managed-attempt status for the target quarter after each candidate attempt. A complete target quarter is persisted as `QUARTER_BASIC_COMPLETE`; an incomplete but present target quarter is persisted as `FUNDAMENTALS_PARTIAL`; a provider/update fetch failure is persisted as `FETCH_FAILED`; and a successful provider interaction that still leaves no usable target-quarter row is persisted as `PUBLISHED_DATA_NOT_FETCHED`. A transient failure does not downgrade an existing complete managed status. Historical unknown rows remain `UNKNOWN_HISTORICAL_INGEST_COMPLETENESS` unless a managed update attempt actually runs for that target quarter.
 
+Quarter completeness and source confirmation are separate. `quarter_basic_complete = 1` means the row is usable for TTM, lifecycle, scoring, and valuation. `source_confirmation_status` records whether the usable row is SEC-backed or still awaiting authoritative SEC confirmation.
+
+USA plan-based `Update Fundamentals` uses this source order for a target quarter:
+
+```text
+SEC companyfacts/reconstruction first
+Yahoo live raw -> rc_fundamental_yahoo_quarterly cache only if SEC target is unavailable
+Yahoo fallback/enrichment from the cache
+```
+
+If SEC produces the target quarter, SEC is authoritative and Yahoo may only fill SEC NULL fields through the existing fallback enrichment path. The source state becomes `SEC_CONFIRMED` or `SEC_CONFIRMED_YAHOO_ENRICHED`.
+
+If SEC does not produce the target but Yahoo cache/live data can create a usable row, the row may still become `QUARTER_BASIC_COMPLETE`; the source state becomes `YAHOO_BACKED_SEC_PENDING`. Future result checks emit `REFRESH_SEC_CONFIRMATION`, not `FETCH_NEW_QUARTER`, so the same fresh-plan update path retries SEC without treating usable fundamentals as missing.
+
+If Yahoo creates only an incomplete target row, the ingestion status remains `FUNDAMENTALS_PARTIAL` and normal partial retry semantics apply. If no usable target data is available, the managed ingestion status remains unresolved (`PUBLISHED_DATA_NOT_FETCHED` or `FETCH_FAILED` depending on the failure). SEC transient failures after a Yahoo-complete row do not downgrade quarter completeness; they set `SEC_CONFIRMATION_FAILED_RETRYABLE`, which remains eligible for SEC follow-up.
+
+Migration/bootstrap does not infer SEC confirmation for historical rows. Existing rows without managed source evidence use `SOURCE_CONFIRMATION_UNKNOWN` and do not create a new historical SEC-confirmation backlog.
+
 The active leverage metric is `net_debt_to_ebit`; the deprecated `net_debt_to_ebitda` is not part of this policy.
 
 ## Production Audit

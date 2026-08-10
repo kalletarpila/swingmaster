@@ -25,6 +25,7 @@ DECISION_NO_ACTION_COMPLETE = "NO_ACTION_COMPLETE"
 DECISION_WATCH_DUE_TODAY = "WATCH_DUE_TODAY"
 DECISION_WATCH_POST_EVENT_GRACE = "WATCH_POST_EVENT_GRACE"
 DECISION_FETCH_NEW_QUARTER = "FETCH_NEW_QUARTER"
+DECISION_REFRESH_SEC_CONFIRMATION = "REFRESH_SEC_CONFIRMATION"
 DECISION_RETRY_PARTIAL_QUARTER = "RETRY_PARTIAL_QUARTER"
 DECISION_RETRY_FETCH_FAILED = "RETRY_FETCH_FAILED"
 DECISION_REVIEW_DATE_PASSED_NO_EVENT = "REVIEW_DATE_PASSED_NO_EVENT"
@@ -73,6 +74,7 @@ class QuarterRefreshDecisionRow:
     score_history_complete: int | None
     ingestion_status: str | None
     last_fetch_status: str | None
+    source_confirmation_status: str | None
     missing_basic_fields: str | None
     decision_before_activity_suppression: str
     decision: str
@@ -310,6 +312,7 @@ def summarize_quarter_refresh_decisions(rows: list[QuarterRefreshDecisionRow]) -
         "watch_due_today": decision_counts.get(DECISION_WATCH_DUE_TODAY, 0),
         "watch_post_event_grace": decision_counts.get(DECISION_WATCH_POST_EVENT_GRACE, 0),
         "fetch_new_quarter": decision_counts.get(DECISION_FETCH_NEW_QUARTER, 0),
+        "refresh_sec_confirmation": decision_counts.get(DECISION_REFRESH_SEC_CONFIRMATION, 0),
         "retry_partial_quarter": decision_counts.get(DECISION_RETRY_PARTIAL_QUARTER, 0),
         "retry_fetch_failed": decision_counts.get(DECISION_RETRY_FETCH_FAILED, 0),
         "review_date_passed_no_event": decision_counts.get(DECISION_REVIEW_DATE_PASSED_NO_EVENT, 0),
@@ -436,6 +439,11 @@ def _classify_fetch_decision_without_security(
             return DECISION_FETCH_NEW_QUARTER, "Completed event confirms publication and target quarter is missing."
         if _fetch_failed(quarter_status):
             return DECISION_RETRY_FETCH_FAILED, "Target quarter has a recorded fetch failure."
+        if _sec_confirmation_retryable(quarter_status):
+            return (
+                DECISION_REFRESH_SEC_CONFIRMATION,
+                "Target quarter is usable from Yahoo, but authoritative SEC confirmation is still pending.",
+            )
         if int(_value(quarter_status, "quarter_basic_complete") or 0) == 1:
             return DECISION_NO_ACTION_COMPLETE, "Target quarter exists and quarter_basic_complete is true."
         if not _managed_partial_retryable(quarter_status):
@@ -505,6 +513,7 @@ def _row(
         score_history_complete=_int(quarter_status, "score_history_complete"),
         ingestion_status=_text(quarter_status, "ingestion_status"),
         last_fetch_status=_text(quarter_status, "last_fetch_status"),
+        source_confirmation_status=_text(quarter_status, "source_confirmation_status"),
         missing_basic_fields=_text(quarter_status, "missing_basic_fields"),
         decision_before_activity_suppression=decision_before_activity_suppression,
         decision=decision,
@@ -520,7 +529,7 @@ def _row(
 def priority_for_decision(decision: str) -> str:
     if decision == DECISION_FETCH_NEW_QUARTER:
         return PRIORITY_P1_FETCH_NOW
-    if decision in {DECISION_RETRY_FETCH_FAILED, DECISION_RETRY_PARTIAL_QUARTER}:
+    if decision in {DECISION_RETRY_FETCH_FAILED, DECISION_RETRY_PARTIAL_QUARTER, DECISION_REFRESH_SEC_CONFIRMATION}:
         return PRIORITY_P2_RETRY
     if decision in {DECISION_WATCH_DUE_TODAY, DECISION_WATCH_POST_EVENT_GRACE}:
         return PRIORITY_P3_WATCH
@@ -537,6 +546,7 @@ def priority_for_decision(decision: str) -> str:
 def planned_action_for_decision(decision: str) -> str:
     return {
         DECISION_FETCH_NEW_QUARTER: "PLAN_FETCH_QUARTERLY_FUNDAMENTALS",
+        DECISION_REFRESH_SEC_CONFIRMATION: "PLAN_REFRESH_SEC_CONFIRMATION",
         DECISION_RETRY_PARTIAL_QUARTER: "PLAN_RETRY_QUARTERLY_FUNDAMENTALS",
         DECISION_RETRY_FETCH_FAILED: "PLAN_RETRY_AFTER_BACKOFF",
         DECISION_WATCH_DUE_TODAY: "WATCH_FOR_COMPLETED_EVENT",
@@ -552,7 +562,12 @@ def planned_action_for_decision(decision: str) -> str:
 
 
 def _is_auto_fetch_candidate(decision_pair: tuple[str, str]) -> bool:
-    return decision_pair[0] in {DECISION_FETCH_NEW_QUARTER, DECISION_RETRY_FETCH_FAILED, DECISION_RETRY_PARTIAL_QUARTER}
+    return decision_pair[0] in {
+        DECISION_FETCH_NEW_QUARTER,
+        DECISION_RETRY_FETCH_FAILED,
+        DECISION_RETRY_PARTIAL_QUARTER,
+        DECISION_REFRESH_SEC_CONFIRMATION,
+    }
 
 
 def _event_confirms_calendar(
@@ -585,6 +600,20 @@ def _managed_partial_retryable(row: Mapping[str, Any]) -> bool:
     if evidence_type and evidence_type != "CURRENT_DB_STATE_ONLY":
         return True
     return False
+
+
+def _sec_confirmation_retryable(row: Mapping[str, Any]) -> bool:
+    if int(_value(row, "quarter_basic_complete") or 0) != 1:
+        return False
+    evidence_type = str(_value(row, "ingestion_evidence_type") or "").upper()
+    if evidence_type in {"", "CURRENT_DB_STATE_ONLY"}:
+        return False
+    status = str(_value(row, "source_confirmation_status") or "").upper()
+    return status in {
+        "YAHOO_BACKED_SEC_PENDING",
+        "SEC_CONFIRMATION_FAILED_RETRYABLE",
+        "SEC_TARGET_NOT_AVAILABLE",
+    }
 
 
 def _select_tickers(conn: sqlite3.Connection, *, tickers: list[str] | None, market: str) -> list[str]:

@@ -20,6 +20,7 @@ from swingmaster.fundamentals.score_percentile import (
     resolve_industry_min_size,
     resolve_min_universe_size,
     run_fundamental_score_percentile,
+    select_calendar_time_percentile_cohort,
 )
 
 
@@ -103,6 +104,92 @@ def test_tie_handling_uses_average_rank() -> None:
     assert percentiles["LOW"] == 0.0
     assert percentiles["TIE1"] == pytest.approx(75.0)
     assert percentiles["TIE2"] == pytest.approx(75.0)
+
+
+def test_calendar_time_cohort_uses_period_proximity_not_fiscal_label() -> None:
+    rows = [
+        _snapshot_row("TARGET", "2026-03-31"),
+        _snapshot_row("APRIL", "2026-04-15"),
+        _snapshot_row("OCT_Q1", "2026-10-31"),
+    ]
+
+    cohort = select_calendar_time_percentile_cohort(
+        rows,
+        target_ticker="TARGET",
+        target_period_end_date="2026-03-31",
+        window_days=45,
+    )
+
+    assert [(row.ticker, row.as_of_date) for row in cohort] == [
+        ("APRIL", "2026-04-15"),
+        ("TARGET", "2026-03-31"),
+    ]
+
+
+def test_calendar_time_cohort_supports_non_calendar_fiscal_target() -> None:
+    rows = [
+        _snapshot_row("AAPL", "2025-12-27"),
+        _snapshot_row("NOV", "2025-11-30"),
+        _snapshot_row("JAN", "2026-01-31"),
+        _snapshot_row("MAR", "2026-03-31"),
+    ]
+
+    cohort = select_calendar_time_percentile_cohort(
+        rows,
+        target_ticker="AAPL",
+        target_period_end_date="2025-12-27",
+        window_days=45,
+    )
+
+    assert [(row.ticker, row.as_of_date) for row in cohort] == [
+        ("AAPL", "2025-12-27"),
+        ("JAN", "2026-01-31"),
+        ("NOV", "2025-11-30"),
+    ]
+
+
+def test_calendar_time_cohort_selects_one_nearest_row_per_peer_with_deterministic_tie() -> None:
+    rows = [
+        _snapshot_row("TARGET", "2026-03-31"),
+        _snapshot_row("PEER", "2026-03-01"),
+        _snapshot_row("PEER", "2026-04-30"),
+        _snapshot_row("BOUNDARY", "2026-05-15"),
+        _snapshot_row("OUTSIDE", "2026-05-16"),
+    ]
+
+    cohort = select_calendar_time_percentile_cohort(
+        rows,
+        target_ticker="TARGET",
+        target_period_end_date="2026-03-31",
+        window_days=45,
+    )
+
+    assert [(row.ticker, row.as_of_date) for row in cohort] == [
+        ("BOUNDARY", "2026-05-15"),
+        ("PEER", "2026-03-01"),
+        ("TARGET", "2026-03-31"),
+    ]
+
+
+def test_calendar_time_percentile_rows_use_target_specific_cohort() -> None:
+    rows = [
+        _snapshot_row("TARGET", "2026-03-31", growth=2.0),
+        _snapshot_row("APRIL", "2026-04-15", growth=1.0),
+        _snapshot_row("OCT_Q1", "2026-10-31", growth=100.0),
+    ]
+
+    percentile_rows = build_percentile_rows(
+        snapshot_rows=rows,
+        target_date="2026-11-15",
+        rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+        run_id="RUN1",
+        created_at_utc="2026-11-15T00:00:00Z",
+        cohort_window_days=45,
+    )
+    by_ticker = {row["ticker"]: row for row in percentile_rows}
+
+    assert by_ticker["TARGET"]["universe_size"] == 2
+    assert by_ticker["TARGET"]["growth_pct_global"] == pytest.approx(100.0)
 
 
 def test_null_raw_values_produce_null_percentiles_and_are_excluded(tmp_path: Path) -> None:

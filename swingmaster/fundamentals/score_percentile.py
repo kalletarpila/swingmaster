@@ -8,10 +8,12 @@ from typing import Any, Iterable
 
 
 FUND_SCORE_PERCENTILE_V2_PRE = "FUND_SCORE_PERCENTILE_V2_PRE"
+FUND_SCORE_PERCENTILE_V3_CALENDAR_TIME_PRE = "FUND_SCORE_PERCENTILE_V3_CALENDAR_TIME_PRE"
 FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE = "FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE"
 SECTOR_MIN_SIZE = 10
 INDUSTRY_MIN_SIZE = 10
 MIN_UNIVERSE_SIZE = 500
+DEFAULT_PERCENTILE_COHORT_WINDOW_DAYS = 45
 MIN_UNIVERSE_SIZE_BY_MARKET = {
     "omxh": 50,
     "usa": 500,
@@ -257,6 +259,36 @@ def build_percentile_rows(
     run_id: str,
     created_at_utc: str,
     market: str = "usa",
+    cohort_window_days: int | None = None,
+) -> list[dict[str, Any]]:
+    if cohort_window_days is not None:
+        return _build_calendar_time_percentile_rows(
+            snapshot_rows=snapshot_rows,
+            target_date=target_date,
+            rule_id=rule_id,
+            run_id=run_id,
+            created_at_utc=created_at_utc,
+            market=market,
+            cohort_window_days=cohort_window_days,
+        )
+    return _build_shared_cohort_percentile_rows(
+        snapshot_rows=snapshot_rows,
+        target_date=target_date,
+        rule_id=rule_id,
+        run_id=run_id,
+        created_at_utc=created_at_utc,
+        market=market,
+    )
+
+
+def _build_shared_cohort_percentile_rows(
+    *,
+    snapshot_rows: list[PercentileSnapshotRow],
+    target_date: str,
+    rule_id: str,
+    run_id: str,
+    created_at_utc: str,
+    market: str,
 ) -> list[dict[str, Any]]:
     universe_size = len(snapshot_rows)
     industry_min_size = resolve_industry_min_size(market)
@@ -378,6 +410,77 @@ def build_percentile_rows(
         rank_key="industry_rank_blended_lifecycle_weighted",
     )
     return percentile_rows
+
+
+def _build_calendar_time_percentile_rows(
+    *,
+    snapshot_rows: list[PercentileSnapshotRow],
+    target_date: str,
+    rule_id: str,
+    run_id: str,
+    created_at_utc: str,
+    market: str,
+    cohort_window_days: int,
+) -> list[dict[str, Any]]:
+    percentile_rows: list[dict[str, Any]] = []
+    rows_by_target_period: dict[str, dict[str, dict[str, Any]]] = {}
+    for target_row in snapshot_rows:
+        cohort_rows_by_ticker = rows_by_target_period.get(target_row.as_of_date)
+        if cohort_rows_by_ticker is None:
+            cohort = select_calendar_time_percentile_cohort(
+                snapshot_rows,
+                target_ticker=target_row.ticker,
+                target_period_end_date=target_row.as_of_date,
+                window_days=cohort_window_days,
+            )
+            cohort_percentile_rows = _build_shared_cohort_percentile_rows(
+                snapshot_rows=cohort,
+                target_date=target_date,
+                rule_id=rule_id,
+                run_id=run_id,
+                created_at_utc=created_at_utc,
+                market=market,
+            )
+            cohort_rows_by_ticker = {str(row["ticker"]): row for row in cohort_percentile_rows}
+            rows_by_target_period[target_row.as_of_date] = cohort_rows_by_ticker
+        percentile_rows.append(cohort_rows_by_ticker[target_row.ticker])
+    return percentile_rows
+
+
+def select_calendar_time_percentile_cohort(
+    snapshot_rows: list[PercentileSnapshotRow],
+    *,
+    target_ticker: str,
+    target_period_end_date: str,
+    window_days: int = DEFAULT_PERCENTILE_COHORT_WINDOW_DAYS,
+) -> list[PercentileSnapshotRow]:
+    target_date = _parse_yyyy_mm_dd(target_period_end_date)
+    selected_by_ticker: dict[str, tuple[tuple[int, int, str, str], PercentileSnapshotRow]] = {}
+    for row in snapshot_rows:
+        peer_date = _parse_yyyy_mm_dd(row.as_of_date)
+        distance = abs((peer_date - target_date).days)
+        if distance > window_days:
+            continue
+        tie_break = (
+            distance,
+            0 if peer_date <= target_date else 1,
+            row.as_of_date,
+            row.ticker,
+        )
+        existing = selected_by_ticker.get(row.ticker)
+        if existing is None or tie_break < existing[0]:
+            selected_by_ticker[row.ticker] = (tie_break, row)
+    if target_ticker not in selected_by_ticker:
+        target_row = next((row for row in snapshot_rows if row.ticker == target_ticker and row.as_of_date == target_period_end_date), None)
+        if target_row is not None:
+            selected_by_ticker[target_ticker] = ((0, 0, target_period_end_date, target_ticker), target_row)
+    return [
+        row
+        for _key, row in sorted(
+            selected_by_ticker.values(),
+            key=lambda item: (item[1].ticker, item[1].as_of_date),
+        )
+    ]
 
 
 def compute_weighted_percentile_score(factor_percentiles: dict[str, float | None]) -> float | None:
@@ -571,6 +674,7 @@ def run_fundamental_score_percentile(
         run_id=run_id,
         created_at_utc=created_at_utc,
         market=market,
+        cohort_window_days=DEFAULT_PERCENTILE_COHORT_WINDOW_DAYS,
     )
     rows_written = 0
     if not dry_run:
@@ -590,6 +694,10 @@ def _coerce_optional_float(value: Any) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _parse_yyyy_mm_dd(value: str) -> datetime:
+    return datetime.strptime(value, "%Y-%m-%d")
 
 
 def _group_rows(

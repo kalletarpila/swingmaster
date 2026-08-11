@@ -336,6 +336,112 @@ def test_build_quarterly_dry_run_does_not_insert_rows(tmp_path: Path) -> None:
         assert row_count == 0
 
 
+def test_build_quarterly_target_period_scope_only_writes_target(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_target_scope.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        for period, revenue in [
+            ("2025-12-31", 100.0),
+            ("2026-03-31", 200.0),
+            ("2026-06-30", 300.0),
+        ]:
+            _insert_raw_row(conn, "AAPL", "income", period, "Total Revenue", revenue)
+            conn.execute(
+                """
+                INSERT INTO rc_fundamental_quarterly (ticker, period_end_date, revenue, run_id)
+                VALUES ('AAPL', ?, ?, 'OLD_RUN')
+                """,
+                (period, revenue - 1.0),
+            )
+        conn.commit()
+
+        periods_detected, rows_written = build_and_insert_quarterly_rows(
+            conn=conn,
+            ticker="AAPL",
+            run_id="TARGET_RUN",
+            dry_run=False,
+            target_period_end_date="2026-03-31",
+            skip_unchanged=True,
+        )
+
+        assert periods_detected == 3
+        assert rows_written == 1
+        rows = conn.execute(
+            """
+            SELECT period_end_date, revenue, run_id
+            FROM rc_fundamental_quarterly
+            ORDER BY period_end_date
+            """
+        ).fetchall()
+        assert rows == [
+            ("2025-12-31", 99.0, "OLD_RUN"),
+            ("2026-03-31", 200.0, "TARGET_RUN"),
+            ("2026-06-30", 299.0, "OLD_RUN"),
+        ]
+
+
+def test_build_quarterly_target_scope_ignores_run_id_only_change(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_target_scope_idempotent.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_raw_row(conn, "AAPL", "income", "2026-03-31", "Total Revenue", 100.0)
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_quarterly (ticker, period_end_date, revenue, run_id)
+            VALUES ('AAPL', '2026-03-31', 100.0, 'OLD_RUN')
+            """
+        )
+        conn.commit()
+
+        periods_detected, rows_written = build_and_insert_quarterly_rows(
+            conn=conn,
+            ticker="AAPL",
+            run_id="NEW_RUN",
+            dry_run=False,
+            target_period_end_date="2026-03-31",
+            skip_unchanged=True,
+        )
+
+        assert periods_detected == 1
+        assert rows_written == 0
+        run_id = conn.execute("SELECT run_id FROM rc_fundamental_quarterly").fetchone()[0]
+        assert run_id == "OLD_RUN"
+
+
+def test_build_quarterly_target_scope_preserves_existing_value_when_sec_reconstructs_null(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_target_scope_preserve_existing.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_raw_row(conn, "AAPL", "income", "2026-03-31", "Total Revenue", 100.0)
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_quarterly (
+                ticker, period_end_date, revenue, gross_profit, run_id
+            ) VALUES ('AAPL', '2026-03-31', 100.0, 40.0, 'OLD_RUN')
+            """
+        )
+        conn.commit()
+
+        periods_detected, rows_written = build_and_insert_quarterly_rows(
+            conn=conn,
+            ticker="AAPL",
+            run_id="NEW_RUN",
+            dry_run=False,
+            target_period_end_date="2026-03-31",
+            skip_unchanged=True,
+        )
+
+        assert periods_detected == 1
+        assert rows_written == 0
+        row = conn.execute(
+            "SELECT revenue, gross_profit, run_id FROM rc_fundamental_quarterly WHERE ticker='AAPL'"
+        ).fetchone()
+        assert row == (100.0, 40.0, "OLD_RUN")
+
+
 def test_build_quarterly_raises_when_no_raw_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamentals_quarterly_missing.db"
     run_migration(db_path)

@@ -1061,8 +1061,6 @@ def persist_managed_update_ingestion_status(
 
 
 def candidate_material_fundamentals_changed(summary: Mapping[str, object], post_update_result: str) -> bool:
-    if post_update_result == "UPDATED_COMPLETE":
-        return True
     if _int_value(summary.get("material_fundamentals_changed")) > 0:
         return True
     if _int_value(summary.get("quarterly_rows_written")) > 0:
@@ -1116,24 +1114,69 @@ def load_eligible_rows(
     return rows
 
 
-def run_lifecycle_step(db_path: Path, ticker: str, dry_run: bool) -> int:
+def run_lifecycle_step(
+    db_path: Path,
+    ticker: str,
+    dry_run: bool,
+    as_of_dates: list[str] | None = None,
+    skip_unchanged: bool = False,
+) -> int:
     with sqlite3.connect(str(db_path)) as conn:
         rows_classified, _class_counts = run_lifecycle_classification(
             conn=conn,
             ticker=ticker.upper(),
             dry_run=dry_run,
+            as_of_dates=as_of_dates,
+            skip_unchanged=skip_unchanged,
         )
     return 0 if dry_run else rows_classified
 
 
-def run_score_step(db_path: Path, ticker: str, dry_run: bool) -> int:
+def run_score_step(
+    db_path: Path,
+    ticker: str,
+    dry_run: bool,
+    as_of_dates: list[str] | None = None,
+    skip_unchanged: bool = False,
+) -> int:
     with sqlite3.connect(str(db_path)) as conn:
         rows_scored, _min_score, _max_score, _avg_score = run_fundamental_scoring(
             conn=conn,
             ticker=ticker.upper(),
             dry_run=dry_run,
+            as_of_dates=as_of_dates,
+            skip_unchanged=skip_unchanged,
         )
     return 0 if dry_run else rows_scored
+
+
+def expand_score_as_of_dates_for_consistency(
+    db_path: Path,
+    ticker: str,
+    changed_ttm_as_of_dates: list[str],
+    *,
+    forward_rows: int = 3,
+) -> list[str]:
+    if not changed_ttm_as_of_dates:
+        return []
+    changed = set(changed_ttm_as_of_dates)
+    with sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT as_of_date
+            FROM rc_fundamental_ttm
+            WHERE ticker = ?
+            ORDER BY as_of_date ASC
+            """,
+            (ticker.upper(),),
+        ).fetchall()
+    ordered = [str(row[0]) for row in rows]
+    selected: set[str] = set(changed)
+    for index, as_of_date in enumerate(ordered):
+        if as_of_date not in changed:
+            continue
+        selected.update(ordered[index + 1 : index + 1 + forward_rows])
+    return [as_of_date for as_of_date in ordered if as_of_date in selected]
 
 
 def latest_quarter_meets_detected(conn: sqlite3.Connection, ticker: str, detected_source_period_end_date: str) -> bool:
@@ -1227,13 +1270,22 @@ def acknowledge_ticker(db_path: Path, ticker: str, run_id: str) -> int:
     return rows_updated
 
 
-def run_sec_quarterly_build_step(db_path: Path, ticker: str, run_id: str, dry_run: bool) -> tuple[int, int]:
+def run_sec_quarterly_build_step(
+    db_path: Path,
+    ticker: str,
+    run_id: str,
+    dry_run: bool,
+    target_period_end_date: str | None = None,
+    skip_unchanged: bool = False,
+) -> tuple[int, int]:
     with sqlite3.connect(str(db_path)) as conn:
         return build_and_insert_quarterly_rows(
             conn=conn,
             ticker=ticker.upper(),
             run_id=run_id,
             dry_run=dry_run,
+            target_period_end_date=target_period_end_date,
+            skip_unchanged=skip_unchanged,
         )
 
 
@@ -2653,6 +2705,7 @@ def run_quarterly_refresh(
     sec_vintage_options: dict[str, object] | None = None,
     yahoo_fallback_vintage_options: dict[str, object] | None = None,
     sec_latest_writer_vintage_options: dict[str, object] | None = None,
+    target_scoped_normalized: bool = False,
 ) -> dict[str, Any]:
     if market == "usa":
         retrieved_at_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -2749,6 +2802,8 @@ def run_quarterly_refresh(
                     ticker=ticker,
                     run_id=child_run_ids["quarterly"],
                     dry_run=False,
+                    target_period_end_date=detected_source_period_end_date if target_scoped_normalized else None,
+                    skip_unchanged=target_scoped_normalized,
                 )
                 sec_latest_writer_vintage_summary = None
                 if sec_latest_writer_vintage_options is not None:
@@ -2822,6 +2877,7 @@ def run_quarterly_refresh(
             dry_run=False,
             replace_audit_for_run=False,
             detected_source_period_end_date=detected_source_period_end_date,
+            target_only=target_scoped_normalized,
             **(yahoo_fallback_vintage_options or {}),
         )
         with sqlite3.connect(str(db_path)) as conn:
@@ -2905,6 +2961,7 @@ def process_ticker(
         "RETRY_PARTIAL_QUARTER",
         "RETRY_FETCH_FAILED",
     }
+    target_scoped_normalized = execution_source == "quarter_refresh_plan"
     quarterly_refresh_summary = run_quarterly_refresh(
         db_path=db_path,
         ticker=ticker,
@@ -2916,6 +2973,7 @@ def process_ticker(
         sec_vintage_options=sec_vintage_options,
         yahoo_fallback_vintage_options=yahoo_fallback_vintage_options,
         sec_latest_writer_vintage_options=sec_latest_writer_vintage_options,
+        target_scoped_normalized=target_scoped_normalized,
     )
     print("STEP quarterly_refresh=OK")
 
@@ -2924,21 +2982,33 @@ def process_ticker(
         ticker=ticker,
         run_id=child_run_ids["ttm"],
         dry_run=False,
-        replace_ticker=True,
+        replace_ticker=not target_scoped_normalized,
+        target_quarter_period_end_date=str(detected_source_period_end_date) if target_scoped_normalized else None,
+        skip_unchanged=target_scoped_normalized,
     )
     print("STEP ttm=OK")
 
+    downstream_as_of_dates = list(ttm_summary.get("written_as_of_dates") or [])
     lifecycle_rows_written = run_lifecycle_step(
         db_path=db_path,
         ticker=ticker,
         dry_run=False,
+        as_of_dates=downstream_as_of_dates if target_scoped_normalized else None,
+        skip_unchanged=target_scoped_normalized,
     )
     print("STEP lifecycle=OK")
 
+    score_as_of_dates = (
+        expand_score_as_of_dates_for_consistency(db_path, ticker, downstream_as_of_dates)
+        if target_scoped_normalized
+        else None
+    )
     score_rows_written = run_score_step(
         db_path=db_path,
         ticker=ticker,
         dry_run=False,
+        as_of_dates=score_as_of_dates,
+        skip_unchanged=target_scoped_normalized,
     )
     print("STEP score=OK")
 
@@ -3018,7 +3088,8 @@ def process_ticker(
     material_fundamentals_changed = int(
         quarterly_rows_written > 0
         or ttm_rows_written > 0
-        or target_assessment.get("post_update_result") == "UPDATED_COMPLETE"
+        or lifecycle_rows_written > 0
+        or score_rows_written > 0
     )
     return {
         "quarterly_refresh_mode": 1 if quarterly_refresh_summary else 0,

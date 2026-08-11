@@ -168,6 +168,30 @@ no duplicate ticker/target rows
 
 Plan mode does not call `load_eligible_rows()` and does not require `rc_fundamental_quarter_state.new_quarter_available = 1`. It also does not acknowledge/reset quarter-state rows.
 
+## Raw Scope vs Normalized Scope
+
+Provider payload scope and normalized repair scope are intentionally separate.
+
+SEC `companyfacts` and Yahoo quarterly raw/cache ingestion may remain ticker-wide because the provider APIs naturally return multi-period payloads and the repair may need earlier raw facts in memory to derive the target quarter correctly. This is provider caching/input scope, not a license to rewrite all normalized historical periods.
+
+For `--quarter-refresh-plan-json` execution, the normalized repair target is the explicit:
+
+```text
+ticker + target_period_end_date
+```
+
+The SEC quarterly builder still reconstructs all available provider periods in memory, then writes only the normalized period compatible with the target date using the existing same-calendar-quarter and seven-day tolerance rule. Unrelated `rc_fundamental_quarterly` periods are left untouched. A new `run_id` alone is not a material quarterly change and must not replace an otherwise identical normalized row.
+
+Yahoo fallback follows the same normalized target scope in plan mode. It may read ticker-wide Yahoo cache rows, but it only inserts/enriches the target-compatible normalized quarter. Existing SEC values remain authoritative; Yahoo fills only missing normalized fields.
+
+Full-history workflows remain available by omitting the target-scope option. Initial bootstrap, explicit historical backfill, and legacy full reconstruction can continue to write all reconstructed periods.
+
+## Downstream Scope
+
+Plan-mode TTM recalculation is target-dependent rather than ticker-wide. For a repaired quarter `Q`, the candidate TTM rows are the `as_of_date` rows whose rolling four-quarter input window contains `Q`. The builder may read the full quarterly series to compute those rows correctly, including YoY/trend fields, but it writes only new or materially changed TTM rows. A `run_id`-only TTM replacement is ignored.
+
+Lifecycle and score calculations still read the ticker history needed for correct classification, scoring, and consistency components. Lifecycle write scope is limited to the TTM rows materially written by the target repair. Score write scope starts with those TTM rows and expands by up to three later TTM `as_of_date` rows because the consistency component uses the current row plus recent history. Unchanged lifecycle/score values are not rewritten.
+
 ## Update Behavior
 
 All executable plan decisions use the existing USA source precedence:
@@ -185,7 +209,7 @@ SEC fetch/reconstruction
 
 `FETCH_NEW_QUARTER` fills a missing target quarter. `RETRY_PARTIAL_QUARTER` reruns the same safe fill path without deleting existing values. `RETRY_FETCH_FAILED` uses the same explicit target and provider path.
 
-The quarter-update executor is not the independent daily price-driven valuation refresh path. Its USA valuation step runs once at batch end only when the batch records a material fundamentals change, such as quarterly rows written, Yahoo fallback rows inserted/updated, TTM rows written, or a target quarter becoming complete. Zero-candidate plans, all-failed batches, and all-partial/no-write batches skip valuation.
+The quarter-update executor is not the independent daily price-driven valuation refresh path. Its USA valuation step runs once at batch end only when the batch records a material fundamentals change, such as a target quarterly value insert/update, a dependent TTM value insert/update, or a lifecycle/score value update caused by those fundamentals. Status-only and `run_id`-only changes do not trigger valuation. Zero-candidate plans, all-failed batches, and no-material-change replay batches skip valuation.
 
 After provider work, the executor reassesses:
 

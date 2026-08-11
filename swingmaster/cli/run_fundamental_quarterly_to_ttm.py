@@ -4,7 +4,13 @@ import argparse
 import sqlite3
 from pathlib import Path
 
-from swingmaster.fundamentals.build_ttm import build_ttm_rows, insert_ttm_rows, load_quarterly_rows
+from swingmaster.fundamentals.build_ttm import (
+    build_ttm_rows,
+    filter_ttm_rows_depending_on_quarter,
+    insert_ttm_rows,
+    load_quarterly_rows,
+    upsert_ttm_business_rows,
+)
 
 
 DEFAULT_TICKER = "NOKIA.HE"
@@ -50,22 +56,39 @@ def run_quarterly_to_ttm(
     run_id: str,
     dry_run: bool,
     replace_ticker: bool,
+    target_quarter_period_end_date: str | None = None,
+    skip_unchanged: bool = False,
 ) -> dict[str, object]:
     normalized_ticker = ticker.upper()
     with sqlite3.connect(str(db_path)) as conn:
         quarterly_rows = load_quarterly_rows(conn, normalized_ticker)
         ttm_rows = build_ttm_rows(quarterly_rows, run_id)
+        write_rows = filter_ttm_rows_depending_on_quarter(
+            ttm_rows,
+            quarterly_rows,
+            target_quarter_period_end_date,
+        )
         rows_written = 0
+        written_as_of_dates: list[str] = []
         if not dry_run:
             if replace_ticker:
                 delete_ttm_rows_for_ticker(conn, normalized_ticker)
-            rows_written = insert_ttm_rows(conn, ttm_rows)
+            if target_quarter_period_end_date is None:
+                rows_written = insert_ttm_rows(conn, write_rows, skip_unchanged=skip_unchanged)
+                written_as_of_dates = [str(row["as_of_date"]) for row in write_rows]
+            else:
+                rows_written, written_as_of_dates = upsert_ttm_business_rows(
+                    conn,
+                    write_rows,
+                    skip_unchanged=skip_unchanged,
+                )
             conn.commit()
     return {
         "ticker": normalized_ticker,
         "input_quarterly_rows": len(quarterly_rows),
-        "ttm_rows_built": len(ttm_rows),
+        "ttm_rows_built": len(write_rows),
         "rows_written": rows_written,
+        "written_as_of_dates": written_as_of_dates,
         "dry_run": "true" if dry_run else "false",
         "run_id": run_id,
     }

@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from swingmaster.fundamentals.build_quarterly import target_compatible_period
+
 
 TTM_SUM_FIELDS = (
     "revenue",
@@ -10,6 +12,23 @@ TTM_SUM_FIELDS = (
     "free_cashflow",
     "ebitda",
     "gross_profit",
+)
+
+TTM_BUSINESS_FIELDS = (
+    "latest_period_end_date",
+    "revenue_ttm",
+    "revenue_growth_ttm_yoy",
+    "ebit_ttm",
+    "ebit_growth_ttm_yoy",
+    "ebit_margin_ttm",
+    "ebit_margin_trend_4q",
+    "gross_margin_trend_4q",
+    "fcf_ttm",
+    "fcf_margin_ttm",
+    "fcf_margin_trend_4q",
+    "net_debt",
+    "net_debt_to_ebit",
+    "share_dilution_yoy",
 )
 
 
@@ -105,6 +124,33 @@ def build_ttm_rows(quarterly_rows: list[sqlite3.Row], run_id: str) -> list[dict[
     return ttm_rows
 
 
+def filter_ttm_rows_depending_on_quarter(
+    ttm_rows: list[dict[str, Any]],
+    quarterly_rows: list[sqlite3.Row],
+    target_period_end_date: str | None,
+) -> list[dict[str, Any]]:
+    if target_period_end_date is None:
+        return ttm_rows
+    target_periods = {
+        str(row["period_end_date"])
+        for row in quarterly_rows
+        if target_compatible_period(str(row["period_end_date"]), target_period_end_date)
+    }
+    if not target_periods:
+        return []
+    periods_by_as_of = {
+        str(quarterly_rows[index]["period_end_date"]): {
+            str(row["period_end_date"]) for row in quarterly_rows[index - 3 : index + 1]
+        }
+        for index in range(3, len(quarterly_rows))
+    }
+    return [
+        row
+        for row in ttm_rows
+        if target_periods.intersection(periods_by_as_of.get(str(row["as_of_date"]), set()))
+    ]
+
+
 def _sum_window(rows: list[sqlite3.Row] | None, field_name: str) -> float | None:
     if rows is None:
         return None
@@ -152,7 +198,52 @@ def _calculate_share_dilution(quarterly_rows: list[sqlite3.Row], index: int) -> 
     return float((current_value - previous_value) / abs(previous_value))
 
 
-def insert_ttm_rows(conn: sqlite3.Connection, ttm_rows: list[dict[str, Any]]) -> int:
+def _values_equal(left: Any, right: Any) -> bool:
+    return left == right
+
+
+def _ttm_row_materially_changed(existing: sqlite3.Row | None, row: dict[str, Any]) -> bool:
+    if existing is None:
+        return True
+    return any(not _values_equal(existing[field], row[field]) for field in TTM_BUSINESS_FIELDS)
+
+
+def _select_ttm_rows_to_write(
+    conn: sqlite3.Connection,
+    ttm_rows: list[dict[str, Any]],
+    *,
+    skip_unchanged: bool,
+) -> list[dict[str, Any]]:
+    if not skip_unchanged:
+        return ttm_rows
+    previous_row_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        rows_to_write = []
+        for row in ttm_rows:
+            existing = conn.execute(
+                """
+                SELECT *
+                FROM rc_fundamental_ttm
+                WHERE ticker = ?
+                  AND as_of_date = ?
+                """,
+                (row["ticker"], row["as_of_date"]),
+            ).fetchone()
+            if _ttm_row_materially_changed(existing, row):
+                rows_to_write.append(row)
+        return rows_to_write
+    finally:
+        conn.row_factory = previous_row_factory
+
+
+def insert_ttm_rows(
+    conn: sqlite3.Connection,
+    ttm_rows: list[dict[str, Any]],
+    *,
+    skip_unchanged: bool = False,
+) -> int:
+    rows_to_write = _select_ttm_rows_to_write(conn, ttm_rows, skip_unchanged=skip_unchanged)
     conn.executemany(
         """
         INSERT OR REPLACE INTO rc_fundamental_ttm (
@@ -199,10 +290,85 @@ def insert_ttm_rows(conn: sqlite3.Connection, ttm_rows: list[dict[str, Any]]) ->
                 row["fundamental_score"],
                 row["run_id"],
             )
-            for row in ttm_rows
+            for row in rows_to_write
         ],
     )
-    return len(ttm_rows)
+    return len(rows_to_write)
+
+
+def upsert_ttm_business_rows(
+    conn: sqlite3.Connection,
+    ttm_rows: list[dict[str, Any]],
+    *,
+    skip_unchanged: bool = False,
+) -> tuple[int, list[str]]:
+    rows_to_write = _select_ttm_rows_to_write(conn, ttm_rows, skip_unchanged=skip_unchanged)
+    conn.executemany(
+        """
+        INSERT INTO rc_fundamental_ttm (
+            ticker,
+            as_of_date,
+            latest_period_end_date,
+            revenue_ttm,
+            revenue_growth_ttm_yoy,
+            ebit_ttm,
+            ebit_growth_ttm_yoy,
+            ebit_margin_ttm,
+            ebit_margin_trend_4q,
+            gross_margin_trend_4q,
+            fcf_ttm,
+            fcf_margin_ttm,
+            fcf_margin_trend_4q,
+            net_debt,
+            net_debt_to_ebit,
+            share_dilution_yoy,
+            lifecycle_class,
+            fundamental_score,
+            run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ticker, as_of_date) DO UPDATE SET
+            latest_period_end_date = excluded.latest_period_end_date,
+            revenue_ttm = excluded.revenue_ttm,
+            revenue_growth_ttm_yoy = excluded.revenue_growth_ttm_yoy,
+            ebit_ttm = excluded.ebit_ttm,
+            ebit_growth_ttm_yoy = excluded.ebit_growth_ttm_yoy,
+            ebit_margin_ttm = excluded.ebit_margin_ttm,
+            ebit_margin_trend_4q = excluded.ebit_margin_trend_4q,
+            gross_margin_trend_4q = excluded.gross_margin_trend_4q,
+            fcf_ttm = excluded.fcf_ttm,
+            fcf_margin_ttm = excluded.fcf_margin_ttm,
+            fcf_margin_trend_4q = excluded.fcf_margin_trend_4q,
+            net_debt = excluded.net_debt,
+            net_debt_to_ebit = excluded.net_debt_to_ebit,
+            share_dilution_yoy = excluded.share_dilution_yoy,
+            run_id = excluded.run_id
+        """,
+        [
+            (
+                row["ticker"],
+                row["as_of_date"],
+                row["latest_period_end_date"],
+                row["revenue_ttm"],
+                row["revenue_growth_ttm_yoy"],
+                row["ebit_ttm"],
+                row["ebit_growth_ttm_yoy"],
+                row["ebit_margin_ttm"],
+                row["ebit_margin_trend_4q"],
+                row["gross_margin_trend_4q"],
+                row["fcf_ttm"],
+                row["fcf_margin_ttm"],
+                row["fcf_margin_trend_4q"],
+                row["net_debt"],
+                row["net_debt_to_ebit"],
+                row["share_dilution_yoy"],
+                row["lifecycle_class"],
+                row["fundamental_score"],
+                row["run_id"],
+            )
+            for row in rows_to_write
+        ],
+    )
+    return len(rows_to_write), [str(row["as_of_date"]) for row in rows_to_write]
 
 
 def build_and_insert_ttm_rows(
@@ -210,17 +376,25 @@ def build_and_insert_ttm_rows(
     ticker: str,
     run_id: str,
     dry_run: bool,
+    target_quarter_period_end_date: str | None = None,
+    skip_unchanged: bool = False,
 ) -> tuple[int, int, str | None, str | None]:
     quarterly_rows = load_quarterly_rows(conn, ticker)
     ttm_rows = build_ttm_rows(quarterly_rows, run_id)
+    write_rows = filter_ttm_rows_depending_on_quarter(ttm_rows, quarterly_rows, target_quarter_period_end_date)
     quarterly_row_count = len(quarterly_rows)
-    ttm_rows_written = len(ttm_rows)
-    first_as_of_date = ttm_rows[0]["as_of_date"] if ttm_rows else None
-    last_as_of_date = ttm_rows[-1]["as_of_date"] if ttm_rows else None
+    ttm_rows_written = len(write_rows)
+    first_as_of_date = write_rows[0]["as_of_date"] if write_rows else None
+    last_as_of_date = write_rows[-1]["as_of_date"] if write_rows else None
 
     if dry_run:
+        if skip_unchanged:
+            ttm_rows_written = len(_select_ttm_rows_to_write(conn, write_rows, skip_unchanged=True))
         return quarterly_row_count, ttm_rows_written, first_as_of_date, last_as_of_date
 
-    insert_ttm_rows(conn, ttm_rows)
+    if target_quarter_period_end_date is None:
+        ttm_rows_written = insert_ttm_rows(conn, write_rows, skip_unchanged=skip_unchanged)
+    else:
+        ttm_rows_written, _written_dates = upsert_ttm_business_rows(conn, write_rows, skip_unchanged=skip_unchanged)
     conn.commit()
     return quarterly_row_count, ttm_rows_written, first_as_of_date, last_as_of_date

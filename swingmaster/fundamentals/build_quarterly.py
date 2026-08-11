@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 import sqlite3
 from typing import Any
 
@@ -174,7 +175,115 @@ def _resolve_total_debt_value(
     return float(sum(values))
 
 
-def insert_quarterly_rows(conn: sqlite3.Connection, quarterly_rows: list[dict[str, Any]]) -> int:
+QUARTERLY_BUSINESS_FIELDS = (
+    "revenue",
+    "gross_profit",
+    "operating_income",
+    "ebit",
+    "ebitda",
+    "net_income",
+    "operating_cashflow",
+    "capex",
+    "free_cashflow",
+    "cash",
+    "total_debt",
+    "shares_outstanding",
+    "currency",
+)
+
+
+def target_compatible_period(period_end_date: str, target_period_end_date: str, *, tolerance_days: int = 7) -> bool:
+    period_date = date.fromisoformat(period_end_date)
+    target_date = date.fromisoformat(target_period_end_date)
+    return (
+        period_date.year == target_date.year
+        and _calendar_quarter(period_date) == _calendar_quarter(target_date)
+        and abs((period_date - target_date).days) <= tolerance_days
+    )
+
+
+def filter_target_compatible_quarterly_rows(
+    quarterly_rows: list[dict[str, Any]],
+    target_period_end_date: str | None,
+) -> list[dict[str, Any]]:
+    if target_period_end_date is None:
+        return quarterly_rows
+    return [
+        row
+        for row in quarterly_rows
+        if target_compatible_period(str(row["period_end_date"]), target_period_end_date)
+    ]
+
+
+def _calendar_quarter(value: date) -> int:
+    return ((value.month - 1) // 3) + 1
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    return left == right
+
+
+def _quarterly_row_materially_changed(existing: sqlite3.Row | None, row: dict[str, Any]) -> bool:
+    if existing is None:
+        return True
+    return any(not _values_equal(existing[field], row[field]) for field in QUARTERLY_BUSINESS_FIELDS)
+
+
+def _preserve_existing_values_for_null_fields(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    previous_row_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        merged_rows: list[dict[str, Any]] = []
+        for row in rows:
+            existing = conn.execute(
+                """
+                SELECT *
+                FROM rc_fundamental_quarterly
+                WHERE ticker = ?
+                  AND period_end_date = ?
+                """,
+                (row["ticker"], row["period_end_date"]),
+            ).fetchone()
+            if existing is None:
+                merged_rows.append(row)
+                continue
+            merged = dict(row)
+            for field in QUARTERLY_BUSINESS_FIELDS:
+                if merged.get(field) is None and existing[field] is not None:
+                    merged[field] = existing[field]
+            merged_rows.append(merged)
+        return merged_rows
+    finally:
+        conn.row_factory = previous_row_factory
+
+
+def insert_quarterly_rows(
+    conn: sqlite3.Connection,
+    quarterly_rows: list[dict[str, Any]],
+    *,
+    skip_unchanged: bool = False,
+) -> int:
+    rows_to_write = quarterly_rows
+    if skip_unchanged:
+        previous_row_factory = conn.row_factory
+        conn.row_factory = sqlite3.Row
+        try:
+            rows_to_write = []
+            for row in quarterly_rows:
+                existing = conn.execute(
+                    """
+                    SELECT *
+                    FROM rc_fundamental_quarterly
+                    WHERE ticker = ?
+                      AND period_end_date = ?
+                    """,
+                    (row["ticker"], row["period_end_date"]),
+                ).fetchone()
+                if _quarterly_row_materially_changed(existing, row):
+                    rows_to_write.append(row)
+        finally:
+            conn.row_factory = previous_row_factory
+
     conn.executemany(
         """
         INSERT OR REPLACE INTO rc_fundamental_quarterly (
@@ -215,10 +324,10 @@ def insert_quarterly_rows(conn: sqlite3.Connection, quarterly_rows: list[dict[st
                 row["currency"],
                 row["run_id"],
             )
-            for row in quarterly_rows
+            for row in rows_to_write
         ],
     )
-    return len(quarterly_rows)
+    return len(rows_to_write)
 
 
 def build_and_insert_quarterly_rows(
@@ -226,15 +335,42 @@ def build_and_insert_quarterly_rows(
     ticker: str,
     run_id: str,
     dry_run: bool,
+    target_period_end_date: str | None = None,
+    skip_unchanged: bool = False,
 ) -> tuple[int, int]:
     raw_rows = load_raw_statement_rows(conn, ticker)
     quarterly_rows = build_quarterly_rows(raw_rows, run_id)
     periods_detected = len(quarterly_rows)
-    rows_written = len(quarterly_rows)
+    write_rows = filter_target_compatible_quarterly_rows(quarterly_rows, target_period_end_date)
+    if target_period_end_date is not None:
+        write_rows = _preserve_existing_values_for_null_fields(conn, write_rows)
 
     if dry_run:
+        rows_written = len(write_rows)
+        if skip_unchanged:
+            previous_row_factory = conn.row_factory
+            conn.row_factory = sqlite3.Row
+            try:
+                rows_written = sum(
+                    1
+                    for row in write_rows
+                    if _quarterly_row_materially_changed(
+                        conn.execute(
+                            """
+                            SELECT *
+                            FROM rc_fundamental_quarterly
+                            WHERE ticker = ?
+                              AND period_end_date = ?
+                            """,
+                            (row["ticker"], row["period_end_date"]),
+                        ).fetchone(),
+                        row,
+                    )
+                )
+            finally:
+                conn.row_factory = previous_row_factory
         return periods_detected, rows_written
 
-    insert_quarterly_rows(conn, quarterly_rows)
+    rows_written = insert_quarterly_rows(conn, write_rows, skip_unchanged=skip_unchanged)
     conn.commit()
     return periods_detected, rows_written

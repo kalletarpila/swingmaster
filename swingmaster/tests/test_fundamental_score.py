@@ -644,6 +644,27 @@ def test_score_raises_when_no_ttm_rows(tmp_path: Path) -> None:
             run_fundamental_scoring(conn, None, dry_run=False)
 
 
+def test_score_empty_scope_updates_zero_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_score_empty_scope.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", None, 0.32, None, 0.28, 0.30, None, "MATURE")
+        conn.commit()
+        rows_scored, min_score, max_score, avg_score = run_fundamental_scoring(
+            conn,
+            "AAPL",
+            dry_run=False,
+            as_of_dates=[],
+            skip_unchanged=True,
+        )
+        score = conn.execute("SELECT fundamental_score FROM rc_fundamental_ttm").fetchone()[0]
+        assert rows_scored == 0
+        assert min_score is None
+        assert max_score is None
+        assert avg_score is None
+        assert score is None
+
+
 def test_cli_score_summary_all(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_score_cli.db"
     run_migration(db_path)

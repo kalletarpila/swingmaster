@@ -368,6 +368,8 @@ def update_scores(
     conn: sqlite3.Connection,
     rows: list[sqlite3.Row],
     dry_run: bool,
+    as_of_dates: set[str] | None = None,
+    skip_unchanged: bool = False,
 ) -> tuple[int, float | None, float | None, float | None]:
     score_updates: list[
         tuple[
@@ -402,32 +404,35 @@ def update_scores(
         ticker_history.append(row)
         explained_components = explain_score_components(row, ticker_history)
         lifecycle_components = compute_lifecycle_score_components(row, explained_components)
-        score_updates.append(
-            (
-                explained_components["fundamental_score_recomputed"],
-                explained_components["growth_component"],
-                explained_components["margin_component"],
-                explained_components["margin_trend_component"],
-                explained_components["fcf_component"],
-                explained_components["leverage_component"],
-                explained_components["dilution_component"],
-                explained_components["lifecycle_component"],
-                explained_components["consistency_component"],
-                FUND_SCORE_RULE_V1_1,
-                lifecycle_components["fundamental_score_lifecycle"],
-                lifecycle_components["growth_component_lifecycle"],
-                lifecycle_components["margin_component_lifecycle"],
-                lifecycle_components["margin_trend_component_lifecycle"],
-                lifecycle_components["fcf_component_lifecycle"],
-                lifecycle_components["leverage_component_lifecycle"],
-                lifecycle_components["dilution_component_lifecycle"],
-                lifecycle_components["lifecycle_component_lifecycle"],
-                lifecycle_components["consistency_component_lifecycle"],
-                str(lifecycle_components["score_rule_lifecycle"]),
-                ticker,
-                str(row["as_of_date"]),
-            )
+        update = (
+            explained_components["fundamental_score_recomputed"],
+            explained_components["growth_component"],
+            explained_components["margin_component"],
+            explained_components["margin_trend_component"],
+            explained_components["fcf_component"],
+            explained_components["leverage_component"],
+            explained_components["dilution_component"],
+            explained_components["lifecycle_component"],
+            explained_components["consistency_component"],
+            FUND_SCORE_RULE_V1_1,
+            lifecycle_components["fundamental_score_lifecycle"],
+            lifecycle_components["growth_component_lifecycle"],
+            lifecycle_components["margin_component_lifecycle"],
+            lifecycle_components["margin_trend_component_lifecycle"],
+            lifecycle_components["fcf_component_lifecycle"],
+            lifecycle_components["leverage_component_lifecycle"],
+            lifecycle_components["dilution_component_lifecycle"],
+            lifecycle_components["lifecycle_component_lifecycle"],
+            lifecycle_components["consistency_component_lifecycle"],
+            str(lifecycle_components["score_rule_lifecycle"]),
+            ticker,
+            str(row["as_of_date"]),
         )
+        if as_of_dates is not None and str(row["as_of_date"]) not in as_of_dates:
+            continue
+        if skip_unchanged and _score_update_matches_existing(row, update):
+            continue
+        score_updates.append(update)
     scores = [score for score, *_rest in score_updates]
     min_score = min(scores) if scores else None
     max_score = max(scores) if scores else None
@@ -463,13 +468,47 @@ def update_scores(
         )
         conn.commit()
 
-    return len(rows), min_score, max_score, avg_score
+    return len(score_updates), min_score, max_score, avg_score
 
 
 def run_fundamental_scoring(
     conn: sqlite3.Connection,
     ticker: str | None,
     dry_run: bool,
+    as_of_dates: list[str] | None = None,
+    skip_unchanged: bool = False,
 ) -> tuple[int, float | None, float | None, float | None]:
     rows = load_ttm_rows(conn, ticker)
-    return update_scores(conn, rows, dry_run)
+    return update_scores(
+        conn,
+        rows,
+        dry_run,
+        as_of_dates=None if as_of_dates is None else set(as_of_dates),
+        skip_unchanged=skip_unchanged,
+    )
+
+
+def _score_update_matches_existing(row: sqlite3.Row, update: tuple[Any, ...]) -> bool:
+    field_names = (
+        "fundamental_score",
+        "growth_component",
+        "margin_component",
+        "margin_trend_component",
+        "fcf_component",
+        "leverage_component",
+        "dilution_component",
+        "lifecycle_component",
+        "consistency_component",
+        "score_rule",
+        "fundamental_score_lifecycle",
+        "growth_component_lifecycle",
+        "margin_component_lifecycle",
+        "margin_trend_component_lifecycle",
+        "fcf_component_lifecycle",
+        "leverage_component_lifecycle",
+        "dilution_component_lifecycle",
+        "lifecycle_component_lifecycle",
+        "consistency_component_lifecycle",
+        "score_rule_lifecycle",
+    )
+    return all(row[field_name] == update[index] for index, field_name in enumerate(field_names))

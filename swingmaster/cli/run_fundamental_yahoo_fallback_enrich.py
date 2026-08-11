@@ -452,6 +452,7 @@ def run_yahoo_fallback_enrich(
     vintage_ingested_at_utc: str | None = None,
     vintage_run_id: str | None = None,
     vintage_normalization_run_id: str | None = None,
+    target_only: bool = False,
 ) -> dict[str, Any]:
     if write_vintage:
         reject_vintage_write()
@@ -490,9 +491,18 @@ def run_yahoo_fallback_enrich(
             quarterly_rows = load_quarterly_rows(conn, current_ticker)
             yahoo_rows_by_period = load_yahoo_rows(conn, market, current_ticker)
             for quarterly_row in quarterly_rows:
+                period_end_date = str(quarterly_row["period_end_date"])
+                if target_only and detected_source_period_end_date is not None:
+                    detected_date = date.fromisoformat(detected_source_period_end_date)
+                    quarter_date = date.fromisoformat(period_end_date)
+                    if (
+                        quarter_date.year != detected_date.year
+                        or _calendar_quarter(quarter_date) != _calendar_quarter(detected_date)
+                        or abs((quarter_date - detected_date).days) > 7
+                    ):
+                        continue
                 quarterly_rows_scanned += 1
                 fields_checked += len(ALLOWED_FIELDS)
-                period_end_date = str(quarterly_row["period_end_date"])
                 yahoo_row, match_method = resolve_yahoo_match(yahoo_rows_by_period, period_end_date)
                 if yahoo_row is None:
                     no_match_count += 1

@@ -136,6 +136,24 @@ def test_lifecycle_fundamental_score_untouched(tmp_path: Path) -> None:
         assert fundamental_score == 77.0
 
 
+def test_lifecycle_empty_scope_updates_zero_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_lifecycle_empty_scope.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(conn, "AAPL", "2025-12-31", 1000.0, None, 0.30, 0.01, 0.20)
+        conn.commit()
+        rows_classified, _class_counts = run_lifecycle_classification(
+            conn,
+            "AAPL",
+            dry_run=False,
+            as_of_dates=[],
+            skip_unchanged=True,
+        )
+        lifecycle_class = conn.execute("SELECT lifecycle_class FROM rc_fundamental_ttm").fetchone()[0]
+        assert rows_classified == 0
+        assert lifecycle_class is None
+
+
 def test_lifecycle_raises_when_no_ttm_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_lifecycle_empty.db"
     run_migration(db_path)

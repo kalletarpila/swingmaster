@@ -766,6 +766,116 @@ def test_plan_mode_retry_partial_quarter_forces_provider_refresh(
 
     assert captured[0]["allow_live_yahoo_fast_ingest"] is True
     assert captured[0]["force_provider_refresh"] is True
+    assert captured[0]["target_scoped_normalized"] is True
+
+
+def test_plan_mode_uses_target_scoped_downstream_and_skips_run_id_only_valuation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "quarter_update_plan_target_scope.db"
+    run_migration(db_path)
+    plan_path = _write_plan(
+        "pytest_quarter_update_plan_target_scope",
+        db_path,
+        [_candidate("AAPL", DECISION_RETRY_PARTIAL_QUARTER)],
+    )
+    calls: dict[str, dict] = {}
+    valuation_calls: list[dict] = []
+
+    def _fake_quarterly_refresh(**kwargs):
+        calls["quarterly_refresh"] = kwargs
+        return {
+            "mode": "enrich",
+            "sec_refresh_required": True,
+            "sec_target_available": True,
+            "summary": {"rows_inserted": 0, "rows_updated": 0, "fields_filled": 0},
+            "sec_refresh_summary": {"rows_written": 0},
+        }
+
+    def _fake_ttm(**kwargs):
+        calls["ttm"] = kwargs
+        return {"rows_written": 0, "written_as_of_dates": []}
+
+    def _fake_lifecycle(**kwargs):
+        calls["lifecycle"] = kwargs
+        return 0
+
+    def _fake_score(**kwargs):
+        calls["score"] = kwargs
+        return 0
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_quarterly_refresh", _fake_quarterly_refresh)
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_quarterly_to_ttm", _fake_ttm)
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_lifecycle_step", _fake_lifecycle)
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_score_step", _fake_score)
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "reassess_target_quarter",
+        lambda **_kwargs: {
+            "target_period_end_date": "2026-06-30",
+            "target_quarter_exists": 1,
+            "target_quarter_basic_complete": 1,
+            "target_ttm_input_complete": None,
+            "target_score_history_complete": None,
+            "post_update_result": "UPDATED_COMPLETE",
+        },
+    )
+    _capture_usa_valuation(monkeypatch, valuation_calls)
+
+    summary = run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "osakedata.db",
+        run_id="BASE",
+        market="usa",
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
+    )
+
+    assert calls["quarterly_refresh"]["target_scoped_normalized"] is True
+    assert calls["ttm"]["replace_ticker"] is False
+    assert calls["ttm"]["target_quarter_period_end_date"] == "2026-06-30"
+    assert calls["ttm"]["skip_unchanged"] is True
+    assert calls["lifecycle"]["as_of_dates"] == []
+    assert calls["lifecycle"]["skip_unchanged"] is True
+    assert calls["score"]["as_of_dates"] == []
+    assert calls["score"]["skip_unchanged"] is True
+    assert summary["material_fundamentals_change_count"] == 0
+    assert summary["valuation_status"] == "SKIPPED"
+    assert valuation_calls == []
+
+
+def test_score_scope_expands_three_forward_rows_for_consistency(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_score_scope.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        for period in [
+            "2025-03-31",
+            "2025-06-30",
+            "2025-09-30",
+            "2025-12-31",
+            "2026-03-31",
+            "2026-06-30",
+        ]:
+            conn.execute(
+                """
+                INSERT INTO rc_fundamental_ttm (ticker, as_of_date, latest_period_end_date, run_id)
+                VALUES ('AAPL', ?, ?, 'TTM')
+                """,
+                (period, period),
+            )
+        conn.commit()
+
+    as_of_dates = run_fundamental_quarter_update.expand_score_as_of_dates_for_consistency(
+        db_path,
+        "AAPL",
+        ["2025-09-30"],
+    )
+
+    assert as_of_dates == ["2025-09-30", "2025-12-31", "2026-03-31", "2026-06-30"]
 
 
 def test_plan_mode_does_not_require_quarter_state_row(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

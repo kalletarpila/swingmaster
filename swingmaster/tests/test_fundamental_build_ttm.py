@@ -373,6 +373,46 @@ def test_build_ttm_target_scope_writes_only_dependent_changed_rows(tmp_path: Pat
         ]
 
 
+def test_build_ttm_target_scope_does_not_treat_adjacent_period_as_target(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamental_ttm_target_scope_exact.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        for period in ["2025-03-31", "2025-06-30", "2025-09-30", "2026-01-05"]:
+            _insert_quarterly_row(
+                conn,
+                "AAPL",
+                (period, 100.0, 30.0, 40.0, 20.0, 10.0, 50.0, 200.0, 1000.0),
+                "Q_RUN_V1",
+            )
+        conn.commit()
+        build_and_insert_ttm_rows(conn=conn, ticker="AAPL", run_id="OLD_TTM", dry_run=False)
+        conn.execute(
+            """
+            UPDATE rc_fundamental_quarterly
+            SET revenue = 999.0
+            WHERE ticker = 'AAPL'
+              AND period_end_date = '2026-01-05'
+            """
+        )
+        conn.commit()
+
+        _quarterly_rows, ttm_rows_written, first_as_of_date, last_as_of_date = build_and_insert_ttm_rows(
+            conn=conn,
+            ticker="AAPL",
+            run_id="TARGET_TTM",
+            dry_run=False,
+            target_quarter_period_end_date="2025-12-31",
+            skip_unchanged=True,
+        )
+
+        assert ttm_rows_written == 0
+        assert first_as_of_date is None
+        assert last_as_of_date is None
+        run_ids = conn.execute("SELECT DISTINCT run_id FROM rc_fundamental_ttm").fetchall()
+        assert run_ids == [("OLD_TTM",)]
+
+
 def test_build_ttm_target_scope_ignores_run_id_only_change(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ttm_target_scope_idempotent.db"
     run_migration(db_path)

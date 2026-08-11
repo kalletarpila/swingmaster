@@ -211,7 +211,7 @@ def filter_target_compatible_quarterly_rows(
     return [
         row
         for row in quarterly_rows
-        if target_compatible_period(str(row["period_end_date"]), target_period_end_date)
+        if str(row["period_end_date"]) == target_period_end_date
     ]
 
 

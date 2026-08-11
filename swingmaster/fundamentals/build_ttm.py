@@ -3,8 +3,6 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from swingmaster.fundamentals.build_quarterly import target_compatible_period
-
 
 TTM_SUM_FIELDS = (
     "revenue",
@@ -134,7 +132,7 @@ def filter_ttm_rows_depending_on_quarter(
     target_periods = {
         str(row["period_end_date"])
         for row in quarterly_rows
-        if target_compatible_period(str(row["period_end_date"]), target_period_end_date)
+        if str(row["period_end_date"]) == target_period_end_date
     }
     if not target_periods:
         return []

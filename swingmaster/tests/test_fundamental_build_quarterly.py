@@ -381,6 +381,45 @@ def test_build_quarterly_target_period_scope_only_writes_target(tmp_path: Path) 
         ]
 
 
+def test_build_quarterly_target_period_scope_does_not_write_adjacent_period(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_target_scope_exact.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_raw_row(conn, "AAPL", "balance", "2026-03-31", "Cash And Cash Equivalents", 100.0)
+        _insert_raw_row(conn, "AAPL", "balance", "2026-04-05", "Cash And Cash Equivalents", 200.0)
+        conn.execute(
+            """
+            INSERT INTO rc_fundamental_quarterly (ticker, period_end_date, cash, run_id)
+            VALUES ('AAPL', '2026-04-05', 150.0, 'OLD_RUN')
+            """
+        )
+        conn.commit()
+
+        periods_detected, rows_written = build_and_insert_quarterly_rows(
+            conn=conn,
+            ticker="AAPL",
+            run_id="TARGET_RUN",
+            dry_run=False,
+            target_period_end_date="2026-03-31",
+            skip_unchanged=True,
+        )
+
+        assert periods_detected == 2
+        assert rows_written == 1
+        rows = conn.execute(
+            """
+            SELECT period_end_date, cash, run_id
+            FROM rc_fundamental_quarterly
+            ORDER BY period_end_date
+            """
+        ).fetchall()
+        assert rows == [
+            ("2026-03-31", 100.0, "TARGET_RUN"),
+            ("2026-04-05", 150.0, "OLD_RUN"),
+        ]
+
+
 def test_build_quarterly_target_scope_ignores_run_id_only_change(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamentals_quarterly_target_scope_idempotent.db"
     run_migration(db_path)

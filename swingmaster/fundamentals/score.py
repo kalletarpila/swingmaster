@@ -27,7 +27,26 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
                     net_debt_to_ebit,
                     share_dilution_yoy,
                     lifecycle_class,
-                    fundamental_score
+                    fundamental_score,
+                    growth_component,
+                    margin_component,
+                    margin_trend_component,
+                    fcf_component,
+                    leverage_component,
+                    dilution_component,
+                    lifecycle_component,
+                    consistency_component,
+                    score_rule,
+                    fundamental_score_lifecycle,
+                    growth_component_lifecycle,
+                    margin_component_lifecycle,
+                    margin_trend_component_lifecycle,
+                    fcf_component_lifecycle,
+                    leverage_component_lifecycle,
+                    dilution_component_lifecycle,
+                    lifecycle_component_lifecycle,
+                    consistency_component_lifecycle,
+                    score_rule_lifecycle
                 FROM rc_fundamental_ttm
                 ORDER BY ticker ASC, as_of_date ASC
                 """
@@ -45,7 +64,26 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
                     net_debt_to_ebit,
                     share_dilution_yoy,
                     lifecycle_class,
-                    fundamental_score
+                    fundamental_score,
+                    growth_component,
+                    margin_component,
+                    margin_trend_component,
+                    fcf_component,
+                    leverage_component,
+                    dilution_component,
+                    lifecycle_component,
+                    consistency_component,
+                    score_rule,
+                    fundamental_score_lifecycle,
+                    growth_component_lifecycle,
+                    margin_component_lifecycle,
+                    margin_trend_component_lifecycle,
+                    fcf_component_lifecycle,
+                    leverage_component_lifecycle,
+                    dilution_component_lifecycle,
+                    lifecycle_component_lifecycle,
+                    consistency_component_lifecycle,
+                    score_rule_lifecycle
                 FROM rc_fundamental_ttm
                 WHERE ticker = ?
                 ORDER BY ticker ASC, as_of_date ASC

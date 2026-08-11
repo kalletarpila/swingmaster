@@ -11,6 +11,7 @@ from swingmaster.cli.run_fundamental_score_percentile import main as percentile_
 from swingmaster.fundamentals.score_percentile import (
     FUND_SCORE_PERCENTILE_V2_PRE,
     FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE,
+    MIN_GLOBAL_PERCENTILE_COHORT_SIZE,
     build_percentile_rows,
     compute_blended_percentile_score,
     compute_lifecycle_weighted_percentile_score,
@@ -190,6 +191,69 @@ def test_calendar_time_percentile_rows_use_target_specific_cohort() -> None:
 
     assert by_ticker["TARGET"]["universe_size"] == 2
     assert by_ticker["TARGET"]["growth_pct_global"] == pytest.approx(100.0)
+
+
+def test_tiny_global_calendar_cohort_emits_null_not_zero() -> None:
+    rows = [
+        _snapshot_row("TARGET", "2026-03-31", growth=2.0),
+        _snapshot_row("PEER", "2026-04-15", growth=1.0),
+    ]
+
+    percentile_rows = build_percentile_rows(
+        snapshot_rows=rows,
+        target_date="2026-04-30",
+        rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+        run_id="RUN1",
+        created_at_utc="2026-04-30T00:00:00Z",
+        cohort_window_days=45,
+        min_global_cohort_size=MIN_GLOBAL_PERCENTILE_COHORT_SIZE,
+    )
+    target = {row["ticker"]: row for row in percentile_rows}["TARGET"]
+
+    assert target["universe_size"] == 2
+    assert target["growth_pct_global"] is None
+    assert target["fundamental_score_percentile_global"] is None
+    assert target["fundamental_score_percentile_blended_lifecycle_weighted"] is None
+
+
+def test_exact_minimum_global_calendar_cohort_is_allowed() -> None:
+    rows = [
+        _snapshot_row(f"T{i:02d}", "2026-03-31", growth=float(i))
+        for i in range(MIN_GLOBAL_PERCENTILE_COHORT_SIZE)
+    ]
+
+    percentile_rows = build_percentile_rows(
+        snapshot_rows=rows,
+        target_date="2026-04-30",
+        rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+        run_id="RUN1",
+        created_at_utc="2026-04-30T00:00:00Z",
+        cohort_window_days=45,
+        min_global_cohort_size=MIN_GLOBAL_PERCENTILE_COHORT_SIZE,
+    )
+    first = {row["ticker"]: row for row in percentile_rows}["T00"]
+
+    assert first["universe_size"] == MIN_GLOBAL_PERCENTILE_COHORT_SIZE
+    assert first["growth_pct_global"] == pytest.approx(0.0)
+
+
+def test_stale_observation_is_excluded_from_current_calendar_percentiles() -> None:
+    rows = [
+        _snapshot_row("FRESH", "2026-03-31", growth=1.0),
+        _snapshot_row("STALE", "2025-01-31", growth=100.0),
+    ]
+
+    percentile_rows = build_percentile_rows(
+        snapshot_rows=rows,
+        target_date="2026-08-05",
+        rule_id=FUND_SCORE_PERCENTILE_V2_PRE,
+        run_id="RUN1",
+        created_at_utc="2026-08-05T00:00:00Z",
+        cohort_window_days=45,
+        max_observation_age_days=180,
+    )
+
+    assert [row["ticker"] for row in percentile_rows] == ["FRESH"]
 
 
 def test_null_raw_values_produce_null_percentiles_and_are_excluded(tmp_path: Path) -> None:
@@ -629,7 +693,7 @@ def test_resolve_min_universe_size_is_market_specific() -> None:
 
 
 def test_resolve_industry_min_size_is_market_specific() -> None:
-    assert resolve_industry_min_size("usa") == 10
+    assert resolve_industry_min_size("usa") == 5
     assert resolve_industry_min_size("omxh") == 5
     assert resolve_industry_min_size("fin") == 10
 
@@ -701,6 +765,7 @@ def test_cli_writes_expected_rows_and_summary_status_ok(monkeypatch, capsys, tmp
         "SUMMARY universe_size=500",
         "SUMMARY rows_computed=500",
         "SUMMARY rows_written=500",
+        "SUMMARY stale_observation_rows_excluded=0",
         "SUMMARY lifecycle_weighted_rows_computed=500",
         "SUMMARY lifecycle_weighted_rows_written=500",
         "SUMMARY sector_count=1",

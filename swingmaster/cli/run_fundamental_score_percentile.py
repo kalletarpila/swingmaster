@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from swingmaster.fundamentals.score_percentile import (
-    FUND_SCORE_PERCENTILE_V3_CALENDAR_TIME_PRE,
+    FUND_SCORE_PERCENTILE_V4_CALENDAR_TIME_GUARDED_PRE,
     resolve_created_at_utc,
     run_fundamental_score_percentile,
 )
@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", required=True, help="Fundamentals SQLite database path")
     parser.add_argument("--osakedata-db", required=True, help="Osakedata SQLite database path")
     parser.add_argument("--as-of-date", required=True, help="Target date in YYYY-MM-DD format")
-    parser.add_argument("--rule-id", default=FUND_SCORE_PERCENTILE_V3_CALENDAR_TIME_PRE, help="Percentile rule identifier")
+    parser.add_argument("--rule-id", default=FUND_SCORE_PERCENTILE_V4_CALENDAR_TIME_GUARDED_PRE, help="Percentile rule identifier")
     parser.add_argument("--run-id", required=True, help="Deterministic run identifier")
     parser.add_argument("--market", default="usa", help="Ticker metadata market filter")
     parser.add_argument("--created-at-utc", default=None, help="Explicit created_at_utc timestamp")
@@ -60,6 +60,7 @@ def main() -> None:
     _summary(universe_size=summary["universe_size"])
     _summary(rows_computed=summary["rows_computed"])
     _summary(rows_written=summary["rows_written"])
+    _summary(stale_observation_rows_excluded=summary["stale_observation_rows_excluded"])
     _summary(lifecycle_weighted_rows_computed=summary["lifecycle_weighted_rows_computed"])
     _summary(lifecycle_weighted_rows_written=summary["lifecycle_weighted_rows_written"])
     _summary(sector_count=summary["sector_count"])

@@ -4,18 +4,18 @@
 
 SwingMaster stores percentile rows in `rc_fundamental_score_percentile`, keyed by `(ticker, target_date, rule_id)`. The current builder is `swingmaster/fundamentals/score_percentile.py`; the CLI is `swingmaster/cli/run_fundamental_score_percentile.py`.
 
-Current percentile population uses `rc_fundamental_ttm` and selects one score row per ticker by `MAX(as_of_date) <= target_date`. It then joins `ticker_meta` from osakedata for sector and industry, computes global, sector, and industry factor percentiles, blended percentiles, lifecycle-weighted percentiles, and sector/industry ranks. The writer uses `INSERT OR REPLACE` into the current percentile table.
+Current percentile population uses `rc_fundamental_ttm` and selects one score row per ticker by `MAX(as_of_date) <= target_date`. It then joins `ticker_meta` from osakedata for sector and industry. Percentile calculation uses calendar-time cohorts rather than one broad all-season snapshot: for each target row, peers must be within `target.as_of_date +/- 45` calendar days, with at most one row per peer ticker selected by nearest period end.
 
-This current path remains unchanged. It is suitable for current/latest screening, but historical use can look ahead because `as_of_date` is the fiscal period date, not the date the score became available.
+Current percentile writes are versioned with `FUND_SCORE_PERCENTILE_V4_CALENDAR_TIME_GUARDED_PRE`. This path is suitable for current/latest screening after the configured freshness and cohort-size guardrails, but strict historical trading-signal use still requires the effective-date-safe historical helper because `as_of_date` is the fiscal period date, not the date the score became available.
 
 ## Dependency Map
 
 | Path | Input Tables | Output | Date Logic | Classification | Action |
 | --- | --- | --- | --- | --- | --- |
-| `score_percentile.load_latest_percentile_snapshot` | `rc_fundamental_ttm`, `ticker_meta` | in-memory rows | `MAX(as_of_date) <= target_date` per ticker | `CURRENT_ONLY_NO_CHANGE` | Leave unchanged |
-| `score_percentile.build_percentile_rows` | in-memory score population | in-memory percentile rows | caller-supplied population | `HISTORICAL_PERCENTILE_NEEDS_AS_OF_POPULATION` | Reuse for historical population |
+| `score_percentile.load_latest_percentile_snapshot` | `rc_fundamental_ttm`, `ticker_meta` | in-memory rows | `MAX(as_of_date) <= target_date` per ticker | `CURRENT_SNAPSHOT_INPUT` | Current/latest input selector |
+| `score_percentile.build_percentile_rows` | in-memory score population | in-memory percentile rows | caller-supplied population; current runner passes calendar cohort and guardrail options | `CURRENT_CALENDAR_COHORT_OR_HISTORICAL_POPULATION` | Reuse for current and historical populations |
 | `score_percentile.write_percentile_rows` | in-memory percentile rows | `rc_fundamental_score_percentile` | writes target-date rows | `DERIVED_TABLE_NEEDS_NEW_MATERIALIZATION` | Leave unchanged |
-| `run_fundamental_score_percentile.py` | fundamentals DB, osakedata DB | `rc_fundamental_score_percentile` unless dry-run | current builder path | `CURRENT_ONLY_NO_CHANGE` | Leave unchanged |
+| `run_fundamental_score_percentile.py` | fundamentals DB, osakedata DB | `rc_fundamental_score_percentile` unless dry-run | current builder path with calendar-time guardrails | `CURRENT_CALENDAR_TIME_GUARDED` | Default rule id is V4 guarded |
 | `inspect_historical_fundamental_percentile.py` | fundamentals DB, osakedata DB | stdout JSON/text | `score_effective_trading_date <= D` | `DIAGNOSTIC_ONLY` | New read-only CLI |
 | `audit_historical_fundamental_percentile.py` | fundamentals DB, osakedata DB | temp JSON/CSV | bounded date/sample comparison | `DIAGNOSTIC_ONLY` | New read-only CLI |
 | snapshot/report/UI percentile readers | `rc_fundamental_score_percentile` | display/report output | stored current percentile rows | `DISPLAY_ONLY` | Leave unchanged |
@@ -43,6 +43,28 @@ Ordering per ticker:
 4. `rowid DESC`
 
 Each peer can contribute a different fiscal period and effective date. Null-effective rows are excluded and counted. Tickers with future effective scores but no score available by `D` are excluded and counted.
+
+## Current Calendar-Time Guardrails
+
+The current percentile runner keeps fiscal-quarter identity separate from percentile peer selection:
+
+- target identity remains `ticker + as_of_date`;
+- peer period comparability uses `target.as_of_date +/- 45` calendar days;
+- at most one row per peer ticker is selected;
+- tie-break is smallest absolute day distance, then period ending on or before the target, then stable date/ticker order;
+- stale observations are excluded from current percentiles when `target_date - as_of_date > 180` days;
+- global percentile cohorts require at least 30 peers;
+- sector percentiles require at least 10 peers;
+- USA and OMXH industry percentiles require at least 5 peers.
+
+If the global calendar-time cohort is below minimum size, percentile fields are written as `NULL`, not `0`. The row still carries cohort sizes through `universe_size`, `sector_size`, and `industry_size`, so downstream consumers can distinguish an unavailable percentile from a real 0th percentile. Sector and industry components do not fall back to broader cohorts; blended scores already renormalize over available global/sector/industry components.
+
+Recommended production rebuild order after the FY2026/Q1 repair work:
+
+1. keep percentile guardrail code deployed;
+2. run the Q1 repair/backfill;
+3. rebuild TTM and fundamental scores for changed tickers;
+4. rebuild production percentile rows under `FUND_SCORE_PERCENTILE_V4_CALENDAR_TIME_GUARDED_PRE`.
 
 ## Semantics
 

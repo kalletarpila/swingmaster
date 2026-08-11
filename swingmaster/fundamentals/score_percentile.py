@@ -9,17 +9,21 @@ from typing import Any, Iterable
 
 FUND_SCORE_PERCENTILE_V2_PRE = "FUND_SCORE_PERCENTILE_V2_PRE"
 FUND_SCORE_PERCENTILE_V3_CALENDAR_TIME_PRE = "FUND_SCORE_PERCENTILE_V3_CALENDAR_TIME_PRE"
+FUND_SCORE_PERCENTILE_V4_CALENDAR_TIME_GUARDED_PRE = "FUND_SCORE_PERCENTILE_V4_CALENDAR_TIME_GUARDED_PRE"
 FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE = "FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE"
 SECTOR_MIN_SIZE = 10
 INDUSTRY_MIN_SIZE = 10
 MIN_UNIVERSE_SIZE = 500
 DEFAULT_PERCENTILE_COHORT_WINDOW_DAYS = 45
+MAX_PERCENTILE_TARGET_OBSERVATION_AGE_DAYS = 180
+MIN_GLOBAL_PERCENTILE_COHORT_SIZE = 30
 MIN_UNIVERSE_SIZE_BY_MARKET = {
     "omxh": 50,
     "usa": 500,
 }
 INDUSTRY_MIN_SIZE_BY_MARKET = {
     "omxh": 5,
+    "usa": 5,
 }
 MIN_AVAILABLE_FACTORS = 4
 FACTOR_WEIGHTS = {
@@ -260,7 +264,15 @@ def build_percentile_rows(
     created_at_utc: str,
     market: str = "usa",
     cohort_window_days: int | None = None,
+    max_observation_age_days: int | None = None,
+    min_global_cohort_size: int | None = None,
 ) -> list[dict[str, Any]]:
+    if max_observation_age_days is not None:
+        snapshot_rows = [
+            row
+            for row in snapshot_rows
+            if (_parse_yyyy_mm_dd(target_date) - _parse_yyyy_mm_dd(row.as_of_date)).days <= max_observation_age_days
+        ]
     if cohort_window_days is not None:
         return _build_calendar_time_percentile_rows(
             snapshot_rows=snapshot_rows,
@@ -270,6 +282,7 @@ def build_percentile_rows(
             created_at_utc=created_at_utc,
             market=market,
             cohort_window_days=cohort_window_days,
+            min_global_cohort_size=min_global_cohort_size,
         )
     return _build_shared_cohort_percentile_rows(
         snapshot_rows=snapshot_rows,
@@ -421,6 +434,7 @@ def _build_calendar_time_percentile_rows(
     created_at_utc: str,
     market: str,
     cohort_window_days: int,
+    min_global_cohort_size: int | None,
 ) -> list[dict[str, Any]]:
     percentile_rows: list[dict[str, Any]] = []
     rows_by_target_period: dict[str, dict[str, dict[str, Any]]] = {}
@@ -433,18 +447,75 @@ def _build_calendar_time_percentile_rows(
                 target_period_end_date=target_row.as_of_date,
                 window_days=cohort_window_days,
             )
-            cohort_percentile_rows = _build_shared_cohort_percentile_rows(
-                snapshot_rows=cohort,
-                target_date=target_date,
-                rule_id=rule_id,
-                run_id=run_id,
-                created_at_utc=created_at_utc,
-                market=market,
-            )
-            cohort_rows_by_ticker = {str(row["ticker"]): row for row in cohort_percentile_rows}
+            if min_global_cohort_size is not None and len(cohort) < min_global_cohort_size:
+                cohort_rows_by_ticker = {
+                    row.ticker: _insufficient_percentile_row(
+                        target_row=row,
+                        cohort_rows=cohort,
+                        target_date=target_date,
+                        rule_id=rule_id,
+                        run_id=run_id,
+                        created_at_utc=created_at_utc,
+                    )
+                    for row in cohort
+                }
+            else:
+                cohort_percentile_rows = _build_shared_cohort_percentile_rows(
+                    snapshot_rows=cohort,
+                    target_date=target_date,
+                    rule_id=rule_id,
+                    run_id=run_id,
+                    created_at_utc=created_at_utc,
+                    market=market,
+                )
+                cohort_rows_by_ticker = {str(row["ticker"]): row for row in cohort_percentile_rows}
             rows_by_target_period[target_row.as_of_date] = cohort_rows_by_ticker
         percentile_rows.append(cohort_rows_by_ticker[target_row.ticker])
     return percentile_rows
+
+
+def _insufficient_percentile_row(
+    *,
+    target_row: PercentileSnapshotRow,
+    cohort_rows: list[PercentileSnapshotRow],
+    target_date: str,
+    rule_id: str,
+    run_id: str,
+    created_at_utc: str,
+) -> dict[str, Any]:
+    sector_size = sum(1 for row in cohort_rows if row.sector == target_row.sector and row.sector is not None)
+    industry_size = sum(1 for row in cohort_rows if row.industry == target_row.industry and row.industry is not None)
+    row_result: dict[str, Any] = {
+        "ticker": target_row.ticker,
+        "as_of_date": target_row.as_of_date,
+        "target_date": target_date,
+        "sector": target_row.sector,
+        "industry": target_row.industry,
+        "rule_id": rule_id,
+        "run_id": run_id,
+        "universe_size": len(cohort_rows),
+        "sector_size": sector_size if target_row.sector is not None else None,
+        "industry_size": industry_size if target_row.industry is not None else None,
+        "created_at_utc": created_at_utc,
+        "fundamental_score_percentile_global": None,
+        "fundamental_score_percentile_sector": None,
+        "fundamental_score_percentile_industry": None,
+        "fundamental_score_percentile_blended": None,
+        "sector_rank_blended": None,
+        "industry_rank_blended": None,
+        "fundamental_score_percentile_global_lifecycle_weighted": None,
+        "fundamental_score_percentile_sector_lifecycle_weighted": None,
+        "fundamental_score_percentile_industry_lifecycle_weighted": None,
+        "fundamental_score_percentile_blended_lifecycle_weighted": None,
+        "sector_rank_blended_lifecycle_weighted": None,
+        "industry_rank_blended_lifecycle_weighted": None,
+        "percentile_lifecycle_weight_rule": FUND_SCORE_PERCENTILE_V2_2_LIFECYCLE_MULT_PRE,
+    }
+    for factor_name in FACTOR_COLUMNS:
+        row_result[f"{factor_name}_pct_global"] = None
+        row_result[f"{factor_name}_pct_sector"] = None
+        row_result[f"{factor_name}_pct_industry"] = None
+    return row_result
 
 
 def select_calendar_time_percentile_cohort(
@@ -667,6 +738,11 @@ def run_fundamental_score_percentile(
     if len(snapshot_rows) < min_universe_size:
         raise RuntimeError(f"FUND_SCORE_PERCENTILE_UNIVERSE_TOO_SMALL:{len(snapshot_rows)}")
 
+    stale_observation_rows_excluded = _stale_observation_count(
+        snapshot_rows=snapshot_rows,
+        target_date=target_date,
+        max_observation_age_days=MAX_PERCENTILE_TARGET_OBSERVATION_AGE_DAYS,
+    )
     percentile_rows = build_percentile_rows(
         snapshot_rows=snapshot_rows,
         target_date=target_date,
@@ -675,7 +751,11 @@ def run_fundamental_score_percentile(
         created_at_utc=created_at_utc,
         market=market,
         cohort_window_days=DEFAULT_PERCENTILE_COHORT_WINDOW_DAYS,
+        max_observation_age_days=MAX_PERCENTILE_TARGET_OBSERVATION_AGE_DAYS,
+        min_global_cohort_size=MIN_GLOBAL_PERCENTILE_COHORT_SIZE,
     )
+    if len(percentile_rows) < min_universe_size:
+        raise RuntimeError(f"FUND_SCORE_PERCENTILE_ELIGIBLE_UNIVERSE_TOO_SMALL:{len(percentile_rows)}")
     rows_written = 0
     if not dry_run:
         rows_written = write_percentile_rows(fundamentals_conn, percentile_rows)
@@ -683,6 +763,7 @@ def run_fundamental_score_percentile(
         "universe_size": len(snapshot_rows),
         "rows_computed": len(percentile_rows),
         "rows_written": rows_written,
+        "stale_observation_rows_excluded": stale_observation_rows_excluded,
         "lifecycle_weighted_rows_computed": len(percentile_rows),
         "lifecycle_weighted_rows_written": rows_written,
         "sector_count": len({row.sector for row in snapshot_rows if row.sector is not None}),
@@ -698,6 +779,20 @@ def _coerce_optional_float(value: Any) -> float | None:
 
 def _parse_yyyy_mm_dd(value: str) -> datetime:
     return datetime.strptime(value, "%Y-%m-%d")
+
+
+def _stale_observation_count(
+    *,
+    snapshot_rows: list[PercentileSnapshotRow],
+    target_date: str,
+    max_observation_age_days: int,
+) -> int:
+    parsed_target_date = _parse_yyyy_mm_dd(target_date)
+    return sum(
+        1
+        for row in snapshot_rows
+        if (parsed_target_date - _parse_yyyy_mm_dd(row.as_of_date)).days > max_observation_age_days
+    )
 
 
 def _group_rows(

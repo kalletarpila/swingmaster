@@ -167,6 +167,55 @@ def test_fills_missing_sec_value_and_inserts_audit_row(tmp_path: Path) -> None:
     assert audit_row == ("total_debt", None, 123.0, "sec_edgar", "yahoo", "FILLED_FROM_YAHOO", "2026-03-29", "EXACT")
 
 
+def test_fills_missing_ebit_from_yahoo_operating_income(tmp_path: Path) -> None:
+    db_path = tmp_path / "fallback_fill_ebit_from_operating_income.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_quarterly_row(conn, ticker="AAPL", period_end_date="2026-03-31")
+        _insert_yahoo_quarterly_row(
+            conn,
+            market="usa",
+            symbol="AAPL",
+            period_end_date="2026-03-31",
+            operating_income=321.0,
+        )
+        conn.commit()
+
+    summary = run_fundamental_yahoo_fallback_enrich.run_yahoo_fallback_enrich(
+        db_path=db_path,
+        market="usa",
+        ticker="AAPL",
+        run_id="ENRICH_EBIT",
+        dry_run=False,
+        replace_audit_for_run=False,
+    )
+
+    assert summary["fields_filled"] == 2
+    assert summary["filled_operating_income"] == 1
+    assert summary["filled_ebit"] == 1
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT operating_income, ebit
+            FROM rc_fundamental_quarterly
+            WHERE ticker='AAPL' AND period_end_date='2026-03-31'
+            """
+        ).fetchone()
+        audit_rows = conn.execute(
+            """
+            SELECT field_name, new_value, enrichment_status
+            FROM rc_fundamental_quarterly_enrichment_audit
+            WHERE ticker='AAPL' AND period_end_date='2026-03-31'
+            ORDER BY field_name
+            """
+        ).fetchall()
+    assert row == (321.0, 321.0)
+    assert audit_rows == [
+        ("ebit", 321.0, "FILLED_FROM_YAHOO_OPERATING_INCOME"),
+        ("operating_income", 321.0, "FILLED_FROM_YAHOO"),
+    ]
+
+
 def test_lrcx_style_same_quarter_date_tolerance_match_works(tmp_path: Path) -> None:
     db_path = tmp_path / "fallback_exact_period.db"
     run_migration(db_path)
@@ -427,6 +476,40 @@ def test_target_only_enriches_only_detected_quarter(tmp_path: Path) -> None:
             """
         ).fetchall()
     assert rows == [("2025-12-31", None), ("2026-03-31", 200.0)]
+
+
+def test_target_only_does_not_enrich_adjacent_normalized_quarter(tmp_path: Path) -> None:
+    db_path = tmp_path / "fallback_target_only_exact.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_quarterly_row(conn, ticker="BNC", period_end_date="2025-07-31", cash=None)
+        _insert_quarterly_row(conn, ticker="BNC", period_end_date="2025-08-05", cash=None)
+        _insert_yahoo_quarterly_row(conn, market="usa", symbol="BNC", period_end_date="2025-07-31", cash=100.0)
+        _insert_yahoo_quarterly_row(conn, market="usa", symbol="BNC", period_end_date="2025-08-05", cash=200.0)
+        conn.commit()
+
+    summary = run_fundamental_yahoo_fallback_enrich.run_yahoo_fallback_enrich(
+        db_path=db_path,
+        market="usa",
+        ticker="BNC",
+        run_id="ENRICH_TARGET_EXACT",
+        dry_run=False,
+        replace_audit_for_run=False,
+        detected_source_period_end_date="2025-07-31",
+        target_only=True,
+    )
+
+    assert summary["quarterly_rows_scanned"] == 1
+    assert summary["fields_filled"] == 1
+    with sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT period_end_date, cash
+            FROM rc_fundamental_quarterly
+            ORDER BY period_end_date
+            """
+        ).fetchall()
+    assert rows == [("2025-07-31", 100.0), ("2025-08-05", None)]
 
 
 def test_replace_audit_for_run_replaces_previous_rows(tmp_path: Path) -> None:

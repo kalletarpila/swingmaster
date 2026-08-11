@@ -33,6 +33,19 @@ ALLOWED_FIELDS = (
     "total_debt",
     "shares_outstanding",
 )
+ENRICHABLE_QUARTERLY_FIELDS = (
+    "revenue",
+    "gross_profit",
+    "operating_income",
+    "ebit",
+    "net_income",
+    "operating_cashflow",
+    "capex",
+    "free_cashflow",
+    "cash",
+    "total_debt",
+    "shares_outstanding",
+)
 QUARTERLY_INSERT_FIELDS = (
     "revenue",
     "gross_profit",
@@ -117,7 +130,7 @@ def load_quarterly_rows(conn: sqlite3.Connection, ticker: str) -> list[sqlite3.R
     try:
         rows = conn.execute(
             f"""
-            SELECT ticker, period_end_date, {", ".join(ALLOWED_FIELDS)}
+            SELECT ticker, period_end_date, {", ".join(ENRICHABLE_QUARTERLY_FIELDS)}
             FROM rc_fundamental_quarterly
             WHERE ticker = ?
             ORDER BY period_end_date ASC
@@ -262,12 +275,16 @@ def build_field_updates(
 ) -> tuple[dict[str, float], list[dict[str, Any]]]:
     updates: dict[str, float] = {}
     audit_rows: list[dict[str, Any]] = []
-    for field_name in ALLOWED_FIELDS:
+    for field_name in ENRICHABLE_QUARTERLY_FIELDS:
         if quarterly_row[field_name] is not None:
             continue
-        if yahoo_row[field_name] is None:
+        if field_name == "ebit":
+            yahoo_value = yahoo_row["operating_income"] if "operating_income" in yahoo_row.keys() else None
+        else:
+            yahoo_value = yahoo_row[field_name]
+        if yahoo_value is None:
             continue
-        new_value = float(yahoo_row[field_name])
+        new_value = float(yahoo_value)
         updates[field_name] = new_value
         audit_rows.append(
             {
@@ -278,7 +295,7 @@ def build_field_updates(
                 "new_value": new_value,
                 "primary_source": "sec_edgar",
                 "fallback_source": "yahoo",
-                "enrichment_status": "FILLED_FROM_YAHOO",
+                "enrichment_status": "FILLED_FROM_YAHOO_OPERATING_INCOME" if field_name == "ebit" else "FILLED_FROM_YAHOO",
                 "matched_yahoo_period_end_date": str(yahoo_row["period_end_date"]),
                 "match_method": match_method,
                 "run_id": run_id,
@@ -458,7 +475,7 @@ def run_yahoo_fallback_enrich(
         reject_vintage_write()
 
     created_at_utc = resolve_created_at_utc()
-    filled_per_field = {field_name: 0 for field_name in ALLOWED_FIELDS}
+    filled_per_field = {field_name: 0 for field_name in ENRICHABLE_QUARTERLY_FIELDS}
     tickers_processed = 0
     quarterly_rows_scanned = 0
     yahoo_rows_matched = 0
@@ -493,16 +510,10 @@ def run_yahoo_fallback_enrich(
             for quarterly_row in quarterly_rows:
                 period_end_date = str(quarterly_row["period_end_date"])
                 if target_only and detected_source_period_end_date is not None:
-                    detected_date = date.fromisoformat(detected_source_period_end_date)
-                    quarter_date = date.fromisoformat(period_end_date)
-                    if (
-                        quarter_date.year != detected_date.year
-                        or _calendar_quarter(quarter_date) != _calendar_quarter(detected_date)
-                        or abs((quarter_date - detected_date).days) > 7
-                    ):
+                    if period_end_date != detected_source_period_end_date:
                         continue
                 quarterly_rows_scanned += 1
-                fields_checked += len(ALLOWED_FIELDS)
+                fields_checked += len(ENRICHABLE_QUARTERLY_FIELDS)
                 yahoo_row, match_method = resolve_yahoo_match(yahoo_rows_by_period, period_end_date)
                 if yahoo_row is None:
                     no_match_count += 1
@@ -564,7 +575,7 @@ def run_yahoo_fallback_enrich(
         "dry_run": "true" if dry_run else "false",
         "run_id": run_id,
     }
-    for field_name in ALLOWED_FIELDS:
+    for field_name in ENRICHABLE_QUARTERLY_FIELDS:
         summary[f"filled_{field_name}"] = filled_per_field[field_name]
     return summary
 

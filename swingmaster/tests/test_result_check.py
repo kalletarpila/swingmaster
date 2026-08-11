@@ -297,6 +297,93 @@ def test_completed_event_candidate_selection_uses_due_today_and_recent_passed(tm
     assert selected == ["AAPL", "MSFT"]
 
 
+def test_completed_event_refresh_uses_one_batch_backup_for_multiple_tickers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    root = Path.cwd() / "temp" / "pytest_completed_event_batch_backup"
+    backup_paths: list[Path] = []
+    apply_args: list[object] = []
+
+    def fake_backup(db_path: Path, backup_arg: str | None = None) -> Path:
+        assert db_path == fundamentals_db
+        assert backup_arg is not None
+        backup_path = Path(backup_arg)
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(str(backup_path)) as conn:
+            conn.execute("CREATE TABLE backup_marker (id INTEGER)")
+            conn.commit()
+        backup_paths.append(backup_path)
+        return backup_path.resolve()
+
+    def fake_apply(args: object) -> tuple[dict[str, object], int]:
+        apply_args.append(args)
+        assert getattr(args, "backup_already_created") is True
+        assert getattr(args, "backup") is None
+        return {"mode": "apply", "backup_path": None, "apply_summary": {"transaction_status": "COMMITTED"}}, 0
+
+    monkeypatch.setattr(result_check.apply_yahoo_earnings_events, "create_sqlite_backup", fake_backup)
+    monkeypatch.setattr(result_check.apply_yahoo_earnings_events, "build_apply_summary", fake_apply)
+
+    payload = result_check._run_completed_event_refresh(root, fundamentals_db, ["AAPL", "MSFT", "JPM"])
+
+    assert payload["stage"]["status"] == result_check.CHECK_STATUS_SUCCESS
+    assert payload["summary"]["selected_tickers"] == 3
+    assert payload["summary"]["batch_backup"]["created"] is True
+    assert payload["summary"]["batch_backup"]["verified"] is True
+    assert payload["summary"]["batch_backup"]["path"] == str(backup_paths[0].resolve())
+    assert len(backup_paths) == 1
+    assert len(apply_args) == 3
+    assert all(row["summary"]["backup_path"] is None for row in payload["summary"]["results"])
+
+
+def test_completed_event_refresh_zero_candidates_creates_no_backup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    root = Path.cwd() / "temp" / "pytest_completed_event_zero_backup"
+
+    def fail_backup(*_: object, **__: object) -> None:
+        raise AssertionError("backup should not be created for zero candidates")
+
+    def fail_apply(*_: object, **__: object) -> None:
+        raise AssertionError("ticker apply should not run for zero candidates")
+
+    monkeypatch.setattr(result_check.apply_yahoo_earnings_events, "create_sqlite_backup", fail_backup)
+    monkeypatch.setattr(result_check.apply_yahoo_earnings_events, "build_apply_summary", fail_apply)
+
+    payload = result_check._run_completed_event_refresh(root, fundamentals_db, [])
+
+    assert payload["stage"]["status"] == result_check.CHECK_STATUS_SUCCESS
+    assert payload["stage"]["backup_created"] is False
+    assert payload["summary"]["selected_tickers"] == 0
+    assert payload["summary"]["batch_backup"] == {"created": False, "path": None, "verified": False}
+    assert payload["summary"]["results"] == []
+
+
+def test_completed_event_refresh_backup_failure_stops_before_ticker_apply(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    root = Path.cwd() / "temp" / "pytest_completed_event_backup_failure"
+    apply_started = False
+
+    def fail_backup(*_: object, **__: object) -> Path:
+        raise RuntimeError("disk full")
+
+    def fake_apply(*_: object, **__: object) -> tuple[dict[str, object], int]:
+        nonlocal apply_started
+        apply_started = True
+        return {}, 1
+
+    monkeypatch.setattr(result_check.apply_yahoo_earnings_events, "create_sqlite_backup", fail_backup)
+    monkeypatch.setattr(result_check.apply_yahoo_earnings_events, "build_apply_summary", fake_apply)
+
+    payload = result_check._run_completed_event_refresh(root, fundamentals_db, ["AAPL", "MSFT"])
+
+    assert payload["stage"]["status"] == result_check.CHECK_STATUS_FAILED
+    assert payload["stage"]["failed_tickers"] == 2
+    assert payload["summary"]["failed_tickers"] == 2
+    assert payload["summary"]["batch_backup"]["created"] is False
+    assert payload["summary"]["batch_backup"]["error_type"] == "RuntimeError"
+    assert payload["summary"]["results"] == []
+    assert apply_started is False
+
+
 def test_calendar_selector_normal_day_bounds_provider_work_to_due_and_maintenance(tmp_path: Path) -> None:
     fundamentals_db = _migrated_db(tmp_path)
     active = [f"T{i:04d}" for i in range(3000)]

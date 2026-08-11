@@ -58,6 +58,16 @@ DATE_PASSED_EVENT_NOT_FOUND within --event-watch-days-after of decision_date
 
 Far-future `UPCOMING`, stale/inactive tickers, and old `NO_CURRENT_ESTIMATE` rows are not completed-event refresh candidates in this phase.
 
+## Completed-Event Backup Scope
+
+Completed-event refresh is batch orchestration. When one or more completed-event candidates are selected, it creates one verified pre-batch SQLite backup under:
+
+```text
+temp/fundamental_result_check/<UTC_TIMESTAMP>/completed_event_refresh/backups/
+```
+
+The per-ticker Yahoo earnings apply helper is then called with an explicit internal marker that the batch backup already exists, so it does not create another full database backup for each ticker. Direct standalone `apply_yahoo_earnings_events --apply` keeps its guarded single-ticker backup behavior. This prevents backup amplification where N candidate tickers could otherwise create N full copies of `fundamentals_usa.db`.
+
 ## Plan Contract
 
 Artifacts are written under:

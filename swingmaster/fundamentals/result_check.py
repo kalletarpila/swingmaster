@@ -495,6 +495,25 @@ def _run_completed_event_refresh(root: Path, fundamentals_db: Path, tickers: lis
     output_root = root / "completed_event_refresh"
     backup_root = output_root / "backups"
     output_root.mkdir(parents=True, exist_ok=True)
+    batch_backup: dict[str, Any] = {"created": False, "path": None, "verified": False}
+    if tickers:
+        try:
+            backup_path = _create_completed_event_refresh_backup(fundamentals_db, backup_root)
+            batch_backup = {"created": True, "path": str(backup_path), "verified": True}
+        except Exception as exc:
+            batch_backup = {
+                "created": False,
+                "path": None,
+                "verified": False,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            }
+            payload = {"selected_tickers": len(tickers), "failed_tickers": len(tickers), "batch_backup": batch_backup, "results": []}
+            _write_json(output_root / "completed_event_refresh_summary.json", payload)
+            return {
+                "stage": _stage("completed_event_refresh", CHECK_STATUS_FAILED, selected_tickers=len(tickers), failed_tickers=len(tickers), backup_created=False),
+                "summary": payload,
+            }
     rows: list[dict[str, Any]] = []
     failures = 0
     for ticker in tickers:
@@ -508,7 +527,8 @@ def _run_completed_event_refresh(root: Path, fundamentals_db: Path, tickers: lis
             dry_run=False,
             apply=True,
             json_output=True,
-            backup=str(backup_root),
+            backup=None,
+            backup_already_created=True,
         )
         try:
             summary, exit_code = apply_yahoo_earnings_events.build_apply_summary(args)
@@ -522,10 +542,28 @@ def _run_completed_event_refresh(root: Path, fundamentals_db: Path, tickers: lis
         rows.append({"ticker": ticker, "exit_code": exit_code, "summary": summary})
         if exit_code != 0:
             failures += 1
-    payload = {"selected_tickers": len(tickers), "failed_tickers": failures, "results": rows}
+    payload = {"selected_tickers": len(tickers), "failed_tickers": failures, "batch_backup": batch_backup, "results": rows}
     _write_json(output_root / "completed_event_refresh_summary.json", payload)
     status = CHECK_STATUS_SUCCESS if failures == 0 else CHECK_STATUS_PARTIAL
-    return {"stage": _stage("completed_event_refresh", status, selected_tickers=len(tickers), failed_tickers=failures), "summary": payload}
+    return {
+        "stage": _stage("completed_event_refresh", status, selected_tickers=len(tickers), failed_tickers=failures, backup_created=batch_backup["created"]),
+        "summary": payload,
+    }
+
+
+def _create_completed_event_refresh_backup(fundamentals_db: Path, backup_root: Path) -> Path:
+    timestamp = utc_timestamp()
+    backup_path = validate_temp_path(backup_root / f"{fundamentals_db.name}.pre_completed_event_refresh.{timestamp}.bak")
+    created = apply_yahoo_earnings_events.create_sqlite_backup(fundamentals_db, str(backup_path))
+    _verify_sqlite_backup(created)
+    return created
+
+
+def _verify_sqlite_backup(path: Path) -> None:
+    with sqlite3.connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True) as conn:
+        result = conn.execute("PRAGMA quick_check").fetchone()
+    if result is None or str(result[0]).lower() != "ok":
+        raise RuntimeError(f"BACKUP_QUICK_CHECK_FAILED:{path}")
 
 
 def _run_match_rebuild(root: Path, fundamentals_db: Path, *, enabled: bool) -> dict[str, Any]:

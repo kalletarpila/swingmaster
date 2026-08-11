@@ -67,6 +67,7 @@ def build_apply_summary(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         raise ValueError("DRY_RUN_AND_APPLY_ARE_MUTUALLY_EXCLUSIVE")
     apply_mode = bool(args.apply)
     dry_run = not apply_mode
+    backup_already_created = bool(getattr(args, "backup_already_created", False))
     db_path = Path(args.fundamentals_db).expanduser().resolve()
     backup_path: Path | None = None
 
@@ -116,7 +117,8 @@ def build_apply_summary(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             persisted_count_after = count_events_for_ticker(conn, ticker=source_result.normalized_ticker)
         return _summary_payload(db_path, None, range_plan, limit_plan, source_result, apply_summary, "dry-run", persisted_count_after), 0
 
-    backup_path = create_sqlite_backup(db_path, args.backup)
+    if not backup_already_created:
+        backup_path = create_sqlite_backup(db_path, args.backup)
     before_count = 0
     after_count = 0
     with get_connection(str(db_path)) as conn:

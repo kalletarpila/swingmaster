@@ -134,7 +134,7 @@ check_status = PARTIAL
 candidate_count = 0
 ```
 
-The first implementation deliberately disables `Update Fundamentals` for `PARTIAL`; the user must run a successful check again.
+The UI keeps `Update Fundamentals` clickable, but `PARTIAL` plans do not become executable update inputs. The user must run a successful check before a plan-based update can proceed.
 
 ## Plan-Mode Executor
 
@@ -210,7 +210,7 @@ Run USA Score Percentile
 Generate USA Snapshots
 ```
 
-`Update Fundamentals` is disabled until a successful check produces at least one executable candidate. The UI stores only:
+`Update Fundamentals` remains clickable so manual operation is not tied to a just-completed UI session. The click handler still requires a UI-known plan from `Check for New Results`; if none exists it asks the user to run the check first, and if the latest successful plan has zero executable candidates it reports that there is nothing to update. Backend plan validation remains authoritative for stale or invalid plans. The UI stores only:
 
 ```text
 latest_plan_path

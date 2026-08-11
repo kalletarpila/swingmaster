@@ -69,6 +69,24 @@ class TestExecutionOutputPanel(unittest.TestCase):
         for key, value in summary_dict.items():
             self.assertIn(f"{key}={value}", panel.summary_text.value)
 
+    def test_set_summary_hides_pit_vintage_fields_from_display(self):
+        """Test PIT/vintage summary fields are retained but not displayed."""
+        on_stop_mock = Mock()
+        panel = ExecutionOutputPanel(on_stop=on_stop_mock)
+
+        summary_dict = {
+            "status": "OK",
+            "vintage_completion_status": "SEC_VINTAGE_SUFFICIENT",
+            "statement_vintage_id": "v1",
+            "point_in_time_status": "READY",
+        }
+        panel.set_summary(summary_dict)
+
+        self.assertEqual(panel._current_summary, summary_dict)
+        self.assertIn("status=OK", panel.summary_text.value)
+        self.assertNotIn("vintage", panel.summary_text.value.lower())
+        self.assertNotIn("point_in_time", panel.summary_text.value.lower())
+
     def test_set_running_state(self):
         """Test running state affects button disabled status."""
         on_stop_mock = Mock()
@@ -125,8 +143,10 @@ class TestMarketPanel(unittest.TestCase):
 
         self.assertIsNotNone(panel.ticker_input)
         self.assertIsNotNone(panel.quarter_update_btn)
-        self.assertIsNotNone(panel.vintage_write_checkbox)
-        self.assertTrue(panel.quarter_update_btn.disabled)
+        self.assertFalse(hasattr(panel, "vintage_write_checkbox"))
+        self.assertFalse(hasattr(panel, "yahoo_aware_apply_btn"))
+        self.assertFalse(hasattr(panel, "vintage_recovery_btn"))
+        self.assertFalse(panel.quarter_update_btn.disabled)
         self.assertFalse(panel.is_vintage_write_enabled())
         self.assertIsNotNone(panel.percentile_btn)
         self.assertIsNotNone(panel.snapshot_btn)
@@ -144,7 +164,7 @@ class TestMarketPanel(unittest.TestCase):
 
         self.assertIsNotNone(panel.ticker_input)
         self.assertIsNotNone(panel.quarter_update_btn)
-        self.assertIsNone(panel.vintage_write_checkbox)
+        self.assertFalse(hasattr(panel, "vintage_write_checkbox"))
         self.assertFalse(panel.is_vintage_write_enabled())
         self.assertIsNotNone(panel.percentile_btn)
         self.assertIsNotNone(panel.snapshot_btn)
@@ -177,22 +197,20 @@ class TestMarketPanel(unittest.TestCase):
         panel.disable_buttons(True)
         self.assertTrue(panel.ticker_input.disabled)
         self.assertTrue(panel.quarter_update_btn.disabled)
-        self.assertTrue(panel.vintage_write_checkbox.disabled)
         self.assertTrue(panel.percentile_btn.disabled)
         self.assertTrue(panel.snapshot_btn.disabled)
 
         panel.disable_buttons(False)
         self.assertFalse(panel.ticker_input.disabled)
-        self.assertTrue(panel.quarter_update_btn.disabled)
-        self.assertTrue(panel.vintage_write_checkbox.disabled)
+        self.assertFalse(panel.quarter_update_btn.disabled)
         self.assertFalse(panel.percentile_btn.disabled)
         self.assertFalse(panel.snapshot_btn.disabled)
 
-        panel.set_quarter_update_available(True, "ready")
+        panel.set_quarter_update_available(False, "guidance only")
         self.assertFalse(panel.quarter_update_btn.disabled)
 
-    def test_usa_vintage_checkbox_state(self):
-        """Test USA PIT/vintage option is retired and cannot enable writes."""
+    def test_usa_has_no_visible_pit_vintage_controls(self):
+        """Test USA PIT/vintage controls are not exposed."""
         panel = MarketPanel(
             market="usa",
             on_quarter_update=self.on_run_usa_update,
@@ -202,9 +220,9 @@ class TestMarketPanel(unittest.TestCase):
         )
 
         self.assertFalse(panel.is_vintage_write_enabled())
-        panel.vintage_write_checkbox.value = True
-        self.assertFalse(panel.is_vintage_write_enabled())
-        self.assertTrue(panel.vintage_write_checkbox.disabled)
+        self.assertFalse(hasattr(panel, "vintage_write_checkbox"))
+        self.assertFalse(hasattr(panel, "yahoo_aware_apply_btn"))
+        self.assertFalse(hasattr(panel, "vintage_recovery_btn"))
 
     def test_set_status(self):
         """Test setting status message."""

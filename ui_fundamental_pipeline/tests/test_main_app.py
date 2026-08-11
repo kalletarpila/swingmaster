@@ -195,7 +195,7 @@ class TestSwingMasterApp(unittest.TestCase):
         """Test USA update uses the last successful result-check plan."""
         app = SwingMasterApp(self.mock_page)
         app.latest_usa_plan_path = "temp/fundamental_result_check/plan.json"
-        app.usa_panel.vintage_write_checkbox.value = False
+        app.latest_usa_candidate_count = 1
         captured = {}
 
         def _capture(target):
@@ -214,12 +214,15 @@ class TestSwingMasterApp(unittest.TestCase):
         self.assertIn("--quarter-refresh-plan-json", command)
         self.assertEqual(command[command.index("--quarter-refresh-plan-json") + 1], "temp/fundamental_result_check/plan.json")
 
-    def test_usa_panel_exposes_result_check_and_disables_update_initially(self):
-        """Test USA manual workflow starts at result check."""
+    def test_usa_panel_exposes_result_check_and_keeps_update_active_initially(self):
+        """Test USA manual workflow exposes result check without disabling update."""
         app = SwingMasterApp(self.mock_page)
 
         self.assertIsNotNone(app.usa_panel.result_check_btn)
-        self.assertTrue(app.usa_panel.quarter_update_btn.disabled)
+        self.assertFalse(app.usa_panel.quarter_update_btn.disabled)
+        self.assertFalse(hasattr(app.usa_panel, "vintage_write_checkbox"))
+        self.assertFalse(hasattr(app.usa_panel, "yahoo_aware_apply_btn"))
+        self.assertFalse(hasattr(app.usa_panel, "vintage_recovery_btn"))
 
     def test_successful_usa_result_check_enables_update(self):
         """Test successful result check stores plan state and enables update."""
@@ -248,8 +251,8 @@ class TestSwingMasterApp(unittest.TestCase):
         self.assertFalse(app.usa_panel.quarter_update_btn.disabled)
         self.assertIn("ready_to_update=2", app.usa_panel.status_badge.value)
 
-    def test_zero_candidate_usa_result_check_keeps_update_disabled(self):
-        """Test successful zero-candidate result check does not enable update."""
+    def test_zero_candidate_usa_result_check_keeps_update_enabled_but_noops(self):
+        """Test zero-candidate result check keeps update active but does not run update."""
         app = SwingMasterApp(self.mock_page)
 
         def _execute(command, on_output, on_summary, cwd=None):
@@ -268,9 +271,13 @@ class TestSwingMasterApp(unittest.TestCase):
         with patch("ui_fundamental_pipeline.main.resolve_latest_close_as_of_date", return_value="2026-08-07"):
             app._execute_usa_result_check()
 
-        self.assertIsNone(app.latest_usa_plan_path)
-        self.assertTrue(app.usa_panel.quarter_update_btn.disabled)
+        self.assertEqual(app.latest_usa_plan_path, "temp/fundamental_result_check/plan.json")
+        self.assertFalse(app.usa_panel.quarter_update_btn.disabled)
         self.assertIn("ready_to_update=0", app.usa_panel.status_badge.value)
+        with patch.object(app, "_execute_single_command") as execute_single:
+            app._run_usa_update()
+        execute_single.assert_not_called()
+        self.assertEqual(app.usa_panel.status_badge.value, "No executable fundamentals updates in the latest check.")
 
 
 class TestMainFunction(unittest.TestCase):

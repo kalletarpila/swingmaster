@@ -97,7 +97,7 @@ class SnapshotBrowser:
                             color="gray",
                         ),
                         ft.IconButton(
-                            icon=ft.icons.Icons.CLOUD_DOWNLOAD,
+                            icon=ft.Icons.CLOUD_DOWNLOAD,
                             icon_size=16,
                             on_click=lambda e, f=csv_file: self._on_download_single(f),
                             tooltip="Download",

@@ -95,7 +95,11 @@ class ExecutionOutputPanel:
         self._current_summary = summary_dict
 
         # Format summary as key=value lines
-        summary_lines = [f"{k}={v}" for k, v in sorted(summary_dict.items())]
+        summary_lines = [
+            f"{k}={v}"
+            for k, v in sorted(summary_dict.items())
+            if not _is_hidden_pit_vintage_summary_key(str(k))
+        ]
         self.summary_text.value = "\n".join(summary_lines)
 
     def clear_output(self):
@@ -143,3 +147,8 @@ class ExecutionOutputPanel:
             self.add_line(f"Log exported to {export_path}")
         except Exception as e:
             self.add_line(f"ERROR: Failed to export log: {str(e)}")
+
+
+def _is_hidden_pit_vintage_summary_key(key: str) -> bool:
+    normalized = key.lower().replace("_", "-")
+    return "vintage" in normalized or "point-in-time" in normalized or normalized == "pit"

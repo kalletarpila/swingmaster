@@ -25,8 +25,6 @@ class MarketPanel:
         on_result_check: Callable[[], None] | None = None,
         on_secondary_action: Callable[[], None] | None = None,
         secondary_action_label: str | None = None,
-        on_yahoo_aware_apply: Callable[[], None] | None = None,
-        on_vintage_recovery: Callable[[], None] | None = None,
     ):
         """
         Initialize market panel.
@@ -45,10 +43,6 @@ class MarketPanel:
         self.on_lock = on_lock
         self.on_result_check = on_result_check
         self.on_secondary_action = on_secondary_action
-        self.on_yahoo_aware_apply = on_yahoo_aware_apply
-        self.on_vintage_recovery = on_vintage_recovery
-        self._yahoo_aware_apply_available = False
-        self._quarter_update_available = self.market != "usa"
 
         # Load valid tickers from database
         self.valid_tickers = self._load_valid_tickers()
@@ -87,28 +81,7 @@ class MarketPanel:
         self.quarter_update_btn = ft.Button(
             content=ft.Text("Update Fundamentals" if self.market == "usa" else f"▶ Run {self.market.upper()} Quarter Update"),
             on_click=self._on_quarter_update_click,
-            disabled=self.market == "usa",
         )
-        self.vintage_write_checkbox = None
-        if self.market == "usa":
-            self.vintage_write_checkbox = ft.Checkbox(
-                label="PIT/vintage writes disabled by policy",
-                value=False,
-                disabled=True,
-            )
-        self.yahoo_aware_apply_btn = None
-        if self.market == "usa" and self.on_yahoo_aware_apply is not None:
-            self.yahoo_aware_apply_btn = ft.Button(
-                content=ft.Text("Apply planned Yahoo/final mixed vintage corrections"),
-                on_click=self._on_yahoo_aware_apply_click,
-                disabled=True,
-            )
-        self.vintage_recovery_btn = None
-        if self.market == "usa" and self.on_vintage_recovery is not None:
-            self.vintage_recovery_btn = ft.Button(
-                content=ft.Text("Repair missing PIT/vintage rows"),
-                on_click=self._on_vintage_recovery_click,
-            )
 
         self.percentile_btn = ft.Button(
             content=ft.Text(f"▶ Run {self.market.upper()} Score Percentile"),
@@ -140,12 +113,6 @@ class MarketPanel:
         if self.result_check_summary_text is not None and self.result_check_candidate_table is not None:
             controls.extend([self.result_check_summary_text, self.result_check_candidate_table])
         controls.append(self.quarter_update_btn)
-        if self.vintage_write_checkbox is not None:
-            controls.append(self.vintage_write_checkbox)
-        if self.yahoo_aware_apply_btn is not None:
-            controls.append(self.yahoo_aware_apply_btn)
-        if self.vintage_recovery_btn is not None:
-            controls.append(self.vintage_recovery_btn)
         if self.secondary_action_btn is not None:
             controls.extend(
                 [
@@ -246,13 +213,7 @@ class MarketPanel:
         """Disable/enable all action buttons."""
         if self.result_check_btn is not None:
             self.result_check_btn.disabled = disable
-        self.quarter_update_btn.disabled = disable or (self.market == "usa" and not self._quarter_update_available)
-        if self.vintage_write_checkbox is not None:
-            self.vintage_write_checkbox.disabled = True
-        if self.yahoo_aware_apply_btn is not None:
-            self.yahoo_aware_apply_btn.disabled = disable or not bool(getattr(self, "_yahoo_aware_apply_available", False))
-        if self.vintage_recovery_btn is not None:
-            self.vintage_recovery_btn.disabled = disable
+        self.quarter_update_btn.disabled = disable
         self.percentile_btn.disabled = disable
         if self.secondary_action_btn is not None:
             self.secondary_action_btn.disabled = disable
@@ -264,20 +225,16 @@ class MarketPanel:
         self.ticker_input.value = ""
 
     def is_vintage_write_enabled(self) -> bool:
-        """Return whether the USA PIT/vintage write option is enabled."""
+        """Return False for the retired hidden write option."""
         return False
 
     def set_yahoo_aware_apply_available(self, available: bool, reason: str = "") -> None:
-        """Enable or disable the explicit Yahoo-aware apply action."""
-        self._yahoo_aware_apply_available = bool(available)
-        if self.yahoo_aware_apply_btn is not None:
-            self.yahoo_aware_apply_btn.disabled = not available
-            self.yahoo_aware_apply_btn.tooltip = reason
+        """Compatibility no-op for a retired action."""
+        return None
 
     def set_quarter_update_available(self, available: bool, reason: str = "") -> None:
-        """Enable or disable the explicit quarter update action."""
-        self._quarter_update_available = bool(available)
-        self.quarter_update_btn.disabled = not available
+        """Keep quarter update clickable while preserving status tooltip guidance."""
+        self.quarter_update_btn.disabled = False
         self.quarter_update_btn.tooltip = reason
 
     def set_result_check_details(self, summary: dict, candidates: list[dict]) -> None:
@@ -311,17 +268,3 @@ class MarketPanel:
                 )
             )
         self.result_check_candidate_table.rows = rows
-
-    def _on_yahoo_aware_apply_click(self, e):
-        """Handle explicit Yahoo-aware apply click."""
-        if self.on_yahoo_aware_apply is None:
-            return
-        self.on_lock(True)
-        self.on_yahoo_aware_apply()
-
-    def _on_vintage_recovery_click(self, e):
-        """Handle missing PIT/vintage recovery click."""
-        if self.on_vintage_recovery is None:
-            return
-        self.on_lock(True)
-        self.on_vintage_recovery()

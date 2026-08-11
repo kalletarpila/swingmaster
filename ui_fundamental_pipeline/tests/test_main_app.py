@@ -1,11 +1,49 @@
 """
 Tests for main SwingMasterApp to catch Flet API issues early.
 """
+import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import Mock, MagicMock, patch
 import flet as ft
 
 from ui_fundamental_pipeline.main import SwingMasterApp, main
+from ui_fundamental_pipeline.config import FUNDAMENTALS_USA_DB
+from swingmaster.fundamentals.result_check import PLAN_VERSION, candidate_hash
+
+
+def _candidate(ticker: str = "AAPL") -> dict:
+    return {
+        "market": "usa",
+        "ticker": ticker,
+        "decision": "FETCH_NEW_QUARTER",
+        "priority": "P1_FETCH_NOW",
+        "fundamental_fetch_enabled": 1,
+        "target_period_end_date": "2026-06-30",
+        "planned_action": "PLAN_FETCH_QUARTERLY_FUNDAMENTALS",
+        "eligible_for_execution": 1,
+    }
+
+
+def _write_plan(temp_dir: Path, run_id: str, *, decision_date: str, candidates: list[dict]) -> Path:
+    plan_path = temp_dir / "fundamental_result_check" / run_id / "plan.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "plan_version": PLAN_VERSION,
+        "created_at_utc": "2026-08-11T08:00:00Z",
+        "decision_date": decision_date,
+        "fundamentals_db": str(FUNDAMENTALS_USA_DB.resolve()),
+        "ohlcv_db": "/tmp/osakedata.db",
+        "ohlcv_stale_days": 14,
+        "candidate_count": len(candidates),
+        "candidate_hash": candidate_hash(candidates),
+        "check_status": "SUCCESS",
+        "stages": [{"stage": "fixture", "status": "SUCCESS"}],
+        "candidates": candidates,
+    }
+    plan_path.write_text(json.dumps(payload), encoding="utf-8")
+    return plan_path
 
 
 class TestSwingMasterApp(unittest.TestCase):
@@ -185,34 +223,73 @@ class TestSwingMasterApp(unittest.TestCase):
     def test_usa_update_without_result_check_plan_is_blocked(self):
         """Test USA update requires a successful result-check plan."""
         app = SwingMasterApp(self.mock_page)
-        with patch.object(app, "_execute_single_command") as execute_single:
-            app._run_usa_update()
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("ui_fundamental_pipeline.main.TEMP_DIR", Path(tmp)):
+                with patch("ui_fundamental_pipeline.main.resolve_latest_close_as_of_date", return_value="2026-08-07"):
+                    with patch.object(app, "_execute_single_command") as execute_single:
+                        app._run_usa_update()
 
         execute_single.assert_not_called()
-        self.assertEqual(app.usa_panel.status_badge.value, "Run Check for New Results first.")
+        self.assertEqual(
+            app.usa_panel.status_badge.value,
+            "No valid Check for New Results plan exists for the current decision date.",
+        )
 
     def test_usa_plan_update_uses_single_command_without_vintage(self):
         """Test USA update uses the last successful result-check plan."""
         app = SwingMasterApp(self.mock_page)
-        app.latest_usa_plan_path = "temp/fundamental_result_check/plan.json"
-        app.latest_usa_candidate_count = 1
         captured = {}
 
         def _capture(target):
             captured["target"] = target
 
-        app._run_in_background = _capture
-        with patch.object(app, "_execute_single_command") as execute_single:
-            app._run_usa_update()
-            captured["target"]()
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            plan_path = _write_plan(temp_dir, "ui_session", decision_date="2026-08-07", candidates=[_candidate()])
+            app.latest_usa_plan_path = str(plan_path)
+            app.latest_usa_candidate_count = 1
+            app._run_in_background = _capture
+            with patch("ui_fundamental_pipeline.main.TEMP_DIR", temp_dir):
+                with patch("ui_fundamental_pipeline.main.resolve_latest_close_as_of_date", return_value="2026-08-07"):
+                    with patch.object(app, "_execute_single_command") as execute_single:
+                        app._run_usa_update()
+                        captured["target"]()
 
         execute_single.assert_called_once()
         command, status_prefix, market = execute_single.call_args[0]
         self.assertEqual(status_prefix, "USA Quarter Update")
         self.assertEqual(market, "usa")
         self.assertNotIn("--write-vintage", command)
+        self.assertIn("--decision-date", command)
+        self.assertEqual(command[command.index("--decision-date") + 1], "2026-08-07")
         self.assertIn("--quarter-refresh-plan-json", command)
-        self.assertEqual(command[command.index("--quarter-refresh-plan-json") + 1], "temp/fundamental_result_check/plan.json")
+        self.assertEqual(command[command.index("--quarter-refresh-plan-json") + 1], str(plan_path))
+
+    def test_usa_update_discovers_latest_valid_scheduler_plan(self):
+        """Test USA update can discover a valid same-decision-date plan."""
+        app = SwingMasterApp(self.mock_page)
+        captured = {}
+
+        def _capture(target):
+            captured["target"] = target
+
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            old_plan = _write_plan(temp_dir, "old_day", decision_date="2026-08-06", candidates=[_candidate("OLD")])
+            new_plan = _write_plan(temp_dir, "scheduler_day", decision_date="2026-08-07", candidates=[_candidate("AAPL")])
+            del old_plan
+            app._run_in_background = _capture
+            with patch("ui_fundamental_pipeline.main.TEMP_DIR", temp_dir):
+                with patch("ui_fundamental_pipeline.main.resolve_latest_close_as_of_date", return_value="2026-08-07"):
+                    with patch.object(app, "_execute_single_command") as execute_single:
+                        app._run_usa_update()
+                        captured["target"]()
+
+        execute_single.assert_called_once()
+        command = execute_single.call_args[0][0]
+        self.assertEqual(app.latest_usa_plan_path, str(new_plan))
+        self.assertEqual(app.latest_usa_candidate_count, 1)
+        self.assertEqual(command[command.index("--quarter-refresh-plan-json") + 1], str(new_plan))
 
     def test_usa_panel_exposes_result_check_and_keeps_update_active_initially(self):
         """Test USA manual workflow exposes result check without disabling update."""
@@ -274,8 +351,14 @@ class TestSwingMasterApp(unittest.TestCase):
         self.assertEqual(app.latest_usa_plan_path, "temp/fundamental_result_check/plan.json")
         self.assertFalse(app.usa_panel.quarter_update_btn.disabled)
         self.assertIn("ready_to_update=0", app.usa_panel.status_badge.value)
-        with patch.object(app, "_execute_single_command") as execute_single:
-            app._run_usa_update()
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            plan_path = _write_plan(temp_dir, "zero", decision_date="2026-08-07", candidates=[])
+            app.latest_usa_plan_path = str(plan_path)
+            with patch("ui_fundamental_pipeline.main.TEMP_DIR", temp_dir):
+                with patch("ui_fundamental_pipeline.main.resolve_latest_close_as_of_date", return_value="2026-08-07"):
+                    with patch.object(app, "_execute_single_command") as execute_single:
+                        app._run_usa_update()
         execute_single.assert_not_called()
         self.assertEqual(app.usa_panel.status_badge.value, "No executable fundamentals updates in the latest check.")
 

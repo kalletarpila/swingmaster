@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -156,6 +156,7 @@ def _write_plan(
     *,
     check_status: str = "SUCCESS",
     created_at_utc: str | None = None,
+    decision_date: str = "2026-08-07",
 ) -> Path:
     plan_path = Path.cwd() / "temp" / name / "plan.json"
     plan_path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +164,7 @@ def _write_plan(
         "plan_version": PLAN_VERSION,
         "created_at_utc": created_at_utc
         or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "decision_date": "2026-08-07",
+        "decision_date": decision_date,
         "fundamentals_db": str(db_path.resolve()),
         "ohlcv_db": str((Path.cwd() / "temp" / name / "osakedata.db").resolve()),
         "ohlcv_stale_days": 14,
@@ -707,6 +708,7 @@ def test_plan_mode_runs_usa_candidate_without_quarter_state_flag(
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     assert len(captured) == 1
@@ -741,6 +743,7 @@ def test_plan_mode_does_not_require_quarter_state_row(monkeypatch: pytest.Monkey
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     assert calls == ["MSFT"]
@@ -770,6 +773,7 @@ def test_plan_mode_zero_candidates_skips_usa_valuation(monkeypatch: pytest.Monke
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     assert valuation_calls == []
@@ -803,6 +807,7 @@ def test_plan_mode_all_failed_candidates_skip_usa_valuation(monkeypatch: pytest.
             dry_run=False,
             skip_ack=False,
             quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
         )
 
     assert valuation_calls == []
@@ -840,6 +845,7 @@ def test_plan_mode_all_partial_without_writes_skips_usa_valuation(monkeypatch: p
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     assert valuation_calls == []
@@ -880,6 +886,7 @@ def test_plan_mode_material_quarterly_update_runs_usa_valuation_once(monkeypatch
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     assert len(valuation_calls) == 1
@@ -931,6 +938,7 @@ def test_plan_mode_mixed_batch_runs_usa_valuation_once(monkeypatch: pytest.Monke
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     assert len(valuation_calls) == 1
@@ -939,15 +947,38 @@ def test_plan_mode_mixed_batch_runs_usa_valuation_once(monkeypatch: pytest.Monke
     assert summary["material_fundamentals_change_count"] == 1
 
 
-def test_plan_mode_rejects_stale_plan(tmp_path: Path) -> None:
-    db_path = tmp_path / "quarter_update_plan_stale.db"
+def test_plan_mode_accepts_old_created_at_on_same_decision_date(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_old_created_same_day.db"
     run_migration(db_path)
-    stale = datetime.now(timezone.utc) - timedelta(hours=3)
+    old_created_at = datetime(2026, 8, 7, 5, 0, tzinfo=timezone.utc)
     plan_path = _write_plan(
-        "pytest_quarter_update_plan_stale",
+        "pytest_quarter_update_plan_old_created_same_day",
         db_path,
         [_candidate()],
-        created_at_utc=stale.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        created_at_utc=old_created_at.isoformat().replace("+00:00", "Z"),
+        decision_date="2026-08-07",
+    )
+
+    plan, rows = run_fundamental_quarter_update.load_plan_rows(
+        plan_path=plan_path,
+        db_path=db_path,
+        ticker=None,
+        limit=None,
+        execution_decision_date="2026-08-07",
+    )
+
+    assert plan["decision_date"] == "2026-08-07"
+    assert [row["ticker"] for row in rows] == ["AAPL"]
+
+
+def test_plan_mode_rejects_old_decision_date_plan(tmp_path: Path) -> None:
+    db_path = tmp_path / "quarter_update_plan_old_decision_date.db"
+    run_migration(db_path)
+    plan_path = _write_plan(
+        "pytest_quarter_update_plan_old_decision_date",
+        db_path,
+        [_candidate()],
+        decision_date="2026-08-06",
     )
 
     with pytest.raises(RuntimeError, match="STALE_RESULT_CHECK_PLAN"):
@@ -961,6 +992,7 @@ def test_plan_mode_rejects_stale_plan(tmp_path: Path) -> None:
             dry_run=True,
             skip_ack=False,
             quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
         )
 
 
@@ -982,6 +1014,7 @@ def test_plan_mode_rejects_non_executable_decision(tmp_path: Path) -> None:
             dry_run=True,
             skip_ack=False,
             quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
         )
 
 
@@ -996,6 +1029,7 @@ def test_plan_mode_rejects_duplicate_ticker_target(tmp_path: Path) -> None:
             db_path=db_path,
             ticker=None,
             limit=None,
+            execution_decision_date="2026-08-07",
         )
 
 
@@ -1012,6 +1046,7 @@ def test_plan_mode_rejects_wrong_db(tmp_path: Path) -> None:
             db_path=db_path,
             ticker=None,
             limit=None,
+            execution_decision_date="2026-08-07",
         )
 
 
@@ -1028,6 +1063,7 @@ def test_plan_mode_rejects_inactive_row(tmp_path: Path) -> None:
             db_path=db_path,
             ticker=None,
             limit=None,
+            execution_decision_date="2026-08-07",
         )
 
 
@@ -1044,6 +1080,7 @@ def test_plan_mode_rejects_missing_target_period(tmp_path: Path) -> None:
             db_path=db_path,
             ticker=None,
             limit=None,
+            execution_decision_date="2026-08-07",
         )
 
 
@@ -1061,6 +1098,7 @@ def test_plan_mode_accepts_retry_decisions(tmp_path: Path) -> None:
         db_path=db_path,
         ticker=None,
         limit=None,
+        execution_decision_date="2026-08-07",
     )
 
     assert [row["ticker"] for row in rows] == ["AAPL", "MSFT"]
@@ -1093,6 +1131,7 @@ def test_plan_mode_persists_fetch_failed_for_next_retry(
             dry_run=False,
             skip_ack=False,
             quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
         )
 
     status = _status_row(db_path, "AAPL")
@@ -1135,6 +1174,7 @@ def test_plan_mode_persists_partial_for_next_retry(
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     status = _status_row(db_path, "AAPL")
@@ -1187,6 +1227,7 @@ def test_plan_mode_partial_then_complete_updates_status(
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     assert _status_row(db_path, "AAPL")["ingestion_status"] == "QUARTER_BASIC_COMPLETE"
@@ -1236,6 +1277,7 @@ def test_plan_mode_fetch_failed_then_complete_updates_status(
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     assert _status_row(db_path, "AAPL")["ingestion_status"] == "QUARTER_BASIC_COMPLETE"
@@ -1276,6 +1318,7 @@ def test_plan_mode_does_not_downgrade_complete_on_transient_failure(
             dry_run=False,
             skip_ack=False,
             quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
         )
 
     assert _status_row(db_path, "AAPL")["ingestion_status"] == "QUARTER_BASIC_COMPLETE"
@@ -1386,6 +1429,7 @@ def test_plan_mode_mixed_outcomes_persist_matching_statuses(
             dry_run=False,
             skip_ack=False,
             quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
         )
 
     statuses = {ticker: _status_row(db_path, ticker)["ingestion_status"] for ticker in tickers}
@@ -1433,6 +1477,7 @@ def test_plan_mode_sec_first_success_skips_live_yahoo_and_confirms_source(
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     status = _status_row(db_path, "AAPL")
@@ -1490,6 +1535,7 @@ def test_plan_mode_sec_missing_yahoo_complete_fast_ingest_creates_sec_followup(
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     with sqlite3.connect(str(db_path)) as conn:
@@ -1561,6 +1607,7 @@ def test_plan_mode_yahoo_complete_then_later_sec_confirmation_overwrites_sec_fie
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     with sqlite3.connect(str(db_path)) as conn:
@@ -1612,6 +1659,7 @@ def test_plan_mode_sec_error_after_yahoo_complete_keeps_completeness_and_retries
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
     status = _status_row(db_path, "AAPL")

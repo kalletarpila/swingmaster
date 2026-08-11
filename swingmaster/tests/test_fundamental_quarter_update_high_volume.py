@@ -75,6 +75,7 @@ def _run_plan(db_path: Path, osakedata_db: Path, plan_path: Path) -> dict[str, o
         dry_run=False,
         skip_ack=False,
         quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
     )
 
 
@@ -201,6 +202,7 @@ def test_plan_mode_rejects_duplicate_high_volume_candidates(tmp_path: Path) -> N
             db_path=db_path,
             ticker=None,
             limit=None,
+            execution_decision_date="2026-08-07",
         )
 
 

@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime
+import json
 from pathlib import Path
 import threading
+from typing import Any
 from typing import Optional
 
 import flet as ft
@@ -23,7 +25,9 @@ try:
     from .components.snapshot_browser import SnapshotBrowser
     from .config import (
         DATETIME_FORMAT,
+        FUNDAMENTALS_USA_DB,
         SNAPSHOTS_DIR,
+        TEMP_DIR,
         WINDOW_HEIGHT,
         WEB_HOST,
         WEB_PORT,
@@ -54,7 +58,9 @@ except ImportError:  # pragma: no cover
     from components.snapshot_browser import SnapshotBrowser
     from config import (
         DATETIME_FORMAT,
+        FUNDAMENTALS_USA_DB,
         SNAPSHOTS_DIR,
+        TEMP_DIR,
         WINDOW_HEIGHT,
         WEB_HOST,
         WEB_PORT,
@@ -71,6 +77,21 @@ except ImportError:  # pragma: no cover
     )
     from data_access import resolve_latest_close_as_of_date
     from executor import ProcessExecutor
+
+try:
+    from swingmaster.fundamentals.result_check import (
+        CHECK_STATUS_SUCCESS,
+        EXECUTABLE_DECISIONS,
+        PLAN_VERSION,
+        validate_candidate_hash,
+    )
+except ImportError:  # pragma: no cover
+    from fundamentals.result_check import (
+        CHECK_STATUS_SUCCESS,
+        EXECUTABLE_DECISIONS,
+        PLAN_VERSION,
+        validate_candidate_hash,
+    )
 
 
 class SwingMasterApp:
@@ -430,8 +451,9 @@ class SwingMasterApp:
             return []
 
     def _run_usa_update(self) -> None:
-        if not self.latest_usa_plan_path:
-            self.usa_panel.set_status("Run Check for New Results first.", "red")
+        decision_date = resolve_latest_close_as_of_date("usa")
+        if not self._ensure_usa_plan_for_update(decision_date):
+            self.usa_panel.set_status("No valid Check for New Results plan exists for the current decision date.", "red")
             self._lock_ui(False)
             return
         if self.latest_usa_candidate_count <= 0:
@@ -439,8 +461,102 @@ class SwingMasterApp:
             self._lock_ui(False)
             return
         run_id = get_run_id_usa()
-        command = build_usa_update_command(run_id=run_id, quarter_refresh_plan_json=Path(self.latest_usa_plan_path))
+        command = build_usa_update_command(
+            run_id=run_id,
+            quarter_refresh_plan_json=Path(self.latest_usa_plan_path),
+            decision_date=decision_date,
+        )
         self._run_in_background(lambda: self._execute_single_command(command, "USA Quarter Update", "usa"))
+
+    def _ensure_usa_plan_for_update(self, decision_date: str) -> bool:
+        if self.latest_usa_plan_path and self._is_usable_usa_plan_path(Path(self.latest_usa_plan_path), decision_date):
+            return True
+        discovered = self._discover_latest_usa_plan(decision_date)
+        if discovered is None:
+            return False
+        plan_path, plan = discovered
+        self._store_usa_plan(plan_path, plan)
+        return True
+
+    def _discover_latest_usa_plan(self, decision_date: str) -> tuple[Path, dict[str, Any]] | None:
+        result_check_root = TEMP_DIR / "fundamental_result_check"
+        if not result_check_root.exists():
+            return None
+        candidates: list[tuple[datetime, Path, dict[str, Any]]] = []
+        for plan_path in result_check_root.glob("*/plan.json"):
+            plan = self._read_plan_json(plan_path)
+            if plan is None or not self._is_usable_usa_plan(plan, decision_date):
+                continue
+            candidates.append((_plan_created_at(plan), plan_path, plan))
+        if not candidates:
+            return None
+        _created_at, plan_path, plan = max(candidates, key=lambda item: (item[0], str(item[1])))
+        return plan_path, plan
+
+    def _is_usable_usa_plan_path(self, plan_path: Path, decision_date: str) -> bool:
+        plan = self._read_plan_json(plan_path)
+        if plan is None or not self._is_usable_usa_plan(plan, decision_date):
+            return False
+        self._store_usa_plan(plan_path, plan)
+        return True
+
+    def _read_plan_json(self, plan_path: Path) -> dict[str, Any] | None:
+        try:
+            resolved = plan_path.resolve()
+            expected_root = (TEMP_DIR / "fundamental_result_check").resolve()
+            if resolved.name != "plan.json" or resolved.parent.parent != expected_root:
+                return None
+            payload = json.loads(resolved.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _is_usable_usa_plan(self, plan: dict[str, Any], decision_date: str) -> bool:
+        try:
+            if plan.get("plan_version") != PLAN_VERSION:
+                return False
+            if plan.get("check_status") != CHECK_STATUS_SUCCESS:
+                return False
+            if str(plan.get("fundamentals_db")) != str(FUNDAMENTALS_USA_DB.resolve()):
+                return False
+            if str(plan.get("decision_date")) != decision_date:
+                return False
+            rows = plan.get("candidates")
+            if not isinstance(rows, list):
+                return False
+            if int(plan.get("candidate_count") or 0) != len(rows):
+                return False
+            seen: set[tuple[str, str]] = set()
+            for row in rows:
+                if not isinstance(row, dict):
+                    return False
+                ticker = str(row.get("ticker") or "").upper()
+                period = str(row.get("target_period_end_date") or "")
+                if not ticker or not period:
+                    return False
+                key = (ticker, period)
+                if key in seen:
+                    return False
+                seen.add(key)
+                if str(row.get("market") or "").lower() != "usa":
+                    return False
+                if str(row.get("decision")) not in EXECUTABLE_DECISIONS:
+                    return False
+                if int(row.get("fundamental_fetch_enabled") or 0) != 1:
+                    return False
+                if int(row.get("eligible_for_execution") or 0) != 1:
+                    return False
+            if not validate_candidate_hash(plan):
+                return False
+            return True
+        except Exception:
+            return False
+
+    def _store_usa_plan(self, plan_path: Path, plan: dict[str, Any]) -> None:
+        self.latest_usa_plan_path = str(plan_path)
+        self.latest_usa_plan_created_at = str(plan.get("created_at_utc") or "")
+        self.latest_usa_candidate_count = int(plan.get("candidate_count") or 0)
+        self.latest_usa_candidate_hash = str(plan.get("candidate_hash") or "")
 
     def _run_fin_update(self) -> None:
         run_id = get_run_id_fin()
@@ -483,6 +599,14 @@ class SwingMasterApp:
 
 def main(page: ft.Page):
     SwingMasterApp(page)
+
+
+def _plan_created_at(plan: dict[str, Any]) -> datetime:
+    value = str(plan.get("created_at_utc") or "")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return datetime.min
 
 
 if __name__ == "__main__":

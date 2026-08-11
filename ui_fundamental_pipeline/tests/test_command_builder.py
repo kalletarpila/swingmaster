@@ -44,8 +44,11 @@ class TestCommandBuilder(unittest.TestCase):
         command = build_usa_update_command(
             "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
             quarter_refresh_plan_json=Path("temp/fundamental_result_check/plan.json"),
+            decision_date="2026-08-07",
         )
 
+        self.assertIn("--decision-date", command)
+        self.assertEqual(command[command.index("--decision-date") + 1], "2026-08-07")
         self.assertIn("--quarter-refresh-plan-json", command)
         self.assertEqual(command[command.index("--quarter-refresh-plan-json") + 1], "temp/fundamental_result_check/plan.json")
 

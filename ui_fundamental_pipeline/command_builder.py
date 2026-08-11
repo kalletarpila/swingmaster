@@ -102,6 +102,7 @@ def build_usa_update_command(
     run_id: str,
     vintage_options: UsaQuarterUpdateVintageOptions | None = None,
     quarter_refresh_plan_json: Path | None = None,
+    decision_date: str | None = None,
 ) -> list[str]:
     command = [
         str(PYTHON_EXECUTABLE),
@@ -115,6 +116,8 @@ def build_usa_update_command(
         "--market",
         "usa",
     ]
+    if decision_date is not None:
+        command.extend(["--decision-date", decision_date])
     if quarter_refresh_plan_json is not None:
         command.extend(["--quarter-refresh-plan-json", str(quarter_refresh_plan_json)])
     return command

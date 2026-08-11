@@ -48,7 +48,7 @@ non-temp paths
 wrong plan_version
 non-SUCCESS check_status
 wrong fundamentals_db
-stale plans older than 2 hours
+plans whose decision_date is older than the current operational decision date
 invalid decision_date
 candidate_count/hash mismatch
 duplicate ticker + target period
@@ -92,8 +92,8 @@ This lets the operator identify which ticker/period rows failed after a large ru
 The supported safe procedure after a partial failure is:
 
 1. Inspect `failed_candidates_json` and the console errors.
-2. If still within the 2-hour plan freshness window, rerun the same plan or rerun with `--ticker` for selected failed tickers.
-3. If the plan is stale, run `Check for New Results` again and execute the newly generated plan.
+2. If still on the same operational decision date, rerun the same plan or rerun with `--ticker` for selected failed tickers.
+3. If the plan decision date is stale, run `Check for New Results` again and execute the newly generated plan.
 4. Do not manually edit plan rows to invent target periods.
 
 Replay within the freshness window is deterministic: the same candidate set is validated by the same hash and processed in sorted order. Already completed target quarters are checked against the explicit target before SEC refresh, and SQLite primary keys prevent duplicate quarterly rows.
@@ -133,6 +133,6 @@ The tests prove candidate ordering, exact once-per-plan attempts, explicit targe
 
 The 2026-08-07 production `Check for New Results` produced zero executable candidates, so it did not exercise real provider throughput for 100-300 quarterly updates. The high-volume tests prove control-flow correctness under volume, not provider speed or provider availability.
 
-Plan freshness is checked at start of execution. A long run is allowed to finish even if wall-clock time passes the 2-hour age while it is running. This is intentional; the stale-plan guard prevents starting from stale evidence, not completing a run already started from fresh evidence.
+Plan freshness is checked at start of execution against the operational decision date. A long run is allowed to finish even if wall-clock time crosses into a later moment while it is running. This is intentional; the stale-plan guard prevents starting from stale decision-date evidence, not completing a run already started from valid evidence.
 
 If the process is interrupted by `KeyboardInterrupt`, the top-level loop does not emit a final summary because that is not an `Exception`. Previously completed ticker writes remain committed by their individual sub-steps. The safe restart procedure is to rerun the fresh plan or run a new check if the plan is stale.

@@ -155,8 +155,8 @@ path is under repository temp/
 plan_version
 check_status = SUCCESS
 fundamentals_db matches
-created_at_utc age <= 2 hours
-decision_date parses
+decision_date equals the current operational USA decision date
+created_at_utc parses
 candidate_count and candidate_hash match rows
 market = usa
 decision is executable
@@ -210,7 +210,7 @@ Run USA Score Percentile
 Generate USA Snapshots
 ```
 
-`Update Fundamentals` remains clickable so manual operation is not tied to a just-completed UI session. The click handler still requires a UI-known plan from `Check for New Results`; if none exists it asks the user to run the check first, and if the latest successful plan has zero executable candidates it reports that there is nothing to update. Backend plan validation remains authoritative for stale or invalid plans. The UI stores only:
+`Update Fundamentals` remains clickable so manual operation is not tied to a just-completed UI session. The click handler first uses a valid UI-session plan when present; otherwise it searches `temp/fundamental_result_check/*/plan.json` for the newest successful USA plan whose `decision_date` matches the current USA latest-close decision date and whose basic structure, database path, candidate count, and candidate hash are valid. If no valid same-date plan exists it asks for a fresh check, and if the latest valid plan has zero executable candidates it reports that there is nothing to update. Backend plan validation remains authoritative for stale or invalid plans. The UI stores only:
 
 ```text
 latest_plan_path

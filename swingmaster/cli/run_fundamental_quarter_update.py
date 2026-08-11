@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import json
-import sqlite3
 from collections.abc import Callable, Mapping
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
+import json
 from pathlib import Path
+import sqlite3
 from typing import Any
 
 from swingmaster.cli.run_fundamental_bootstrap_sec_raw import SEC_USER_AGENT, run_sec_raw_bootstrap
@@ -124,6 +124,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ticker", default=None, help="Optional single ticker filter")
     parser.add_argument("--limit", type=int, default=None, help="Optional ticker limit after deterministic ordering")
     parser.add_argument("--quarter-refresh-plan-json", default=None, help="USA-only explicit result-check plan under temp/")
+    parser.add_argument(
+        "--decision-date",
+        default=None,
+        help="Operational decision date for validating a USA quarter-refresh plan",
+    )
     parser.add_argument(
         "--osakedata-db",
         default=None,
@@ -3063,13 +3068,13 @@ def load_plan_rows(
     db_path: Path,
     ticker: str | None,
     limit: int | None,
-    max_age_hours: int = 2,
+    execution_decision_date: str | date,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if plan_path is None:
         raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_PLAN_PATH_REQUIRED")
     resolved = validate_temp_path(plan_path, must_exist=True)
     plan = json.loads(resolved.read_text(encoding="utf-8"))
-    validate_quarter_refresh_plan(plan, db_path=db_path, max_age_hours=max_age_hours)
+    validate_quarter_refresh_plan(plan, db_path=db_path, execution_decision_date=execution_decision_date)
     rows = [dict(row) for row in plan.get("candidates", [])]
     if ticker is not None:
         rows = [row for row in rows if str(row["ticker"]).upper() == ticker.strip().upper()]
@@ -3090,17 +3095,23 @@ def load_plan_rows(
     return plan, execution_rows
 
 
-def validate_quarter_refresh_plan(plan: Mapping[str, Any], *, db_path: Path, max_age_hours: int = 2) -> None:
+def validate_quarter_refresh_plan(
+    plan: Mapping[str, Any],
+    *,
+    db_path: Path,
+    execution_decision_date: str | date,
+) -> None:
     if plan.get("plan_version") != PLAN_VERSION:
         raise RuntimeError("INVALID_RESULT_CHECK_PLAN_VERSION")
     if plan.get("check_status") != CHECK_STATUS_SUCCESS:
         raise RuntimeError("RESULT_CHECK_PLAN_NOT_SUCCESS")
     if str(plan.get("fundamentals_db")) != str(db_path.resolve()):
         raise RuntimeError("RESULT_CHECK_PLAN_DB_MISMATCH")
-    created_at = _parse_plan_timestamp(str(plan.get("created_at_utc") or ""))
-    if datetime.now(timezone.utc) - created_at > timedelta(hours=max_age_hours):
+    _parse_plan_timestamp(str(plan.get("created_at_utc") or ""))
+    plan_decision_date = date.fromisoformat(str(plan.get("decision_date")))
+    current_decision_date = _parse_execution_decision_date(execution_decision_date)
+    if plan_decision_date != current_decision_date:
         raise RuntimeError("STALE_RESULT_CHECK_PLAN")
-    date.fromisoformat(str(plan.get("decision_date")))
     rows = [dict(row) for row in plan.get("candidates", [])]
     if int(plan.get("candidate_count") or 0) != len(rows):
         raise RuntimeError("RESULT_CHECK_PLAN_CANDIDATE_COUNT_MISMATCH")
@@ -3136,6 +3147,12 @@ def _parse_plan_timestamp(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _parse_execution_decision_date(value: str | date) -> date:
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value))
+
+
 def run_fundamental_quarter_update(
     db_path: Path,
     osakedata_db_path: Path | None,
@@ -3146,6 +3163,7 @@ def run_fundamental_quarter_update(
     dry_run: bool,
     skip_ack: bool,
     quarter_refresh_plan_json: Path | None = None,
+    execution_decision_date: str | date | None = None,
     write_vintage: bool = False,
     vintage_market: str | None = None,
     vintage_available_at_utc: str | None = None,
@@ -3208,11 +3226,16 @@ def run_fundamental_quarter_update(
     if plan_mode:
         if market is not None and market.strip().lower() != "usa":
             raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_PLAN_MODE_USA_ONLY")
+        if execution_decision_date is None:
+            if osakedata_db_path is None:
+                raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_DECISION_DATE_REQUIRED")
+            execution_decision_date = resolve_latest_close_as_of_date(osakedata_db_path, market="usa")
         plan_payload, rows = load_plan_rows(
             plan_path=quarter_refresh_plan_json,
             db_path=db_path,
             ticker=ticker,
             limit=limit,
+            execution_decision_date=execution_decision_date,
         )
         market = "usa"
         skip_ack = True
@@ -3484,6 +3507,7 @@ def main() -> None:
             dry_run=args.dry_run,
             skip_ack=args.skip_ack,
             quarter_refresh_plan_json=resolve_optional_db_path(args.quarter_refresh_plan_json),
+            execution_decision_date=args.decision_date,
             write_vintage=args.write_vintage,
             vintage_market=args.vintage_market,
             vintage_available_at_utc=args.vintage_available_at_utc,

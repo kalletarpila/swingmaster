@@ -31,6 +31,16 @@ def test_ticker_not_found(monkeypatch) -> None:
         sec_edgar.resolve_cik("TSLA", sec_edgar.SEC_USER_AGENT)
 
 
+def test_resolve_cik_uses_known_sec_map_omission_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sec_edgar,
+        "fetch_json",
+        lambda _url, _ua: {"0": {"ticker": "AAPL", "cik_str": 320193}},
+    )
+    assert sec_edgar.resolve_cik("AEP", sec_edgar.SEC_USER_AGENT) == "0000004904"
+    assert sec_edgar.resolve_cik("ALBT", sec_edgar.SEC_USER_AGENT) == "0001630212"
+
+
 def test_inspect_found_tag() -> None:
     companyfacts = {
         "facts": {

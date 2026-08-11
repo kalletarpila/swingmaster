@@ -63,6 +63,9 @@ FIELD_MAPPINGS: dict[str, tuple[str, tuple[str, ...]]] = {
             "Ordinary Shares Number",
             "Share Issued",
             "Common Stock Shares Outstanding",
+            "EntityCommonStockSharesOutstanding",
+            "WeightedAverageNumberOfSharesOutstandingBasic",
+            "WeightedAverageNumberOfDilutedSharesOutstanding",
         ),
     ),
 }

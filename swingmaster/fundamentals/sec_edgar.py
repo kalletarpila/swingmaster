@@ -9,6 +9,10 @@ from urllib.request import Request, urlopen
 SEC_USER_AGENT = "SwingMaster fundamentals research contact@example.com"
 SEC_TICKER_CIK_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_COMPANYFACTS_URL_TEMPLATE = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+SEC_TICKER_CIK_FALLBACKS = {
+    "AEP": "0000004904",
+    "ALBT": "0001630212",
+}
 SEC_TAGS = [
     "Revenues",
     "RevenueFromContractWithCustomerExcludingAssessedTax",
@@ -90,9 +94,11 @@ def load_ticker_cik_map(user_agent: str) -> dict[str, str]:
 def resolve_cik(ticker: str, user_agent: str) -> str:
     normalized_ticker = ticker.upper()
     ticker_map = load_ticker_cik_map(user_agent)
-    if normalized_ticker not in ticker_map:
-        raise RuntimeError(f"SEC_TICKER_NOT_FOUND:{normalized_ticker}")
-    return ticker_map[normalized_ticker]
+    if normalized_ticker in ticker_map:
+        return ticker_map[normalized_ticker]
+    if normalized_ticker in SEC_TICKER_CIK_FALLBACKS:
+        return SEC_TICKER_CIK_FALLBACKS[normalized_ticker]
+    raise RuntimeError(f"SEC_TICKER_NOT_FOUND:{normalized_ticker}")
 
 
 def fetch_companyfacts(cik: str, user_agent: str) -> dict:

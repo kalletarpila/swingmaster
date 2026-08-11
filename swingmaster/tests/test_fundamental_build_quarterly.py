@@ -233,6 +233,40 @@ def test_build_quarterly_maps_additional_sec_fact_names(tmp_path: Path) -> None:
         )
 
 
+def test_build_quarterly_maps_sec_weighted_average_shares(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_sec_shares.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_raw_row(
+            conn,
+            "AAP",
+            "balance",
+            "2026-04-25",
+            "WeightedAverageNumberOfSharesOutstandingBasic|form=10-Q|unit=shares|fy=2026|fp=Q1",
+            60100000.0,
+        )
+        conn.commit()
+
+        periods_detected, rows_written = build_and_insert_quarterly_rows(
+            conn=conn,
+            ticker="AAP",
+            run_id="FUND_BUILD_Q_AAP_V1",
+            dry_run=False,
+        )
+
+        assert periods_detected == 1
+        assert rows_written == 1
+        row = conn.execute(
+            """
+            SELECT shares_outstanding
+            FROM rc_fundamental_quarterly
+            WHERE ticker='AAP' AND period_end_date='2026-04-25'
+            """
+        ).fetchone()
+        assert row == (60100000.0,)
+
+
 def test_build_quarterly_uses_union_of_periods(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamentals_quarterly_union.db"
     run_migration(db_path)

@@ -2649,6 +2649,7 @@ def run_quarterly_refresh(
     child_run_ids: dict[str, str],
     target_period_end_date: str | None = None,
     allow_live_yahoo_fast_ingest: bool = False,
+    force_provider_refresh: bool = False,
     sec_vintage_options: dict[str, object] | None = None,
     yahoo_fallback_vintage_options: dict[str, object] | None = None,
     sec_latest_writer_vintage_options: dict[str, object] | None = None,
@@ -2681,10 +2682,43 @@ def run_quarterly_refresh(
                 sec_refresh_required = not target_already_satisfied
             else:
                 sec_refresh_required = source_confirmation_status not in SOURCE_CONFIRMATION_CONFIRMED_STATUSES
+            if force_provider_refresh:
+                sec_refresh_required = True
 
         sec_refresh_summary: dict[str, Any] | None = None
         sec_error_message: str | None = None
         sec_target_available = False
+        yahoo_live_refresh_summary: dict[str, Any] | None = None
+        if allow_live_yahoo_fast_ingest and sec_refresh_required and force_provider_refresh:
+            raw_summary = run_yahoo_audit(
+                db_path=db_path,
+                market=market,
+                exchange="US",
+                symbols_arg=ticker,
+                limit=None,
+                run_id=child_run_ids["raw"],
+                dry_run=False,
+            )
+            if int(raw_summary["ok_count"]) > 0:
+                yahoo_quarterly_summary = run_yahoo_quarterly_write(
+                    db_path=db_path,
+                    market=market,
+                    symbol=ticker,
+                    run_id=child_run_ids["yqtr"],
+                    dry_run=False,
+                    replace_symbol=True,
+                )
+            else:
+                yahoo_quarterly_summary = {
+                    "rows_written": 0,
+                    "rows_normalized": 0,
+                    "rows_skipped": 0,
+                    "source_run_id": "",
+                }
+            yahoo_live_refresh_summary = {
+                "raw_summary": raw_summary,
+                "yahoo_quarterly_summary": yahoo_quarterly_summary,
+            }
         if sec_refresh_required:
             try:
                 cik, rows = run_sec_raw_bootstrap(
@@ -2749,8 +2783,7 @@ def run_quarterly_refresh(
                 sec_error_message = str(exc)
                 print(f"WARN ticker={ticker.upper()} step=quarterly_refresh_sec message={sec_error_message}")
 
-        yahoo_live_refresh_summary: dict[str, Any] | None = None
-        if allow_live_yahoo_fast_ingest and sec_refresh_required and not sec_target_available:
+        if allow_live_yahoo_fast_ingest and sec_refresh_required and not force_provider_refresh and not sec_target_available:
             raw_summary = run_yahoo_audit(
                 db_path=db_path,
                 market=market,
@@ -2867,6 +2900,11 @@ def process_ticker(
         raise RuntimeError(f"FUNDAMENTAL_QUARTER_UPDATE_DETECTED_DATE_MISSING:{ticker}")
 
     print(f"TICKER {ticker} market={market} detected_period={detected_source_period_end_date} execution_source={execution_source}")
+    decision = str(row["decision"]) if "decision" in row.keys() else ""
+    force_provider_refresh = execution_source == "quarter_refresh_plan" and decision in {
+        "RETRY_PARTIAL_QUARTER",
+        "RETRY_FETCH_FAILED",
+    }
     quarterly_refresh_summary = run_quarterly_refresh(
         db_path=db_path,
         ticker=ticker,
@@ -2874,6 +2912,7 @@ def process_ticker(
         target_period_end_date=str(detected_source_period_end_date),
         child_run_ids=child_run_ids,
         allow_live_yahoo_fast_ingest=execution_source == "quarter_refresh_plan",
+        force_provider_refresh=force_provider_refresh,
         sec_vintage_options=sec_vintage_options,
         yahoo_fallback_vintage_options=yahoo_fallback_vintage_options,
         sec_latest_writer_vintage_options=sec_latest_writer_vintage_options,

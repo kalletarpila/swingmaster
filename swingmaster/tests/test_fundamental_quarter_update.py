@@ -720,6 +720,54 @@ def test_plan_mode_runs_usa_candidate_without_quarter_state_flag(
     assert summary["updated_complete_count"] == 1
 
 
+def test_plan_mode_retry_partial_quarter_forces_provider_refresh(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "quarter_update_plan_force_refresh.db"
+    run_migration(db_path)
+    plan_path = _write_plan(
+        "pytest_quarter_update_plan_force_refresh",
+        db_path,
+        [_candidate("AAPL", DECISION_RETRY_PARTIAL_QUARTER)],
+    )
+    captured: list[dict] = []
+
+    def _fake_quarterly_refresh(**kwargs):
+        captured.append(kwargs)
+        return {
+            "mode": "enrich",
+            "sec_refresh_required": True,
+            "sec_target_available": True,
+            "summary": {"rows_inserted": 0, "rows_updated": 0, "fields_filled": 0},
+            "sec_refresh_summary": {"rows_written": 0},
+        }
+
+    monkeypatch.setattr(run_fundamental_quarter_update, "run_quarterly_refresh", _fake_quarterly_refresh)
+    _mock_downstream(monkeypatch)
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "reassess_target_quarter",
+        lambda **_kwargs: {"post_update_result": "UPDATED_COMPLETE"},
+    )
+    _mock_usa_valuation(monkeypatch)
+
+    run_fundamental_quarter_update.run_fundamental_quarter_update(
+        db_path=db_path,
+        osakedata_db_path=tmp_path / "osakedata.db",
+        run_id="BASE",
+        market="usa",
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan_path,
+        execution_decision_date="2026-08-07",
+    )
+
+    assert captured[0]["allow_live_yahoo_fast_ingest"] is True
+    assert captured[0]["force_provider_refresh"] is True
+
+
 def test_plan_mode_does_not_require_quarter_state_row(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     db_path = tmp_path / "quarter_update_plan_no_state.db"
     run_migration(db_path)
@@ -1744,6 +1792,58 @@ def test_run_quarterly_refresh_usa_uses_enrichment_only(monkeypatch: pytest.Monk
     assert calls == ["enrich"]
     assert summary["mode"] == "enrich"
     assert summary["sec_refresh_required"] is False
+
+
+def test_run_quarterly_refresh_forced_plan_refresh_runs_yahoo_before_sec(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "quarter_update_usa_forced_plan_refresh.db"
+    run_migration(db_path)
+    _insert_state_row(db_path, "AAPL", "usa", "2025-12-31", "2026-03-31", 1)
+    _insert_quarterly_row(db_path, "AAPL", "2026-03-31")
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_yahoo_audit",
+        lambda **kwargs: calls.append("yahoo_audit")
+        or {"ok_count": 1, "empty_count": 0, "error_count": 0, "rows_written": 1},
+    )
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_yahoo_quarterly_write",
+        lambda **kwargs: calls.append("yahoo_write")
+        or {"rows_written": 1, "rows_normalized": 1, "rows_skipped": 0, "source_run_id": "YRAW"},
+    )
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_sec_raw_bootstrap",
+        lambda **kwargs: calls.append("sec_raw") or ("0000320193", [{"ticker": "AAPL"}]),
+    )
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_sec_quarterly_build_step",
+        lambda **kwargs: calls.append("quarterly") or (1, 0),
+    )
+    monkeypatch.setattr(
+        run_fundamental_quarter_update,
+        "run_yahoo_fallback_enrich",
+        lambda **kwargs: calls.append("enrich") or {"fields_filled": 0, "rows_inserted": 0, "rows_updated": 0},
+    )
+
+    summary = run_fundamental_quarter_update.run_quarterly_refresh(
+        db_path=db_path,
+        ticker="AAPL",
+        market="usa",
+        target_period_end_date="2026-03-31",
+        child_run_ids=run_fundamental_quarter_update.derive_child_run_ids("BASE"),
+        allow_live_yahoo_fast_ingest=True,
+        force_provider_refresh=True,
+    )
+
+    assert calls == ["yahoo_audit", "yahoo_write", "sec_raw", "quarterly", "enrich"]
+    assert summary["sec_refresh_required"] is True
+    assert summary["yahoo_live_refresh_attempted"] is True
 
 
 def test_run_quarterly_refresh_non_usa_runs_raw_write_bridge(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

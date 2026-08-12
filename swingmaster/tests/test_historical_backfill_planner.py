@@ -109,6 +109,74 @@ def test_target_inventory_uses_fiscal_sec_metadata_and_flags_ambiguous_match(tmp
     assert by_key[("KNOWN", "2026-03-31")].target_identity_status == TARGET_DETERMINISTIC
 
 
+def test_existing_normalized_exact_period_ignores_conflicting_sec_comparative_fiscal_labels(tmp_path: Path) -> None:
+    db_path = tmp_path / "normalized_exact_identity.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        _insert_quarter(conn, "A", "2010-01-31", complete=False, run_id="BASE")
+        _insert_sec_fact(conn, "A", "2010-01-31", "OperatingIncomeLoss|form=10-Q|unit=USD|fy=2010|fp=Q1|frame=NULL|start=2009-11-01|filed=2010-03-10", 94.0)
+        _insert_sec_fact(conn, "A", "2010-01-31", "OperatingIncomeLoss|form=10-Q|unit=USD|fy=2011|fp=Q1|frame=CY2009Q4|start=2009-11-01|filed=2011-03-09", 94.0)
+        _insert_sec_fact(conn, "A", "2010-01-31", "OperatingIncomeLoss|form=10-K|unit=USD|fy=2010|fp=FY|frame=NULL|start=2009-11-01|filed=2010-12-20", 500.0)
+        conn.commit()
+
+        inventory = build_target_inventory(conn, tickers=["A"])
+        plan = build_historical_backfill_plan(conn, yahoo_recent_targets=1, tickers=["A"])
+
+    assert len(inventory) == 1
+    assert inventory[0].target_identity_status == TARGET_DETERMINISTIC
+    assert inventory[0].target_identity_source == "NORMALIZED_QUARTERLY+SEC_FACT"
+    assert plan["quarter_plan"][0]["proposed_quarter_action"] != ACTION_TARGET_IDENTITY_REVIEW
+
+
+def test_sec_only_conflicting_quarter_identity_stays_review(tmp_path: Path) -> None:
+    db_path = tmp_path / "sec_only_conflict.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        _insert_sec_fact(conn, "ODD", "2026-02-28", "Revenues|form=10-Q|unit=USD|fy=2026|fp=Q1|frame=NULL|start=2025-12-01|filed=2026-04-01", 100.0)
+        _insert_sec_fact(conn, "ODD", "2026-02-28", "Revenues|form=10-Q|unit=USD|fy=2026|fp=Q2|frame=NULL|start=2025-12-01|filed=2026-05-01", 100.0)
+        conn.commit()
+        inventory = build_target_inventory(conn, tickers=["ODD"])
+
+    assert len(inventory) == 1
+    assert inventory[0].target_identity_status == TARGET_IDENTITY_REVIEW
+
+
+def test_annual_sec_fact_does_not_create_quarter_target_or_evidence(tmp_path: Path) -> None:
+    db_path = tmp_path / "annual_excluded.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        _insert_sec_fact(conn, "FYONLY", "2025-12-31", "Revenues|form=10-K|unit=USD|fy=2025|fp=FY|frame=NULL|start=2025-01-01|filed=2026-02-20", 1000.0)
+        _insert_quarter(conn, "NORMFY", "2025-12-31", complete=False, run_id="BASE")
+        _insert_sec_fact(conn, "NORMFY", "2025-12-31", "Revenues|form=10-K|unit=USD|fy=2025|fp=FY|frame=NULL|start=2025-01-01|filed=2026-02-20", 1000.0)
+        conn.commit()
+        inventory = build_target_inventory(conn, tickers=["FYONLY", "NORMFY"])
+        plan = build_historical_backfill_plan(conn, yahoo_recent_targets=0, tickers=["FYONLY", "NORMFY"])
+
+    by_key = {(row.ticker, row.target_period_end_date): row for row in inventory}
+    assert ("FYONLY", "2025-12-31") not in by_key
+    assert by_key[("NORMFY", "2025-12-31")].target_identity_source == "NORMALIZED_QUARTERLY"
+    quarter = {(row["ticker"], row["target_period_end_date"]): row for row in plan["quarter_plan"]}
+    assert quarter[("NORMFY", "2025-12-31")]["sec_evidence_state"] == "NOT_PRESENT"
+
+
+def test_sec_fiscal_identity_does_not_guess_from_calendar_quarter(tmp_path: Path) -> None:
+    db_path = tmp_path / "no_calendar_guess.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        _insert_sec_fact(conn, "FISCAL", "2026-01-31", "Revenues|form=10-Q|unit=USD|fy=2026|fp=Q4|frame=NULL|start=2025-11-01|filed=2026-03-01", 100.0)
+        conn.commit()
+        inventory = build_target_inventory(conn, tickers=["FISCAL"])
+
+    assert len(inventory) == 1
+    assert inventory[0].fiscal_year == "2026"
+    assert inventory[0].fiscal_quarter == "Q4"
+    assert inventory[0].target_identity_status == TARGET_DETERMINISTIC
+
+
 def test_planner_classifies_actions_and_aggregates_provider_calls_once_per_ticker(tmp_path: Path) -> None:
     db_path = tmp_path / "planner.db"
     run_migration(db_path)

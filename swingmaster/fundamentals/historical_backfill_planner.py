@@ -25,6 +25,7 @@ from swingmaster.fundamentals.historical_backfill_source_policy import (
 
 DEFAULT_MARKET = "usa"
 DEFAULT_YAHOO_RECENT_TARGETS = 8
+QUARTERLY_FISCAL_PERIODS = {"Q1", "Q2", "Q3", "Q4"}
 TARGET_DETERMINISTIC = "TARGET_DETERMINISTIC"
 TARGET_IDENTITY_REVIEW = "TARGET_IDENTITY_REVIEW"
 
@@ -129,6 +130,8 @@ def build_target_inventory(
         }
 
     if table_exists(conn, "rc_fundamental_statement_raw"):
+        sec_identities_by_key: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
+        sec_keys: set[tuple[str, str]] = set()
         for row in conn.execute(
             """
             SELECT ticker, period_end_date, field_name
@@ -148,6 +151,17 @@ def build_target_inventory(
             period = str(row["period_end_date"])
             parsed = parse_sec_field_metadata(str(row["field_name"]))
             key = (ticker, period)
+            if not parsed or parsed.get("fp", "").upper() not in QUARTERLY_FISCAL_PERIODS:
+                continue
+            sec_keys.add(key)
+            fy = parsed.get("fy", "")
+            fp = parsed.get("fp", "").upper()
+            if fy and fp:
+                sec_identities_by_key[key].add((fy, fp))
+
+        for key in sorted(sec_keys):
+            ticker, period = key
+            identities = sec_identities_by_key.get(key, set())
             item = targets.setdefault(
                 key,
                 {
@@ -161,13 +175,12 @@ def build_target_inventory(
                 },
             )
             item["sources"].add("SEC_FACT")
-            if parsed:
-                if item["fiscal_year"] and item["fiscal_year"] != parsed.get("fy", ""):
-                    item["status"] = TARGET_IDENTITY_REVIEW
-                if item["fiscal_quarter"] and item["fiscal_quarter"] != parsed.get("fp", ""):
-                    item["status"] = TARGET_IDENTITY_REVIEW
-                item["fiscal_year"] = item["fiscal_year"] or parsed.get("fy", "")
-                item["fiscal_quarter"] = item["fiscal_quarter"] or parsed.get("fp", "")
+            if len(identities) == 1:
+                fiscal_year, fiscal_quarter = next(iter(identities))
+                item["fiscal_year"] = item["fiscal_year"] or fiscal_year
+                item["fiscal_quarter"] = item["fiscal_quarter"] or fiscal_quarter
+            elif "NORMALIZED_QUARTERLY" not in item["sources"]:
+                item["status"] = TARGET_IDENTITY_REVIEW
 
     if table_exists(conn, "rc_fundamental_quarter_earnings_match"):
         for row in conn.execute(
@@ -296,6 +309,8 @@ def _load_sec_evidence(conn: sqlite3.Connection) -> dict[tuple[str, str], set[st
         """
     ):
         parsed = parse_sec_field_metadata(str(row["field_name"]))
+        if not parsed or parsed.get("fp", "").upper() not in QUARTERLY_FISCAL_PERIODS:
+            continue
         tag = str(row["field_name"]).split("|", 1)[0]
         field = SEC_TAG_TO_FIELD.get(tag)
         if field:

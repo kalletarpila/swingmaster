@@ -7,7 +7,6 @@ import pytest
 
 from swingmaster.cli import run_fundamental_quarter_update
 from swingmaster.cli.run_fundamental_migrations import run_migration
-from swingmaster.fundamentals.reported_vintage_reader import get_pit_quarterly_vintage
 
 
 def test_default_quarter_update_behavior_unchanged(tmp_path: Path) -> None:
@@ -17,7 +16,27 @@ def test_default_quarter_update_behavior_unchanged(tmp_path: Path) -> None:
 
     summary = _run_update(db_path)
 
-    assert "vintage_requested" not in summary
+    assert summary["vintage_requested"] is False
+    assert summary["vintage_execution_enabled"] is False
+    assert summary["vintage_status"] == "VINTAGE_DISABLED"
+    assert summary["vintage_rows_inserted"] == 0
+    assert summary["vintage_provenance_rows_inserted"] == 0
+    assert summary["vintage_count_status"] == "disabled_by_policy"
+    assert "vintage_final_mixed_rows_inserted" not in summary
+
+
+def test_default_latest_only_update_still_runs_process_ticker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "final_mixed_runner_latest_only.db"
+    run_migration(db_path)
+    _insert_state_row(db_path)
+    _patch_process_ticker(monkeypatch)
+
+    summary = _run_update(db_path, dry_run=False)
+
+    assert summary["tickers_processed"] == 1
+    assert summary["tickers_succeeded"] == 1
+    assert summary["vintage_requested"] is False
+    assert summary["vintage_status"] == "VINTAGE_DISABLED"
     assert "vintage_final_mixed_rows_inserted" not in summary
 
 
@@ -31,13 +50,17 @@ def test_final_mixed_mode_requires_write_vintage(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("missing_key", "expected_error"),
     [
-        ("vintage_market", "FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_MARKET_REQUIRED"),
-        ("vintage_available_at_utc", "FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_AVAILABLE_AT_UTC_REQUIRED"),
-        ("vintage_ingested_at_utc", "FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_INGESTED_AT_UTC_REQUIRED"),
-        ("vintage_run_id", "FUNDAMENTAL_QUARTER_UPDATE_VINTAGE_RUN_ID_REQUIRED"),
+        ("vintage_market", "VINTAGE_PROVENANCE_WRITES_DISABLED"),
+        ("vintage_available_at_utc", "VINTAGE_PROVENANCE_WRITES_DISABLED"),
+        ("vintage_ingested_at_utc", "VINTAGE_PROVENANCE_WRITES_DISABLED"),
+        ("vintage_run_id", "VINTAGE_PROVENANCE_WRITES_DISABLED"),
     ],
 )
-def test_final_mixed_mode_requires_pit_metadata(tmp_path: Path, missing_key: str, expected_error: str) -> None:
+def test_final_mixed_mode_write_request_is_rejected_before_pit_metadata_validation(
+    tmp_path: Path,
+    missing_key: str,
+    expected_error: str,
+) -> None:
     db_path = tmp_path / f"final_mixed_runner_missing_{missing_key}.db"
     kwargs = _final_mixed_kwargs()
     kwargs[missing_key] = None
@@ -59,43 +82,46 @@ def test_final_mixed_mode_fails_if_inputs_are_not_available_before_child_steps(
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("process_ticker should not run")),
     )
 
-    with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_INPUTS_REQUIRED"):
+    with pytest.raises(RuntimeError, match="VINTAGE_PROVENANCE_WRITES_DISABLED"):
         _run_update(db_path, dry_run=False, **_final_mixed_kwargs())
 
 
-def test_injected_runner_success_updates_summary(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_injected_final_mixed_runner_is_not_called_when_vintage_writes_are_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "final_mixed_runner_injected_success.db"
     run_migration(db_path)
     _insert_state_row(db_path)
     _patch_process_ticker(monkeypatch)
 
-    summary = _run_update(
-        db_path,
-        dry_run=False,
-        final_mixed_execution_runner=lambda **_kwargs: _execution_summary(vintage_rows_inserted=1),
-        **_final_mixed_kwargs(),
-    )
+    with pytest.raises(RuntimeError, match="VINTAGE_PROVENANCE_WRITES_DISABLED"):
+        _run_update(
+            db_path,
+            dry_run=False,
+            final_mixed_execution_runner=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("final_mixed_execution_runner should not run")
+            ),
+            **_final_mixed_kwargs(),
+        )
 
-    assert summary["vintage_final_mixed_written"] is True
-    assert summary["vintage_final_mixed_rows_inserted"] == 1
-    assert summary["vintage_final_mixed_provenance_rows_inserted"] == 5
 
-
-def test_injected_runner_noop_updates_summary(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_final_mixed_noop_runner_setup_is_rejected_by_policy_before_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "final_mixed_runner_injected_noop.db"
     run_migration(db_path)
     _insert_state_row(db_path)
     _patch_process_ticker(monkeypatch)
 
-    summary = _run_update(
-        db_path,
-        dry_run=False,
-        final_mixed_execution_runner=lambda **_kwargs: _execution_summary(vintage_rows_inserted=0, skipped_noop=1),
-        **_final_mixed_kwargs(),
-    )
-
-    assert summary["vintage_final_mixed_written"] is False
-    assert summary["vintage_rows_skipped_noop"] == 1
+    with pytest.raises(RuntimeError, match="VINTAGE_PROVENANCE_WRITES_DISABLED"):
+        _run_update(
+            db_path,
+            dry_run=False,
+            final_mixed_execution_runner=lambda **_kwargs: _execution_summary(vintage_rows_inserted=0, skipped_noop=1),
+            **_final_mixed_kwargs(),
+        )
 
 
 def test_injected_runner_failure_surfaces_controlled_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -104,7 +130,7 @@ def test_injected_runner_failure_surfaces_controlled_error(monkeypatch: pytest.M
     _insert_state_row(db_path)
     _patch_process_ticker(monkeypatch)
 
-    with pytest.raises(RuntimeError, match="FUNDAMENTAL_QUARTER_UPDATE_BATCH_FAILED:tickers_failed=1"):
+    with pytest.raises(RuntimeError, match="VINTAGE_PROVENANCE_WRITES_DISABLED"):
         _run_update(
             db_path,
             dry_run=False,
@@ -115,58 +141,55 @@ def test_injected_runner_failure_surfaces_controlled_error(monkeypatch: pytest.M
         )
 
 
-def test_production_safe_runner_writes_final_mixed_row_in_temp_db(tmp_path: Path) -> None:
+def test_production_safe_runner_rejects_final_mixed_vintage_write(tmp_path: Path) -> None:
     db_path = tmp_path / "final_mixed_runner_direct_write.db"
     run_migration(db_path)
 
     with sqlite3.connect(str(db_path)) as conn:
-        summary = run_fundamental_quarter_update.run_final_mixed_vintage_execution_for_ticker(
-            conn,
-            ticker="AAPL",
-            market="usa",
-            normalized_row=_normalized_row(),
-            sec_field_source_map=_sec_source_map(),
-            yahoo_field_source_map=_yahoo_source_map(),
-            fallback_audit_rows=_audit_rows(),
-            available_at_utc="2026-05-03T10:30:00Z",
-            ingested_at_utc="2026-05-03T10:31:00Z",
-            run_id="FINAL_MIXED_RUN",
-            normalization_run_id="FINAL_MIXED_NORM",
-        )
-
-    assert summary["final_mixed_written"] is True
-    assert summary["vintage_rows_inserted"] == 1
-    assert summary["provenance_rows_inserted"] == 5
+        with pytest.raises(RuntimeError, match="VINTAGE_PROVENANCE_WRITES_DISABLED"):
+            run_fundamental_quarter_update.run_final_mixed_vintage_execution_for_ticker(
+                conn,
+                ticker="AAPL",
+                market="usa",
+                normalized_row=_normalized_row(),
+                sec_field_source_map=_sec_source_map(),
+                yahoo_field_source_map=_yahoo_source_map(),
+                fallback_audit_rows=_audit_rows(),
+                available_at_utc="2026-05-03T10:30:00Z",
+                ingested_at_utc="2026-05-03T10:31:00Z",
+                run_id="FINAL_MIXED_RUN",
+                normalization_run_id="FINAL_MIXED_NORM",
+            )
 
 
-def test_production_safe_runner_returns_pit_readable_row_in_temp_db(tmp_path: Path) -> None:
+def test_production_safe_runner_does_not_write_pit_rows_when_disabled(tmp_path: Path) -> None:
     db_path = tmp_path / "final_mixed_runner_pit.db"
     run_migration(db_path)
 
     with sqlite3.connect(str(db_path)) as conn:
-        summary = run_fundamental_quarter_update.run_final_mixed_vintage_execution_for_ticker(
-            conn,
-            ticker="AAPL",
-            market="usa",
-            normalized_row=_normalized_row(),
-            sec_field_source_map=_sec_source_map(),
-            yahoo_field_source_map=_yahoo_source_map(),
-            fallback_audit_rows=_audit_rows(),
-            available_at_utc="2026-05-03T10:30:00Z",
-            ingested_at_utc="2026-05-03T10:31:00Z",
-            run_id="FINAL_MIXED_RUN",
-            normalization_run_id="FINAL_MIXED_NORM",
-        )
-        pit_row = get_pit_quarterly_vintage(
-            conn,
-            "AAPL",
-            "2026-03-31",
-            "2026-05-03T10:30:00Z",
-            market="usa",
-        )
+        with pytest.raises(RuntimeError, match="VINTAGE_PROVENANCE_WRITES_DISABLED"):
+            run_fundamental_quarter_update.run_final_mixed_vintage_execution_for_ticker(
+                conn,
+                ticker="AAPL",
+                market="usa",
+                normalized_row=_normalized_row(),
+                sec_field_source_map=_sec_source_map(),
+                yahoo_field_source_map=_yahoo_source_map(),
+                fallback_audit_rows=_audit_rows(),
+                available_at_utc="2026-05-03T10:30:00Z",
+                ingested_at_utc="2026-05-03T10:31:00Z",
+                run_id="FINAL_MIXED_RUN",
+                normalization_run_id="FINAL_MIXED_NORM",
+            )
+        counts = conn.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM rc_fundamental_quarterly_vintage),
+                (SELECT COUNT(*) FROM rc_fundamental_quarterly_field_provenance)
+            """
+        ).fetchone()
 
-    assert pit_row is not None
-    assert pit_row["statement_vintage_id"] == summary["statement_vintage_id"]
+    assert counts == (0, 0)
 
 
 def test_production_safe_runner_does_not_open_db_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -179,23 +202,22 @@ def test_production_safe_runner_does_not_open_db_paths(monkeypatch: pytest.Monke
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("sqlite3.connect should not run")),
     )
     try:
-        summary = run_fundamental_quarter_update.run_final_mixed_vintage_execution_for_ticker(
-            conn,
-            ticker="AAPL",
-            market="usa",
-            normalized_row=_normalized_row(),
-            sec_field_source_map=_sec_source_map(),
-            yahoo_field_source_map=_yahoo_source_map(),
-            fallback_audit_rows=_audit_rows(),
-            available_at_utc="2026-05-03T10:30:00Z",
-            ingested_at_utc="2026-05-03T10:31:00Z",
-            run_id="FINAL_MIXED_RUN",
-            normalization_run_id="FINAL_MIXED_NORM",
-        )
+        with pytest.raises(RuntimeError, match="VINTAGE_PROVENANCE_WRITES_DISABLED"):
+            run_fundamental_quarter_update.run_final_mixed_vintage_execution_for_ticker(
+                conn,
+                ticker="AAPL",
+                market="usa",
+                normalized_row=_normalized_row(),
+                sec_field_source_map=_sec_source_map(),
+                yahoo_field_source_map=_yahoo_source_map(),
+                fallback_audit_rows=_audit_rows(),
+                available_at_utc="2026-05-03T10:30:00Z",
+                ingested_at_utc="2026-05-03T10:31:00Z",
+                run_id="FINAL_MIXED_RUN",
+                normalization_run_id="FINAL_MIXED_NORM",
+            )
     finally:
         conn.close()
-
-    assert summary["final_mixed_written"] is True
 
 
 def test_no_provider_functions_are_used(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -217,15 +239,13 @@ def test_no_provider_functions_are_used(monkeypatch: pytest.MonkeyPatch, tmp_pat
             lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("provider function should not run")),
         )
 
-    summary = _run_update(
-        db_path,
-        dry_run=False,
-        final_mixed_inputs_by_key={("AAPL", "2026-03-31"): _final_mixed_inputs()},
-        **_final_mixed_kwargs(),
-    )
-
-    assert summary["vintage_final_mixed_written"] is True
-    assert summary["vintage_final_mixed_rows_inserted"] == 1
+    with pytest.raises(RuntimeError, match="VINTAGE_PROVENANCE_WRITES_DISABLED"):
+        _run_update(
+            db_path,
+            dry_run=False,
+            final_mixed_inputs_by_key={("AAPL", "2026-03-31"): _final_mixed_inputs()},
+            **_final_mixed_kwargs(),
+        )
 
 
 def _insert_state_row(db_path: Path, ticker: str = "AAPL", market: str = "omxh") -> None:

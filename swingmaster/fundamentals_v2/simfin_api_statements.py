@@ -151,7 +151,7 @@ def classify_http_status(status: int, body: str) -> str:
             payload = json.loads(body)
         except json.JSONDecodeError:
             return "MALFORMED_RESPONSE"
-        return "SUCCESS" if parse_companies(payload) else "NO_DATA"
+        return "SUCCESS" if payload_has_statement_rows(payload) else "NO_DATA"
     if status == 429:
         return "RATE_LIMITED"
     if status in {401, 403}:
@@ -380,6 +380,14 @@ def parse_companies(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, dict):
         return [payload]
     return []
+
+
+def payload_has_statement_rows(payload: Any) -> bool:
+    for company in parse_companies(payload):
+        for statement in company.get("statements") or []:
+            if statement.get("data"):
+                return True
+    return False
 
 
 def flatten_statement_company(company: Mapping[str, Any]) -> list[dict[str, Any]]:

@@ -12,6 +12,7 @@ from swingmaster.fundamentals_v2.simfin_api_statements import (
     acquire_simfin_api_statements,
     apply_simfin_api_statements,
     build_candidate_inventory,
+    classify_http_status,
     ensure_schema,
     map_api_ordinary_fields,
     persist_fetch_result,
@@ -168,6 +169,11 @@ def test_map_api_ordinary_fields_uses_shared_semantics() -> None:
     assert values["free_cashflow"] == 2
     assert values["total_debt"] == 5
     assert values["shares_outstanding"] is None
+
+
+def test_http_200_company_wrapper_without_statement_rows_is_no_data() -> None:
+    payload = [{"id": 123, "ticker": "EMPTY", "statements": []}]
+    assert classify_http_status(200, json.dumps(payload)) == "NO_DATA"
 
 
 class FakeClock:

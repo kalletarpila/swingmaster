@@ -4,6 +4,7 @@ import json
 import csv
 import sqlite3
 from pathlib import Path
+from urllib.request import Request
 
 import pytest
 
@@ -47,6 +48,56 @@ def test_rate_limiter_uses_request_start_spacing_and_default_margin() -> None:
     clock.advance(0.4)
     limiter.wait_for_next_start()
     assert sleeps == [pytest.approx(1.7)]
+
+
+def test_acquire_default_client_reuses_rate_limiter_across_tickers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    clock = FakeClock()
+    sleeps = []
+    calls = []
+    monkeypatch.setenv("SIMFIN_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "swingmaster.fundamentals_v2.simfin_api_statements.urlencode",
+        lambda params: f"ticker={params['ticker']}",
+    )
+
+    class InstrumentedRateLimiter(RequestStartRateLimiter):
+        def __init__(self, min_interval_seconds: float = 2.1) -> None:
+            super().__init__(
+                min_interval_seconds,
+                monotonic=clock.monotonic,
+                sleeper=lambda seconds: sleeps.append(seconds) or clock.advance(seconds),
+            )
+
+    monkeypatch.setattr(
+        "swingmaster.fundamentals_v2.simfin_api_statements.RequestStartRateLimiter",
+        InstrumentedRateLimiter,
+    )
+
+    def opener(request: Request, timeout_seconds: float) -> object:
+        ticker = request.full_url.rsplit("=", 1)[-1]
+        calls.append(ticker)
+        clock.advance(0.1)
+
+        class Response:
+            status = 200
+            headers = {}
+
+            def read(self) -> bytes:
+                return json.dumps(_payload(ticker), sort_keys=True).encode("utf-8")
+
+        return Response()
+
+    monkeypatch.setattr(
+        "swingmaster.fundamentals_v2.simfin_api_statements.SimFinStatementClient._default_open",
+        staticmethod(opener),
+    )
+
+    result = acquire_simfin_api_statements(db_path=db, tickers=["AAPL", "MSFT", "NVDA"], run_id="RUN1", min_interval_seconds=2.1)
+    assert result["status"] == "OK"
+    assert calls == ["AAPL", "MSFT", "NVDA"]
+    assert sleeps == [pytest.approx(2.0), pytest.approx(2.0)]
 
 
 def test_acquire_cache_first_and_429_stops_without_erasing_success(tmp_path: Path) -> None:

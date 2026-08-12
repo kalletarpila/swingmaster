@@ -370,6 +370,9 @@ def acquire_simfin_api_statements(
     try:
         if not dry_run:
             ensure_schema(conn)
+        active_client = client
+        if active_client is None and not dry_run:
+            active_client = SimFinStatementClient(rate_limiter=RequestStartRateLimiter(min_interval_seconds))
         for ticker in ordered:
             cached = latest_successful_raw(conn, market=market, ticker=ticker, create_schema_if_missing=not dry_run)
             if cached is not None and not force_refresh:
@@ -382,7 +385,6 @@ def acquire_simfin_api_statements(
             if dry_run:
                 rows.append({"ticker": ticker, "action": "NETWORK_REQUIRED", "status": "DRY_RUN", "raw_id": ""})
                 continue
-            active_client = client or SimFinStatementClient(rate_limiter=RequestStartRateLimiter(min_interval_seconds))
             result = active_client.fetch_ticker(ticker)
             raw_id = persist_fetch_result(conn, market=market, run_id=run_id, result=result)
             conn.commit()

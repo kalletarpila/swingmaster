@@ -2759,7 +2759,7 @@ def run_quarterly_refresh(
                     symbol=ticker,
                     run_id=child_run_ids["yqtr"],
                     dry_run=False,
-                    replace_symbol=True,
+                    replace_symbol=False,
                 )
             else:
                 yahoo_quarterly_summary = {
@@ -2855,7 +2855,7 @@ def run_quarterly_refresh(
                     symbol=ticker,
                     run_id=child_run_ids["yqtr"],
                     dry_run=False,
-                    replace_symbol=True,
+                    replace_symbol=False,
                 )
             else:
                 yahoo_quarterly_summary = {
@@ -2919,7 +2919,7 @@ def run_quarterly_refresh(
         symbol=ticker,
         run_id=child_run_ids["yqtr"],
         dry_run=False,
-        replace_symbol=True,
+        replace_symbol=False,
     )
     quarterly_bridge_summary = run_yahoo_to_quarterly(
         db_path=db_path,

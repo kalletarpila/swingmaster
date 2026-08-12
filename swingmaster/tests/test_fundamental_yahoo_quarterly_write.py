@@ -153,7 +153,7 @@ def test_writer_skips_snapshot_only_row_and_writes_five_rows(tmp_path: Path) -> 
     ]
 
 
-def test_replace_symbol_deletes_existing_rows_before_insert(tmp_path: Path) -> None:
+def test_replace_symbol_preserves_absent_historical_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "yahoo_write_replace.db"
     run_migration(db_path)
     fixture = _base_fixture()
@@ -166,7 +166,7 @@ def test_replace_symbol_deletes_existing_rows_before_insert(tmp_path: Path) -> N
                 market, symbol, period_end_date, shares_outstanding, shares_source, shares_quality, source_run_id, run_id, created_at_utc
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("omxh", "NOKIA.HE", "2025-03-31", 1.0, "snapshot", "REVIEW", "OLDRAW", "OLDRUN", "2026-01-01T00:00:00+00:00"),
+                ("omxh", "NOKIA.HE", "2024-12-31", 1.0, "snapshot", "REVIEW", "OLDRAW", "OLDRUN", "2026-01-01T00:00:00+00:00"),
         )
         conn.commit()
 
@@ -179,13 +179,174 @@ def test_replace_symbol_deletes_existing_rows_before_insert(tmp_path: Path) -> N
         replace_symbol=True,
     )
 
-    assert result["rows_deleted"] == 1
+    assert result["rows_deleted"] == 0
     assert result["rows_written"] == 5
     with sqlite3.connect(str(db_path)) as conn:
-        count = conn.execute(
-            "SELECT COUNT(*) FROM rc_fundamental_yahoo_quarterly WHERE market='omxh' AND symbol='NOKIA.HE'"
-        ).fetchone()[0]
-    assert count == 5
+        rows = conn.execute(
+            """
+            SELECT period_end_date, shares_outstanding, shares_source, shares_quality
+            FROM rc_fundamental_yahoo_quarterly
+            WHERE market='omxh' AND symbol='NOKIA.HE'
+            ORDER BY period_end_date
+            """
+        ).fetchall()
+    assert len(rows) == 6
+    assert rows[0] == ("2024-12-31", 1.0, "snapshot", "REVIEW")
+    assert rows[1] == ("2025-03-31", 5380831000.0, "ordinary_shares_number", "OK")
+
+
+def test_narrower_response_merges_and_preserves_old_quarter(tmp_path: Path) -> None:
+    db_path = tmp_path / "yahoo_write_retention.db"
+    run_migration(db_path)
+    first_fixture = _base_fixture()
+    _insert_yahoo_raw_row(db_path, symbol="NOKIA.HE", run_id="RAW1", **first_fixture)
+
+    run_fundamental_yahoo_quarterly_write.run_yahoo_quarterly_write(
+        db_path=db_path,
+        market="omxh",
+        symbol="NOKIA.HE",
+        run_id="WRITE1",
+        dry_run=False,
+        replace_symbol=False,
+    )
+
+    second_fixture = _base_fixture()
+    for statement_name in ("income", "balance", "cashflow"):
+        statement = second_fixture[statement_name]
+        statement["columns"] = [column for column in statement["columns"] if column != "2025-03-31"]
+        if statement_name == "income":
+            statement["columns"].append("2026-06-30")
+            for row in statement["data"]:
+                row.pop(1)
+                row.append(1.0)
+        elif statement_name == "balance":
+            statement["columns"].append("2026-06-30")
+            for row in statement["data"]:
+                row.pop(1)
+                row.append(2.0)
+        else:
+            statement["columns"].append("2026-06-30")
+            for row in statement["data"]:
+                row.pop(0)
+                row.append(3.0)
+    _insert_yahoo_raw_row(db_path, symbol="NOKIA.HE", run_id="RAW2", **second_fixture)
+
+    run_fundamental_yahoo_quarterly_write.run_yahoo_quarterly_write(
+        db_path=db_path,
+        market="omxh",
+        symbol="NOKIA.HE",
+        run_id="WRITE2",
+        dry_run=False,
+        replace_symbol=True,
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT period_end_date, revenue, ebit, ebitda
+            FROM rc_fundamental_yahoo_quarterly
+            WHERE market='omxh' AND symbol='NOKIA.HE'
+            ORDER BY period_end_date
+            """
+        ).fetchall()
+    periods = [row[0] for row in rows]
+    assert "2025-03-31" in periods
+    assert "2026-06-30" in periods
+    old_row = next(row for row in rows if row[0] == "2025-03-31")
+    assert old_row[1:] == (4390000000.0, -30000000.0, 120000000.0)
+
+
+def test_same_period_refresh_updates_existing_cache_row(tmp_path: Path) -> None:
+    db_path = tmp_path / "yahoo_write_same_period_update.db"
+    run_migration(db_path)
+    fixture = _base_fixture()
+    _insert_yahoo_raw_row(db_path, symbol="NOKIA.HE", run_id="RAW1", **fixture)
+    run_fundamental_yahoo_quarterly_write.run_yahoo_quarterly_write(
+        db_path=db_path,
+        market="omxh",
+        symbol="NOKIA.HE",
+        run_id="WRITE1",
+        dry_run=False,
+        replace_symbol=False,
+    )
+
+    updated_fixture = _base_fixture()
+    updated_fixture["income"]["data"][3][1] = 110.0
+    updated_fixture["income"]["data"][4][1] = 220.0
+    _insert_yahoo_raw_row(db_path, symbol="NOKIA.HE", run_id="RAW2", **updated_fixture)
+    run_fundamental_yahoo_quarterly_write.run_yahoo_quarterly_write(
+        db_path=db_path,
+        market="omxh",
+        symbol="NOKIA.HE",
+        run_id="WRITE2",
+        dry_run=False,
+        replace_symbol=False,
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT ebit, ebitda, run_id
+            FROM rc_fundamental_yahoo_quarterly
+            WHERE market='omxh' AND symbol='NOKIA.HE' AND period_end_date='2025-03-31'
+            """
+        ).fetchone()
+    assert row == (110.0, 220.0, "WRITE2")
+
+
+def test_kmx_style_old_direct_ebitda_survives_narrower_response(tmp_path: Path) -> None:
+    db_path = tmp_path / "yahoo_write_kmx_retention.db"
+    run_migration(db_path)
+    first_fixture = _base_fixture()
+    first_fixture["income"]["columns"] = ["2025-02-28", "2025-05-31"]
+    first_fixture["income"]["data"] = [
+        [6003123000.0, 7000000000.0],
+        [667893000.0, 800000000.0],
+        [-99551000.0, 42284000.0],
+        [None, None],
+        [414013000.0, 587484000.0],
+        [89866000.0, 100000000.0],
+    ]
+    first_fixture["balance"]["columns"] = ["2025-02-28", "2025-05-31"]
+    first_fixture["balance"]["data"] = [[156061000.0, 156061000.0], [246960000.0, 300000000.0], [16821000.0, 20000000.0]]
+    first_fixture["cashflow"]["columns"] = ["2025-02-28", "2025-05-31"]
+    first_fixture["cashflow"]["data"] = [[146377000.0, 200000000.0], [-127617000.0, -100000000.0], [18760000.0, 100000000.0]]
+    _insert_yahoo_raw_row(db_path, symbol="KMX", run_id="RAW1", **first_fixture)
+
+    run_fundamental_yahoo_quarterly_write.run_yahoo_quarterly_write(
+        db_path=db_path,
+        market="usa",
+        symbol="KMX",
+        run_id="WRITE1",
+        dry_run=False,
+        replace_symbol=False,
+    )
+
+    second_fixture = first_fixture
+    for statement_name in ("income", "balance", "cashflow"):
+        statement = second_fixture[statement_name]
+        statement["columns"] = ["2025-05-31"]
+        statement["data"] = [[row[1]] for row in statement["data"]]
+    _insert_yahoo_raw_row(db_path, symbol="KMX", run_id="RAW2", **second_fixture)
+
+    run_fundamental_yahoo_quarterly_write.run_yahoo_quarterly_write(
+        db_path=db_path,
+        market="usa",
+        symbol="KMX",
+        run_id="WRITE2",
+        dry_run=False,
+        replace_symbol=True,
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT operating_income, ebit, ebitda, run_id
+            FROM rc_fundamental_yahoo_quarterly
+            WHERE market='usa' AND symbol='KMX' AND period_end_date='2025-02-28'
+            """
+        ).fetchone()
+    assert row == (-99551000.0, None, 414013000.0, "WRITE1")
 
 
 def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:

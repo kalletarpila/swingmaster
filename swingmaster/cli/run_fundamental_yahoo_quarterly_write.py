@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--replace-symbol",
         action="store_true",
-        help="Delete existing rows for market+symbol before inserting new rows",
+        help="Deprecated no-op; Yahoo quarterly cache is append/update-by-period and never delete-by-absence",
     )
     return parser.parse_args()
 
@@ -81,14 +81,13 @@ def build_persist_rows(
 
 
 def replace_symbol_rows(conn: sqlite3.Connection, market: str, symbol: str) -> int:
-    cursor = conn.execute(
-        """
-        DELETE FROM rc_fundamental_yahoo_quarterly
-        WHERE market = ? AND symbol = ?
-        """,
-        (market, symbol),
-    )
-    return int(cursor.rowcount)
+    """Deprecated compatibility hook.
+
+    Yahoo live quarterly history is limited. The cache is durable historical
+    evidence: refreshes may update same-period rows, but absence from a newer
+    response must never delete older persisted periods.
+    """
+    return 0
 
 
 def insert_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
@@ -116,6 +115,24 @@ def insert_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
             run_id,
             created_at_utc
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(market, symbol, period_end_date) DO UPDATE SET
+            revenue = excluded.revenue,
+            gross_profit = excluded.gross_profit,
+            operating_income = excluded.operating_income,
+            ebit = excluded.ebit,
+            ebitda = excluded.ebitda,
+            net_income = excluded.net_income,
+            operating_cashflow = excluded.operating_cashflow,
+            capex = excluded.capex,
+            free_cashflow = excluded.free_cashflow,
+            cash = excluded.cash,
+            total_debt = excluded.total_debt,
+            shares_outstanding = excluded.shares_outstanding,
+            shares_source = excluded.shares_source,
+            shares_quality = excluded.shares_quality,
+            source_run_id = excluded.source_run_id,
+            run_id = excluded.run_id,
+            created_at_utc = excluded.created_at_utc
         """,
         [
             (

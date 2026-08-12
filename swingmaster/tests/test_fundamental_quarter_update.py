@@ -76,6 +76,8 @@ def _insert_yahoo_quarterly_row(
     revenue: float | None = None,
     gross_profit: float | None = None,
     operating_income: float | None = None,
+    ebit: float | None = None,
+    ebitda: float | None = None,
     net_income: float | None = None,
     operating_cashflow: float | None = None,
     capex: float | None = None,
@@ -88,10 +90,10 @@ def _insert_yahoo_quarterly_row(
         conn.execute(
             """
             INSERT INTO rc_fundamental_yahoo_quarterly (
-                market, symbol, period_end_date, revenue, gross_profit, operating_income, net_income,
+                market, symbol, period_end_date, revenue, gross_profit, operating_income, ebit, ebitda, net_income,
                 operating_cashflow, capex, free_cashflow, cash, total_debt, shares_outstanding,
                 shares_source, shares_quality, source_run_id, run_id, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 market,
@@ -100,6 +102,8 @@ def _insert_yahoo_quarterly_row(
                 revenue,
                 gross_profit,
                 operating_income,
+                ebit,
+                ebitda,
                 net_income,
                 operating_cashflow,
                 capex,
@@ -1668,9 +1672,10 @@ def test_plan_mode_sec_missing_yahoo_complete_fast_ingest_creates_sec_followup(
             market="usa",
             symbol="AAPL",
             period_end_date="2026-06-30",
-            revenue=100,
-            operating_income=10,
-            operating_cashflow=8,
+                revenue=100,
+                operating_income=10,
+                ebit=10,
+                operating_cashflow=8,
             capex=-3,
             free_cashflow=5,
             cash=20,

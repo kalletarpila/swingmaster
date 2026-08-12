@@ -558,6 +558,70 @@ def test_target_only_does_not_enrich_adjacent_normalized_quarter(tmp_path: Path)
     assert rows == [("2025-07-31", 100.0), ("2025-08-05", None)]
 
 
+def test_target_repair_reuses_persisted_historical_kmx_yahoo_cache(tmp_path: Path) -> None:
+    db_path = tmp_path / "fallback_kmx_historical_cache.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_quarterly_row(conn, ticker="KMX", period_end_date="2025-02-28", operating_income=-99551000.0)
+        _insert_quarterly_row(conn, ticker="KMX", period_end_date="2025-05-31", operating_income=42284000.0)
+        _insert_yahoo_quarterly_row(
+            conn,
+            market="usa",
+            symbol="KMX",
+            period_end_date="2025-02-28",
+            operating_income=-99551000.0,
+            ebit=None,
+            ebitda=414013000.0,
+        )
+        _insert_yahoo_quarterly_row(
+            conn,
+            market="usa",
+            symbol="KMX",
+            period_end_date="2025-05-31",
+            operating_income=42284000.0,
+            ebit=None,
+            ebitda=587484000.0,
+        )
+        conn.commit()
+
+    summary = run_fundamental_yahoo_fallback_enrich.run_yahoo_fallback_enrich(
+        db_path=db_path,
+        market="usa",
+        ticker="KMX",
+        run_id="ENRICH_KMX_HISTORICAL",
+        dry_run=False,
+        replace_audit_for_run=False,
+        detected_source_period_end_date="2025-02-28",
+        target_only=True,
+    )
+
+    assert summary["quarterly_rows_scanned"] == 1
+    assert summary["fields_filled"] == 1
+    assert summary["filled_ebit"] == 0
+    assert summary["filled_ebitda"] == 1
+    with sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT period_end_date, operating_income, ebit, ebitda
+            FROM rc_fundamental_quarterly
+            WHERE ticker='KMX'
+            ORDER BY period_end_date
+            """
+        ).fetchall()
+        audit_row = conn.execute(
+            """
+            SELECT field_name, new_value, matched_yahoo_period_end_date, match_method
+            FROM rc_fundamental_quarterly_enrichment_audit
+            WHERE ticker='KMX'
+            """
+        ).fetchone()
+    assert rows == [
+        ("2025-02-28", -99551000.0, None, 414013000.0),
+        ("2025-05-31", 42284000.0, None, None),
+    ]
+    assert audit_row == ("ebitda", 414013000.0, "2025-02-28", "EXACT")
+
+
 def test_replace_audit_for_run_replaces_previous_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "fallback_replace_audit.db"
     run_migration(db_path)

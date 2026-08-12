@@ -17,8 +17,8 @@ FIELD_MAPPINGS: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     "gross_profit": ("income", ("Gross Profit",)),
-    "operating_income": ("income", ("Operating Income", "EBIT", "OperatingIncomeLoss")),
-    "ebit": ("income", ("EBIT", "Operating Income", "OperatingIncomeLoss")),
+    "operating_income": ("income", ("Operating Income", "OperatingIncomeLoss")),
+    "ebit": ("income", ("EBIT",)),
     "ebitda": ("income", ("EBITDA", "Normalized EBITDA")),
     "net_income": ("income", ("Net Income", "Net Income Common Stockholders")),
     "operating_cashflow": (

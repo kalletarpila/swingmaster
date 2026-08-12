@@ -61,7 +61,7 @@ def test_build_quarterly_successful_normalization(tmp_path: Path) -> None:
             "2024-12-31",
             1000.0,
             150.0,
-            150.0,
+            None,
             120.0,
             200.0,
             -50.0,
@@ -224,13 +224,47 @@ def test_build_quarterly_maps_additional_sec_fact_names(tmp_path: Path) -> None:
         assert row == (
             81273000000.0,
             31303000000.0,
-            31303000000.0,
+            None,
             40213000000.0,
             -1287000000.0,
             38926000000.0,
             32400000000.0,
             44358000000.0,
         )
+
+
+def test_build_quarterly_maps_sec_operating_income_without_ebit_proxy(tmp_path: Path) -> None:
+    db_path = tmp_path / "fundamentals_quarterly_sec_operating_income_not_ebit.db"
+    run_migration(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_raw_row(
+            conn,
+            "AAPL",
+            "income",
+            "2026-03-28",
+            "OperatingIncomeLoss|form=10-Q|unit=USD|fy=2026|fp=Q2",
+            27759000000.0,
+        )
+        conn.commit()
+
+        periods_detected, rows_written = build_and_insert_quarterly_rows(
+            conn=conn,
+            ticker="AAPL",
+            run_id="FUND_BUILD_Q_AAPL_SEC_EBIT_POLICY",
+            dry_run=False,
+        )
+
+        assert periods_detected == 1
+        assert rows_written == 1
+        row = conn.execute(
+            """
+            SELECT operating_income, ebit
+            FROM rc_fundamental_quarterly
+            WHERE ticker='AAPL' AND period_end_date='2026-03-28'
+            """
+        ).fetchone()
+    assert row == (27759000000.0, None)
 
 
 def test_build_quarterly_maps_sec_weighted_average_shares(tmp_path: Path) -> None:

@@ -26,6 +26,7 @@ REQUIRED_TABLES = (
     "rc_fundamental_quarterly_field_provenance",
     "rc_earnings_event",
     "rc_fundamental_quarter_earnings_match",
+    "rc_fundamental_historical_backfill_result",
 )
 SCHEMA_VERSION = 1
 TTM_COMPONENT_COLUMNS = (
@@ -262,6 +263,23 @@ EARNINGS_CALENDAR_CHECK_STATE_COLUMNS = (
     ("calendar_last_failed_at_utc", "TEXT"),
     ("calendar_failure_count", "INTEGER NOT NULL DEFAULT 0"),
 )
+HISTORICAL_BACKFILL_RESULT_REQUIRED_COLUMNS = (
+    "id",
+    "market",
+    "ticker",
+    "target_period_end_date",
+    "result_status",
+    "result_reason",
+    "actionable",
+    "exhausted",
+    "retry_after_utc",
+    "sec_evidence_state",
+    "yahoo_evidence_state",
+    "last_attempted_at_utc",
+    "run_id",
+    "created_at_utc",
+    "updated_at_utc",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -419,6 +437,16 @@ def get_earnings_calendar_migration_file_path() -> Path:
     )
 
 
+def get_historical_backfill_result_migration_file_path() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent
+        / "infra"
+        / "sqlite"
+        / "migrations"
+        / "036_rc_fundamental_historical_backfill_result.sql"
+    )
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -446,6 +474,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_ttm_net_debt_to_ebit_migration_file_path(),
         get_quarter_ingestion_status_migration_file_path(),
         get_earnings_calendar_migration_file_path(),
+        get_historical_backfill_result_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")
@@ -462,6 +491,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
     ensure_quarterly_enrichment_audit_v2_columns(conn)
     ensure_quarter_ingestion_status_schema(conn)
     ensure_earnings_calendar_check_state_columns(conn)
+    ensure_historical_backfill_result_schema(conn)
     conn.commit()
 
 
@@ -731,6 +761,10 @@ def ensure_earnings_calendar_check_state_columns(conn: sqlite3.Connection) -> No
         ON rc_earnings_calendar(market, calendar_check_status, calendar_last_checked_at_utc)
         """
     )
+
+
+def ensure_historical_backfill_result_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(get_historical_backfill_result_migration_file_path().read_text(encoding="utf-8"))
 
 
 def _create_quarter_ingestion_status_indexes(conn: sqlite3.Connection) -> None:

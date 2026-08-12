@@ -29,6 +29,10 @@ SUPPORTED_FIELDS = (
     "shares_quality",
 )
 
+RECONSTRUCT_REASON_OK = "OK"
+RECONSTRUCT_REASON_NO_MAPPED_VALUE_AT_TARGET_PERIOD = "NO_MAPPED_STATEMENT_VALUE_AT_TARGET_PERIOD"
+RECONSTRUCT_REASON_TARGET_PERIOD_NOT_FOUND = "TARGET_PERIOD_NOT_FOUND"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Reconstruct one Yahoo quarterly cache row from persisted Yahoo raw")
@@ -92,14 +96,41 @@ def _row_for_period(raw_row: sqlite3.Row, period_end_date: str) -> dict[str, Any
     return None
 
 
+def _analyze_row_for_period(raw_row: sqlite3.Row, period_end_date: str) -> dict[str, Any]:
+    rows = build_normalized_rows(raw_row)
+    for row in rows:
+        if str(row["period_end_date"]) == period_end_date:
+            return {
+                "row": row,
+                "period_marker_present": True,
+                "persistable": should_persist_row(row),
+                "reason": RECONSTRUCT_REASON_OK
+                if should_persist_row(row)
+                else RECONSTRUCT_REASON_NO_MAPPED_VALUE_AT_TARGET_PERIOD,
+            }
+    return {
+        "row": None,
+        "period_marker_present": False,
+        "persistable": False,
+        "reason": RECONSTRUCT_REASON_TARGET_PERIOD_NOT_FOUND,
+    }
+
+
 def build_raw_lineage(raw_rows: list[sqlite3.Row], period_end_date: str) -> list[dict[str, Any]]:
     lineage: list[dict[str, Any]] = []
     for raw_row in raw_rows:
         parse_status = "PARSED"
         target_row: dict[str, Any] | None = None
+        period_marker_present = False
+        persistable = False
+        reason = ""
         error_message = ""
         try:
-            target_row = _row_for_period(raw_row, period_end_date)
+            analysis = _analyze_row_for_period(raw_row, period_end_date)
+            target_row = analysis["row"]
+            period_marker_present = bool(analysis["period_marker_present"])
+            persistable = bool(analysis["persistable"])
+            reason = str(analysis["reason"])
         except Exception as exc:
             parse_status = "PARSE_FAILED"
             error_message = str(exc)
@@ -110,7 +141,9 @@ def build_raw_lineage(raw_rows: list[sqlite3.Row], period_end_date: str) -> list
             "run_id": raw_row["run_id"],
             "loaded_at_utc": raw_row["loaded_at_utc"],
             "target_period_end_date": period_end_date,
-            "period_present": int(target_row is not None),
+            "period_present": int(period_marker_present),
+            "persistable": int(persistable),
+            "reason": reason,
             "parse_status": parse_status,
             "error_message": error_message,
         }
@@ -121,10 +154,15 @@ def build_raw_lineage(raw_rows: list[sqlite3.Row], period_end_date: str) -> list
 
 
 def select_historical_snapshot(raw_rows: list[sqlite3.Row], period_end_date: str) -> tuple[sqlite3.Row, dict[str, Any]]:
+    period_marker_present = False
     for raw_row in raw_rows:
-        target_row = _row_for_period(raw_row, period_end_date)
-        if target_row is not None:
-            return raw_row, target_row
+        analysis = _analyze_row_for_period(raw_row, period_end_date)
+        if analysis["period_marker_present"]:
+            period_marker_present = True
+        if analysis["persistable"]:
+            return raw_row, analysis["row"]
+    if period_marker_present:
+        raise RuntimeError(f"YAHOO_RAW_CACHE_RECONSTRUCT_{RECONSTRUCT_REASON_NO_MAPPED_VALUE_AT_TARGET_PERIOD}:{period_end_date}")
     raise RuntimeError(f"YAHOO_RAW_CACHE_RECONSTRUCT_TARGET_PERIOD_NOT_FOUND:{period_end_date}")
 
 
@@ -137,6 +175,8 @@ def _lineage_fieldnames() -> list[str]:
         "loaded_at_utc",
         "target_period_end_date",
         "period_present",
+        "persistable",
+        "reason",
         "parse_status",
         "error_message",
         *SUPPORTED_FIELDS,
@@ -170,7 +210,31 @@ def run_yahoo_raw_cache_reconstruct(
     with sqlite3.connect(str(db_path)) as conn:
         raw_rows = load_yahoo_raw_rows(conn, normalized_market, normalized_symbol)
         lineage = build_raw_lineage(raw_rows, period_end_date)
-        selected_raw_row, normalized_row = select_historical_snapshot(raw_rows, period_end_date)
+        try:
+            selected_raw_row, normalized_row = select_historical_snapshot(raw_rows, period_end_date)
+        except RuntimeError as exc:
+            reason = str(exc).split(":", 1)[0].removeprefix("YAHOO_RAW_CACHE_RECONSTRUCT_")
+            preview = {
+                "market": normalized_market,
+                "symbol": normalized_symbol,
+                "period_end_date": period_end_date,
+                "selected_raw_id": None,
+                "selected_source_run_id": None,
+                "selected_loaded_at_utc": None,
+                "selection_rule": "NEWEST_PARSEABLE_RAW_SNAPSHOT_CONTAINING_PERIOD",
+                "dry_run": dry_run,
+                "rows_written": 0,
+                "row": None,
+                "status": "NOT_RECONSTRUCTABLE",
+                "reason": reason,
+                "lineage": lineage,
+            }
+            if dry_run:
+                if artifact_dir is not None:
+                    write_raw_lineage(artifact_dir / "raw_lineage.csv", lineage)
+                    write_preview(artifact_dir / "dry_run_preview.json", preview)
+                return preview
+            raise
         persist_rows = build_persist_rows(
             market=normalized_market,
             symbol=normalized_symbol,
@@ -197,6 +261,8 @@ def run_yahoo_raw_cache_reconstruct(
         "dry_run": dry_run,
         "rows_written": rows_written,
         "row": persist_rows[0],
+        "status": "RECONSTRUCTED",
+        "reason": RECONSTRUCT_REASON_OK,
     }
     if artifact_dir is not None:
         write_raw_lineage(artifact_dir / "raw_lineage.csv", lineage)

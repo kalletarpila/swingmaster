@@ -7,7 +7,10 @@ import pytest
 
 from swingmaster.cli.run_fundamental_migrations import run_migration
 from swingmaster.cli.run_fundamental_yahoo_audit import canonical_json_dumps
-from swingmaster.cli.run_fundamental_yahoo_raw_cache_reconstruct import run_yahoo_raw_cache_reconstruct
+from swingmaster.cli.run_fundamental_yahoo_raw_cache_reconstruct import (
+    RECONSTRUCT_REASON_NO_MAPPED_VALUE_AT_TARGET_PERIOD,
+    run_yahoo_raw_cache_reconstruct,
+)
 from swingmaster.fundamentals.providers import yahoo as yahoo_provider
 
 
@@ -276,3 +279,116 @@ def test_reconstruction_does_not_call_network_provider(monkeypatch: pytest.Monke
     )
 
     assert result["selected_source_run_id"] == "RAW1"
+
+
+def test_raw_target_period_with_only_null_mapped_values_reports_insufficient_raw(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "raw_cache_q1_null_values.db"
+    run_migration(db_path)
+    _insert_yahoo_raw_row(
+        db_path,
+        symbol="AAPL",
+        income={
+            "index": ["Total Revenue", "Operating Income", "EBIT", "EBITDA", "Net Income"],
+            "columns": ["2025-12-31", "2026-03-31"],
+            "data": [
+                [1000.0, None],
+                [100.0, None],
+                [90.0, None],
+                [150.0, None],
+                [80.0, None],
+            ],
+        },
+        balance={
+            "index": ["Ordinary Shares Number", "Cash And Cash Equivalents", "Total Debt"],
+            "columns": ["2025-12-31"],
+            "data": [[111.0], [200.0], [300.0]],
+        },
+        cashflow={
+            "index": ["Operating Cash Flow", "Capital Expenditure", "Free Cash Flow"],
+            "columns": ["2025-12-31"],
+            "data": [[40.0], [-5.0], [35.0]],
+        },
+        run_id="RAW_Q1_NULLS",
+        loaded_at_utc="2026-05-05T00:00:00+00:00",
+    )
+
+    def fail_provider(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("network provider must not be constructed")
+
+    monkeypatch.setattr(yahoo_provider, "YahooFinanceClient", fail_provider)
+    result = run_yahoo_raw_cache_reconstruct(
+        db_path=db_path,
+        market="usa",
+        symbol="AAPL",
+        period_end_date="2026-03-31",
+        run_id="RECON_Q1_NULLS",
+        dry_run=True,
+    )
+
+    assert result["status"] == "NOT_RECONSTRUCTABLE"
+    assert result["reason"] == RECONSTRUCT_REASON_NO_MAPPED_VALUE_AT_TARGET_PERIOD
+    assert result["rows_written"] == 0
+    assert result["row"] is None
+    assert result["selected_source_run_id"] is None
+    assert result["lineage"][0]["period_present"] == 1
+    assert result["lineage"][0]["persistable"] == 0
+    assert result["lineage"][0]["reason"] == RECONSTRUCT_REASON_NO_MAPPED_VALUE_AT_TARGET_PERIOD
+    assert result["lineage"][0]["revenue"] == ""
+    assert result["lineage"][0]["operating_income"] == ""
+    assert result["lineage"][0]["ebit"] == ""
+    assert result["lineage"][0]["ebitda"] == ""
+    with sqlite3.connect(str(db_path)) as conn:
+        count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM rc_fundamental_yahoo_quarterly
+            WHERE market='usa' AND symbol='AAPL' AND period_end_date='2026-03-31'
+            """
+        ).fetchone()[0]
+    assert count == 0
+
+
+def test_target_with_one_mapped_income_value_persists_partial_row(tmp_path: Path) -> None:
+    db_path = tmp_path / "raw_cache_partial_income.db"
+    run_migration(db_path)
+    _insert_yahoo_raw_row(
+        db_path,
+        symbol="AAPL",
+        income={
+            "index": ["Total Revenue", "Operating Income", "EBIT", "EBITDA", "Net Income"],
+            "columns": ["2026-03-31"],
+            "data": [[1000.0], [None], [None], [None], [None]],
+        },
+        balance={"index": [], "columns": [], "data": []},
+        cashflow={"index": [], "columns": [], "data": []},
+        run_id="RAW_PARTIAL",
+        loaded_at_utc="2026-05-05T00:00:00+00:00",
+    )
+
+    result = run_yahoo_raw_cache_reconstruct(
+        db_path=db_path,
+        market="usa",
+        symbol="AAPL",
+        period_end_date="2026-03-31",
+        run_id="RECON_PARTIAL",
+        dry_run=False,
+    )
+
+    assert result["status"] == "RECONSTRUCTED"
+    assert result["reason"] == "OK"
+    assert result["rows_written"] == 1
+    assert result["row"]["revenue"] == 1000.0
+    assert result["row"]["operating_income"] is None
+    assert result["row"]["ebit"] is None
+    assert result["row"]["ebitda"] is None
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT revenue, operating_income, ebit, ebitda, cash, operating_cashflow
+            FROM rc_fundamental_yahoo_quarterly
+            WHERE market='usa' AND symbol='AAPL' AND period_end_date='2026-03-31'
+            """
+        ).fetchone()
+    assert row == (1000.0, None, None, None, None, None)

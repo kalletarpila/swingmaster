@@ -95,6 +95,10 @@ QUARTERLY_ENRICHMENT_AUDIT_V2_COLUMNS = (
     ("matched_yahoo_period_end_date", "TEXT"),
     ("match_method", "TEXT"),
 )
+YAHOO_QUARTERLY_DIRECT_METRIC_COLUMNS = (
+    ("ebit", "REAL"),
+    ("ebitda", "REAL"),
+)
 QUARTERLY_VINTAGE_REQUIRED_COLUMNS = (
     "ticker",
     "market",
@@ -454,6 +458,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
     ensure_valuation_v2_columns(conn)
     ensure_valuation_v21_columns(conn)
     ensure_valuation_v22_columns(conn)
+    ensure_yahoo_quarterly_direct_metric_columns(conn)
     ensure_quarterly_enrichment_audit_v2_columns(conn)
     ensure_quarter_ingestion_status_schema(conn)
     ensure_earnings_calendar_check_state_columns(conn)
@@ -473,6 +478,22 @@ def ensure_ttm_component_columns(conn: sqlite3.Connection) -> None:
         if column_name in existing_columns:
             continue
         conn.execute(f"ALTER TABLE rc_fundamental_ttm ADD COLUMN {column_name} {column_type}")
+        existing_columns.add(column_name)
+
+
+def ensure_yahoo_quarterly_direct_metric_columns(conn: sqlite3.Connection) -> None:
+    existing_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_yahoo_quarterly)
+            """
+        )
+    }
+    for column_name, column_type in YAHOO_QUARTERLY_DIRECT_METRIC_COLUMNS:
+        if column_name in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE rc_fundamental_yahoo_quarterly ADD COLUMN {column_name} {column_type}")
         existing_columns.add(column_name)
 
 
@@ -804,6 +825,25 @@ def validate_fundamental_schema(conn: sqlite3.Connection) -> int:
         raise RuntimeError(
             "FUNDAMENTAL_TTM_NET_DEBT_TO_EBIT_COLUMNS_MISSING:"
             + ",".join(missing_ttm_net_debt_to_ebit_columns)
+        )
+
+    yahoo_quarterly_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_yahoo_quarterly)
+            """
+        )
+    }
+    missing_yahoo_quarterly_direct_metric_columns = [
+        column_name
+        for column_name, _column_type in YAHOO_QUARTERLY_DIRECT_METRIC_COLUMNS
+        if column_name not in yahoo_quarterly_columns
+    ]
+    if missing_yahoo_quarterly_direct_metric_columns:
+        raise RuntimeError(
+            "FUNDAMENTAL_YAHOO_QUARTERLY_DIRECT_METRIC_COLUMNS_MISSING:"
+            + ",".join(missing_yahoo_quarterly_direct_metric_columns)
         )
 
     percentile_columns = {

@@ -14,7 +14,9 @@ ISSUED_MINUS_TREASURY_SOURCE = "issued_minus_treasury"
 FIELD_CANDIDATES = {
     "revenue": ("Total Revenue", "Operating Revenue"),
     "gross_profit": ("Gross Profit",),
-    "operating_income": ("Operating Income", "Total Operating Income As Reported", "EBIT"),
+    "operating_income": ("Operating Income", "Total Operating Income As Reported"),
+    "ebit": ("EBIT",),
+    "ebitda": ("EBITDA",),
     "net_income": ("Net Income", "Net Income Common Stockholders", "Net Income Continuous Operations"),
     "operating_cashflow": ("Operating Cash Flow", "Cash Flow From Continuing Operating Activities"),
     "capex": ("Capital Expenditure", "Purchase Of PPE", "Net PPE Purchase And Sale"),
@@ -153,6 +155,8 @@ def build_normalized_rows(raw_row: sqlite3.Row) -> list[dict[str, Any]]:
         revenue = resolve_series_value(income_payload, period_end_date, FIELD_CANDIDATES["revenue"])
         gross_profit = resolve_series_value(income_payload, period_end_date, FIELD_CANDIDATES["gross_profit"])
         operating_income = resolve_series_value(income_payload, period_end_date, FIELD_CANDIDATES["operating_income"])
+        ebit = resolve_series_value(income_payload, period_end_date, FIELD_CANDIDATES["ebit"])
+        ebitda = resolve_series_value(income_payload, period_end_date, FIELD_CANDIDATES["ebitda"])
         net_income = resolve_series_value(income_payload, period_end_date, FIELD_CANDIDATES["net_income"])
         operating_cashflow = resolve_series_value(cashflow_payload, period_end_date, FIELD_CANDIDATES["operating_cashflow"])
         capex = resolve_series_value(cashflow_payload, period_end_date, FIELD_CANDIDATES["capex"])
@@ -198,6 +202,8 @@ def build_normalized_rows(raw_row: sqlite3.Row) -> list[dict[str, Any]]:
                 "revenue": revenue,
                 "gross_profit": gross_profit,
                 "operating_income": operating_income,
+                "ebit": ebit,
+                "ebitda": ebitda,
                 "net_income": net_income,
                 "operating_cashflow": operating_cashflow,
                 "capex": capex,
@@ -223,6 +229,8 @@ def row_has_statement_values(row: dict[str, Any]) -> bool:
             "gross_profit",
             "operating_income",
             "net_income",
+            "ebit",
+            "ebitda",
             "operating_cashflow",
             "capex",
             "free_cashflow",
@@ -238,7 +246,7 @@ def should_persist_row(row: dict[str, Any]) -> bool:
 
 def format_rows(rows: list[dict[str, Any]]) -> list[str]:
     output = [
-        "period_end_date\trevenue\tgross_profit\toperating_income\tnet_income\toperating_cashflow\tcapex\tfree_cashflow\tcash\ttotal_debt\tshares_outstanding\tshares_source\tshares_quality"
+        "period_end_date\trevenue\tgross_profit\toperating_income\tebit\tebitda\tnet_income\toperating_cashflow\tcapex\tfree_cashflow\tcash\ttotal_debt\tshares_outstanding\tshares_source\tshares_quality"
     ]
     for row in rows:
         value_map = {
@@ -247,6 +255,8 @@ def format_rows(rows: list[dict[str, Any]]) -> list[str]:
                 "revenue",
                 "gross_profit",
                 "operating_income",
+                "ebit",
+                "ebitda",
                 "net_income",
                 "operating_cashflow",
                 "capex",
@@ -263,6 +273,8 @@ def format_rows(rows: list[dict[str, Any]]) -> list[str]:
                     value_map["revenue"],
                     value_map["gross_profit"],
                     value_map["operating_income"],
+                    value_map["ebit"],
+                    value_map["ebitda"],
                     value_map["net_income"],
                     value_map["operating_cashflow"],
                     value_map["capex"],

@@ -61,6 +61,8 @@ def build_persist_rows(
                 "revenue": row["revenue"],
                 "gross_profit": row["gross_profit"],
                 "operating_income": row["operating_income"],
+                "ebit": row["ebit"],
+                "ebitda": row["ebitda"],
                 "net_income": row["net_income"],
                 "operating_cashflow": row["operating_cashflow"],
                 "capex": row["capex"],
@@ -99,6 +101,8 @@ def insert_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
             revenue,
             gross_profit,
             operating_income,
+            ebit,
+            ebitda,
             net_income,
             operating_cashflow,
             capex,
@@ -111,7 +115,7 @@ def insert_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
             source_run_id,
             run_id,
             created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -121,6 +125,8 @@ def insert_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> int:
                 row["revenue"],
                 row["gross_profit"],
                 row["operating_income"],
+                row["ebit"],
+                row["ebitda"],
                 row["net_income"],
                 row["operating_cashflow"],
                 row["capex"],

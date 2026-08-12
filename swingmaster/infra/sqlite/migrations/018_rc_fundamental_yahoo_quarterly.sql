@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS rc_fundamental_yahoo_quarterly (
     revenue REAL,
     gross_profit REAL,
     operating_income REAL,
+    ebit REAL,
+    ebitda REAL,
     net_income REAL,
     operating_cashflow REAL,
     capex REAL,

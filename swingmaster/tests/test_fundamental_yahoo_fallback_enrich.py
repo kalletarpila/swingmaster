@@ -16,6 +16,8 @@ def _insert_quarterly_row(
     revenue: float | None = None,
     gross_profit: float | None = None,
     operating_income: float | None = None,
+    ebit: float | None = None,
+    ebitda: float | None = None,
     net_income: float | None = None,
     operating_cashflow: float | None = None,
     capex: float | None = None,
@@ -58,6 +60,8 @@ def _insert_yahoo_quarterly_row(
     revenue: float | None = None,
     gross_profit: float | None = None,
     operating_income: float | None = None,
+    ebit: float | None = None,
+    ebitda: float | None = None,
     net_income: float | None = None,
     operating_cashflow: float | None = None,
     capex: float | None = None,
@@ -69,10 +73,10 @@ def _insert_yahoo_quarterly_row(
     conn.execute(
         """
         INSERT INTO rc_fundamental_yahoo_quarterly (
-            market, symbol, period_end_date, revenue, gross_profit, operating_income, net_income,
+            market, symbol, period_end_date, revenue, gross_profit, operating_income, ebit, ebitda, net_income,
             operating_cashflow, capex, free_cashflow, cash, total_debt, shares_outstanding,
             shares_source, shares_quality, source_run_id, run_id, created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             market,
@@ -81,6 +85,8 @@ def _insert_yahoo_quarterly_row(
             revenue,
             gross_profit,
             operating_income,
+            ebit,
+            ebitda,
             net_income,
             operating_cashflow,
             capex,
@@ -167,8 +173,61 @@ def test_fills_missing_sec_value_and_inserts_audit_row(tmp_path: Path) -> None:
     assert audit_row == ("total_debt", None, 123.0, "sec_edgar", "yahoo", "FILLED_FROM_YAHOO", "2026-03-29", "EXACT")
 
 
-def test_fills_missing_ebit_from_yahoo_operating_income(tmp_path: Path) -> None:
-    db_path = tmp_path / "fallback_fill_ebit_from_operating_income.db"
+def test_fills_missing_ebit_from_yahoo_direct_ebit_not_operating_income(tmp_path: Path) -> None:
+    db_path = tmp_path / "fallback_fill_ebit_from_direct_ebit.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_quarterly_row(conn, ticker="AAPL", period_end_date="2026-03-31")
+        _insert_yahoo_quarterly_row(
+            conn,
+            market="usa",
+            symbol="AAPL",
+            period_end_date="2026-03-31",
+            operating_income=321.0,
+            ebit=300.0,
+            ebitda=390.0,
+        )
+        conn.commit()
+
+    summary = run_fundamental_yahoo_fallback_enrich.run_yahoo_fallback_enrich(
+        db_path=db_path,
+        market="usa",
+        ticker="AAPL",
+        run_id="ENRICH_EBIT",
+        dry_run=False,
+        replace_audit_for_run=False,
+    )
+
+    assert summary["fields_filled"] == 3
+    assert summary["filled_operating_income"] == 1
+    assert summary["filled_ebit"] == 1
+    assert summary["filled_ebitda"] == 1
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT operating_income, ebit, ebitda
+            FROM rc_fundamental_quarterly
+            WHERE ticker='AAPL' AND period_end_date='2026-03-31'
+            """
+        ).fetchone()
+        audit_rows = conn.execute(
+            """
+            SELECT field_name, new_value, enrichment_status
+            FROM rc_fundamental_quarterly_enrichment_audit
+            WHERE ticker='AAPL' AND period_end_date='2026-03-31'
+            ORDER BY field_name
+            """
+        ).fetchall()
+    assert row == (321.0, 300.0, 390.0)
+    assert audit_rows == [
+        ("ebit", 300.0, "FILLED_FROM_YAHOO_DIRECT_EBIT"),
+        ("ebitda", 390.0, "FILLED_FROM_YAHOO"),
+        ("operating_income", 321.0, "FILLED_FROM_YAHOO"),
+    ]
+
+
+def test_does_not_fill_ebit_from_yahoo_operating_income_when_direct_ebit_missing(tmp_path: Path) -> None:
+    db_path = tmp_path / "fallback_no_ebit_proxy.db"
     run_migration(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         _insert_quarterly_row(conn, ticker="AAPL", period_end_date="2026-03-31")
@@ -185,14 +244,13 @@ def test_fills_missing_ebit_from_yahoo_operating_income(tmp_path: Path) -> None:
         db_path=db_path,
         market="usa",
         ticker="AAPL",
-        run_id="ENRICH_EBIT",
+        run_id="ENRICH_NO_EBIT_PROXY",
         dry_run=False,
         replace_audit_for_run=False,
     )
 
-    assert summary["fields_filled"] == 2
     assert summary["filled_operating_income"] == 1
-    assert summary["filled_ebit"] == 1
+    assert summary["filled_ebit"] == 0
     with sqlite3.connect(str(db_path)) as conn:
         row = conn.execute(
             """
@@ -201,19 +259,7 @@ def test_fills_missing_ebit_from_yahoo_operating_income(tmp_path: Path) -> None:
             WHERE ticker='AAPL' AND period_end_date='2026-03-31'
             """
         ).fetchone()
-        audit_rows = conn.execute(
-            """
-            SELECT field_name, new_value, enrichment_status
-            FROM rc_fundamental_quarterly_enrichment_audit
-            WHERE ticker='AAPL' AND period_end_date='2026-03-31'
-            ORDER BY field_name
-            """
-        ).fetchall()
-    assert row == (321.0, 321.0)
-    assert audit_rows == [
-        ("ebit", 321.0, "FILLED_FROM_YAHOO_OPERATING_INCOME"),
-        ("operating_income", 321.0, "FILLED_FROM_YAHOO"),
-    ]
+    assert row == (321.0, None)
 
 
 def test_lrcx_style_same_quarter_date_tolerance_match_works(tmp_path: Path) -> None:
@@ -585,6 +631,8 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
             "filled_revenue": 0,
             "filled_gross_profit": 0,
             "filled_operating_income": 0,
+            "filled_ebit": 0,
+            "filled_ebitda": 0,
             "filled_net_income": 0,
             "filled_operating_cashflow": 0,
             "filled_capex": 0,
@@ -614,6 +662,8 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
         "SUMMARY filled_revenue=0",
         "SUMMARY filled_gross_profit=0",
         "SUMMARY filled_operating_income=0",
+        "SUMMARY filled_ebit=0",
+        "SUMMARY filled_ebitda=0",
         "SUMMARY filled_net_income=0",
         "SUMMARY filled_operating_cashflow=0",
         "SUMMARY filled_capex=0",

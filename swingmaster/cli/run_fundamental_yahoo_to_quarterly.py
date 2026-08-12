@@ -17,6 +17,8 @@ DEFAULT_SYMBOL = "NOKIA.HE"
 CORE_FIELDS = (
     "revenue",
     "operating_income",
+    "ebit",
+    "ebitda",
     "net_income",
     "operating_cashflow",
     "cash",
@@ -58,11 +60,21 @@ def resolve_db_path(db_arg: str) -> Path:
 
 
 def load_yahoo_quarterly_rows(conn: sqlite3.Connection, market: str, symbol: str) -> list[sqlite3.Row]:
+    yahoo_columns = {
+        str(row[1])
+        for row in conn.execute(
+            """
+            PRAGMA table_info(rc_fundamental_yahoo_quarterly)
+            """
+        )
+    }
+    ebit_expr = "ebit" if "ebit" in yahoo_columns else "NULL AS ebit"
+    ebitda_expr = "ebitda" if "ebitda" in yahoo_columns else "NULL AS ebitda"
     previous_row_factory = conn.row_factory
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
-            """
+            f"""
             SELECT
                 market,
                 symbol,
@@ -70,6 +82,8 @@ def load_yahoo_quarterly_rows(conn: sqlite3.Connection, market: str, symbol: str
                 revenue,
                 gross_profit,
                 operating_income,
+                {ebit_expr},
+                {ebitda_expr},
                 net_income,
                 operating_cashflow,
                 capex,
@@ -110,8 +124,8 @@ def map_to_generic_quarterly_rows(rows: list[sqlite3.Row], run_id: str) -> list[
                 "revenue": row["revenue"],
                 "gross_profit": row["gross_profit"],
                 "operating_income": row["operating_income"],
-                "ebit": row["operating_income"],
-                "ebitda": None,
+                "ebit": row["ebit"] if "ebit" in row.keys() else None,
+                "ebitda": row["ebitda"] if "ebitda" in row.keys() else None,
                 "net_income": row["net_income"],
                 "operating_cashflow": row["operating_cashflow"],
                 "capex": row["capex"],
@@ -285,7 +299,9 @@ def _require_yahoo_source_rows_for_non_null_fields(
         if yahoo_row is None:
             raise ValueError(f"YAHOO_TO_QUARTERLY_CLI_VINTAGE_SOURCE_ROW_MISSING:{ticker},{period_end_date}")
         for field_name in REPORTED_FINANCIAL_FIELDS:
-            source_field_name = "operating_income" if field_name == "ebit" else field_name
+            source_field_name = field_name
+            if field_name == "ebit" and "ebit" not in yahoo_row:
+                source_field_name = "operating_income"
             if row.get(field_name) is not None and source_field_name not in yahoo_row:
                 raise ValueError(
                     "YAHOO_TO_QUARTERLY_CLI_VINTAGE_SOURCE_FIELD_MISSING:"

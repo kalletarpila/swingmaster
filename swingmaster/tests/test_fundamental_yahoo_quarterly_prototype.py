@@ -67,12 +67,14 @@ def test_build_rows_prefers_ordinary_then_issued_minus_treasury_then_snapshot(tm
         info={"sharesOutstanding": 999.0},
         fast_info={"shares": 888.0},
         income={
-            "index": ["Total Revenue", "Gross Profit", "Operating Income", "Net Income"],
+            "index": ["Total Revenue", "Gross Profit", "Operating Income", "EBIT", "EBITDA", "Net Income"],
             "columns": ["2024-12-31", "2025-03-31", "2025-06-30"],
             "data": [
                 [1000.0, 1100.0, 1200.0],
                 [400.0, 420.0, 430.0],
                 [200.0, 210.0, 220.0],
+                [190.0, 205.0, 215.0],
+                [250.0, 265.0, 275.0],
                 [150.0, 160.0, 170.0],
             ],
         },
@@ -105,6 +107,8 @@ def test_build_rows_prefers_ordinary_then_issued_minus_treasury_then_snapshot(tm
             "revenue": 1000.0,
             "gross_profit": 400.0,
             "operating_income": 200.0,
+            "ebit": 190.0,
+            "ebitda": 250.0,
             "net_income": 150.0,
             "operating_cashflow": 80.0,
             "capex": -20.0,
@@ -120,6 +124,8 @@ def test_build_rows_prefers_ordinary_then_issued_minus_treasury_then_snapshot(tm
             "revenue": 1100.0,
             "gross_profit": 420.0,
             "operating_income": 210.0,
+            "ebit": 205.0,
+            "ebitda": 265.0,
             "net_income": 160.0,
             "operating_cashflow": 85.0,
             "capex": -25.0,
@@ -135,6 +141,8 @@ def test_build_rows_prefers_ordinary_then_issued_minus_treasury_then_snapshot(tm
             "revenue": 1200.0,
             "gross_profit": 430.0,
             "operating_income": 220.0,
+            "ebit": 215.0,
+            "ebitda": 275.0,
             "net_income": 170.0,
             "operating_cashflow": 90.0,
             "capex": -30.0,
@@ -173,6 +181,8 @@ def test_missing_when_no_valid_value_exists(tmp_path: Path) -> None:
             "revenue": None,
             "gross_profit": None,
             "operating_income": None,
+            "ebit": None,
+            "ebitda": None,
             "net_income": None,
             "operating_cashflow": None,
             "capex": None,
@@ -184,6 +194,56 @@ def test_missing_when_no_valid_value_exists(tmp_path: Path) -> None:
             "shares_quality": "MISSING",
         }
     ]
+
+
+def test_burl_style_direct_ebit_and_ebitda_are_distinct_from_operating_income(tmp_path: Path) -> None:
+    db_path = tmp_path / "prototype_burl_direct_ebit.db"
+    run_migration(db_path)
+    _insert_yahoo_raw_row(
+        db_path,
+        symbol="BURL",
+        info={},
+        fast_info={},
+        income={
+            "index": ["Operating Income", "EBIT", "EBITDA", "Net Income"],
+            "columns": ["2026-04-30"],
+            "data": [[167676000.0], [159164000.0], [263771000.0], [114744000.0]],
+        },
+        balance={"index": [], "columns": ["2026-04-30"], "data": []},
+        cashflow={"index": [], "columns": ["2026-04-30"], "data": []},
+    )
+
+    result = run_fundamental_yahoo_quarterly_prototype.run_yahoo_quarterly_prototype(db_path, "BURL")
+
+    row = result["rows"][0]
+    assert row["operating_income"] == 167676000.0
+    assert row["ebit"] == 159164000.0
+    assert row["ebitda"] == 263771000.0
+
+
+def test_operating_income_does_not_silently_populate_ebit_when_direct_ebit_absent(tmp_path: Path) -> None:
+    db_path = tmp_path / "prototype_no_ebit_proxy.db"
+    run_migration(db_path)
+    _insert_yahoo_raw_row(
+        db_path,
+        symbol="AAPL",
+        info={},
+        fast_info={},
+        income={
+            "index": ["Operating Income", "Net Income"],
+            "columns": ["2026-03-31"],
+            "data": [[321.0], [123.0]],
+        },
+        balance={"index": [], "columns": ["2026-03-31"], "data": []},
+        cashflow={"index": [], "columns": ["2026-03-31"], "data": []},
+    )
+
+    result = run_fundamental_yahoo_quarterly_prototype.run_yahoo_quarterly_prototype(db_path, "AAPL")
+
+    row = result["rows"][0]
+    assert row["operating_income"] == 321.0
+    assert row["ebit"] is None
+    assert row["ebitda"] is None
 
 
 def test_qoq_change_over_25_percent_is_review(tmp_path: Path) -> None:
@@ -258,6 +318,8 @@ def test_cli_summary_and_output(monkeypatch, capsys, tmp_path: Path) -> None:
                     "revenue": 1000.0,
                     "gross_profit": 400.0,
                     "operating_income": 200.0,
+                    "ebit": 190.0,
+                    "ebitda": 250.0,
                     "net_income": 150.0,
                     "operating_cashflow": 80.0,
                     "capex": -20.0,
@@ -273,6 +335,8 @@ def test_cli_summary_and_output(monkeypatch, capsys, tmp_path: Path) -> None:
                     "revenue": 1100.0,
                     "gross_profit": 420.0,
                     "operating_income": 210.0,
+                    "ebit": 205.0,
+                    "ebitda": 265.0,
                     "net_income": 160.0,
                     "operating_cashflow": 85.0,
                     "capex": -25.0,
@@ -297,7 +361,7 @@ def test_cli_summary_and_output(monkeypatch, capsys, tmp_path: Path) -> None:
         "SUMMARY ok_count=1",
         "SUMMARY review_count=1",
         "SUMMARY missing_count=0",
-        "period_end_date\trevenue\tgross_profit\toperating_income\tnet_income\toperating_cashflow\tcapex\tfree_cashflow\tcash\ttotal_debt\tshares_outstanding\tshares_source\tshares_quality",
-        "2024-12-31\t1000.0\t400.0\t200.0\t150.0\t80.0\t-20.0\t60.0\t50.0\t300.0\t100.0\tordinary_shares_number\tOK",
-        "2025-03-31\t1100.0\t420.0\t210.0\t160.0\t85.0\t-25.0\t60.0\t55.0\t290.0\t140.0\tordinary_shares_number\tREVIEW",
+        "period_end_date\trevenue\tgross_profit\toperating_income\tebit\tebitda\tnet_income\toperating_cashflow\tcapex\tfree_cashflow\tcash\ttotal_debt\tshares_outstanding\tshares_source\tshares_quality",
+        "2024-12-31\t1000.0\t400.0\t200.0\t190.0\t250.0\t150.0\t80.0\t-20.0\t60.0\t50.0\t300.0\t100.0\tordinary_shares_number\tOK",
+        "2025-03-31\t1100.0\t420.0\t210.0\t205.0\t265.0\t160.0\t85.0\t-25.0\t60.0\t55.0\t290.0\t140.0\tordinary_shares_number\tREVIEW",
     ]

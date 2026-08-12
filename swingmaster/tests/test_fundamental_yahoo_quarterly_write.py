@@ -63,12 +63,14 @@ def _base_fixture() -> dict:
         "info": {"sharesOutstanding": 5582534171.0},
         "fast_info": {"shares": 5582534171.0},
         "income": {
-            "index": ["Total Revenue", "Gross Profit", "Operating Income", "Net Income"],
+            "index": ["Total Revenue", "Gross Profit", "Operating Income", "EBIT", "EBITDA", "Net Income"],
             "columns": ["2024-12-31", "2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31"],
             "data": [
                 [None, 4390000000.0, 4546000000.0, 4828000000.0, 6125000000.0, 4497000000.0],
                 [None, 1824000000.0, 1971000000.0, 2110000000.0, 2754000000.0, 1988000000.0],
                 [None, -21000000.0, 80000000.0, 239000000.0, 437000000.0, 63000000.0],
+                [None, -30000000.0, 70000000.0, 230000000.0, 420000000.0, 59000000.0],
+                [None, 120000000.0, 210000000.0, 360000000.0, 610000000.0, 230000000.0],
                 [None, -59000000.0, 90000000.0, 78000000.0, 542000000.0, 86000000.0],
             ],
         },
@@ -137,17 +139,17 @@ def test_writer_skips_snapshot_only_row_and_writes_five_rows(tmp_path: Path) -> 
     with sqlite3.connect(str(db_path)) as conn:
         rows = conn.execute(
             """
-            SELECT period_end_date, shares_source, shares_quality
+            SELECT period_end_date, ebit, ebitda, shares_source, shares_quality
             FROM rc_fundamental_yahoo_quarterly
             ORDER BY period_end_date
             """
         ).fetchall()
     assert rows == [
-        ("2025-03-31", "ordinary_shares_number", "OK"),
-        ("2025-06-30", "ordinary_shares_number", "OK"),
-        ("2025-09-30", "ordinary_shares_number", "OK"),
-        ("2025-12-31", "ordinary_shares_number", "OK"),
-        ("2026-03-31", "ordinary_shares_number", "OK"),
+        ("2025-03-31", -30000000.0, 120000000.0, "ordinary_shares_number", "OK"),
+        ("2025-06-30", 70000000.0, 210000000.0, "ordinary_shares_number", "OK"),
+        ("2025-09-30", 230000000.0, 360000000.0, "ordinary_shares_number", "OK"),
+        ("2025-12-31", 420000000.0, 610000000.0, "ordinary_shares_number", "OK"),
+        ("2026-03-31", 59000000.0, 230000000.0, "ordinary_shares_number", "OK"),
     ]
 
 

@@ -25,6 +25,8 @@ ALLOWED_FIELDS = (
     "revenue",
     "gross_profit",
     "operating_income",
+    "ebit",
+    "ebitda",
     "net_income",
     "operating_cashflow",
     "capex",
@@ -38,6 +40,7 @@ ENRICHABLE_QUARTERLY_FIELDS = (
     "gross_profit",
     "operating_income",
     "ebit",
+    "ebitda",
     "net_income",
     "operating_cashflow",
     "capex",
@@ -143,6 +146,8 @@ def load_quarterly_rows(conn: sqlite3.Connection, ticker: str) -> list[sqlite3.R
 
 
 def load_yahoo_rows(conn: sqlite3.Connection, market: str, ticker: str) -> dict[str, sqlite3.Row]:
+    yahoo_columns = load_yahoo_quarterly_columns(conn)
+    selected_fields = [field_name for field_name in ALLOWED_FIELDS if field_name in yahoo_columns]
     previous_row_factory = conn.row_factory
     conn.row_factory = sqlite3.Row
     try:
@@ -152,7 +157,7 @@ def load_yahoo_rows(conn: sqlite3.Connection, market: str, ticker: str) -> dict[
                 market,
                 symbol,
                 period_end_date,
-                {", ".join(ALLOWED_FIELDS)},
+                {", ".join(selected_fields)},
                 source_run_id,
                 run_id,
                 created_at_utc
@@ -278,10 +283,9 @@ def build_field_updates(
     for field_name in ENRICHABLE_QUARTERLY_FIELDS:
         if quarterly_row[field_name] is not None:
             continue
-        if field_name == "ebit":
-            yahoo_value = yahoo_row["operating_income"] if "operating_income" in yahoo_row.keys() else None
-        else:
-            yahoo_value = yahoo_row[field_name]
+        if field_name not in yahoo_row.keys():
+            continue
+        yahoo_value = yahoo_row[field_name]
         if yahoo_value is None:
             continue
         new_value = float(yahoo_value)
@@ -295,7 +299,7 @@ def build_field_updates(
                 "new_value": new_value,
                 "primary_source": "sec_edgar",
                 "fallback_source": "yahoo",
-                "enrichment_status": "FILLED_FROM_YAHOO_OPERATING_INCOME" if field_name == "ebit" else "FILLED_FROM_YAHOO",
+                "enrichment_status": "FILLED_FROM_YAHOO_DIRECT_EBIT" if field_name == "ebit" else "FILLED_FROM_YAHOO",
                 "matched_yahoo_period_end_date": str(yahoo_row["period_end_date"]),
                 "match_method": match_method,
                 "run_id": run_id,
@@ -358,8 +362,6 @@ def insert_missing_quarterly_row_from_yahoo_with_metadata(
     for field_name in QUARTERLY_INSERT_FIELDS:
         if field_name in yahoo_columns and field_name in matched_yahoo_row.keys():
             values.append(matched_yahoo_row[field_name])
-        elif field_name == "ebit" and "operating_income" in matched_yahoo_row.keys():
-            values.append(matched_yahoo_row["operating_income"])
         else:
             values.append(None)
     values.append(run_id)

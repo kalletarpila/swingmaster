@@ -17,6 +17,8 @@ def _insert_yahoo_quarterly_row(
     revenue: float | None = None,
     gross_profit: float | None = None,
     operating_income: float | None = None,
+    ebit: float | None = None,
+    ebitda: float | None = None,
     net_income: float | None = None,
     operating_cashflow: float | None = None,
     capex: float | None = None,
@@ -38,6 +40,8 @@ def _insert_yahoo_quarterly_row(
             revenue,
             gross_profit,
             operating_income,
+            ebit,
+            ebitda,
             net_income,
             operating_cashflow,
             capex,
@@ -50,7 +54,7 @@ def _insert_yahoo_quarterly_row(
             source_run_id,
             run_id,
             created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             market,
@@ -59,6 +63,8 @@ def _insert_yahoo_quarterly_row(
             revenue,
             gross_profit,
             operating_income,
+            ebit,
+            ebitda,
             net_income,
             operating_cashflow,
             capex,
@@ -206,6 +212,8 @@ def test_field_mapping_is_correct(tmp_path: Path) -> None:
             revenue=1000.0,
             gross_profit=400.0,
             operating_income=150.0,
+            ebit=140.0,
+            ebitda=180.0,
             net_income=120.0,
             operating_cashflow=200.0,
             capex=-50.0,
@@ -256,8 +264,8 @@ def test_field_mapping_is_correct(tmp_path: Path) -> None:
         1000.0,
         400.0,
         150.0,
-        150.0,
-        None,
+        140.0,
+        180.0,
         120.0,
         200.0,
         -50.0,
@@ -268,6 +276,40 @@ def test_field_mapping_is_correct(tmp_path: Path) -> None:
         None,
         "BRIDGE5",
     )
+
+
+def test_operating_income_does_not_populate_ebit_when_direct_ebit_missing(tmp_path: Path) -> None:
+    db_path = tmp_path / "yahoo_to_quarterly_direct_ebit_missing.db"
+    run_migration(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_yahoo_quarterly_row(
+            conn,
+            market="omxh",
+            symbol="NOKIA.HE",
+            period_end_date="2025-03-31",
+            operating_income=150.0,
+        )
+        conn.commit()
+
+    run_fundamental_yahoo_to_quarterly.run_yahoo_to_quarterly(
+        db_path=db_path,
+        market="omxh",
+        symbol="NOKIA.HE",
+        run_id="BRIDGE_DIRECT_EBIT_MISSING",
+        dry_run=False,
+        replace_symbol=False,
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT operating_income, ebit
+            FROM rc_fundamental_quarterly
+            WHERE ticker = 'NOKIA.HE'
+            """
+        ).fetchone()
+
+    assert row == (150.0, None)
 
 
 def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:

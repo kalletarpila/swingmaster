@@ -322,6 +322,29 @@ def latest_successful_raw(
     ).fetchone()
 
 
+def latest_terminal_no_data_state(
+    conn: sqlite3.Connection,
+    *,
+    market: str,
+    ticker: str,
+    create_schema_if_missing: bool = True,
+) -> sqlite3.Row | None:
+    if create_schema_if_missing:
+        ensure_schema(conn)
+    elif not table_exists(conn, "rc_v2_simfin_api_fetch_state"):
+        return None
+    conn.row_factory = sqlite3.Row
+    return conn.execute(
+        """
+        SELECT *
+        FROM rc_v2_simfin_api_fetch_state
+        WHERE market=? AND ticker=? AND last_status='NO_DATA'
+        LIMIT 1
+        """,
+        (market, ticker.upper()),
+    ).fetchone()
+
+
 def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
 
@@ -351,6 +374,10 @@ def acquire_simfin_api_statements(
             cached = latest_successful_raw(conn, market=market, ticker=ticker, create_schema_if_missing=not dry_run)
             if cached is not None and not force_refresh:
                 rows.append({"ticker": ticker, "action": "CACHE_HIT", "status": "SUCCESS", "raw_id": cached["raw_id"]})
+                continue
+            no_data_state = latest_terminal_no_data_state(conn, market=market, ticker=ticker, create_schema_if_missing=not dry_run)
+            if no_data_state is not None and not force_refresh:
+                rows.append({"ticker": ticker, "action": "NO_DATA_CACHE_HIT", "status": "NO_DATA", "raw_id": ""})
                 continue
             if dry_run:
                 rows.append({"ticker": ticker, "action": "NETWORK_REQUIRED", "status": "DRY_RUN", "raw_id": ""})

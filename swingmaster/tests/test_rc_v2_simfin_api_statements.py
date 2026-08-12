@@ -80,6 +80,24 @@ def test_acquire_cache_first_and_429_stops_without_erasing_success(tmp_path: Pat
     assert calls == []
 
 
+def test_acquire_no_data_state_is_terminal_cache_hit(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        ensure_schema(conn)
+        persist_fetch_result(conn, market="usa", run_id="RUN1", result=_fetch_result("EMPTY", "NO_DATA", 200))
+        conn.commit()
+
+    class Client:
+        def fetch_ticker(self, ticker: str) -> dict[str, object]:
+            raise AssertionError("NO_DATA state should not be refetched without force_refresh")
+
+    result = acquire_simfin_api_statements(db_path=db, tickers=["EMPTY"], run_id="RUN2", client=Client())
+    assert result["status"] == "OK"
+    assert result["rows"] == [{"ticker": "EMPTY", "action": "NO_DATA_CACHE_HIT", "status": "NO_DATA", "raw_id": ""}]
+
+
 def test_mapping_and_apply_preserve_fiscal_identity_conflicts_and_provenance(tmp_path: Path) -> None:
     db = tmp_path / "v2.db"
     _write_v2_db(db)

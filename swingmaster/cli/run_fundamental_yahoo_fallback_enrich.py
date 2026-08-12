@@ -73,6 +73,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ticker", default=None, help="Optional single ticker override")
     parser.add_argument("--run-id", required=True, help="Deterministic run identifier")
     parser.add_argument("--dry-run", action="store_true", help="Validate only without writing updates or audit rows")
+    parser.add_argument("--detected-source-period-end-date", help="Optional exact target period for cache-only repair")
+    parser.add_argument(
+        "--target-only",
+        action="store_true",
+        help="Only enrich the exact detected source period; requires --detected-source-period-end-date",
+    )
     parser.add_argument(
         "--replace-audit-for-run",
         action="store_true",
@@ -760,6 +766,10 @@ def _optional_text(value: Any) -> str | None:
 def main() -> None:
     args = parse_args()
     write_vintage = bool(getattr(args, "write_vintage", False))
+    target_only = bool(getattr(args, "target_only", False))
+    detected_source_period_end_date = getattr(args, "detected_source_period_end_date", None)
+    if target_only and not detected_source_period_end_date:
+        raise SystemExit("YAHOO_FALLBACK_ENRICH_TARGET_ONLY_REQUIRES_DETECTED_SOURCE_PERIOD_END_DATE")
     summary = run_yahoo_fallback_enrich(
         db_path=resolve_db_path(args.db),
         market=args.market,
@@ -767,6 +777,8 @@ def main() -> None:
         run_id=args.run_id,
         dry_run=args.dry_run,
         replace_audit_for_run=args.replace_audit_for_run,
+        detected_source_period_end_date=detected_source_period_end_date,
+        target_only=target_only,
         write_vintage=write_vintage,
         vintage_market=getattr(args, "vintage_market", None),
         vintage_available_at_utc=getattr(args, "vintage_available_at_utc", None),

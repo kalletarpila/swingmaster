@@ -660,6 +660,59 @@ def test_replace_audit_for_run_replaces_previous_rows(tmp_path: Path) -> None:
     assert rows == [("cash", 300.0)]
 
 
+def test_cli_forwards_cache_only_target_period(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "fallback_cli_target.db"
+    run_migration(db_path)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        run_fundamental_yahoo_fallback_enrich,
+        "parse_args",
+        lambda: Namespace(
+            db=str(db_path),
+            market="usa",
+            ticker="KMX",
+            run_id="ENRICH_TARGET_CLI",
+            dry_run=True,
+            replace_audit_for_run=False,
+            detected_source_period_end_date="2025-02-28",
+            target_only=True,
+            write_vintage=False,
+            vintage_market=None,
+            vintage_available_at_utc=None,
+            vintage_ingested_at_utc=None,
+            vintage_run_id=None,
+            vintage_normalization_run_id=None,
+        ),
+    )
+    monkeypatch.setattr(
+        run_fundamental_yahoo_fallback_enrich,
+        "run_yahoo_fallback_enrich",
+        lambda **kwargs: captured.update(kwargs)
+        or {
+            "market": "usa",
+            "tickers_processed": 1,
+            "quarterly_rows_scanned": 1,
+            "yahoo_rows_matched": 1,
+            "fields_checked": 12,
+            "fields_filled": 1,
+            "rows_updated": 1,
+            "rows_inserted": 0,
+            "no_match_count": 0,
+            "exact_matches": 1,
+            "quarter_aligned_matches": 0,
+            "dry_run": "true",
+            "run_id": "ENRICH_TARGET_CLI",
+            **{f"filled_{field_name}": 0 for field_name in run_fundamental_yahoo_fallback_enrich.ALLOWED_FIELDS},
+        },
+    )
+
+    run_fundamental_yahoo_fallback_enrich.main()
+
+    assert captured["ticker"] == "KMX"
+    assert captured["detected_source_period_end_date"] == "2025-02-28"
+    assert captured["target_only"] is True
+
+
 def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "fallback_cli.db"
     run_migration(db_path)
@@ -673,6 +726,8 @@ def test_cli_summary_output(monkeypatch, capsys, tmp_path: Path) -> None:
             run_id="ENRICHCLI",
             dry_run=True,
             replace_audit_for_run=False,
+            detected_source_period_end_date=None,
+            target_only=False,
         ),
     )
     monkeypatch.setattr(

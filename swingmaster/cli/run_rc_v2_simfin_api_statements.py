@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     acquire.add_argument("--market", default="usa")
     acquire.add_argument("--max-tickers", type=int)
     acquire.add_argument("--min-start-interval-seconds", type=float, default=2.1)
+    acquire.add_argument("--rate-limit-retry-delay-seconds", type=float, default=120.0)
     acquire.add_argument("--force-refresh", action="store_true")
     acquire.add_argument("--dry-run", action="store_true")
 
@@ -62,6 +63,7 @@ def main() -> None:
             force_refresh=args.force_refresh,
             max_tickers=args.max_tickers,
             min_interval_seconds=args.min_start_interval_seconds,
+            rate_limit_retry_delay_seconds=args.rate_limit_retry_delay_seconds,
         )
     else:
         result = apply_simfin_api_statements(

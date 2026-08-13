@@ -100,10 +100,11 @@ def test_acquire_default_client_reuses_rate_limiter_across_tickers(tmp_path: Pat
     assert sleeps == [pytest.approx(2.0), pytest.approx(2.0)]
 
 
-def test_acquire_cache_first_and_429_stops_without_erasing_success(tmp_path: Path) -> None:
+def test_acquire_cache_first_and_second_429_stops_without_erasing_success(tmp_path: Path) -> None:
     db = tmp_path / "v2.db"
     _write_v2_db(db)
     calls = []
+    sleeps = []
 
     class Client:
         def fetch_ticker(self, ticker: str) -> dict[str, object]:
@@ -112,9 +113,28 @@ def test_acquire_cache_first_and_429_stops_without_erasing_success(tmp_path: Pat
                 return _fetch_result("AAPL", "SUCCESS", 200)
             return _fetch_result(ticker, "RATE_LIMITED", 429)
 
-    result = acquire_simfin_api_statements(db_path=db, tickers=["AAPL", "MSFT", "NVDA"], run_id="RUN1", client=Client())
-    assert result["status"] == "SIMFIN_RATE_LIMITED"
-    assert calls == ["AAPL", "MSFT"]
+    result = acquire_simfin_api_statements(
+        db_path=db,
+        tickers=["AAPL", "MSFT", "NVDA"],
+        run_id="RUN1",
+        client=Client(),
+        rate_limit_retry_sleeper=lambda seconds: sleeps.append(seconds),
+    )
+    assert result["status"] == "SIMFIN_RATE_LIMITED_AFTER_RETRY"
+    assert calls == ["AAPL", "MSFT", "MSFT"]
+    assert sleeps == [120.0]
+    assert result["rows"][1]["http_requests_made"] == 2
+    assert result["rows"][1]["first_http_status"] == 429
+    assert result["rows"][1]["first_429_detected"] == 1
+    assert result["rows"][1]["retry_http_status"] == 429
+    assert result["rows"][1]["stopped_after_second_429"] == 1
+    assert result["request_accounting"] == {
+        "logical_tickers_attempted": 2,
+        "http_requests_made": 3,
+        "first_429_count": 1,
+        "recovered_429_count": 0,
+        "second_429_stop_count": 1,
+    }
 
     with sqlite3.connect(str(db)) as conn:
         conn.row_factory = sqlite3.Row
@@ -129,6 +149,83 @@ def test_acquire_cache_first_and_429_stops_without_erasing_success(tmp_path: Pat
     result = acquire_simfin_api_statements(db_path=db, tickers=["AAPL"], run_id="RUN2", client=Client())
     assert result["rows"][0]["action"] == "CACHE_HIT"
     assert calls == []
+
+
+def test_acquire_retries_first_429_once_and_recovers_on_success(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    calls = []
+    sleeps = []
+
+    class Client:
+        def fetch_ticker(self, ticker: str) -> dict[str, object]:
+            calls.append(ticker)
+            if ticker == "MSFT" and calls.count("MSFT") == 1:
+                return _fetch_result("MSFT", "RATE_LIMITED", 429)
+            return _fetch_result(ticker, "SUCCESS", 200)
+
+    result = acquire_simfin_api_statements(
+        db_path=db,
+        tickers=["MSFT", "NVDA"],
+        run_id="RUN1",
+        client=Client(),
+        rate_limit_retry_delay_seconds=0.5,
+        rate_limit_retry_sleeper=lambda seconds: sleeps.append(seconds),
+    )
+
+    assert result["status"] == "OK"
+    assert calls == ["MSFT", "MSFT", "NVDA"]
+    assert sleeps == [0.5]
+    assert result["rows"][0]["status"] == "SUCCESS"
+    assert result["rows"][0]["recovered_after_429"] == 1
+    assert result["request_accounting"] == {
+        "logical_tickers_attempted": 2,
+        "http_requests_made": 3,
+        "first_429_count": 1,
+        "recovered_429_count": 1,
+        "second_429_stop_count": 0,
+    }
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT last_status FROM rc_v2_simfin_api_fetch_state WHERE ticker='MSFT'").fetchone()[0] == "SUCCESS"
+        assert conn.execute("SELECT COUNT(*) FROM rc_v2_simfin_api_raw WHERE ticker='MSFT'").fetchone()[0] == 1
+
+
+def test_acquire_retries_first_429_once_and_continues_on_no_data(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    calls = []
+
+    class Client:
+        def fetch_ticker(self, ticker: str) -> dict[str, object]:
+            calls.append(ticker)
+            if ticker == "EMPTY" and calls.count("EMPTY") == 1:
+                return _fetch_result("EMPTY", "RATE_LIMITED", 429)
+            if ticker == "EMPTY":
+                return _fetch_result("EMPTY", "NO_DATA", 200)
+            return _fetch_result(ticker, "SUCCESS", 200)
+
+    result = acquire_simfin_api_statements(
+        db_path=db,
+        tickers=["EMPTY", "NVDA"],
+        run_id="RUN1",
+        client=Client(),
+        rate_limit_retry_sleeper=lambda seconds: None,
+    )
+
+    assert result["status"] == "OK"
+    assert calls == ["EMPTY", "EMPTY", "NVDA"]
+    assert result["rows"][0]["status"] == "NO_DATA"
+    assert result["rows"][0]["recovered_after_429"] == 1
+    assert result["request_accounting"] == {
+        "logical_tickers_attempted": 2,
+        "http_requests_made": 3,
+        "first_429_count": 1,
+        "recovered_429_count": 1,
+        "second_429_stop_count": 0,
+    }
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT last_status FROM rc_v2_simfin_api_fetch_state WHERE ticker='EMPTY'").fetchone()[0] == "NO_DATA"
+        assert conn.execute("SELECT COUNT(*) FROM rc_v2_simfin_api_raw WHERE ticker='EMPTY'").fetchone()[0] == 0
 
 
 def test_acquire_no_data_state_is_terminal_cache_hit(tmp_path: Path) -> None:

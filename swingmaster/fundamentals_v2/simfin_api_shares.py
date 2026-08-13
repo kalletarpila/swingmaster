@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -13,6 +14,11 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from swingmaster.fundamentals_v2.simfin_api_statements import RequestStartRateLimiter, safe_rate_headers, statement_tickers
+from swingmaster.fundamentals_v2.simfin_api_rate_limit import (
+    DEFAULT_RATE_LIMIT_RETRY_DELAY_SECONDS,
+    request_with_single_429_retry,
+    summarize_request_accounting,
+)
 from swingmaster.fundamentals_v2.simfin_seed import load_active_tickers_readonly, parse_float, read_csv_rows, write_csv
 
 
@@ -332,6 +338,8 @@ def acquire_simfin_api_shares(
     force_refresh: bool = False,
     max_tickers: int | None = None,
     min_interval_seconds: float = 2.1,
+    rate_limit_retry_delay_seconds: float = DEFAULT_RATE_LIMIT_RETRY_DELAY_SECONDS,
+    rate_limit_retry_sleeper: Callable[[float], None] = time.sleep,
     client: SimFinSharesClient | None = None,
 ) -> dict[str, Any]:
     ordered = deterministic_tickers(tickers)
@@ -358,16 +366,40 @@ def acquire_simfin_api_shares(
             if dry_run:
                 rows.append({"ticker": ticker, "action": "NETWORK_REQUIRED", "status": "DRY_RUN", "raw_id": ""})
                 continue
-            result = active_client.fetch_ticker(ticker)
-            raw_id = persist_fetch_result(conn, market=market, run_id=run_id, result=result)
-            conn.commit()
-            rows.append({"ticker": ticker, "action": "FETCHED", "status": result["provider_status"], "raw_id": raw_id or ""})
-            if result["provider_status"] == "RATE_LIMITED":
-                return {"status": "SIMFIN_RATE_LIMITED", "rows": rows}
+            retry_result = request_with_single_429_retry(
+                ticker=ticker,
+                requester=active_client.fetch_ticker,
+                retry_delay_seconds=rate_limit_retry_delay_seconds,
+                sleeper=rate_limit_retry_sleeper,
+            )
+            raw_id = None
+            for attempt in retry_result.attempts:
+                raw_id = persist_fetch_result(conn, market=market, run_id=run_id, result=attempt)
+                conn.commit()
+            result = retry_result.result
+            rows.append({
+                "ticker": ticker,
+                "action": "FETCHED",
+                "status": result["provider_status"],
+                "raw_id": raw_id or "",
+                "http_requests_made": retry_result.http_requests_made,
+                "first_http_status": retry_result.attempts[0].get("http_status"),
+                "first_429_detected": int(retry_result.retry_performed),
+                "retry_delay_seconds": rate_limit_retry_delay_seconds if retry_result.retry_performed else "",
+                "retry_http_status": retry_result.attempts[1].get("http_status") if retry_result.retry_performed else "",
+                "recovered_after_429": int(retry_result.recovered_after_429),
+                "stopped_after_second_429": int(retry_result.stopped_after_second_429),
+            })
+            if retry_result.stopped_after_second_429:
+                return {
+                    "status": "SIMFIN_RATE_LIMITED_AFTER_RETRY",
+                    "rows": rows,
+                    "request_accounting": summarize_request_accounting(rows),
+                }
             if result["provider_status"] == "AUTH_ERROR":
-                return {"status": "SIMFIN_AUTH_ERROR", "rows": rows}
+                return {"status": "SIMFIN_AUTH_ERROR", "rows": rows, "request_accounting": summarize_request_accounting(rows)}
         conn.commit()
-        return {"status": "OK", "rows": rows}
+        return {"status": "OK", "rows": rows, "request_accounting": summarize_request_accounting(rows)}
     finally:
         conn.close()
 

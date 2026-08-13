@@ -41,6 +41,20 @@ def test_parse_compact_shares_payload_and_match_latest_prior() -> None:
     assert no_future is None
 
 
+def test_parse_live_shares_endpoint_pid_enddate_value_rows() -> None:
+    observations = parse_share_observations(
+        [
+            {"pid": 111052, "endDate": "2026-03-31", "value": 15000000000},
+            {"pid": 111052, "endDate": "2026-06-15", "value": "14900000000"},
+        ]
+    )
+
+    assert [(obs.simfin_id, obs.observation_date, obs.shares_outstanding, obs.provider_field) for obs in observations] == [
+        (111052, "2026-03-31", 15000000000.0, "value"),
+        (111052, "2026-06-15", 14900000000.0, "value"),
+    ]
+
+
 def test_no_lookahead_prefers_prior_observation_over_future() -> None:
     observations = parse_share_observations(
         [

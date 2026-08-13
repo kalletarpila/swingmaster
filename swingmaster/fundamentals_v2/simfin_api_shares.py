@@ -24,6 +24,8 @@ SOURCE_FILE = "SIMFIN_API_SHARES_RAW"
 
 DATE_COLUMNS = (
     "date",
+    "end date",
+    "enddate",
     "publish date",
     "report date",
     "period end date",
@@ -33,9 +35,9 @@ DATE_COLUMNS = (
 SHARES_COLUMNS = (
     "common shares outstanding",
     "commonsharesoutstanding",
+    "value",
     "shares outstanding",
     "shares",
-    "value",
 )
 
 
@@ -377,7 +379,11 @@ def parse_share_observations(payload: Any) -> list[ShareObservation]:
     observations: list[ShareObservation] = []
     for company in _companies(payload):
         ticker = str(company.get("ticker") or company.get("Ticker") or "").upper()
-        simfin_id = _optional_int(company.get("id") or company.get("SimFinId") or company.get("simfin_id"))
+        simfin_id = _optional_int(company.get("id") or company.get("SimFinId") or company.get("simfin_id") or company.get("pid"))
+        if _is_direct_observation(company):
+            observation = _row_to_observation(company, ticker=ticker, simfin_id=simfin_id)
+            if observation is not None:
+                observations.append(observation)
         for row in _share_rows(company):
             observation = _row_to_observation(row, ticker=ticker, simfin_id=simfin_id)
             if observation is not None:
@@ -397,6 +403,10 @@ def _companies(payload: Any) -> list[Mapping[str, Any]]:
             return [item for item in nested if isinstance(item, Mapping)]
         return [payload]
     return []
+
+
+def _is_direct_observation(row: Mapping[str, Any]) -> bool:
+    return _first_matching_key(row, DATE_COLUMNS) is not None and _first_matching_key(row, SHARES_COLUMNS) is not None
 
 
 def _share_rows(company: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -437,7 +447,7 @@ def _row_to_observation(row: Mapping[str, Any], *, ticker: str, simfin_id: int |
         return None
     return ShareObservation(
         ticker=ticker,
-        simfin_id=simfin_id or _optional_int(row.get("SimFinId") or row.get("simfin_id")),
+        simfin_id=simfin_id or _optional_int(row.get("SimFinId") or row.get("simfin_id") or row.get("pid")),
         observation_date=observation_date,
         shares_outstanding=shares,
         provider_field=str(shares_key),
@@ -480,7 +490,7 @@ def extract_first_simfin_id(payload_json: str) -> int | None:
     except json.JSONDecodeError:
         return None
     for company in companies:
-        value = company.get("id") or company.get("SimFinId") or company.get("simfin_id")
+        value = company.get("id") or company.get("SimFinId") or company.get("simfin_id") or company.get("pid")
         if value is not None:
             return _optional_int(value)
     return None

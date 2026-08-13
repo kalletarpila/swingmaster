@@ -470,6 +470,12 @@ def acquire_simfin_api_shares(
                     "rows": rows,
                     "request_accounting": summarize_shares_request_accounting(rows),
                 }
+            if any(result["provider_status"] == "MALFORMED_RESPONSE" for result, _raw_id in final_results):
+                return {
+                    "status": "SIMFIN_SHARES_PAIR_RESPONSE_MAPPING_FAILURE",
+                    "rows": rows,
+                    "request_accounting": summarize_shares_request_accounting(rows),
+                }
             if any(result["provider_status"] == "AUTH_ERROR" for result, _raw_id in final_results):
                 return {"status": "SIMFIN_AUTH_ERROR", "rows": rows, "request_accounting": summarize_shares_request_accounting(rows)}
         conn.commit()

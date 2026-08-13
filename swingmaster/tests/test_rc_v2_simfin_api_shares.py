@@ -331,7 +331,7 @@ def test_pair_acquire_unknown_pid_is_malformed_not_silent_assignment(tmp_path: P
 
     result = acquire_simfin_api_shares(db_path=db, tickers=["AAA", "BBB"], run_id="RUN1", client=Client())
 
-    assert result["status"] == "OK"
+    assert result["status"] == "SIMFIN_SHARES_PAIR_RESPONSE_MAPPING_FAILURE"
     assert [row["status"] for row in result["rows"]] == ["MALFORMED_RESPONSE", "MALFORMED_RESPONSE"]
     with sqlite3.connect(str(db)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM rc_v2_simfin_api_shares_raw").fetchone()[0] == 0
@@ -587,6 +587,7 @@ def test_no_data_state_is_terminal_cache_hit(tmp_path: Path) -> None:
 def test_default_client_reuses_rate_limiter_across_tickers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "v2.db"
     _write_v2_db(db)
+    _insert_companies(db, {"AAPL": _test_simfin_id("AAPL"), "MSFT": _test_simfin_id("MSFT"), "NVDA": _test_simfin_id("NVDA")})
     clock = FakeClock()
     sleeps = []
     calls = []
@@ -604,8 +605,8 @@ def test_default_client_reuses_rate_limiter_across_tickers(tmp_path: Path, monke
     monkeypatch.setattr("swingmaster.fundamentals_v2.simfin_api_shares.RequestStartRateLimiter", InstrumentedRateLimiter)
 
     def opener(request: Request, timeout_seconds: float) -> object:
-        ticker = request.full_url.rsplit("=", 1)[-1]
-        calls.append(ticker)
+        ticker_param = request.full_url.rsplit("=", 1)[-1]
+        calls.append(ticker_param)
         clock.advance(0.1)
 
         class Response:
@@ -613,7 +614,10 @@ def test_default_client_reuses_rate_limiter_across_tickers(tmp_path: Path, monke
             headers = {}
 
             def read(self) -> bytes:
-                return json.dumps(_shares_payload(ticker), sort_keys=True).encode("utf-8")
+                payload = []
+                for ticker in ticker_param.split(","):
+                    payload.extend(_shares_payload(ticker))
+                return json.dumps(payload, sort_keys=True).encode("utf-8")
 
         return Response()
 

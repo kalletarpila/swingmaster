@@ -126,6 +126,7 @@ def test_default_120_day_boundary_for_prior_matches() -> None:
 def test_acquire_uses_separate_shares_cache_and_stops_on_second_429(tmp_path: Path) -> None:
     db = tmp_path / "v2.db"
     _write_v2_db(db)
+    _insert_companies(db, {"AAPL": _test_simfin_id("AAPL"), "MSFT": _test_simfin_id("MSFT"), "NVDA": _test_simfin_id("NVDA")})
     calls = []
     sleeps = []
 
@@ -141,6 +142,7 @@ def test_acquire_uses_separate_shares_cache_and_stops_on_second_429(tmp_path: Pa
         tickers=["AAPL", "MSFT", "NVDA"],
         run_id="RUN1",
         client=Client(),
+        request_batch_size=1,
         rate_limit_retry_sleeper=lambda seconds: sleeps.append(seconds),
     )
 
@@ -168,7 +170,7 @@ def test_acquire_uses_separate_shares_cache_and_stops_on_second_429(tmp_path: Pa
         }
 
     calls.clear()
-    result = acquire_simfin_api_shares(db_path=db, tickers=["AAPL"], run_id="RUN2", client=Client())
+    result = acquire_simfin_api_shares(db_path=db, tickers=["AAPL"], run_id="RUN2", client=Client(), request_batch_size=1)
     assert result["rows"][0]["action"] == "CACHE_HIT"
     assert calls == []
 
@@ -176,6 +178,7 @@ def test_acquire_uses_separate_shares_cache_and_stops_on_second_429(tmp_path: Pa
 def test_acquire_shares_retries_first_429_once_and_recovers_on_success(tmp_path: Path) -> None:
     db = tmp_path / "v2.db"
     _write_v2_db(db)
+    _insert_companies(db, {"MSFT": _test_simfin_id("MSFT"), "NVDA": _test_simfin_id("NVDA")})
     calls = []
     sleeps = []
 
@@ -191,6 +194,7 @@ def test_acquire_shares_retries_first_429_once_and_recovers_on_success(tmp_path:
         tickers=["MSFT", "NVDA"],
         run_id="RUN1",
         client=Client(),
+        request_batch_size=1,
         rate_limit_retry_delay_seconds=0.5,
         rate_limit_retry_sleeper=lambda seconds: sleeps.append(seconds),
     )
@@ -215,6 +219,7 @@ def test_acquire_shares_retries_first_429_once_and_recovers_on_success(tmp_path:
 def test_acquire_shares_retries_first_429_once_and_continues_on_no_data(tmp_path: Path) -> None:
     db = tmp_path / "v2.db"
     _write_v2_db(db)
+    _insert_companies(db, {"EMPTY": _test_simfin_id("EMPTY"), "NVDA": _test_simfin_id("NVDA")})
     calls = []
 
     class Client:
@@ -231,6 +236,7 @@ def test_acquire_shares_retries_first_429_once_and_continues_on_no_data(tmp_path
         tickers=["EMPTY", "NVDA"],
         run_id="RUN1",
         client=Client(),
+        request_batch_size=1,
         rate_limit_retry_sleeper=lambda seconds: None,
     )
 
@@ -248,6 +254,216 @@ def test_acquire_shares_retries_first_429_once_and_continues_on_no_data(tmp_path
     with sqlite3.connect(str(db)) as conn:
         assert conn.execute("SELECT last_status FROM rc_v2_simfin_api_shares_fetch_state WHERE ticker='EMPTY'").fetchone()[0] == "NO_DATA"
         assert conn.execute("SELECT COUNT(*) FROM rc_v2_simfin_api_shares_raw WHERE ticker='EMPTY'").fetchone()[0] == 0
+
+
+def test_pair_acquire_batches_four_tickers_into_two_http_requests_and_demultiplexes_pid_rows(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    _insert_companies(db, {"AAA": 101, "BBB": 202, "CCC": 303, "DDD": 404})
+    calls = []
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            calls.append(tuple(tickers))
+            payload = []
+            for ticker in reversed(tickers):
+                simfin_id = {"AAA": 101, "BBB": 202, "CCC": 303, "DDD": 404}[ticker]
+                payload.extend(
+                    [
+                        {"pid": simfin_id, "endDate": "2026-06-30", "value": simfin_id * 10},
+                        {"pid": simfin_id, "endDate": "2026-03-31", "value": simfin_id * 9},
+                    ]
+                )
+            return _group_result(tickers, "SUCCESS", 200, payload)
+
+    result = acquire_simfin_api_shares(db_path=db, tickers=["AAA", "BBB", "CCC", "DDD"], run_id="RUN1", client=Client())
+
+    assert result["status"] == "OK"
+    assert calls == [("AAA", "BBB"), ("CCC", "DDD")]
+    assert result["request_accounting"] == {
+        "logical_tickers_attempted": 4,
+        "http_requests_made": 2,
+        "first_429_count": 0,
+        "recovered_429_count": 0,
+        "second_429_stop_count": 0,
+    }
+    with sqlite3.connect(str(db)) as conn:
+        for ticker in ("AAA", "BBB", "CCC", "DDD"):
+            raw = conn.execute("SELECT payload_json FROM rc_v2_simfin_api_shares_raw WHERE ticker=?", (ticker,)).fetchone()[0]
+            observations = parse_share_observations(json.loads(raw))
+            assert {obs.simfin_id for obs in observations} == {{"AAA": 101, "BBB": 202, "CCC": 303, "DDD": 404}[ticker]}
+
+
+def test_pair_acquire_batches_odd_final_ticker(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    _insert_companies(db, {"AAA": 101, "BBB": 202, "CCC": 303, "DDD": 404, "EEE": 505})
+    calls = []
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            calls.append(tuple(tickers))
+            return _group_result(tickers, "SUCCESS", 200, [{"pid": _pid(ticker), "endDate": "2026-03-31", "value": 1} for ticker in tickers])
+
+    result = acquire_simfin_api_shares(db_path=db, tickers=["AAA", "BBB", "CCC", "DDD", "EEE"], run_id="RUN1", client=Client())
+
+    assert result["status"] == "OK"
+    assert calls == [("AAA", "BBB"), ("CCC", "DDD"), ("EEE",)]
+    assert result["request_accounting"]["http_requests_made"] == 3
+
+
+def test_pair_acquire_rejects_batch_size_above_two(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+
+    with pytest.raises(ValueError, match="SIMFIN_API_SHARES_REQUEST_BATCH_SIZE_MAX_2"):
+        acquire_simfin_api_shares(db_path=db, tickers=["AAA", "BBB", "CCC"], run_id="RUN1", request_batch_size=3)
+
+
+def test_pair_acquire_unknown_pid_is_malformed_not_silent_assignment(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    _insert_companies(db, {"AAA": 101, "BBB": 202})
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            return _group_result(tickers, "SUCCESS", 200, [{"pid": 999, "endDate": "2026-03-31", "value": 1}])
+
+    result = acquire_simfin_api_shares(db_path=db, tickers=["AAA", "BBB"], run_id="RUN1", client=Client())
+
+    assert result["status"] == "OK"
+    assert [row["status"] for row in result["rows"]] == ["MALFORMED_RESPONSE", "MALFORMED_RESPONSE"]
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM rc_v2_simfin_api_shares_raw").fetchone()[0] == 0
+
+
+def test_pair_acquire_one_cached_one_actionable_requests_only_actionable(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    _insert_companies(db, {"AAA": 101, "BBB": 202})
+    with sqlite3.connect(str(db)) as conn:
+        ensure_schema(conn)
+        persist_fetch_result(conn, market="usa", run_id="RAW1", result=_fetch_result("AAA", "SUCCESS", 200))
+        conn.commit()
+    calls = []
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            calls.append(tuple(tickers))
+            return _group_result(tickers, "SUCCESS", 200, [{"pid": 202, "endDate": "2026-03-31", "value": 1}])
+
+    result = acquire_simfin_api_shares(db_path=db, tickers=["AAA", "BBB"], run_id="RUN1", client=Client())
+
+    assert [row["action"] for row in result["rows"]] == ["CACHE_HIT", "FETCHED"]
+    assert calls == [("BBB",)]
+
+
+def test_pair_429_retries_same_pair_once_then_success(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    _insert_companies(db, {"AAA": 101, "BBB": 202})
+    calls = []
+    sleeps = []
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            calls.append(tuple(tickers))
+            if len(calls) == 1:
+                return _group_result(tickers, "RATE_LIMITED", 429, {"error": "quota"})
+            return _group_result(tickers, "SUCCESS", 200, [{"pid": _pid(ticker), "endDate": "2026-03-31", "value": 1} for ticker in tickers])
+
+    result = acquire_simfin_api_shares(
+        db_path=db,
+        tickers=["AAA", "BBB"],
+        run_id="RUN1",
+        client=Client(),
+        rate_limit_retry_sleeper=lambda seconds: sleeps.append(seconds),
+    )
+
+    assert result["status"] == "OK"
+    assert calls == [("AAA", "BBB"), ("AAA", "BBB")]
+    assert sleeps == [120.0]
+    assert result["request_accounting"] == {
+        "logical_tickers_attempted": 2,
+        "http_requests_made": 2,
+        "first_429_count": 1,
+        "recovered_429_count": 1,
+        "second_429_stop_count": 0,
+    }
+
+
+def test_pair_429_twice_stops_without_later_pair_and_preserves_first_pair(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    _insert_companies(db, {"AAA": 101, "BBB": 202, "CCC": 303, "DDD": 404, "EEE": 505, "FFF": 606})
+    calls = []
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            calls.append(tuple(tickers))
+            if tuple(tickers) == ("AAA", "BBB"):
+                return _group_result(tickers, "SUCCESS", 200, [{"pid": _pid(ticker), "endDate": "2026-03-31", "value": 1} for ticker in tickers])
+            return _group_result(tickers, "RATE_LIMITED", 429, {"error": "quota"})
+
+    result = acquire_simfin_api_shares(
+        db_path=db,
+        tickers=["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"],
+        run_id="RUN1",
+        client=Client(),
+        rate_limit_retry_sleeper=lambda seconds: None,
+    )
+
+    assert result["status"] == "SIMFIN_RATE_LIMITED_AFTER_RETRY"
+    assert calls == [("AAA", "BBB"), ("CCC", "DDD"), ("CCC", "DDD")]
+    assert result["request_accounting"] == {
+        "logical_tickers_attempted": 4,
+        "http_requests_made": 3,
+        "first_429_count": 1,
+        "recovered_429_count": 0,
+        "second_429_stop_count": 1,
+    }
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM rc_v2_simfin_api_shares_raw WHERE ticker IN ('AAA','BBB')").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM rc_v2_simfin_api_shares_fetch_state WHERE ticker IN ('EEE','FFF')").fetchone()[0] == 0
+
+
+def test_pair_cache_replay_makes_zero_provider_requests(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    _insert_companies(db, {"AAA": 101, "BBB": 202})
+    with sqlite3.connect(str(db)) as conn:
+        ensure_schema(conn)
+        persist_fetch_result(conn, market="usa", run_id="RAW1", result=_fetch_result("AAA", "SUCCESS", 200))
+        persist_fetch_result(conn, market="usa", run_id="RAW1", result=_fetch_result("BBB", "NO_DATA", 200))
+        conn.commit()
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            raise AssertionError("cache replay should not call provider")
+
+    result = acquire_simfin_api_shares(db_path=db, tickers=["AAA", "BBB"], run_id="RUN2", client=Client())
+
+    assert result["status"] == "OK"
+    assert [row["action"] for row in result["rows"]] == ["CACHE_HIT", "NO_DATA_CACHE_HIT"]
+    assert result["request_accounting"]["http_requests_made"] == 0
+
+
+def test_pair_batch_size_one_still_works(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    _insert_companies(db, {"AAA": 101, "BBB": 202})
+    calls = []
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            calls.append(tuple(tickers))
+            return _group_result(tickers, "SUCCESS", 200, [{"pid": _pid(ticker), "endDate": "2026-03-31", "value": 1} for ticker in tickers])
+
+    result = acquire_simfin_api_shares(db_path=db, tickers=["AAA", "BBB"], run_id="RUN1", client=Client(), request_batch_size=1)
+
+    assert result["status"] == "OK"
+    assert calls == [("AAA",), ("BBB",)]
+    assert result["request_accounting"]["http_requests_made"] == 2
 
 
 def test_apply_fills_only_null_shares_and_records_match_metadata(tmp_path: Path) -> None:
@@ -405,8 +621,8 @@ def test_default_client_reuses_rate_limiter_across_tickers(tmp_path: Path, monke
 
     result = acquire_simfin_api_shares(db_path=db, tickers=["AAPL", "MSFT", "NVDA"], run_id="RUN1", min_interval_seconds=2.1)
     assert result["status"] == "OK"
-    assert calls == ["AAPL", "MSFT", "NVDA"]
-    assert sleeps == [pytest.approx(2.0), pytest.approx(2.0)]
+    assert calls == ["AAPL,MSFT", "NVDA"]
+    assert sleeps == [pytest.approx(2.0)]
 
 
 def test_classify_http_status_requires_parseable_shares_rows() -> None:
@@ -429,6 +645,21 @@ class FakeClock:
 def _write_v2_db(path: Path) -> None:
     with sqlite3.connect(str(path)) as conn:
         create_schema(conn)
+        conn.commit()
+
+
+def _insert_companies(path: Path, simfin_ids: dict[str, int]) -> None:
+    now = "2026-08-13T00:00:00Z"
+    with sqlite3.connect(str(path)) as conn:
+        for ticker, simfin_id in simfin_ids.items():
+            conn.execute(
+                """
+                INSERT INTO rc_v2_company (market, ticker, simfin_id, company_name, company_profile, active, created_at_utc, updated_at_utc)
+                VALUES ('usa', ?, ?, ?, 'ORDINARY', 1, ?, ?)
+                ON CONFLICT(simfin_id) DO UPDATE SET ticker=excluded.ticker
+                """,
+                (ticker, simfin_id, ticker, now, now),
+            )
         conn.commit()
 
 
@@ -484,11 +715,26 @@ def _fetch_result(ticker: str, status: str, http_status: int) -> dict[str, objec
     }
 
 
+def _group_result(tickers: list[str], status: str, http_status: int, payload: object) -> dict[str, object]:
+    return {
+        "tickers": tickers,
+        "retrieved_at_utc": "2026-08-13T00:00:00Z",
+        "http_status": http_status,
+        "provider_status": status,
+        "payload_json": json.dumps(payload, sort_keys=True),
+        "safe_headers_json": "{}",
+    }
+
+
+def _pid(ticker: str) -> int:
+    return {"AAA": 101, "BBB": 202, "CCC": 303, "DDD": 404, "EEE": 505, "FFF": 606}[ticker]
+
+
 def _shares_payload(ticker: str) -> list[dict[str, object]]:
     return [
         {
             "ticker": ticker,
-            "id": 111052,
+            "id": _test_simfin_id(ticker),
             "currency": "USD",
             "columns": ["Date", "Common Shares Outstanding"],
             "data": [
@@ -498,3 +744,7 @@ def _shares_payload(ticker: str) -> list[dict[str, object]]:
             ],
         }
     ]
+
+
+def _test_simfin_id(ticker: str) -> int:
+    return {"AAPL": 111052, "MSFT": 59265, "NVDA": 477647, "EMPTY": 1}.get(ticker, 111052)

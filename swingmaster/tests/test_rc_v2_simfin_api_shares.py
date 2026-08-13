@@ -50,8 +50,8 @@ def test_parse_live_shares_endpoint_pid_enddate_value_rows() -> None:
     )
 
     assert [(obs.simfin_id, obs.observation_date, obs.shares_outstanding, obs.provider_field) for obs in observations] == [
-        (111052, "2026-03-31", 15000000000.0, "value"),
-        (111052, "2026-06-15", 14900000000.0, "value"),
+        (111052, "2026-03-31", 15000000000.0, "Common Shares Outstanding"),
+        (111052, "2026-06-15", 14900000000.0, "Common Shares Outstanding"),
     ]
 
 
@@ -108,6 +108,19 @@ def test_age_threshold_blocks_stale_prior_when_configured() -> None:
 
     assert match_observation_for_report_date(observations, ticker="OLD", report_date="2025-03-31", max_age_days=None) is not None
     assert match_observation_for_report_date(observations, ticker="OLD", report_date="2025-03-31", max_age_days=90) is None
+
+
+def test_default_120_day_boundary_for_prior_matches() -> None:
+    for age in (0, 1, 30, 90, 120):
+        observations = parse_share_observations(
+            [{"ticker": "AGE", "id": 1, "columns": ["Date", "Common Shares Outstanding"], "data": [[_date_days_before("2025-06-30", age), "100"]]}]
+        )
+        assert match_observation_for_report_date(observations, ticker="AGE", report_date="2025-06-30") is not None
+    for age in (121, 153, 181, 184):
+        observations = parse_share_observations(
+            [{"ticker": "AGE", "id": 1, "columns": ["Date", "Common Shares Outstanding"], "data": [[_date_days_before("2025-06-30", age), "100"]]}]
+        )
+        assert match_observation_for_report_date(observations, ticker="AGE", report_date="2025-06-30") is None
 
 
 def test_acquire_uses_separate_shares_cache_and_stops_on_429(tmp_path: Path) -> None:
@@ -170,6 +183,11 @@ def test_apply_fills_only_null_shares_and_records_match_metadata(tmp_path: Path)
         }
         assert rows["2026-03-31"]["shares_outstanding"] == 15000000000.0
         assert rows["2026-06-30"]["shares_outstanding"] == 999.0
+        weighted = conn.execute(
+            "SELECT weighted_average_shares_basic, weighted_average_shares_diluted FROM rc_v2_fundamental_quarterly WHERE shares_outstanding=15000000000.0"
+        ).fetchone()
+        assert weighted["weighted_average_shares_basic"] == 111.0
+        assert weighted["weighted_average_shares_diluted"] == 222.0
         source = conn.execute(
             """
             SELECT provider, provider_field, source_dataset, transformation, source_value
@@ -183,6 +201,39 @@ def test_apply_fills_only_null_shares_and_records_match_metadata(tmp_path: Path)
         source_value = json.loads(source["source_value"])
         assert source_value["match_type"] == "EXACT_DATE"
         assert source_value["source_observation_date"] == "2026-03-31"
+        assert source_value["quarter_report_date"] == "2026-03-31"
+        assert source_value["age_days"] == 0
+
+
+def test_apply_default_rejects_stale_121_day_prior(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        ensure_schema(conn)
+        persist_fetch_result(
+            conn,
+            market="usa",
+            run_id="RAW1",
+            result={
+                "ticker": "AAPL",
+                "retrieved_at_utc": "2026-08-13T00:00:00Z",
+                "http_status": 200,
+                "provider_status": "SUCCESS",
+                "payload_json": json.dumps([{"pid": 111052, "endDate": "2026-01-01", "value": 15000000000}], sort_keys=True),
+                "safe_headers_json": "{}",
+            },
+        )
+        _insert_company_quarter(conn, "AAPL", "2026-05-02", None)
+        conn.commit()
+
+    result = apply_simfin_api_shares(db_path=db, tickers=["AAPL"], run_id="APPLY1")
+
+    assert result["rows"][0]["updated"] == 0
+    assert result["rows"][0]["unmatched"] == 1
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT shares_outstanding FROM rc_v2_fundamental_quarterly").fetchone()[0] is None
+        assert conn.execute("SELECT COUNT(*) FROM rc_v2_fundamental_field_source WHERE field_name='shares_outstanding'").fetchone()[0] == 0
 
 
 def test_apply_replay_is_idempotent_without_provenance_churn(tmp_path: Path) -> None:
@@ -309,12 +360,19 @@ def _insert_company_quarter(conn: sqlite3.Connection, ticker: str, report_date: 
     conn.execute(
         """
         INSERT INTO rc_v2_fundamental_quarterly (
-            quarter_id, shares_outstanding, available_canonical_field_count, has_income, has_balance,
+            quarter_id, shares_outstanding, weighted_average_shares_basic, weighted_average_shares_diluted,
+            available_canonical_field_count, has_income, has_balance,
             has_cashflow, seed_status, missing_seed_fields_json, created_at_utc, updated_at_utc
-        ) VALUES (?, ?, 0, 1, 1, 1, 'fixture', '[]', ?, ?)
+        ) VALUES (?, ?, 111.0, 222.0, 0, 1, 1, 1, 'fixture', '[]', ?, ?)
         """,
         (quarter[0], shares, now, now),
     )
+
+
+def _date_days_before(report_date: str, days: int) -> str:
+    from datetime import date, timedelta
+
+    return (date.fromisoformat(report_date) - timedelta(days=days)).isoformat()
 
 
 def _fetch_result(ticker: str, status: str, http_status: int) -> dict[str, object]:

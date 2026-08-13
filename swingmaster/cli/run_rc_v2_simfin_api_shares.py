@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     apply.add_argument("--tickers", required=True, help="Comma-separated explicit ticker list")
     apply.add_argument("--run-id", required=True)
     apply.add_argument("--market", default="usa")
+    apply.add_argument("--max-age-days", type=int, default=120)
     apply.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -68,6 +69,7 @@ def main() -> None:
             tickers=args.tickers.split(","),
             run_id=args.run_id,
             market=args.market,
+            max_age_days=args.max_age_days,
             dry_run=args.dry_run,
         )
     print(json.dumps(result, indent=2, sort_keys=True, default=str))

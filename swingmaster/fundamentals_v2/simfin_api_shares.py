@@ -21,6 +21,7 @@ SHARES_ENDPOINT = "https://prod.simfin.com/api/v3/companies/common-shares-outsta
 SHARES_ENDPOINT_NAME = "/api/v3/companies/common-shares-outstanding"
 SOURCE_DATASET = "common-shares-outstanding"
 SOURCE_FILE = "SIMFIN_API_SHARES_RAW"
+DEFAULT_MAX_AGE_DAYS = 120
 
 DATE_COLUMNS = (
     "date",
@@ -450,9 +451,13 @@ def _row_to_observation(row: Mapping[str, Any], *, ticker: str, simfin_id: int |
         simfin_id=simfin_id or _optional_int(row.get("SimFinId") or row.get("simfin_id") or row.get("pid")),
         observation_date=observation_date,
         shares_outstanding=shares,
-        provider_field=str(shares_key),
+        provider_field=canonical_provider_field(shares_key),
         source_value=row.get(shares_key),
     )
+
+
+def canonical_provider_field(field_name: str) -> str:
+    return "Common Shares Outstanding" if _normalize_key(field_name) == "value" else str(field_name)
 
 
 def _first_matching_key(row: Mapping[str, Any], candidates: Iterable[str]) -> str | None:
@@ -501,7 +506,7 @@ def match_observation_for_report_date(
     *,
     ticker: str,
     report_date: str,
-    max_age_days: int | None = None,
+    max_age_days: int | None = DEFAULT_MAX_AGE_DAYS,
 ) -> ShareMatch | None:
     report = date.fromisoformat(report_date)
     candidates = [
@@ -535,7 +540,7 @@ def apply_simfin_api_shares(
     run_id: str,
     market: str = "usa",
     dry_run: bool = False,
-    max_age_days: int | None = None,
+    max_age_days: int | None = DEFAULT_MAX_AGE_DAYS,
 ) -> dict[str, Any]:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row

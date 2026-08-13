@@ -12,7 +12,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from swingmaster.fundamentals_v2.simfin_api_statements import RequestStartRateLimiter, safe_rate_headers
+from swingmaster.fundamentals_v2.simfin_api_statements import RequestStartRateLimiter, safe_rate_headers, statement_tickers
 from swingmaster.fundamentals_v2.simfin_seed import load_active_tickers_readonly, parse_float, read_csv_rows, write_csv
 
 
@@ -682,6 +682,20 @@ def build_candidate_inventory(*, v2_db: Path, market: str = "usa") -> dict[str, 
                 (market,),
             )
         )
+        zero_coverage_companies = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM rc_v2_company c
+            WHERE c.market=? AND c.active=1 AND c.company_profile='ORDINARY'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM rc_v2_quarter q
+                  JOIN rc_v2_fundamental_quarterly f ON f.quarter_id=q.quarter_id
+                  WHERE q.company_id=c.company_id AND f.shares_outstanding IS NOT NULL
+              )
+            """,
+            (market,),
+        ).fetchone()[0]
     finally:
         conn.close()
     inventory_rows = []
@@ -706,8 +720,13 @@ def build_candidate_inventory(*, v2_db: Path, market: str = "usa") -> dict[str, 
     return {
         "rows": inventory_rows,
         "summary": {
+            "ordinary_companies": len(inventory_rows),
+            "ordinary_quarters": sum(int(row["quarters_needing_shares"]) for row in inventory_rows),
             "ordinary_tickers_requiring_shares_request": len(inventory_rows),
             "quarters_needing_shares": sum(int(row["quarters_needing_shares"]) for row in inventory_rows),
+            "companies_with_zero_shares_coverage": int(zero_coverage_companies),
+            "tickers_needing_latest_quarter_shares": len(inventory_rows),
+            "historical_quarters_needing_shares": sum(max(int(row["quarters_needing_shares"]) - 1, 0) for row in inventory_rows),
             "cached_shares_tickers": len(cached),
             "terminal_no_data_shares_tickers": len(no_data),
             "network_required_shares_tickers": sum(1 for row in inventory_rows if row["cache_status"] == "NETWORK_REQUIRED"),
@@ -823,6 +842,13 @@ def write_residual_reconciliation(
         active = load_active_tickers_readonly(legacy_db)
     if simfin_dir is not None and (simfin_dir / "us-companies.csv").exists():
         metadata_by_ticker = {str(row.get("Ticker") or "").upper(): row for row in read_csv_rows(simfin_dir / "us-companies.csv") if row.get("Ticker")}
+    local_ordinary = set()
+    local_banks = set()
+    local_insurance = set()
+    if simfin_dir is not None:
+        local_ordinary = statement_tickers(simfin_dir, ["us-income-quarterly.csv", "us-balance-quarterly.csv", "us-cashflow-quarterly.csv"])
+        local_banks = statement_tickers(simfin_dir, ["us-income-banks-quarterly.csv", "us-balance-banks-quarterly.csv", "us-cashflow-banks-quarterly.csv"])
+        local_insurance = statement_tickers(simfin_dir, ["us-income-insurance-quarterly.csv", "us-balance-insurance-quarterly.csv", "us-cashflow-insurance-quarterly.csv"])
     conn = sqlite3.connect(f"file:{v2_db.as_posix()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
@@ -831,6 +857,55 @@ def write_residual_reconciliation(
         no_data = {
             str(row[0]).upper()
             for row in conn.execute("SELECT ticker FROM rc_v2_simfin_api_fetch_state WHERE market=? AND last_status='NO_DATA'", (market,))
+        }
+        fetch_state_by_ticker = {
+            str(row["ticker"]).upper(): dict(row)
+            for row in conn.execute(
+                """
+                SELECT ticker, last_status, last_http_status, last_run_id, last_attempt_at_utc, last_success_at_utc
+                FROM rc_v2_simfin_api_fetch_state
+                WHERE market=?
+                """,
+                (market,),
+            )
+        }
+        raw_state_by_ticker = {
+            str(row["ticker"]).upper(): dict(row)
+            for row in conn.execute(
+                """
+                SELECT ticker, COUNT(*) AS raw_success_rows, MAX(retrieved_at_utc) AS latest_raw_success_at,
+                       MAX(simfin_id) AS raw_simfin_id, MAX(length(payload_json)) AS max_payload_bytes
+                FROM rc_v2_simfin_api_raw
+                WHERE market=? AND provider_status='SUCCESS'
+                GROUP BY ticker
+                """,
+                (market,),
+            )
+        }
+        v2_company_by_ticker = {
+            str(row["ticker"]).upper(): dict(row)
+            for row in conn.execute(
+                """
+                SELECT ticker, company_id, company_profile, active
+                FROM rc_v2_company
+                WHERE market=?
+                """,
+                (market,),
+            )
+        }
+        canonical_by_ticker = {
+            str(row["ticker"]).upper(): dict(row)
+            for row in conn.execute(
+                """
+                SELECT c.ticker, COUNT(q.quarter_id) AS quarters, COUNT(f.quarter_id) AS fundamentals
+                FROM rc_v2_company c
+                LEFT JOIN rc_v2_quarter q ON q.company_id=c.company_id
+                LEFT JOIN rc_v2_fundamental_quarterly f ON f.quarter_id=q.quarter_id
+                WHERE c.market=?
+                GROUP BY c.ticker
+                """,
+                (market,),
+            )
         }
         empty_success = {
             str(row[0]).upper()
@@ -868,9 +943,19 @@ def write_residual_reconciliation(
         rows.append(
             {
                 "ticker": ticker,
+                "active_universe_status": "ACTIVE" if active is None or ticker in active else "NOT_ACTIVE",
+                "v2_company_row": "YES" if ticker in v2_company_by_ticker else "NO",
+                "company_profile": v2_company_by_ticker.get(ticker, {}).get("company_profile", ""),
+                "local_ordinary_membership": int(ticker in local_ordinary),
+                "bank_membership": int(ticker in local_banks),
+                "insurance_membership": int(ticker in local_insurance),
+                "simfin_company_metadata": "YES" if ticker in metadata_by_ticker else "NO",
                 "classification": classification,
                 "simfin_id": metadata_by_ticker.get(ticker, {}).get("SimFinId", ""),
                 "company_name": metadata_by_ticker.get(ticker, {}).get("Company Name", ""),
+                "api_fetch_state": json.dumps(fetch_state_by_ticker.get(ticker, {}), sort_keys=True),
+                "raw_api_state": json.dumps(raw_state_by_ticker.get(ticker, {}), sort_keys=True),
+                "canonical_quarter_fundamental_state": json.dumps(canonical_by_ticker.get(ticker, {"quarters": 0, "fundamentals": 0}), sort_keys=True),
                 "evidence": evidence,
             }
         )
@@ -938,12 +1023,28 @@ Saved evidence from `temp/simfin_api_capability_audit/20260812T173450Z` shows:
 
 - one ticker per request is the only confirmed shares request shape;
 - an AAPL-only request returned HTTP 200;
-- the previous parser wrote zero rows, so no retained raw payload proves the exact row field names;
+- the previous parser wrote zero rows and no retained raw payload exists in the artifacts;
 - a two-ticker request returned HTTP 429.
 
-The V2 parser therefore accepts the SimFin compact-style `columns` + `data`
-shape and row-dict shapes, but only emits observations when both a parseable
-date column and a parseable common-shares-outstanding value column exist.
+Current public client documentation for this endpoint maps response rows to
+`id`, `Date`, and `Common Shares Outstanding`. The V2 parser accepts that
+compact-style `columns` + `data` shape and row-dict shapes, but only emits
+observations when both a parseable date column and a parseable
+common-shares-outstanding value column exist.
+
+Observed/assumed schema for the checkpoint:
+
+- top level: one company object or list of company objects;
+- ticker: company-level `ticker`;
+- SimFinId: company-level `id`/`SimFinId`;
+- observation date: row `Date`;
+- shares value field: row `Common Shares Outstanding`;
+- units: raw share count, no currency conversion;
+- ordering: not trusted by importer; observations are sorted by date before matching;
+- multiple share classes: endpoint name is common shares outstanding; no retained
+  evidence of separate class rows, so first checkpoint must inspect raw payload;
+- frequency: sparse point-in-time observations, not per-quarter statement rows;
+- null behavior: rows with null/blank shares or unparsable dates are ignored.
 
 Canonical semantic: `shares_outstanding` is point-in-time shares applicable at
 the canonical quarter `report_date`. It is not weighted-average basic/diluted

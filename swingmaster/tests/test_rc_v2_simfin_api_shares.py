@@ -41,6 +41,61 @@ def test_parse_compact_shares_payload_and_match_latest_prior() -> None:
     assert no_future is None
 
 
+def test_no_lookahead_prefers_prior_observation_over_future() -> None:
+    observations = parse_share_observations(
+        [
+            {
+                "ticker": "LOOK",
+                "id": 7,
+                "columns": ["Date", "Common Shares Outstanding"],
+                "data": [["2025-03-15", "100"], ["2025-04-10", "200"]],
+            }
+        ]
+    )
+
+    match = match_observation_for_report_date(observations, ticker="LOOK", report_date="2025-03-31")
+
+    assert match is not None
+    assert match.observation_date == "2025-03-15"
+    assert match.shares_outstanding == 100.0
+
+
+def test_exact_date_wins_over_older_prior_observation() -> None:
+    observations = parse_share_observations(
+        [
+            {
+                "ticker": "EXACT",
+                "id": 8,
+                "columns": ["Date", "Common Shares Outstanding"],
+                "data": [["2025-03-15", "100"], ["2025-03-31", "150"]],
+            }
+        ]
+    )
+
+    match = match_observation_for_report_date(observations, ticker="EXACT", report_date="2025-03-31")
+
+    assert match is not None
+    assert match.match_type == "EXACT_DATE"
+    assert match.shares_outstanding == 150.0
+
+
+def test_null_and_malformed_shares_rows_are_not_successful() -> None:
+    payload = [{"ticker": "NULLS", "id": 9, "columns": ["Date", "Common Shares Outstanding"], "data": [["2025-03-31", None]]}]
+
+    assert parse_share_observations(payload) == []
+    assert classify_http_status(200, json.dumps(payload)) == "NO_DATA"
+    assert classify_http_status(200, "{") == "MALFORMED_RESPONSE"
+
+
+def test_age_threshold_blocks_stale_prior_when_configured() -> None:
+    observations = parse_share_observations(
+        [{"ticker": "OLD", "id": 10, "columns": ["Date", "Common Shares Outstanding"], "data": [["2024-01-01", "100"]]}]
+    )
+
+    assert match_observation_for_report_date(observations, ticker="OLD", report_date="2025-03-31", max_age_days=None) is not None
+    assert match_observation_for_report_date(observations, ticker="OLD", report_date="2025-03-31", max_age_days=90) is None
+
+
 def test_acquire_uses_separate_shares_cache_and_stops_on_429(tmp_path: Path) -> None:
     db = tmp_path / "v2.db"
     _write_v2_db(db)
@@ -114,6 +169,26 @@ def test_apply_fills_only_null_shares_and_records_match_metadata(tmp_path: Path)
         source_value = json.loads(source["source_value"])
         assert source_value["match_type"] == "EXACT_DATE"
         assert source_value["source_observation_date"] == "2026-03-31"
+
+
+def test_apply_replay_is_idempotent_without_provenance_churn(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        ensure_schema(conn)
+        persist_fetch_result(conn, market="usa", run_id="RAW1", result=_fetch_result("AAPL", "SUCCESS", 200))
+        _insert_company_quarter(conn, "AAPL", "2026-03-31", None)
+        conn.commit()
+
+    first = apply_simfin_api_shares(db_path=db, tickers=["AAPL"], run_id="APPLY1")
+    second = apply_simfin_api_shares(db_path=db, tickers=["AAPL"], run_id="APPLY2")
+
+    assert first["rows"][0]["updated"] == 1
+    assert second["rows"][0]["updated"] == 0
+    assert second["rows"][0]["unchanged"] == 1
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM rc_v2_fundamental_field_source WHERE field_name='shares_outstanding'").fetchone()[0] == 1
 
 
 def test_no_data_state_is_terminal_cache_hit(tmp_path: Path) -> None:

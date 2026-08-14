@@ -142,6 +142,49 @@ def test_missing_fcf_is_invalid_missing_fcf(tmp_path: Path) -> None:
     assert row == ("INVALID", "MISSING_FCF")
 
 
+def test_valuation_uses_ev_ebitda_primary_and_retains_ev_ebit(tmp_path: Path) -> None:
+    db_path = tmp_path / "valuation_ebitda_primary.db"
+    osakedata_db_path = tmp_path / "osakedata_ebitda_primary.db"
+    run_migration(db_path)
+    _create_osakedata_db(osakedata_db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        _insert_ttm_row(
+            conn,
+            "EBITDA.HE",
+            "2026-03-31",
+            "2026-03-31",
+            ebit_ttm=10.0,
+            ebitda_ttm=20.0,
+            fcf_ttm=7.0,
+            ebit_margin_ttm=0.10,
+            ebitda_margin_ttm=0.20,
+            score=50.0,
+        )
+        _insert_quarterly_row(conn, "EBITDA.HE", "2026-03-31", cash=0.0, total_debt=0.0, shares_outstanding=10.0)
+        conn.commit()
+    _insert_close(osakedata_db_path, "EBITDA.HE", "2026-03-31", 10.0, "omxh")
+
+    run_fundamental_valuation.run_fundamental_valuation(
+        db_path=db_path,
+        osakedata_db_path=osakedata_db_path,
+        market="omxh",
+        as_of_date="2026-03-31",
+        ticker="EBITDA.HE",
+        run_id="RUN_EBITDA_PRIMARY",
+        dry_run=False,
+        replace=False,
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT valuation_ev_ebitda, valuation_ev_ebit, valuation_ebitda_margin, ebitda_ttm, valuation_status
+            FROM rc_fundamental_valuation
+            """
+        ).fetchone()
+    assert row == (5.0, 10.0, 0.20, 20.0, "OK")
+
+
 def test_missing_total_debt_assumes_zero_and_stays_ok(tmp_path: Path) -> None:
     row = _run_single_ticker_case(
         tmp_path,
@@ -474,14 +517,28 @@ def _insert_ttm_row(
     fcf_ttm: float | None,
     ebit_margin_ttm: float | None,
     score: float | None,
+    ebitda_ttm: float | None = None,
+    ebitda_margin_ttm: float | None = None,
 ) -> None:
     conn.execute(
         """
         INSERT INTO rc_fundamental_ttm (
-            ticker, as_of_date, latest_period_end_date, ebit_ttm, fcf_ttm, ebit_margin_ttm, fundamental_score_lifecycle, run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ticker, as_of_date, latest_period_end_date, ebit_ttm, ebitda_ttm,
+            fcf_ttm, ebit_margin_ttm, ebitda_margin_ttm, fundamental_score_lifecycle, run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (ticker, as_of_date, latest_period_end_date, ebit_ttm, fcf_ttm, ebit_margin_ttm, score, "TTM_RUN"),
+        (
+            ticker,
+            as_of_date,
+            latest_period_end_date,
+            ebit_ttm,
+            ebitda_ttm,
+            fcf_ttm,
+            ebit_margin_ttm,
+            ebitda_margin_ttm,
+            score,
+            "TTM_RUN",
+        ),
     )
 
 

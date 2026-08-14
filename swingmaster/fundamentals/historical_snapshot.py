@@ -101,6 +101,7 @@ PERCENTILE_METRICS = (
 )
 VALUATION_METRICS = (
     "valuation_ev_ebit",
+    "valuation_ev_ebitda",
     "valuation_fcf_yield",
     "valuation_ebit_margin",
     "valuation_bucket",

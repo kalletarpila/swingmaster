@@ -126,7 +126,7 @@ def select_peer_scores_as_of(
                     t.ebit_margin_ttm,
                     t.ebit_margin_trend_4q,
                     t.fcf_margin_ttm,
-                    t.net_debt_to_ebit,
+                    COALESCE(t.net_debt_to_ebitda, t.net_debt_to_ebit) AS net_debt_to_ebit,
                     t.share_dilution_yoy,
                     t.consistency_component_lifecycle,
                     t.fundamental_score_lifecycle,

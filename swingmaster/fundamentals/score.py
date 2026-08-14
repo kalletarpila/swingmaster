@@ -24,6 +24,7 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
                     ebit_margin_ttm,
                     ebit_margin_trend_4q,
                     fcf_margin_ttm,
+                    net_debt_to_ebitda,
                     net_debt_to_ebit,
                     share_dilution_yoy,
                     lifecycle_class,
@@ -61,6 +62,7 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
                     ebit_margin_ttm,
                     ebit_margin_trend_4q,
                     fcf_margin_ttm,
+                    net_debt_to_ebitda,
                     net_debt_to_ebit,
                     share_dilution_yoy,
                     lifecycle_class,
@@ -115,7 +117,7 @@ def explain_score_components(
     margin_component = float(_margin_component(row["ebit_margin_ttm"]))
     margin_trend_component = float(_margin_trend_component(row["ebit_margin_trend_4q"]))
     fcf_component = float(_fcf_component(row["fcf_margin_ttm"]))
-    leverage_component = float(_leverage_component(row["net_debt_to_ebit"]))
+    leverage_component = float(_leverage_component(_leverage_ratio(row)))
     dilution_component = float(_dilution_component(row["share_dilution_yoy"]))
     lifecycle_component = float(_lifecycle_component(row["lifecycle_class"]))
     consistency_component = float(compute_consistency_component(ttm_series_history or [row]))
@@ -316,6 +318,16 @@ def _leverage_component(value: float | None) -> int:
     if value <= 3:
         return 4
     return 0
+
+
+def _leverage_ratio(row: Mapping[str, Any]) -> float | None:
+    value = _mapping_value(row, "net_debt_to_ebitda")
+    if value is not None:
+        return float(value)
+    value = _mapping_value(row, "net_debt_to_ebit")
+    if value is not None:
+        return float(value)
+    return None
 
 
 def _dilution_component(value: float | None) -> int:

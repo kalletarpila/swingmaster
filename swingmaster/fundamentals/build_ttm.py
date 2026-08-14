@@ -20,12 +20,16 @@ TTM_BUSINESS_FIELDS = (
     "ebit_growth_ttm_yoy",
     "ebit_margin_ttm",
     "ebit_margin_trend_4q",
+    "ebitda_ttm",
+    "ebitda_margin_ttm",
+    "ebitda_margin_trend_4q",
     "gross_margin_trend_4q",
     "fcf_ttm",
     "fcf_margin_ttm",
     "fcf_margin_trend_4q",
     "net_debt",
     "net_debt_to_ebit",
+    "net_debt_to_ebitda",
     "share_dilution_yoy",
 )
 
@@ -71,15 +75,18 @@ def build_ttm_rows(quarterly_rows: list[sqlite3.Row], run_id: str) -> list[dict[
 
         revenue_ttm = _sum_window(current_4q, "revenue")
         ebit_ttm = _sum_window(current_4q, "ebit")
+        ebitda_ttm = _sum_window(current_4q, "ebitda")
         fcf_ttm = _sum_window(current_4q, "free_cashflow")
         gross_profit_ttm = _sum_window(current_4q, "gross_profit")
 
         ebit_margin_ttm = _safe_divide(ebit_ttm, revenue_ttm)
+        ebitda_margin_ttm = _safe_divide(ebitda_ttm, revenue_ttm)
         fcf_margin_ttm = _safe_divide(fcf_ttm, revenue_ttm)
         gross_margin_ttm = _safe_divide(gross_profit_ttm, revenue_ttm)
 
         previous_revenue_ttm = _sum_window(previous_4q, "revenue") if previous_4q is not None else None
         previous_ebit_ttm = _sum_window(previous_4q, "ebit") if previous_4q is not None else None
+        previous_ebitda_ttm = _sum_window(previous_4q, "ebitda") if previous_4q is not None else None
         previous_fcf_ttm = _sum_window(previous_4q, "free_cashflow") if previous_4q is not None else None
         previous_gross_profit_ttm = _sum_window(previous_4q, "gross_profit") if previous_4q is not None else None
 
@@ -87,11 +94,13 @@ def build_ttm_rows(quarterly_rows: list[sqlite3.Row], run_id: str) -> list[dict[
         ebit_growth_ttm_yoy = _safe_growth(ebit_ttm, previous_ebit_ttm)
 
         previous_ebit_margin_ttm = _safe_divide(previous_ebit_ttm, previous_revenue_ttm)
+        previous_ebitda_margin_ttm = _safe_divide(previous_ebitda_ttm, previous_revenue_ttm)
         previous_fcf_margin_ttm = _safe_divide(previous_fcf_ttm, previous_revenue_ttm)
         previous_gross_margin_ttm = _safe_divide(previous_gross_profit_ttm, previous_revenue_ttm)
 
         net_debt = _calculate_net_debt(current_row["total_debt"], current_row["cash"])
         net_debt_to_ebit = _calculate_net_debt_to_ebit(net_debt, ebit_ttm)
+        net_debt_to_ebitda = _calculate_net_debt_to_ebitda(net_debt, ebitda_ttm, ebit_ttm)
         share_dilution_yoy = _calculate_share_dilution(quarterly_rows, index)
 
         latest_period_end_date = str(current_row["period_end_date"])
@@ -106,12 +115,16 @@ def build_ttm_rows(quarterly_rows: list[sqlite3.Row], run_id: str) -> list[dict[
                 "ebit_growth_ttm_yoy": ebit_growth_ttm_yoy,
                 "ebit_margin_ttm": ebit_margin_ttm,
                 "ebit_margin_trend_4q": _safe_delta(ebit_margin_ttm, previous_ebit_margin_ttm),
+                "ebitda_ttm": ebitda_ttm,
+                "ebitda_margin_ttm": ebitda_margin_ttm,
+                "ebitda_margin_trend_4q": _safe_delta(ebitda_margin_ttm, previous_ebitda_margin_ttm),
                 "gross_margin_trend_4q": _safe_delta(gross_margin_ttm, previous_gross_margin_ttm),
                 "fcf_ttm": fcf_ttm,
                 "fcf_margin_ttm": fcf_margin_ttm,
                 "fcf_margin_trend_4q": _safe_delta(fcf_margin_ttm, previous_fcf_margin_ttm),
                 "net_debt": net_debt,
                 "net_debt_to_ebit": net_debt_to_ebit,
+                "net_debt_to_ebitda": net_debt_to_ebitda,
                 "share_dilution_yoy": share_dilution_yoy,
                 "lifecycle_class": None,
                 "fundamental_score": None,
@@ -186,6 +199,17 @@ def _calculate_net_debt_to_ebit(net_debt: float | None, ebit_ttm: float | None) 
     return _safe_divide(net_debt, ebit_ttm)
 
 
+def _calculate_net_debt_to_ebitda(
+    net_debt: float | None,
+    ebitda_ttm: float | None,
+    ebit_ttm: float | None,
+) -> float | None:
+    primary_value = _safe_divide(net_debt, ebitda_ttm)
+    if primary_value is not None:
+        return primary_value
+    return _safe_divide(net_debt, ebit_ttm)
+
+
 def _calculate_share_dilution(quarterly_rows: list[sqlite3.Row], index: int) -> float | None:
     if index < 4:
         return None
@@ -254,17 +278,21 @@ def insert_ttm_rows(
             ebit_growth_ttm_yoy,
             ebit_margin_ttm,
             ebit_margin_trend_4q,
+            ebitda_ttm,
+            ebitda_margin_ttm,
+            ebitda_margin_trend_4q,
             gross_margin_trend_4q,
             fcf_ttm,
             fcf_margin_ttm,
             fcf_margin_trend_4q,
             net_debt,
             net_debt_to_ebit,
+            net_debt_to_ebitda,
             share_dilution_yoy,
             lifecycle_class,
             fundamental_score,
             run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -277,12 +305,16 @@ def insert_ttm_rows(
                 row["ebit_growth_ttm_yoy"],
                 row["ebit_margin_ttm"],
                 row["ebit_margin_trend_4q"],
+                row["ebitda_ttm"],
+                row["ebitda_margin_ttm"],
+                row["ebitda_margin_trend_4q"],
                 row["gross_margin_trend_4q"],
                 row["fcf_ttm"],
                 row["fcf_margin_ttm"],
                 row["fcf_margin_trend_4q"],
                 row["net_debt"],
                 row["net_debt_to_ebit"],
+                row["net_debt_to_ebitda"],
                 row["share_dilution_yoy"],
                 row["lifecycle_class"],
                 row["fundamental_score"],
@@ -313,17 +345,21 @@ def upsert_ttm_business_rows(
             ebit_growth_ttm_yoy,
             ebit_margin_ttm,
             ebit_margin_trend_4q,
+            ebitda_ttm,
+            ebitda_margin_ttm,
+            ebitda_margin_trend_4q,
             gross_margin_trend_4q,
             fcf_ttm,
             fcf_margin_ttm,
             fcf_margin_trend_4q,
             net_debt,
             net_debt_to_ebit,
+            net_debt_to_ebitda,
             share_dilution_yoy,
             lifecycle_class,
             fundamental_score,
             run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(ticker, as_of_date) DO UPDATE SET
             latest_period_end_date = excluded.latest_period_end_date,
             revenue_ttm = excluded.revenue_ttm,
@@ -332,12 +368,16 @@ def upsert_ttm_business_rows(
             ebit_growth_ttm_yoy = excluded.ebit_growth_ttm_yoy,
             ebit_margin_ttm = excluded.ebit_margin_ttm,
             ebit_margin_trend_4q = excluded.ebit_margin_trend_4q,
+            ebitda_ttm = excluded.ebitda_ttm,
+            ebitda_margin_ttm = excluded.ebitda_margin_ttm,
+            ebitda_margin_trend_4q = excluded.ebitda_margin_trend_4q,
             gross_margin_trend_4q = excluded.gross_margin_trend_4q,
             fcf_ttm = excluded.fcf_ttm,
             fcf_margin_ttm = excluded.fcf_margin_ttm,
             fcf_margin_trend_4q = excluded.fcf_margin_trend_4q,
             net_debt = excluded.net_debt,
             net_debt_to_ebit = excluded.net_debt_to_ebit,
+            net_debt_to_ebitda = excluded.net_debt_to_ebitda,
             share_dilution_yoy = excluded.share_dilution_yoy,
             run_id = excluded.run_id
         """,
@@ -352,12 +392,16 @@ def upsert_ttm_business_rows(
                 row["ebit_growth_ttm_yoy"],
                 row["ebit_margin_ttm"],
                 row["ebit_margin_trend_4q"],
+                row["ebitda_ttm"],
+                row["ebitda_margin_ttm"],
+                row["ebitda_margin_trend_4q"],
                 row["gross_margin_trend_4q"],
                 row["fcf_ttm"],
                 row["fcf_margin_ttm"],
                 row["fcf_margin_trend_4q"],
                 row["net_debt"],
                 row["net_debt_to_ebit"],
+                row["net_debt_to_ebitda"],
                 row["share_dilution_yoy"],
                 row["lifecycle_class"],
                 row["fundamental_score"],

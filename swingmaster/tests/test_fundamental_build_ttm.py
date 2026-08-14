@@ -44,7 +44,9 @@ def test_build_ttm_successful_partial_with_4_rows(tmp_path: Path) -> None:
                 latest_period_end_date,
                 revenue_ttm,
                 ebit_ttm,
+                ebitda_ttm,
                 ebit_margin_ttm,
+                ebitda_margin_ttm,
                 revenue_growth_ttm_yoy,
                 ebit_growth_ttm_yoy,
                 ebit_margin_trend_4q,
@@ -61,7 +63,9 @@ def test_build_ttm_successful_partial_with_4_rows(tmp_path: Path) -> None:
             "2024-12-31",
             460.0,
             138.0,
+            184.0,
             0.3,
+            0.4,
             None,
             None,
             None,
@@ -127,7 +131,7 @@ def test_build_ttm_full_trend_and_yoy_with_8_rows(tmp_path: Path) -> None:
         assert last_row[4] is not None
         assert last_row[5] == 180.0
         assert last_row[6] is not None
-        assert last_row[7] is None
+        assert last_row[7] == 180.0 / 280.0
         assert last_row[8] == 0.1
 
 
@@ -180,7 +184,7 @@ def test_build_ttm_null_handling_ignores_partial_nulls(tmp_path: Path) -> None:
             )
             """
         ).fetchone()
-        assert row == (220.0, 70.0, None, 2.142857142857143, None, None)
+        assert row == (220.0, 70.0, None, 2.142857142857143, 2.142857142857143, None)
 
 
 def test_build_ttm_is_idempotent(tmp_path: Path) -> None:
@@ -204,7 +208,7 @@ def test_build_ttm_is_idempotent(tmp_path: Path) -> None:
         assert row_count == 1
 
 
-def test_net_debt_to_ebit_uses_ebit_when_ebitda_missing(tmp_path: Path) -> None:
+def test_net_debt_to_ebitda_uses_ebit_when_ebitda_missing(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ttm_net_debt_ebit_fallback.db"
     run_migration(db_path)
 
@@ -220,13 +224,13 @@ def test_net_debt_to_ebit_uses_ebit_when_ebitda_missing(tmp_path: Path) -> None:
 
         build_and_insert_ttm_rows(conn=conn, ticker="AAPL", run_id="FUND_BUILD_TTM_AAPL_V1", dry_run=False)
 
-        value = conn.execute(
+        row = conn.execute(
             "SELECT net_debt_to_ebit, net_debt_to_ebitda FROM rc_fundamental_ttm WHERE ticker='AAPL' AND as_of_date='2024-12-31'"
-        ).fetchone()[0]
-        assert value == 4.0
+        ).fetchone()
+        assert row == (4.0, 4.0)
 
 
-def test_net_debt_to_ebit_ignores_ebitda_when_available(tmp_path: Path) -> None:
+def test_net_debt_to_ebitda_prefers_ebitda_when_available(tmp_path: Path) -> None:
     db_path = tmp_path / "fundamental_ttm_net_debt_ebitda_primary.db"
     run_migration(db_path)
 
@@ -242,10 +246,10 @@ def test_net_debt_to_ebit_ignores_ebitda_when_available(tmp_path: Path) -> None:
 
         build_and_insert_ttm_rows(conn=conn, ticker="AAPL", run_id="FUND_BUILD_TTM_AAPL_V1", dry_run=False)
 
-        value = conn.execute(
+        row = conn.execute(
             "SELECT net_debt_to_ebit, net_debt_to_ebitda FROM rc_fundamental_ttm WHERE ticker='AAPL' AND as_of_date='2024-12-31'"
-        ).fetchone()[0]
-        assert value == 3.75
+        ).fetchone()
+        assert row == (3.75, 3.0)
 
 
 def test_net_debt_to_ebit_is_null_when_ebit_missing(tmp_path: Path) -> None:

@@ -125,7 +125,7 @@ def test_missing_required_input_and_invalid_denominator_statuses() -> None:
     assert missing.valuation_status == STATUS_MISSING_REQUIRED_INPUT
     assert missing.missing_input_fields == ["fcf_ttm"]
     assert invalid.valuation_status == STATUS_INVALID_DENOMINATOR
-    assert invalid.missing_input_fields == ["ebit_ttm"]
+    assert invalid.missing_input_fields == ["ebitda_ttm", "ebit_ttm"]
 
 
 def test_no_price_available_has_explicit_status_after_ttm_selected() -> None:

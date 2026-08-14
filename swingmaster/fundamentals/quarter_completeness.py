@@ -17,11 +17,11 @@ ASSESSMENT_POLICY_VERSION = "fundamental_quarter_readiness_v2"
 DEFAULT_MARKET = "usa"
 
 IDENTITY_AND_PERIOD_FIELDS = ("ticker", "period_end_date")
-INCOME_STATEMENT_CORE_FIELDS = ("revenue", "ebit")
+INCOME_STATEMENT_CORE_FIELDS = ("revenue", "ebitda", "ebit")
 BALANCE_SHEET_CORE_FIELDS = ("cash", "total_debt")
 CASH_FLOW_CORE_FIELDS = ("operating_cashflow", "capex", "free_cashflow")
 SHARE_AND_EPS_CORE_FIELDS = ("shares_outstanding",)
-DERIVED_OR_OPTIONAL_FIELDS = ("ebitda",)
+DERIVED_OR_OPTIONAL_FIELDS = ()
 SOURCE_OR_OPERATIONAL_METADATA_FIELDS = ("currency", "run_id")
 CORE_FIELDS = (
     *INCOME_STATEMENT_CORE_FIELDS,
@@ -30,14 +30,24 @@ CORE_FIELDS = (
     *SHARE_AND_EPS_CORE_FIELDS,
 )
 FINANCIAL_FIELDS = (*CORE_FIELDS, *DERIVED_OR_OPTIONAL_FIELDS)
-TTM_CONSUMER_FIELDS = ("revenue", "ebit", "free_cashflow", "operating_cashflow", "capex", "cash", "total_debt", "shares_outstanding")
+TTM_CONSUMER_FIELDS = (
+    "revenue",
+    "ebitda",
+    "ebit",
+    "free_cashflow",
+    "operating_cashflow",
+    "capex",
+    "cash",
+    "total_debt",
+    "shares_outstanding",
+)
 SCORE_HISTORY_TTM_FIELDS = (
     "revenue_growth_ttm_yoy",
     "ebit_margin_ttm",
     "ebit_margin_trend_4q",
     "fcf_margin_ttm",
     "fcf_margin_trend_4q",
-    "net_debt_to_ebit",
+    "net_debt_to_ebitda",
     "share_dilution_yoy",
 )
 VALUATION_QUARTER_FIELDS = ("shares_outstanding", "cash", "total_debt")
@@ -45,8 +55,8 @@ SOURCE_FIELD_IMPORTANCE = {
     "revenue": "core_ttm_score_snapshot",
     "gross_profit": "optional_ttm_margin_trend",
     "operating_income": "core_normalization_fallback",
-    "ebit": "core_ttm_score_valuation",
-    "ebitda": "deprecated_optional_not_used_for_active_leverage",
+    "ebit": "profitability_fallback_and_secondary_metric",
+    "ebitda": "primary_downstream_leverage_and_ev_metric",
     "net_income": "core_research_context",
     "operating_cashflow": "core_fcf_derivation",
     "capex": "core_fcf_derivation",
@@ -131,8 +141,13 @@ def assess_quarter_completeness(row: Mapping[str, Any], *, market: str = DEFAULT
     if period is None or not _valid_date(period):
         warnings.append("INVALID_PERIOD_END_DATE")
 
-    available = [field for field in CORE_FIELDS if _is_present(_mapping_value(row, field))]
-    missing_core = [field for field in CORE_FIELDS if not _is_present(_mapping_value(row, field))]
+    missing_core = [
+        field
+        for field in CORE_FIELDS
+        if not _is_present(_mapping_value(row, field))
+        and not (field in {"ebitda", "ebit"} and _profitability_available(row))
+    ]
+    available = [field for field in CORE_FIELDS if field not in missing_core]
     missing_ttm = [field for field in TTM_CONSUMER_FIELDS if not _quarter_ttm_field_available(row, field)]
     missing_score = list(missing_ttm)
     missing_valuation = [field for field in VALUATION_QUARTER_FIELDS if not _is_present(_mapping_value(row, field))]
@@ -153,7 +168,7 @@ def assess_quarter_completeness(row: Mapping[str, Any], *, market: str = DEFAULT
         and period is not None
         and "INVALID_PERIOD_END_DATE" not in warnings
         and _is_present(_mapping_value(row, "revenue"))
-        and _is_present(_mapping_value(row, "ebit"))
+        and _profitability_available(row)
         and (
             _is_present(_mapping_value(row, "free_cashflow"))
             or (
@@ -218,7 +233,7 @@ def apply_history_readiness(
             ttm_metric_row = ttm_metrics_by_key.get((row.ticker, row.period_end_date or ""))
             ttm_metric_complete = bool(
                 ttm_metric_row
-                and all(_is_present(_mapping_value(ttm_metric_row, field)) for field in SCORE_HISTORY_TTM_FIELDS)
+                and all(_ttm_metric_present(ttm_metric_row, field) for field in SCORE_HISTORY_TTM_FIELDS)
             )
             result.append(
                 replace(
@@ -412,8 +427,14 @@ def load_ttm_score_metric_rows(
             """
         )
     }
-    if not set(SCORE_HISTORY_TTM_FIELDS).issubset(existing_columns):
+    required_columns = set(SCORE_HISTORY_TTM_FIELDS) - {"net_debt_to_ebitda"}
+    if not required_columns.issubset(existing_columns) or not (
+        "net_debt_to_ebitda" in existing_columns or "net_debt_to_ebit" in existing_columns
+    ):
         return {}
+    selected_fields = [field for field in SCORE_HISTORY_TTM_FIELDS if field in existing_columns]
+    if "net_debt_to_ebit" in existing_columns and "net_debt_to_ebit" not in selected_fields:
+        selected_fields.append("net_debt_to_ebit")
     clauses = [f"ticker IN ({', '.join('?' for _ in tickers)})"]
     params: list[Any] = list(tickers)
     if period_from is not None:
@@ -424,7 +445,7 @@ def load_ttm_score_metric_rows(
         params.append(period_to)
     rows = conn.execute(
         f"""
-        SELECT ticker, as_of_date, {', '.join(SCORE_HISTORY_TTM_FIELDS)}
+        SELECT ticker, as_of_date, {', '.join(selected_fields)}
         FROM rc_fundamental_ttm
         WHERE {' AND '.join(clauses)}
         """,
@@ -768,7 +789,9 @@ def _recommend_retry(row: Mapping[str, Any], quarter_basic_complete: bool, missi
     old = bool(period and _valid_date(period) and date.fromisoformat(period) < date(2018, 1, 1))
     if old and not has_match:
         return "NOT_RETRYABLE"
-    income_missing = any(field in missing_core for field in ("revenue", "ebit"))
+    income_missing = "revenue" in missing_core or (
+        "ebitda" in missing_core and "ebit" in missing_core
+    )
     cashflow_missing = any(field in missing_core for field in ("operating_cashflow", "capex", "free_cashflow"))
     balance_missing = any(field in missing_core for field in ("cash", "total_debt", "shares_outstanding"))
     run_id = str(_mapping_value(row, "run_id") or "").upper()
@@ -829,7 +852,13 @@ def _is_present(value: Any) -> bool:
     return not _is_nullish(value)
 
 
+def _profitability_available(row: Mapping[str, Any]) -> bool:
+    return _is_present(_mapping_value(row, "ebitda")) or _is_present(_mapping_value(row, "ebit"))
+
+
 def _quarter_ttm_field_available(row: Mapping[str, Any], field: str) -> bool:
+    if field in {"ebitda", "ebit"}:
+        return _profitability_available(row)
     if field == "free_cashflow":
         return _is_present(_mapping_value(row, "free_cashflow")) or (
             _is_present(_mapping_value(row, "operating_cashflow"))
@@ -837,6 +866,14 @@ def _quarter_ttm_field_available(row: Mapping[str, Any], field: str) -> bool:
         )
     if field in {"operating_cashflow", "capex"} and _is_present(_mapping_value(row, "free_cashflow")):
         return True
+    return _is_present(_mapping_value(row, field))
+
+
+def _ttm_metric_present(row: Mapping[str, Any], field: str) -> bool:
+    if field == "net_debt_to_ebitda":
+        return _is_present(_mapping_value(row, "net_debt_to_ebitda")) or _is_present(
+            _mapping_value(row, "net_debt_to_ebit")
+        )
     return _is_present(_mapping_value(row, field))
 
 

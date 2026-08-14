@@ -73,6 +73,7 @@ SECTIONED_METRICS: tuple[str | None, ...] = (
     "valuation_fundamental_as_of_date",
     "valuation_fundamental_staleness_days",
     "valuation_ev_ebit",
+    "valuation_ev_ebitda",
     "valuation_fcf_yield",
     "valuation_ebit_margin",
     "valuation_bucket",
@@ -132,6 +133,7 @@ VALUATION_SNAPSHOT_METRICS: tuple[str, ...] = (
     "valuation_fundamental_as_of_date",
     "valuation_fundamental_staleness_days",
     "valuation_ev_ebit",
+    "valuation_ev_ebitda",
     "valuation_fcf_yield",
     "valuation_ebit_margin",
     "adjusted_expensive_threshold",
@@ -566,7 +568,7 @@ def load_latest_quarter_rows(conn: sqlite3.Connection, ticker: str, quarters: in
                 ebit_margin_trend_4q,
                 fcf_margin_ttm,
                 fcf_margin_trend_4q,
-                net_debt_to_ebit,
+                COALESCE(net_debt_to_ebitda, net_debt_to_ebit) AS net_debt_to_ebit,
                 share_dilution_yoy
             FROM rc_fundamental_ttm
             WHERE ticker = ?
@@ -615,7 +617,7 @@ def load_peer_rows_by_date(conn: sqlite3.Connection, as_of_dates: list[str]) -> 
                 ebit_margin_ttm,
                 ebit_margin_trend_4q,
                 fcf_margin_ttm,
-                net_debt_to_ebit,
+                COALESCE(net_debt_to_ebitda, net_debt_to_ebit) AS net_debt_to_ebit,
                 share_dilution_yoy
             FROM rc_fundamental_ttm
             WHERE as_of_date IN ({placeholders})
@@ -734,6 +736,7 @@ def load_latest_valuation_snapshot(conn: sqlite3.Connection, ticker: str) -> dic
         "valuation_fundamental_as_of_date": str(row["valuation_fundamental_as_of_date"]) if row["valuation_fundamental_as_of_date"] is not None else "",
         "valuation_fundamental_staleness_days": str(row["valuation_fundamental_staleness_days"]) if row["valuation_fundamental_staleness_days"] is not None else "",
         "valuation_ev_ebit": _format_optional_float(_coerce_optional_float(row["valuation_ev_ebit"])),
+        "valuation_ev_ebitda": _format_optional_float(_coerce_optional_float(row["valuation_ev_ebitda"])),
         "valuation_fcf_yield": _format_optional_float(_coerce_optional_float(row["valuation_fcf_yield"])),
         "valuation_ebit_margin": _format_optional_float(_coerce_optional_float(row["valuation_ebit_margin"])),
         "adjusted_expensive_threshold": _format_optional_float(_coerce_optional_float(row["adjusted_expensive_threshold"])),
@@ -875,6 +878,7 @@ def build_snapshot_matrix(
                 "valuation_fundamental_as_of_date": str(valuation_row["valuation_fundamental_as_of_date"]) if valuation_row is not None and valuation_row["valuation_fundamental_as_of_date"] is not None else "",
                 "valuation_fundamental_staleness_days": str(valuation_row["valuation_fundamental_staleness_days"]) if valuation_row is not None and valuation_row["valuation_fundamental_staleness_days"] is not None else "",
                 "valuation_ev_ebit": _format_optional_float(_coerce_optional_float(valuation_row["valuation_ev_ebit"] if valuation_row is not None else None)),
+                "valuation_ev_ebitda": _format_optional_float(_coerce_optional_float(valuation_row["valuation_ev_ebitda"] if valuation_row is not None else None)),
                 "valuation_fcf_yield": _format_optional_float(_coerce_optional_float(valuation_row["valuation_fcf_yield"] if valuation_row is not None else None)),
                 "valuation_ebit_margin": _format_optional_float(_coerce_optional_float(valuation_row["valuation_ebit_margin"] if valuation_row is not None else None)),
                 "valuation_bucket": str(valuation_row["valuation_bucket"]) if valuation_row is not None and valuation_row["valuation_bucket"] is not None else "",

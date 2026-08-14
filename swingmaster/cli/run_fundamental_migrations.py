@@ -65,6 +65,10 @@ TTM_SCORE_EFFECTIVE_DATE_COLUMNS = (
     ("score_effective_date_source_ttm_as_of_date", "TEXT"),
 )
 TTM_NET_DEBT_TO_EBIT_COLUMNS = (
+    ("ebitda_ttm", "REAL"),
+    ("ebitda_margin_ttm", "REAL"),
+    ("ebitda_margin_trend_4q", "REAL"),
+    ("net_debt_to_ebitda", "REAL"),
     ("net_debt_to_ebit", "REAL"),
 )
 PERCENTILE_LIFECYCLE_COLUMNS = (
@@ -79,10 +83,13 @@ PERCENTILE_LIFECYCLE_COLUMNS = (
     ("percentile_lifecycle_weight_rule", "TEXT"),
 )
 VALUATION_V2_COLUMNS = (
+    ("valuation_ev_ebitda", "REAL"),
     ("valuation_fcf_yield", "REAL"),
     ("valuation_ebit_margin", "REAL"),
+    ("valuation_ebitda_margin", "REAL"),
     ("adjusted_expensive_threshold", "REAL"),
     ("valuation_model_version", "TEXT"),
+    ("ebitda_ttm", "REAL"),
 )
 VALUATION_V21_COLUMNS = (
     ("valuation_fundamental_as_of_date", "TEXT"),

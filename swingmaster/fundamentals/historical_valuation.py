@@ -374,7 +374,7 @@ def _missing_input_fields(row: Mapping[str, Any]) -> list[str]:
     mapping = {
         "MISSING_PRICE": ["close_price"],
         "MISSING_SHARES": ["shares_outstanding"],
-        "INVALID_EBIT": ["ebit_ttm"],
+        "INVALID_EBIT": ["ebitda_ttm", "ebit_ttm"],
         "MISSING_FCF": ["fcf_ttm"],
         "INVALID_MARKET_CAP": ["market_cap"],
         "MISSING_EBIT_MARGIN": ["ebit_margin_ttm"],

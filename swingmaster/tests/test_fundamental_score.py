@@ -8,7 +8,7 @@ import pytest
 from swingmaster.cli import run_fundamental_score
 from swingmaster.cli.run_fundamental_score import main as score_main
 from swingmaster.cli.run_fundamental_migrations import run_migration
-from swingmaster.fundamentals.score import compute_consistency_component, run_fundamental_scoring
+from swingmaster.fundamentals.score import compute_consistency_component, explain_score_components, run_fundamental_scoring
 
 
 def test_score_mature_high_quality(tmp_path: Path) -> None:
@@ -31,6 +31,23 @@ def test_score_mature_high_quality(tmp_path: Path) -> None:
         run_fundamental_scoring(conn, "AAPL", dry_run=False)
         score = conn.execute("SELECT fundamental_score FROM rc_fundamental_ttm").fetchone()[0]
         assert score == 64.0
+
+
+def test_score_leverage_prefers_net_debt_to_ebitda_over_ebit() -> None:
+    row = {
+        "revenue_growth_ttm_yoy": None,
+        "ebit_margin_ttm": 0.10,
+        "ebit_margin_trend_4q": None,
+        "fcf_margin_ttm": 0.10,
+        "net_debt_to_ebitda": 0.5,
+        "net_debt_to_ebit": 4.0,
+        "share_dilution_yoy": None,
+        "lifecycle_class": None,
+    }
+
+    components = explain_score_components(row)
+
+    assert components["leverage_component"] == 12.0
 
 
 def test_score_writes_all_component_columns_and_rule(tmp_path: Path) -> None:

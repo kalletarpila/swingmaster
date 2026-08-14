@@ -61,8 +61,8 @@ def load_ttm_rows(
         if ticker is not None:
             candidate_rows = fundamentals_conn.execute(
                 """
-                SELECT ticker, as_of_date, latest_period_end_date, ebit_ttm, fundamental_score_lifecycle,
-                       fcf_ttm, ebit_margin_ttm
+                SELECT ticker, as_of_date, latest_period_end_date, ebit_ttm, ebitda_ttm, fundamental_score_lifecycle,
+                       fcf_ttm, ebit_margin_ttm, ebitda_margin_ttm
                 FROM rc_fundamental_ttm
                 WHERE ticker = ?
                   AND as_of_date <= ?
@@ -76,8 +76,8 @@ def load_ttm_rows(
             placeholders = ", ".join("?" for _ in market_universe)
             candidate_rows = fundamentals_conn.execute(
                 f"""
-                SELECT ticker, as_of_date, latest_period_end_date, ebit_ttm, fundamental_score_lifecycle,
-                       fcf_ttm, ebit_margin_ttm
+                SELECT ticker, as_of_date, latest_period_end_date, ebit_ttm, ebitda_ttm, fundamental_score_lifecycle,
+                       fcf_ttm, ebit_margin_ttm, ebitda_margin_ttm
                 FROM rc_fundamental_ttm
                 WHERE as_of_date <= ?
                   AND ticker IN ({placeholders})
@@ -146,6 +146,14 @@ def _coerce_optional_float(value: object) -> float | None:
     return float(value)
 
 
+def _row_optional_float(row: sqlite3.Row | dict[str, Any], key: str) -> float | None:
+    try:
+        value = row[key]
+    except (IndexError, KeyError):
+        return None
+    return _coerce_optional_float(value)
+
+
 def compute_staleness_days(valuation_date: str, fundamental_as_of_date: str) -> int:
     return (date.fromisoformat(valuation_date) - date.fromisoformat(fundamental_as_of_date)).days
 
@@ -165,10 +173,12 @@ def build_valuation_row(
     cash_assumed_zero = 1 if cash is None else 0
     total_debt_used = 0.0 if total_debt is None else total_debt
     cash_used = 0.0 if cash is None else cash
-    ebit_ttm = _coerce_optional_float(ttm_row["ebit_ttm"])
-    fcf_ttm = _coerce_optional_float(ttm_row["fcf_ttm"])
-    valuation_ebit_margin = _coerce_optional_float(ttm_row["ebit_margin_ttm"])
-    fundamental_score_lifecycle = _coerce_optional_float(ttm_row["fundamental_score_lifecycle"])
+    ebit_ttm = _row_optional_float(ttm_row, "ebit_ttm")
+    ebitda_ttm = _row_optional_float(ttm_row, "ebitda_ttm")
+    fcf_ttm = _row_optional_float(ttm_row, "fcf_ttm")
+    valuation_ebit_margin = _row_optional_float(ttm_row, "ebit_margin_ttm")
+    valuation_ebitda_margin = _row_optional_float(ttm_row, "ebitda_margin_ttm")
+    fundamental_score_lifecycle = _row_optional_float(ttm_row, "fundamental_score_lifecycle")
     valuation_fundamental_as_of_date = str(ttm_row["as_of_date"])
     valuation_fundamental_staleness_days = compute_staleness_days(valuation_date, valuation_fundamental_as_of_date)
 
@@ -184,6 +194,10 @@ def build_valuation_row(
     if enterprise_value is not None and ebit_ttm is not None and ebit_ttm > 0:
         valuation_ev_ebit = enterprise_value / ebit_ttm
 
+    valuation_ev_ebitda: float | None = None
+    if enterprise_value is not None and ebitda_ttm is not None and ebitda_ttm > 0:
+        valuation_ev_ebitda = enterprise_value / ebitda_ttm
+
     valuation_fcf_yield: float | None = None
     if market_cap is not None and market_cap > 0 and fcf_ttm is not None:
         valuation_fcf_yield = fcf_ttm / market_cap
@@ -196,7 +210,7 @@ def build_valuation_row(
     elif shares_outstanding is None or shares_outstanding <= 0:
         valuation_status = "MISSING_SHARES"
         valuation_bucket = "INVALID"
-    elif ebit_ttm is None or ebit_ttm <= 0:
+    elif (ebitda_ttm is None or ebitda_ttm <= 0) and (ebit_ttm is None or ebit_ttm <= 0):
         valuation_status = "INVALID_EBIT"
         valuation_bucket = "INVALID"
     elif fcf_ttm is None:
@@ -219,14 +233,15 @@ def build_valuation_row(
             adjusted_expensive_threshold = 25.0
         else:
             adjusted_expensive_threshold = 22.0
-        if valuation_ev_ebit is None:
+        valuation_primary_ev_multiple = valuation_ev_ebitda if valuation_ev_ebitda is not None else valuation_ev_ebit
+        if valuation_primary_ev_multiple is None:
             valuation_bucket = "INVALID"
             valuation_status = "INVALID_EBIT"
-        elif valuation_ev_ebit >= 30.0 or valuation_fcf_yield < 0.03:
+        elif valuation_primary_ev_multiple >= 30.0 or valuation_fcf_yield < 0.03:
             valuation_bucket = "VERY_EXPENSIVE"
-        elif valuation_ev_ebit < 12.0 and valuation_fcf_yield >= 0.07:
+        elif valuation_primary_ev_multiple < 12.0 and valuation_fcf_yield >= 0.07:
             valuation_bucket = "CHEAP"
-        elif valuation_ev_ebit >= adjusted_expensive_threshold or valuation_fcf_yield < 0.04:
+        elif valuation_primary_ev_multiple >= adjusted_expensive_threshold or valuation_fcf_yield < 0.04:
             valuation_bucket = "EXPENSIVE"
         else:
             valuation_bucket = "FAIR"
@@ -236,9 +251,11 @@ def build_valuation_row(
         "as_of_date": valuation_date,
         "valuation_fundamental_as_of_date": valuation_fundamental_as_of_date,
         "valuation_fundamental_staleness_days": valuation_fundamental_staleness_days,
+        "valuation_ev_ebitda": valuation_ev_ebitda,
         "valuation_ev_ebit": valuation_ev_ebit,
         "valuation_fcf_yield": valuation_fcf_yield,
         "valuation_ebit_margin": valuation_ebit_margin,
+        "valuation_ebitda_margin": valuation_ebitda_margin,
         "adjusted_expensive_threshold": adjusted_expensive_threshold,
         "valuation_model_version": "V2",
         "valuation_bucket": valuation_bucket,
@@ -251,6 +268,7 @@ def build_valuation_row(
         "shares_outstanding": shares_outstanding,
         "cash": cash_used,
         "total_debt": total_debt_used,
+        "ebitda_ttm": ebitda_ttm,
         "ebit_ttm": ebit_ttm,
         "fundamental_score_lifecycle": fundamental_score_lifecycle,
         "run_id": run_id,
@@ -290,8 +308,10 @@ def insert_valuation_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) 
             ticker,
             as_of_date,
             valuation_ev_ebit,
+            valuation_ev_ebitda,
             valuation_fcf_yield,
             valuation_ebit_margin,
+            valuation_ebitda_margin,
             adjusted_expensive_threshold,
             valuation_model_version,
             valuation_fundamental_as_of_date,
@@ -307,18 +327,21 @@ def insert_valuation_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) 
             cash,
             total_debt,
             ebit_ttm,
+            ebitda_ttm,
             fundamental_score_lifecycle,
             run_id,
             created_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
                 row["ticker"],
                 row["as_of_date"],
                 row["valuation_ev_ebit"],
+                row["valuation_ev_ebitda"],
                 row["valuation_fcf_yield"],
                 row["valuation_ebit_margin"],
+                row["valuation_ebitda_margin"],
                 row["adjusted_expensive_threshold"],
                 row["valuation_model_version"],
                 row["valuation_fundamental_as_of_date"],
@@ -334,6 +357,7 @@ def insert_valuation_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]]) 
                 row["cash"],
                 row["total_debt"],
                 row["ebit_ttm"],
+                row["ebitda_ttm"],
                 row["fundamental_score_lifecycle"],
                 row["run_id"],
                 row["created_at_utc"],

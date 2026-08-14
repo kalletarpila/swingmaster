@@ -458,6 +458,47 @@ def test_replay_apply_does_not_duplicate_quarters(tmp_path: Path) -> None:
         assert conn.execute("SELECT COUNT(*) FROM rc_v2_fundamental_quarterly").fetchone()[0] == 1
 
 
+def test_apply_uses_all_cached_quarterly_history_without_lower_date_bound(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    old_payload = _payload_company("AAPL")
+    for statement in old_payload["statements"]:
+        statement["data"][0][0] = "Q1"
+        statement["data"][0][1] = 2018
+        statement["data"][0][2] = "2018-03-31"
+        statement["data"][0][3] = "2018-04-30"
+
+    with sqlite3.connect(str(db)) as conn:
+        ensure_schema(conn)
+        persist_fetch_result(
+            conn,
+            market="usa",
+            run_id="RAW_OLD",
+            result={
+                "ticker": "AAPL",
+                "retrieved_at_utc": "2026-08-12T00:00:00Z",
+                "http_status": 200,
+                "provider_status": "SUCCESS",
+                "payload_json": json.dumps([old_payload], sort_keys=True),
+                "safe_headers_json": "{}",
+            },
+        )
+        conn.commit()
+
+    result = apply_simfin_api_statements(db_path=db, tickers=["AAPL"], run_id="APPLY_OLD")
+    assert result["rows"][0]["inserted_quarters"] == 1
+
+    with sqlite3.connect(str(db)) as conn:
+        row = conn.execute(
+            """
+            SELECT q.fiscal_year, q.fiscal_period, q.report_date, f.revenue, f.ebit
+            FROM rc_v2_quarter q
+            JOIN rc_v2_fundamental_quarterly f ON f.quarter_id=q.quarter_id
+            """
+        ).fetchone()
+    assert row == (2018, "Q1", "2018-03-31", 100.0, None)
+
+
 def test_api_key_never_accepted_as_required_function_argument(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SIMFIN_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="SIMFIN_API_KEY_MISSING"):

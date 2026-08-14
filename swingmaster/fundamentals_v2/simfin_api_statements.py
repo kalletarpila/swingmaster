@@ -28,7 +28,6 @@ STATEMENT_ENDPOINT_NAME = "/api/v3/companies/statements/compact"
 DEFAULT_STATEMENT_RATE_LIMIT_RETRY_DELAY_SECONDS = 300.0
 DEFAULT_REQUEST_BATCH_SIZE = 2
 MAX_REQUEST_BATCH_SIZE = 2
-REQUIRED_START = (2020, "Q4")
 REQUIRED_PERIOD_ORDER = {"Q1": 1, "Q2": 2, "Q3": 3, "Q4": 4}
 
 
@@ -669,9 +668,7 @@ def row_by_statement_key(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[tu
 
 def is_required_window(fiscal_year: int, fiscal_period: str) -> bool:
     period = fiscal_period.upper()
-    if period not in REQUIRED_PERIOD_ORDER:
-        return False
-    return (fiscal_year, REQUIRED_PERIOD_ORDER[period]) >= (REQUIRED_START[0], REQUIRED_PERIOD_ORDER[REQUIRED_START[1]])
+    return period in REQUIRED_PERIOD_ORDER
 
 
 def map_api_ordinary_fields(rows: Mapping[str, Mapping[str, Any] | None]) -> dict[str, float | None]:

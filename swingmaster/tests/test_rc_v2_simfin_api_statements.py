@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import csv
+import json
 import sqlite3
 from pathlib import Path
 from urllib.request import Request
@@ -15,8 +15,11 @@ from swingmaster.fundamentals_v2.simfin_api_statements import (
     build_candidate_inventory,
     classify_http_status,
     ensure_schema,
+    flatten_statement_company,
     map_api_ordinary_fields,
     persist_fetch_result,
+    row_by_statement_key,
+    validated_pl_da_fallback_value,
 )
 from swingmaster.fundamentals_v2.simfin_seed import create_schema
 
@@ -458,6 +461,203 @@ def test_replay_apply_does_not_duplicate_quarters(tmp_path: Path) -> None:
         assert conn.execute("SELECT COUNT(*) FROM rc_v2_fundamental_quarterly").fetchone()[0] == 1
 
 
+def test_validated_pl_da_fallback_positive_eligibility() -> None:
+    company = _da_payload_company(
+        target_pl_da=-9,
+        target_cf_da=None,
+        target_operating_income=40,
+        overlap_pairs=[(-10, 10), (-11, 11), (-12, 12), (-13, 13)],
+    )
+    grouped = row_by_statement_key(flatten_statement_company(company))
+    target_key = (111052, 2026, "Q1", "2026-03-31")
+
+    assert validated_pl_da_fallback_value(grouped, target_key) == 9
+
+
+def test_validated_pl_da_fallback_existing_cf_wins() -> None:
+    company = _da_payload_company(
+        target_pl_da=-9,
+        target_cf_da=7,
+        target_operating_income=40,
+        overlap_pairs=[(-10, 10), (-11, 11), (-12, 12), (-13, 13)],
+    )
+    grouped = row_by_statement_key(flatten_statement_company(company))
+    target_key = (111052, 2026, "Q1", "2026-03-31")
+    values = map_api_ordinary_fields({"PL": grouped["PL"][target_key], "BS": {}, "CF": grouped["CF"][target_key]})
+
+    assert validated_pl_da_fallback_value(grouped, target_key) is None
+    assert values["depreciation_amortization"] == 7
+    assert values["ebitda"] == 47
+
+
+def test_validated_pl_da_fallback_requires_four_comparable_rows() -> None:
+    company = _da_payload_company(
+        target_pl_da=-9,
+        target_cf_da=None,
+        target_operating_income=40,
+        overlap_pairs=[(-10, 10), (-11, 11), (-12, 12)],
+    )
+    grouped = row_by_statement_key(flatten_statement_company(company))
+
+    assert validated_pl_da_fallback_value(grouped, (111052, 2026, "Q1", "2026-03-31")) is None
+
+
+def test_validated_pl_da_fallback_rejects_historical_divergence() -> None:
+    company = _da_payload_company(
+        target_pl_da=-9,
+        target_cf_da=None,
+        target_operating_income=40,
+        overlap_pairs=[(-10, 10), (-11, 11), (-12, 12), (-13, 20)],
+    )
+    grouped = row_by_statement_key(flatten_statement_company(company))
+
+    assert validated_pl_da_fallback_value(grouped, (111052, 2026, "Q1", "2026-03-31")) is None
+
+
+def test_validated_pl_da_fallback_rejects_positive_target_pl_da() -> None:
+    company = _da_payload_company(
+        target_pl_da=9,
+        target_cf_da=None,
+        target_operating_income=40,
+        overlap_pairs=[(-10, 10), (-11, 11), (-12, 12), (-13, 13)],
+    )
+    grouped = row_by_statement_key(flatten_statement_company(company))
+
+    assert validated_pl_da_fallback_value(grouped, (111052, 2026, "Q1", "2026-03-31")) is None
+
+
+def test_validated_pl_da_fallback_requires_operating_income() -> None:
+    company = _da_payload_company(
+        target_pl_da=-9,
+        target_cf_da=None,
+        target_operating_income=None,
+        overlap_pairs=[(-10, 10), (-11, 11), (-12, 12), (-13, 13)],
+    )
+    grouped = row_by_statement_key(flatten_statement_company(company))
+
+    assert validated_pl_da_fallback_value(grouped, (111052, 2026, "Q1", "2026-03-31")) is None
+
+
+def test_validated_pl_da_fallback_uses_exact_report_date_identity() -> None:
+    company = _da_payload_company(
+        target_pl_da=-9,
+        target_cf_da=None,
+        target_operating_income=40,
+        overlap_pairs=[(-10, 10), (-11, 11), (-12, 12)],
+        extra_non_matching_report_date_overlap=True,
+    )
+    grouped = row_by_statement_key(flatten_statement_company(company))
+
+    assert validated_pl_da_fallback_value(grouped, (111052, 2026, "Q1", "2026-03-31")) is None
+
+
+def test_apply_records_validated_pl_da_fallback_provenance_and_ebitda(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    _persist_statement_payload(
+        db,
+        _da_payload_company(
+            target_pl_da=-9,
+            target_cf_da=None,
+            target_operating_income=40,
+            overlap_pairs=[(-10, 10), (-11, 11), (-12, 12), (-13, 13)],
+        ),
+    )
+
+    result = apply_simfin_api_statements(db_path=db, tickers=["AAPL"], run_id="APPLY_PL_DA")
+    assert result["rows"][0]["status"] == "APPLIED"
+
+    with sqlite3.connect(str(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT f.depreciation_amortization, f.ebitda
+            FROM rc_v2_company c
+            JOIN rc_v2_quarter q ON q.company_id=c.company_id
+            JOIN rc_v2_fundamental_quarterly f ON f.quarter_id=q.quarter_id
+            WHERE c.ticker='AAPL' AND q.fiscal_year=2026 AND q.fiscal_period='Q1'
+            """
+        ).fetchone()
+        assert row["depreciation_amortization"] == 9
+        assert row["ebitda"] == 49
+        provenance = {
+            field: (provider, source_dataset, transformation)
+            for field, provider, source_dataset, transformation in conn.execute(
+                """
+                SELECT s.field_name, s.provider, s.source_dataset, s.transformation
+                FROM rc_v2_fundamental_field_source s
+                JOIN rc_v2_quarter q ON q.quarter_id=s.quarter_id
+                JOIN rc_v2_company c ON c.company_id=q.company_id
+                WHERE c.ticker='AAPL'
+                  AND q.fiscal_year=2026
+                  AND q.fiscal_period='Q1'
+                  AND q.report_date='2026-03-31'
+                  AND s.field_name IN ('depreciation_amortization','ebitda')
+                """
+            )
+        }
+    assert provenance["depreciation_amortization"] == ("SIMFIN_API_DERIVED", "PL", "validated_abs_pl_da_fallback")
+    assert provenance["ebitda"] == ("SIMFIN_API_DERIVED", "PL", "operating_income + validated_abs_pl_depreciation_amortization")
+
+
+def test_apply_validated_pl_da_fallback_does_not_overwrite_existing_ebitda(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    _persist_statement_payload(
+        db,
+        _da_payload_company(
+            target_pl_da=-9,
+            target_cf_da=None,
+            target_operating_income=40,
+            overlap_pairs=[(-10, 10), (-11, 11), (-12, 12), (-13, 13)],
+        ),
+    )
+    with sqlite3.connect(str(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        ensure_schema(conn)
+        conn.execute(
+            """
+            INSERT INTO rc_v2_company (market,ticker,simfin_id,company_name,company_profile,active,created_at_utc,updated_at_utc)
+            VALUES ('usa','AAPL',111052,'AAPL INC','ORDINARY',1,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')
+            """
+        )
+        company_id = conn.execute("SELECT company_id FROM rc_v2_company WHERE ticker='AAPL'").fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO rc_v2_quarter (company_id,fiscal_year,fiscal_period,report_date,quarter_identity_source,has_income,has_balance,has_cashflow,created_at_utc,updated_at_utc)
+            VALUES (?,2026,'Q1','2026-03-31','TEST',1,1,1,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')
+            """,
+            (company_id,),
+        )
+        quarter_id = conn.execute(
+            "SELECT quarter_id FROM rc_v2_quarter WHERE company_id=? AND fiscal_year=2026 AND fiscal_period='Q1' AND report_date='2026-03-31'",
+            (company_id,),
+        ).fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO rc_v2_fundamental_quarterly (
+                quarter_id, operating_income, ebitda, available_canonical_field_count, has_income, has_balance, has_cashflow,
+                seed_status, missing_seed_fields_json, created_at_utc, updated_at_utc
+            ) VALUES (?, 40, 999, 2, 1, 1, 1, 'TEST', '[]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+            """,
+            (quarter_id,),
+        )
+        conn.commit()
+
+    result = apply_simfin_api_statements(db_path=db, tickers=["AAPL"], run_id="APPLY_PL_DA")
+    assert result["rows"][0]["conflicts"] >= 1
+    with sqlite3.connect(str(db)) as conn:
+        row = conn.execute(
+            """
+            SELECT f.depreciation_amortization, f.ebitda
+            FROM rc_v2_fundamental_quarterly f
+            JOIN rc_v2_quarter q ON q.quarter_id=f.quarter_id
+            WHERE q.fiscal_year=2026 AND q.fiscal_period='Q1' AND q.report_date='2026-03-31'
+            """
+        ).fetchone()
+    assert row == (9.0, 999.0)
+
+
 def test_apply_uses_all_cached_quarterly_history_without_lower_date_bound(tmp_path: Path) -> None:
     db = tmp_path / "v2.db"
     _write_v2_db(db)
@@ -611,6 +811,94 @@ def _group_fetch_result(tickers: list[str], status: str, http_status: int) -> di
 
 def _payload(ticker: str) -> list[dict[str, object]]:
     return [_payload_company(ticker)]
+
+
+def _persist_statement_payload(db: Path, company: dict[str, object]) -> None:
+    with sqlite3.connect(str(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        ensure_schema(conn)
+        persist_fetch_result(
+            conn,
+            market="usa",
+            run_id="RAW_DA",
+            result={
+                "ticker": str(company["ticker"]),
+                "retrieved_at_utc": "2026-08-12T00:00:00Z",
+                "http_status": 200,
+                "provider_status": "SUCCESS",
+                "payload_json": json.dumps([company], sort_keys=True),
+                "safe_headers_json": "{}",
+            },
+        )
+        conn.commit()
+
+
+def _da_payload_company(
+    *,
+    target_pl_da: float | None,
+    target_cf_da: float | None,
+    target_operating_income: float | None,
+    overlap_pairs: list[tuple[float, float]],
+    extra_non_matching_report_date_overlap: bool = False,
+) -> dict[str, object]:
+    pl_columns = [
+        "Fiscal Period",
+        "Fiscal Year",
+        "Report Date",
+        "Publish Date",
+        "Revenue",
+        "Gross Profit",
+        "Operating Income (Loss)",
+        "Net Income",
+        "Depreciation & Amortization",
+    ]
+    bs_columns = [
+        "Fiscal Period",
+        "Fiscal Year",
+        "Report Date",
+        "Publish Date",
+        "Cash, Cash Equivalents & Short Term Investments",
+        "Short Term Debt",
+        "Long Term Debt",
+    ]
+    cf_columns = [
+        "Fiscal Period",
+        "Fiscal Year",
+        "Report Date",
+        "Publish Date",
+        "Cash from Operating Activities",
+        "Change in Fixed Assets & Intangibles",
+        "Depreciation & Amortization",
+    ]
+    overlap_periods = [
+        ("Q1", 2025, "2025-03-31"),
+        ("Q2", 2025, "2025-06-30"),
+        ("Q3", 2025, "2025-09-30"),
+        ("Q4", 2025, "2025-12-31"),
+        ("Q1", 2024, "2024-03-31"),
+        ("Q2", 2024, "2024-06-30"),
+    ]
+    pl_data = [["Q1", 2026, "2026-03-31", "2026-04-30", 100, 50, target_operating_income, 30, target_pl_da]]
+    bs_data = [["Q1", 2026, "2026-03-31", "2026-04-30", 20, 5, 10]]
+    cf_data = [["Q1", 2026, "2026-03-31", "2026-04-30", 25, -3, target_cf_da]]
+    for (period, year, report_date), (pl_da, cf_da) in zip(overlap_periods, overlap_pairs):
+        pl_data.append([period, year, report_date, f"{year}-04-30", 90, 45, 35, 25, pl_da])
+        bs_data.append([period, year, report_date, f"{year}-04-30", 20, 5, 10])
+        cf_data.append([period, year, report_date, f"{year}-04-30", 25, -3, cf_da])
+    if extra_non_matching_report_date_overlap:
+        pl_data.append(["Q4", 2024, "2024-12-30", "2025-01-30", 90, 45, 35, 25, -14])
+        cf_data.append(["Q4", 2024, "2024-12-31", "2025-01-30", 25, -3, 14])
+    return {
+        "id": 111052,
+        "ticker": "AAPL",
+        "name": "AAPL INC",
+        "currency": "USD",
+        "statements": [
+            {"statement": "PL", "columns": pl_columns, "data": pl_data},
+            {"statement": "BS", "columns": bs_columns, "data": bs_data},
+            {"statement": "CF", "columns": cf_columns, "data": cf_data},
+        ],
+    }
 
 
 def _payload_company(ticker: str) -> dict[str, object]:

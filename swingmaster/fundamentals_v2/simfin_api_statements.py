@@ -671,12 +671,54 @@ def is_required_window(fiscal_year: int, fiscal_period: str) -> bool:
     return period in REQUIRED_PERIOD_ORDER
 
 
-def map_api_ordinary_fields(rows: Mapping[str, Mapping[str, Any] | None]) -> dict[str, float | None]:
+def abs_normalized_relative_difference(left: float, right: float) -> float:
+    return abs(abs(left) - abs(right)) / max(abs(left), abs(right), 1.0)
+
+
+def validated_pl_da_fallback_value(
+    grouped_rows: Mapping[str, Mapping[tuple[int, int, str, str], Mapping[str, Any]]],
+    target_key: tuple[int, int, str, str],
+) -> float | None:
+    _sid, _fiscal_year, fiscal_period, _report_date = target_key
+    if fiscal_period not in QUARTERLY_PERIODS:
+        return None
+    target_pl = grouped_rows.get("PL", {}).get(target_key) or {}
+    target_cf = grouped_rows.get("CF", {}).get(target_key) or {}
+    if parse_float(target_cf.get("Depreciation & Amortization")) is not None:
+        return None
+    pl_da = parse_float(target_pl.get("Depreciation & Amortization"))
+    if pl_da is None or pl_da > 0:
+        return None
+    if parse_float(target_pl.get("Operating Income (Loss)")) is None:
+        return None
+
+    comparable = []
+    for key in set(grouped_rows.get("PL", {})) & set(grouped_rows.get("CF", {})):
+        if key == target_key:
+            continue
+        pl_row = grouped_rows["PL"].get(key) or {}
+        cf_row = grouped_rows["CF"].get(key) or {}
+        overlap_pl_da = parse_float(pl_row.get("Depreciation & Amortization"))
+        overlap_cf_da = parse_float(cf_row.get("Depreciation & Amortization"))
+        if overlap_pl_da is None or overlap_cf_da is None:
+            continue
+        comparable.append((overlap_pl_da, overlap_cf_da))
+
+    if len(comparable) < 4:
+        return None
+    if any(abs_normalized_relative_difference(pl_value, cf_value) > 0.01 for pl_value, cf_value in comparable):
+        return None
+    return abs(pl_da)
+
+
+def map_api_ordinary_fields(rows: Mapping[str, Mapping[str, Any] | None], *, depreciation_amortization_fallback: float | None = None) -> dict[str, float | None]:
     income = rows.get("PL") or {}
     balance = rows.get("BS") or {}
     cashflow = rows.get("CF") or {}
     operating_income = parse_float(income.get("Operating Income (Loss)"))
     depreciation_amortization = parse_float(cashflow.get("Depreciation & Amortization"))
+    if depreciation_amortization is None:
+        depreciation_amortization = depreciation_amortization_fallback
     operating_cashflow = parse_float(cashflow.get("Cash from Operating Activities")) or parse_float(cashflow.get("Net Cash from Operating Activities"))
     capex = parse_float(cashflow.get("Change in Fixed Assets & Intangibles"))
     short_debt = parse_float(balance.get("Short Term Debt"))
@@ -769,12 +811,14 @@ def apply_one_raw(conn: sqlite3.Connection, *, raw: sqlite3.Row, run_id: str, ma
                 continue
             quarter_id, quarter_inserted = get_or_create_quarter(conn, company_id, key, quarter_rows)
             inserted_quarters += int(quarter_inserted)
-            values = map_api_ordinary_fields(quarter_rows)
+            fallback_da = validated_pl_da_fallback_value(grouped, key)
+            source_overrides = {"depreciation_amortization": "VALIDATED_PL_DA_FALLBACK"} if fallback_da is not None else {}
+            values = map_api_ordinary_fields(quarter_rows, depreciation_amortization_fallback=fallback_da)
             fund_inserted, field_fills, field_conflicts = upsert_fundamentals_with_conflict_policy(conn, quarter_id, values)
             inserted_fundamentals += int(fund_inserted)
             filled_fields += field_fills
             conflicts += field_conflicts
-            insert_api_provenance(conn, quarter_id, values, raw, run_id)
+            insert_api_provenance(conn, quarter_id, values, raw, run_id, source_overrides=source_overrides)
     return {
         "status": "APPLIED_DRY_RUN" if dry_run else "APPLIED",
         "inserted_companies": inserted_companies,
@@ -969,16 +1013,23 @@ def insert_api_provenance(
     values: Mapping[str, float | None],
     raw: sqlite3.Row,
     run_id: str,
+    source_overrides: Mapping[str, str] | None = None,
 ) -> None:
     now = utc_now()
+    source_overrides = source_overrides or {}
     for field, value in values.items():
         if value is None:
             continue
         if field == "ebitda":
             provider = SIMFIN_API_DERIVED_PROVIDER
-            provider_field = "Operating Income (Loss)+Depreciation & Amortization"
-            source_dataset = "PL+CF"
-            transformation = "operating_income + depreciation_amortization"
+            if source_overrides.get("depreciation_amortization") == "VALIDATED_PL_DA_FALLBACK":
+                provider_field = "Operating Income (Loss)+validated abs PL Depreciation & Amortization"
+                source_dataset = "PL"
+                transformation = "operating_income + validated_abs_pl_depreciation_amortization"
+            else:
+                provider_field = "Operating Income (Loss)+Depreciation & Amortization"
+                source_dataset = "PL+CF"
+                transformation = "operating_income + depreciation_amortization"
             source_value = json.dumps({"operating_income": values["operating_income"], "depreciation_amortization": values["depreciation_amortization"]}, sort_keys=True)
         elif field == "free_cashflow":
             provider = SIMFIN_API_DERIVED_PROVIDER
@@ -991,6 +1042,12 @@ def insert_api_provenance(
             provider_field = "Short Term Debt+Long Term Debt"
             source_dataset = "BS"
             transformation = "short_term_debt + long_term_debt"
+            source_value = str(value)
+        elif field == "depreciation_amortization" and source_overrides.get(field) == "VALIDATED_PL_DA_FALLBACK":
+            provider = SIMFIN_API_DERIVED_PROVIDER
+            provider_field = "Depreciation & Amortization"
+            source_dataset = "PL"
+            transformation = "validated_abs_pl_da_fallback"
             source_value = str(value)
         else:
             source_dataset, provider_field, provider, transformation = PROVENANCE[field]

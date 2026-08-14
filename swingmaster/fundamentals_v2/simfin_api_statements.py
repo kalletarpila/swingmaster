@@ -21,17 +21,13 @@ from swingmaster.fundamentals_v2.simfin_seed import (
     read_csv_rows,
     write_csv,
 )
-from swingmaster.fundamentals_v2.simfin_api_rate_limit import (
-    DEFAULT_RATE_LIMIT_RETRY_DELAY_SECONDS,
-    request_with_single_429_retry,
-    summarize_request_accounting,
-)
-
-
 SIMFIN_API_STATEMENTS_PROVIDER = "SIMFIN_API_STATEMENTS"
 SIMFIN_API_DERIVED_PROVIDER = "SIMFIN_API_DERIVED"
 STATEMENT_ENDPOINT = "https://prod.simfin.com/api/v3/companies/statements/compact"
 STATEMENT_ENDPOINT_NAME = "/api/v3/companies/statements/compact"
+DEFAULT_STATEMENT_RATE_LIMIT_RETRY_DELAY_SECONDS = 300.0
+DEFAULT_REQUEST_BATCH_SIZE = 2
+MAX_REQUEST_BATCH_SIZE = 2
 REQUIRED_START = (2020, "Q4")
 REQUIRED_PERIOD_ORDER = {"Q1": 1, "Q2": 2, "Q3": 3, "Q4": 4}
 
@@ -90,10 +86,16 @@ class SimFinStatementClient:
         ticker = ticker.strip().upper()
         if not ticker or "," in ticker:
             raise ValueError("SIMFIN_API_ONE_TICKER_ONLY")
+        return self.fetch_tickers([ticker])
+
+    def fetch_tickers(self, tickers: Iterable[str]) -> dict[str, Any]:
+        ordered = deterministic_tickers(tickers)
+        if not ordered or len(ordered) > MAX_REQUEST_BATCH_SIZE:
+            raise ValueError("SIMFIN_API_STATEMENT_REQUEST_BATCH_SIZE_MAX_2")
         self._rate_limiter.wait_for_next_start()
         started = utc_now()
         params = {
-            "ticker": ticker,
+            "ticker": ",".join(ordered),
             "statements": "pl,bs,cf",
             "period": "q1,q2,q3,q4",
         }
@@ -115,7 +117,8 @@ class SimFinStatementClient:
             body = exc.read().decode("utf-8", errors="replace")
             headers = dict(exc.headers.items())
             return {
-                "ticker": ticker,
+                "ticker": ",".join(ordered),
+                "requested_tickers": ordered,
                 "retrieved_at_utc": started,
                 "http_status": status,
                 "provider_status": classify_http_status(status, body),
@@ -124,7 +127,8 @@ class SimFinStatementClient:
             }
         except Exception as exc:
             return {
-                "ticker": ticker,
+                "ticker": ",".join(ordered),
+                "requested_tickers": ordered,
                 "retrieved_at_utc": started,
                 "http_status": 0,
                 "provider_status": "RETRYABLE_ERROR",
@@ -133,7 +137,8 @@ class SimFinStatementClient:
             }
         provider_status = classify_http_status(status, body)
         return {
-            "ticker": ticker,
+            "ticker": ",".join(ordered),
+            "requested_tickers": ordered,
             "retrieved_at_utc": started,
             "http_status": status,
             "provider_status": provider_status,
@@ -291,6 +296,49 @@ def persist_fetch_result(
     return raw_id
 
 
+@dataclass(frozen=True)
+class StatementGroup429RetryResult:
+    result: Mapping[str, Any]
+    attempts: list[Mapping[str, Any]]
+    retry_performed: bool
+    recovered_after_429: bool
+    stopped_after_second_429: bool
+
+    @property
+    def http_requests_made(self) -> int:
+        return len(self.attempts)
+
+
+def request_statement_group_with_single_429_retry(
+    *,
+    tickers: list[str],
+    requester: Callable[[list[str]], Mapping[str, Any]],
+    retry_delay_seconds: float,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> StatementGroup429RetryResult:
+    first = requester(tickers)
+    attempts = [first]
+    if first.get("provider_status") != "RATE_LIMITED":
+        return StatementGroup429RetryResult(
+            result=first,
+            attempts=attempts,
+            retry_performed=False,
+            recovered_after_429=False,
+            stopped_after_second_429=False,
+        )
+    sleeper(retry_delay_seconds)
+    retry = requester(tickers)
+    attempts.append(retry)
+    retry_status = retry.get("provider_status")
+    return StatementGroup429RetryResult(
+        result=retry,
+        attempts=attempts,
+        retry_performed=True,
+        recovered_after_429=retry_status in {"SUCCESS", "NO_DATA"},
+        stopped_after_second_429=retry_status == "RATE_LIMITED",
+    )
+
+
 def extract_first_simfin_id(payload_json: str) -> int | None:
     try:
         companies = parse_companies(json.loads(payload_json))
@@ -354,6 +402,119 @@ def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone() is not None
 
 
+def grouped(tickers: list[str], request_batch_size: int) -> list[list[str]]:
+    return [tickers[index : index + request_batch_size] for index in range(0, len(tickers), request_batch_size)]
+
+
+def requested_statement_identity_map(conn: sqlite3.Connection, *, market: str, tickers: list[str]) -> tuple[dict[int, str], dict[str, str]]:
+    id_to_ticker: dict[int, str] = {}
+    ticker_to_ticker = {ticker.upper(): ticker.upper() for ticker in tickers}
+    marks = ",".join("?" for _ in tickers)
+    if marks:
+        for row in conn.execute(
+            f"SELECT ticker, simfin_id FROM rc_v2_company WHERE market=? AND ticker IN ({marks})",
+            (market, *tickers),
+        ):
+            if row["simfin_id"] is not None:
+                id_to_ticker[int(row["simfin_id"])] = str(row["ticker"]).upper()
+    return id_to_ticker, ticker_to_ticker
+
+
+def statement_payload_by_requested_ticker(
+    conn: sqlite3.Connection,
+    *,
+    market: str,
+    tickers: list[str],
+    group_result: Mapping[str, Any],
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    if group_result.get("provider_status") != "SUCCESS":
+        return {}, False
+    try:
+        companies = parse_companies(json.loads(str(group_result["payload_json"])))
+    except json.JSONDecodeError:
+        return {}, True
+    id_to_ticker, ticker_to_ticker = requested_statement_identity_map(conn, market=market, tickers=tickers)
+    mapped: dict[str, dict[str, Any]] = {}
+    for company in companies:
+        if not isinstance(company, dict):
+            return {}, True
+        provider_id = company.get("id")
+        provider_ticker = str(company.get("ticker") or "").upper()
+        owner = None
+        if provider_id is not None and id_to_ticker:
+            if int(provider_id) not in id_to_ticker:
+                return {}, True
+            owner = id_to_ticker[int(provider_id)]
+        elif provider_id is not None and int(provider_id) in id_to_ticker:
+            owner = id_to_ticker[int(provider_id)]
+        elif provider_ticker in ticker_to_ticker:
+            owner = ticker_to_ticker[provider_ticker]
+        else:
+            return {}, True
+        if owner in mapped:
+            return {}, True
+        mapped[owner] = company
+    return mapped, False
+
+
+def demultiplex_statement_group_result(
+    conn: sqlite3.Connection,
+    *,
+    market: str,
+    tickers: list[str],
+    group_result: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    status = str(group_result.get("provider_status") or "")
+    if status == "SUCCESS":
+        mapped, failed = statement_payload_by_requested_ticker(conn, market=market, tickers=tickers, group_result=group_result)
+        if failed:
+            return [per_ticker_statement_result(group_result, ticker=ticker, provider_status="MALFORMED_RESPONSE", payload={}) for ticker in tickers]
+        results = []
+        for ticker in tickers:
+            company = mapped.get(ticker)
+            if company is None or not payload_has_statement_rows([company]):
+                results.append(per_ticker_statement_result(group_result, ticker=ticker, provider_status="NO_DATA", payload={"statements": []}))
+            else:
+                results.append(per_ticker_statement_result(group_result, ticker=ticker, provider_status="SUCCESS", payload=[company]))
+        return results
+    return [per_ticker_statement_result(group_result, ticker=ticker, provider_status=status, payload=None) for ticker in tickers]
+
+
+def per_ticker_statement_result(
+    group_result: Mapping[str, Any],
+    *,
+    ticker: str,
+    provider_status: str,
+    payload: Any,
+) -> dict[str, Any]:
+    if payload is None:
+        payload_json = str(group_result.get("payload_json", ""))
+    else:
+        payload_json = json.dumps(payload, sort_keys=True)
+    return {
+        "ticker": ticker,
+        "retrieved_at_utc": group_result["retrieved_at_utc"],
+        "http_status": group_result["http_status"],
+        "provider_status": provider_status,
+        "payload_json": payload_json,
+        "safe_headers_json": group_result.get("safe_headers_json", "{}"),
+    }
+
+
+def summarize_statement_request_accounting(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    fetched = [row for row in rows if row.get("action") == "FETCHED"]
+    groups: dict[str, Mapping[str, Any]] = {}
+    for row in fetched:
+        groups[str(row.get("request_group") or row.get("ticker"))] = row
+    return {
+        "logical_tickers_attempted": len(fetched),
+        "http_requests_made": sum(int(row.get("http_requests_made") or 0) for row in groups.values()),
+        "first_429_count": sum(int(row.get("first_429_detected") or 0) for row in groups.values()),
+        "recovered_429_count": sum(int(row.get("recovered_after_429") or 0) for row in groups.values()),
+        "second_429_stop_count": sum(int(row.get("stopped_after_second_429") or 0) for row in groups.values()),
+    }
+
+
 def acquire_simfin_api_statements(
     *,
     db_path: Path,
@@ -364,10 +525,13 @@ def acquire_simfin_api_statements(
     force_refresh: bool = False,
     max_tickers: int | None = None,
     min_interval_seconds: float = 2.1,
-    rate_limit_retry_delay_seconds: float = DEFAULT_RATE_LIMIT_RETRY_DELAY_SECONDS,
+    request_batch_size: int = DEFAULT_REQUEST_BATCH_SIZE,
+    rate_limit_retry_delay_seconds: float = DEFAULT_STATEMENT_RATE_LIMIT_RETRY_DELAY_SECONDS,
     rate_limit_retry_sleeper: Callable[[float], None] = time.sleep,
     client: SimFinStatementClient | None = None,
 ) -> dict[str, Any]:
+    if request_batch_size < 1 or request_batch_size > MAX_REQUEST_BATCH_SIZE:
+        raise ValueError("SIMFIN_API_STATEMENT_REQUEST_BATCH_SIZE_MAX_2")
     ordered = deterministic_tickers(tickers)
     if max_tickers is not None:
         ordered = ordered[:max_tickers]
@@ -380,6 +544,7 @@ def acquire_simfin_api_statements(
         active_client = client
         if active_client is None and not dry_run:
             active_client = SimFinStatementClient(rate_limiter=RequestStartRateLimiter(min_interval_seconds))
+        network_required = []
         for ticker in ordered:
             cached = latest_successful_raw(conn, market=market, ticker=ticker, create_schema_if_missing=not dry_run)
             if cached is not None and not force_refresh:
@@ -392,40 +557,54 @@ def acquire_simfin_api_statements(
             if dry_run:
                 rows.append({"ticker": ticker, "action": "NETWORK_REQUIRED", "status": "DRY_RUN", "raw_id": ""})
                 continue
-            retry_result = request_with_single_429_retry(
-                ticker=ticker,
-                requester=active_client.fetch_ticker,
+            network_required.append(ticker)
+        for group in grouped(network_required, request_batch_size):
+            retry_result = request_statement_group_with_single_429_retry(
+                tickers=group,
+                requester=active_client.fetch_tickers,
                 retry_delay_seconds=rate_limit_retry_delay_seconds,
                 sleeper=rate_limit_retry_sleeper,
             )
-            raw_id = None
-            for attempt in retry_result.attempts:
-                raw_id = persist_fetch_result(conn, market=market, run_id=run_id, result=attempt)
+            final_results = []
+            for attempt_index, attempt in enumerate(retry_result.attempts, start=1):
+                per_ticker = demultiplex_statement_group_result(conn, market=market, tickers=group, group_result=attempt)
+                for result in per_ticker:
+                    raw_id = persist_fetch_result(conn, market=market, run_id=run_id, result=result)
+                    if attempt_index == len(retry_result.attempts):
+                        final_results.append((result, raw_id))
                 conn.commit()
-            result = retry_result.result
-            rows.append({
-                "ticker": ticker,
-                "action": "FETCHED",
-                "status": result["provider_status"],
-                "raw_id": raw_id or "",
-                "http_requests_made": retry_result.http_requests_made,
-                "first_http_status": retry_result.attempts[0].get("http_status"),
-                "first_429_detected": int(retry_result.retry_performed),
-                "retry_delay_seconds": rate_limit_retry_delay_seconds if retry_result.retry_performed else "",
-                "retry_http_status": retry_result.attempts[1].get("http_status") if retry_result.retry_performed else "",
-                "recovered_after_429": int(retry_result.recovered_after_429),
-                "stopped_after_second_429": int(retry_result.stopped_after_second_429),
-            })
+            for result, raw_id in final_results:
+                rows.append({
+                    "ticker": result["ticker"],
+                    "request_group": ",".join(group),
+                    "action": "FETCHED",
+                    "status": result["provider_status"],
+                    "raw_id": raw_id or "",
+                    "http_requests_made": retry_result.http_requests_made,
+                    "logical_companies_in_request": len(group),
+                    "first_http_status": retry_result.attempts[0].get("http_status"),
+                    "first_429_detected": int(retry_result.retry_performed),
+                    "retry_delay_seconds": rate_limit_retry_delay_seconds if retry_result.retry_performed else "",
+                    "retry_http_status": retry_result.attempts[1].get("http_status") if retry_result.retry_performed else "",
+                    "recovered_after_429": int(retry_result.recovered_after_429),
+                    "stopped_after_second_429": int(retry_result.stopped_after_second_429),
+                })
             if retry_result.stopped_after_second_429:
                 return {
                     "status": "SIMFIN_RATE_LIMITED_AFTER_RETRY",
                     "rows": rows,
-                    "request_accounting": summarize_request_accounting(rows),
+                    "request_accounting": summarize_statement_request_accounting(rows),
                 }
-            if result["provider_status"] == "AUTH_ERROR":
-                return {"status": "SIMFIN_AUTH_ERROR", "rows": rows, "request_accounting": summarize_request_accounting(rows)}
+            if any(result["provider_status"] == "MALFORMED_RESPONSE" for result, _raw_id in final_results):
+                return {
+                    "status": "SIMFIN_STATEMENT_PAIR_RESPONSE_MAPPING_FAILURE",
+                    "rows": rows,
+                    "request_accounting": summarize_statement_request_accounting(rows),
+                }
+            if any(result["provider_status"] == "AUTH_ERROR" for result, _raw_id in final_results):
+                return {"status": "SIMFIN_AUTH_ERROR", "rows": rows, "request_accounting": summarize_statement_request_accounting(rows)}
         conn.commit()
-        return {"status": "OK", "rows": rows, "request_accounting": summarize_request_accounting(rows)}
+        return {"status": "OK", "rows": rows, "request_accounting": summarize_statement_request_accounting(rows)}
     finally:
         conn.close()
 
@@ -878,7 +1057,7 @@ def build_candidate_inventory(
         else:
             candidate_rows.append(profile_row(ticker, "ORDINARY_API_GAP", meta))
     network_rows = [
-        {**row, "request_number": idx + 1, "request_model": "one_ticker_per_request", "min_start_interval_seconds": 2.1}
+        {**row, "request_number": idx + 1, "request_model": "up_to_two_tickers_per_request", "min_start_interval_seconds": 2.1}
         for idx, row in enumerate(row for row in candidate_rows if row["ticker"] not in cached)
     ]
     counts = count_by_class(candidate_rows + excluded_rows)
@@ -891,8 +1070,8 @@ def build_candidate_inventory(
         "no_metadata_count": counts.get("NO_SIMFIN_COMPANY_METADATA", 0),
         "network_required_count": len(network_rows),
         "cache_hit_count": len(cached),
-        "estimated_runtime_seconds_at_2_1": round(len(network_rows) * 2.1, 1),
-        "estimated_runtime_minutes_at_2_1": round(len(network_rows) * 2.1 / 60, 2),
+        "estimated_runtime_seconds_at_2_1": round(len(grouped([row["ticker"] for row in network_rows], DEFAULT_REQUEST_BATCH_SIZE)) * 2.1, 1),
+        "estimated_runtime_minutes_at_2_1": round(len(grouped([row["ticker"] for row in network_rows], DEFAULT_REQUEST_BATCH_SIZE)) * 2.1 / 60, 2),
     }
     return CandidateInventory(candidate_rows, excluded_rows, cache_rows, network_rows, summary)
 
@@ -999,7 +1178,7 @@ def select_first_production_batch(candidate_rows: list[dict[str, Any]]) -> list[
     return [
         {
             **row,
-            "request_model": "one_ticker_per_request",
+            "request_model": "up_to_two_tickers_per_request",
             "max_statement_requests": 1,
             "min_start_interval_seconds": 2.1,
             "stop_on_429": 1,
@@ -1067,7 +1246,7 @@ def write_rate_doc(path: Path) -> None:
 
 Initial production default:
 
-- one ticker per request
+- up to two tickers per request
 - `statements=pl,bs,cf`
 - `period=q1,q2,q3,q4`
 - serial execution only
@@ -1076,9 +1255,9 @@ Initial production default:
 If HTTP 429 occurs:
 
 - persist safe fetch-state as `RATE_LIMITED`
-- stop the run immediately
-- do not retry the ticker in the same run
-- do not call subsequent tickers
+- wait 300 seconds
+- retry the same exact ticker group once
+- if the retry is also HTTP 429, stop the run
 - preserve all previous successful raw snapshots
 """.strip()
         + "\n",

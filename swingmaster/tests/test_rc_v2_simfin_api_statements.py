@@ -57,11 +57,6 @@ def test_acquire_default_client_reuses_rate_limiter_across_tickers(tmp_path: Pat
     sleeps = []
     calls = []
     monkeypatch.setenv("SIMFIN_API_KEY", "test-key")
-    monkeypatch.setattr(
-        "swingmaster.fundamentals_v2.simfin_api_statements.urlencode",
-        lambda params: f"ticker={params['ticker']}",
-    )
-
     class InstrumentedRateLimiter(RequestStartRateLimiter):
         def __init__(self, min_interval_seconds: float = 2.1) -> None:
             super().__init__(
@@ -76,8 +71,9 @@ def test_acquire_default_client_reuses_rate_limiter_across_tickers(tmp_path: Pat
     )
 
     def opener(request: Request, timeout_seconds: float) -> object:
-        ticker = request.full_url.rsplit("=", 1)[-1]
-        calls.append(ticker)
+        query = request.full_url.split("?", 1)[1]
+        ticker_value = dict(part.split("=", 1) for part in query.split("&"))["ticker"]
+        calls.append(ticker_value)
         clock.advance(0.1)
 
         class Response:
@@ -85,7 +81,7 @@ def test_acquire_default_client_reuses_rate_limiter_across_tickers(tmp_path: Pat
             headers = {}
 
             def read(self) -> bytes:
-                return json.dumps(_payload(ticker), sort_keys=True).encode("utf-8")
+                return json.dumps([_payload_company(ticker) for ticker in ticker_value.split("%2C")], sort_keys=True).encode("utf-8")
 
         return Response()
 
@@ -96,8 +92,8 @@ def test_acquire_default_client_reuses_rate_limiter_across_tickers(tmp_path: Pat
 
     result = acquire_simfin_api_statements(db_path=db, tickers=["AAPL", "MSFT", "NVDA"], run_id="RUN1", min_interval_seconds=2.1)
     assert result["status"] == "OK"
-    assert calls == ["AAPL", "MSFT", "NVDA"]
-    assert sleeps == [pytest.approx(2.0), pytest.approx(2.0)]
+    assert calls == ["AAPL%2CMSFT", "NVDA"]
+    assert sleeps == [pytest.approx(2.0)]
 
 
 def test_acquire_cache_first_and_second_429_stops_without_erasing_success(tmp_path: Path) -> None:
@@ -107,11 +103,11 @@ def test_acquire_cache_first_and_second_429_stops_without_erasing_success(tmp_pa
     sleeps = []
 
     class Client:
-        def fetch_ticker(self, ticker: str) -> dict[str, object]:
-            calls.append(ticker)
-            if ticker == "AAPL":
-                return _fetch_result("AAPL", "SUCCESS", 200)
-            return _fetch_result(ticker, "RATE_LIMITED", 429)
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            calls.append(",".join(tickers))
+            if tickers == ["AAPL", "MSFT"]:
+                return _group_fetch_result(tickers, "SUCCESS", 200)
+            return _group_fetch_result(tickers, "RATE_LIMITED", 429)
 
     result = acquire_simfin_api_statements(
         db_path=db,
@@ -121,15 +117,15 @@ def test_acquire_cache_first_and_second_429_stops_without_erasing_success(tmp_pa
         rate_limit_retry_sleeper=lambda seconds: sleeps.append(seconds),
     )
     assert result["status"] == "SIMFIN_RATE_LIMITED_AFTER_RETRY"
-    assert calls == ["AAPL", "MSFT", "MSFT"]
-    assert sleeps == [120.0]
-    assert result["rows"][1]["http_requests_made"] == 2
-    assert result["rows"][1]["first_http_status"] == 429
-    assert result["rows"][1]["first_429_detected"] == 1
-    assert result["rows"][1]["retry_http_status"] == 429
-    assert result["rows"][1]["stopped_after_second_429"] == 1
+    assert calls == ["AAPL,MSFT", "NVDA", "NVDA"]
+    assert sleeps == [300.0]
+    assert result["rows"][2]["http_requests_made"] == 2
+    assert result["rows"][2]["first_http_status"] == 429
+    assert result["rows"][2]["first_429_detected"] == 1
+    assert result["rows"][2]["retry_http_status"] == 429
+    assert result["rows"][2]["stopped_after_second_429"] == 1
     assert result["request_accounting"] == {
-        "logical_tickers_attempted": 2,
+        "logical_tickers_attempted": 3,
         "http_requests_made": 3,
         "first_429_count": 1,
         "recovered_429_count": 0,
@@ -140,9 +136,9 @@ def test_acquire_cache_first_and_second_429_stops_without_erasing_success(tmp_pa
         conn.row_factory = sqlite3.Row
         raw_count = conn.execute("SELECT COUNT(*) FROM rc_v2_simfin_api_raw WHERE ticker='AAPL'").fetchone()[0]
         msft_raw = conn.execute("SELECT COUNT(*) FROM rc_v2_simfin_api_raw WHERE ticker='MSFT'").fetchone()[0]
-        state = conn.execute("SELECT last_status FROM rc_v2_simfin_api_fetch_state WHERE ticker='MSFT'").fetchone()[0]
+        state = conn.execute("SELECT last_status FROM rc_v2_simfin_api_fetch_state WHERE ticker='NVDA'").fetchone()[0]
     assert raw_count == 1
-    assert msft_raw == 0
+    assert msft_raw == 1
     assert state == "RATE_LIMITED"
 
     calls.clear()
@@ -158,11 +154,12 @@ def test_acquire_retries_first_429_once_and_recovers_on_success(tmp_path: Path) 
     sleeps = []
 
     class Client:
-        def fetch_ticker(self, ticker: str) -> dict[str, object]:
-            calls.append(ticker)
-            if ticker == "MSFT" and calls.count("MSFT") == 1:
-                return _fetch_result("MSFT", "RATE_LIMITED", 429)
-            return _fetch_result(ticker, "SUCCESS", 200)
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            group = ",".join(tickers)
+            calls.append(group)
+            if tickers == ["MSFT", "NVDA"] and calls.count(group) == 1:
+                return _group_fetch_result(tickers, "RATE_LIMITED", 429)
+            return _group_fetch_result(tickers, "SUCCESS", 200)
 
     result = acquire_simfin_api_statements(
         db_path=db,
@@ -174,13 +171,13 @@ def test_acquire_retries_first_429_once_and_recovers_on_success(tmp_path: Path) 
     )
 
     assert result["status"] == "OK"
-    assert calls == ["MSFT", "MSFT", "NVDA"]
+    assert calls == ["MSFT,NVDA", "MSFT,NVDA"]
     assert sleeps == [0.5]
     assert result["rows"][0]["status"] == "SUCCESS"
     assert result["rows"][0]["recovered_after_429"] == 1
     assert result["request_accounting"] == {
         "logical_tickers_attempted": 2,
-        "http_requests_made": 3,
+        "http_requests_made": 2,
         "first_429_count": 1,
         "recovered_429_count": 1,
         "second_429_stop_count": 0,
@@ -196,13 +193,12 @@ def test_acquire_retries_first_429_once_and_continues_on_no_data(tmp_path: Path)
     calls = []
 
     class Client:
-        def fetch_ticker(self, ticker: str) -> dict[str, object]:
-            calls.append(ticker)
-            if ticker == "EMPTY" and calls.count("EMPTY") == 1:
-                return _fetch_result("EMPTY", "RATE_LIMITED", 429)
-            if ticker == "EMPTY":
-                return _fetch_result("EMPTY", "NO_DATA", 200)
-            return _fetch_result(ticker, "SUCCESS", 200)
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            group = ",".join(tickers)
+            calls.append(group)
+            if tickers == ["EMPTY", "NVDA"] and calls.count(group) == 1:
+                return _group_fetch_result(tickers, "RATE_LIMITED", 429)
+            return _group_fetch_result(["NVDA"], "SUCCESS", 200)
 
     result = acquire_simfin_api_statements(
         db_path=db,
@@ -213,12 +209,12 @@ def test_acquire_retries_first_429_once_and_continues_on_no_data(tmp_path: Path)
     )
 
     assert result["status"] == "OK"
-    assert calls == ["EMPTY", "EMPTY", "NVDA"]
+    assert calls == ["EMPTY,NVDA", "EMPTY,NVDA"]
     assert result["rows"][0]["status"] == "NO_DATA"
     assert result["rows"][0]["recovered_after_429"] == 1
     assert result["request_accounting"] == {
         "logical_tickers_attempted": 2,
-        "http_requests_made": 3,
+        "http_requests_made": 2,
         "first_429_count": 1,
         "recovered_429_count": 1,
         "second_429_stop_count": 0,
@@ -244,6 +240,154 @@ def test_acquire_no_data_state_is_terminal_cache_hit(tmp_path: Path) -> None:
     result = acquire_simfin_api_statements(db_path=db, tickers=["EMPTY"], run_id="RUN2", client=Client())
     assert result["status"] == "OK"
     assert result["rows"] == [{"ticker": "EMPTY", "action": "NO_DATA_CACHE_HIT", "status": "NO_DATA", "raw_id": ""}]
+
+
+def test_statement_pair_batching_two_tickers_one_http_request(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    calls = []
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            calls.append(tickers)
+            return _group_fetch_result(tickers, "SUCCESS", 200)
+
+    result = acquire_simfin_api_statements(db_path=db, tickers=["AAPL", "MSFT"], run_id="RUN1", client=Client())
+
+    assert result["status"] == "OK"
+    assert calls == [["AAPL", "MSFT"]]
+    assert result["request_accounting"]["logical_tickers_attempted"] == 2
+    assert result["request_accounting"]["http_requests_made"] == 1
+
+
+def test_statement_pair_batching_odd_count_uses_three_http_requests(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    calls = []
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            calls.append(tickers)
+            return _group_fetch_result(tickers, "SUCCESS", 200)
+
+    result = acquire_simfin_api_statements(db_path=db, tickers=["A", "B", "C", "D", "E"], run_id="RUN1", client=Client())
+
+    assert result["status"] == "OK"
+    assert calls == [["A", "B"], ["C", "D"], ["E"]]
+    assert result["request_accounting"]["logical_tickers_attempted"] == 5
+    assert result["request_accounting"]["http_requests_made"] == 3
+
+
+def test_statement_batch_size_above_two_rejected(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+
+    with pytest.raises(ValueError, match="SIMFIN_API_STATEMENT_REQUEST_BATCH_SIZE_MAX_2"):
+        acquire_simfin_api_statements(db_path=db, tickers=["A", "B", "C"], run_id="RUN1", request_batch_size=3)
+
+
+def test_statement_pair_demux_uses_identity_not_response_order(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            return _group_fetch_result(["MSFT", "AAPL"], "SUCCESS", 200)
+
+    result = acquire_simfin_api_statements(db_path=db, tickers=["AAPL", "MSFT"], run_id="RUN1", client=Client())
+
+    assert result["status"] == "OK"
+    assert [row["ticker"] for row in result["rows"]] == ["AAPL", "MSFT"]
+    with sqlite3.connect(str(db)) as conn:
+        payloads = {
+            row[0]: json.loads(row[1])[0]["ticker"]
+            for row in conn.execute("SELECT ticker, payload_json FROM rc_v2_simfin_api_raw ORDER BY ticker")
+        }
+    assert payloads == {"AAPL": "AAPL", "MSFT": "MSFT"}
+
+
+def test_statement_pair_unknown_identity_is_hard_mapping_failure(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            return _group_fetch_result(["AAPL", "ZZZ"], "SUCCESS", 200)
+
+    result = acquire_simfin_api_statements(db_path=db, tickers=["AAPL", "MSFT"], run_id="RUN1", client=Client())
+
+    assert result["status"] == "SIMFIN_STATEMENT_PAIR_RESPONSE_MAPPING_FAILURE"
+    assert {row["status"] for row in result["rows"]} == {"MALFORMED_RESPONSE"}
+
+
+def test_statement_pair_missing_requested_company_is_no_data(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            return _group_fetch_result(["AAPL"], "SUCCESS", 200)
+
+    result = acquire_simfin_api_statements(db_path=db, tickers=["AAPL", "EMPTY"], run_id="RUN1", client=Client())
+
+    assert result["status"] == "OK"
+    assert {row["ticker"]: row["status"] for row in result["rows"]} == {"AAPL": "SUCCESS", "EMPTY": "NO_DATA"}
+
+
+def test_statement_pair_one_cached_one_network_required_requests_only_actionable(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    with sqlite3.connect(str(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        ensure_schema(conn)
+        persist_fetch_result(conn, market="usa", run_id="RAW1", result=_fetch_result("AAPL", "SUCCESS", 200))
+        conn.commit()
+    calls = []
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            calls.append(tickers)
+            return _group_fetch_result(tickers, "SUCCESS", 200)
+
+    result = acquire_simfin_api_statements(db_path=db, tickers=["AAPL", "MSFT"], run_id="RUN1", client=Client())
+
+    assert calls == [["MSFT"]]
+    assert [row["action"] for row in result["rows"]] == ["CACHE_HIT", "FETCHED"]
+
+
+def test_statement_pair_429_uses_300_second_retry_and_stops_later_groups(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    _write_v2_db(db)
+    calls = []
+    sleeps = []
+
+    class Client:
+        def fetch_tickers(self, tickers: list[str]) -> dict[str, object]:
+            calls.append(tickers)
+            if tickers == ["AAPL", "MSFT"]:
+                return _group_fetch_result(tickers, "SUCCESS", 200)
+            return _group_fetch_result(tickers, "RATE_LIMITED", 429)
+
+    result = acquire_simfin_api_statements(
+        db_path=db,
+        tickers=["AAPL", "MSFT", "NVDA", "TSLA", "ZZZ"],
+        run_id="RUN1",
+        client=Client(),
+        rate_limit_retry_sleeper=lambda seconds: sleeps.append(seconds),
+    )
+
+    assert result["status"] == "SIMFIN_RATE_LIMITED_AFTER_RETRY"
+    assert calls == [["AAPL", "MSFT"], ["NVDA", "TSLA"], ["NVDA", "TSLA"]]
+    assert sleeps == [300.0]
+    assert result["request_accounting"] == {
+        "logical_tickers_attempted": 4,
+        "http_requests_made": 3,
+        "first_429_count": 1,
+        "recovered_429_count": 0,
+        "second_429_stop_count": 1,
+    }
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM rc_v2_simfin_api_fetch_state WHERE ticker='ZZZ'").fetchone()[0] == 0
 
 
 def test_mapping_and_apply_preserve_fiscal_identity_conflicts_and_provenance(tmp_path: Path) -> None:
@@ -411,12 +555,42 @@ def _fetch_result(ticker: str, status: str, http_status: int) -> dict[str, objec
     }
 
 
+def _group_fetch_result(tickers: list[str], status: str, http_status: int) -> dict[str, object]:
+    payload = [_payload_company(ticker) for ticker in tickers] if status == "SUCCESS" else {"error": status}
+    return {
+        "ticker": ",".join(tickers),
+        "requested_tickers": tickers,
+        "retrieved_at_utc": "2026-08-12T00:00:00Z",
+        "http_status": http_status,
+        "provider_status": status,
+        "payload_json": json.dumps(payload, sort_keys=True),
+        "safe_headers_json": "{}",
+    }
+
+
 def _payload(ticker: str) -> list[dict[str, object]]:
+    return [_payload_company(ticker)]
+
+
+def _payload_company(ticker: str) -> dict[str, object]:
+    simfin_id = {
+        "A": 100001,
+        "AAPL": 111052,
+        "B": 100002,
+        "C": 100003,
+        "D": 100004,
+        "E": 100005,
+        "EMPTY": 100006,
+        "MSFT": 59265,
+        "NVDA": 59266,
+        "TSLA": 59267,
+        "ZZZ": 999999,
+    }.get(ticker, 111052)
     return [
         {
-            "id": 111052,
+            "id": simfin_id,
             "ticker": ticker,
-            "name": "APPLE INC",
+            "name": f"{ticker} INC",
             "currency": "USD",
             "statements": [
                 {
@@ -436,4 +610,4 @@ def _payload(ticker: str) -> list[dict[str, object]]:
                 },
             ],
         }
-    ]
+    ][0]

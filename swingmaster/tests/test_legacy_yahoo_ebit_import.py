@@ -191,6 +191,14 @@ def _create_v2(path: Path) -> None:
                 created_at_utc TEXT NOT NULL,
                 updated_at_utc TEXT NOT NULL
             );
+            CREATE TABLE rc_v2_import_run (
+                import_run_id TEXT PRIMARY KEY,
+                market TEXT NOT NULL,
+                simfin_dir TEXT NOT NULL,
+                builder_version TEXT NOT NULL,
+                started_at_utc TEXT NOT NULL,
+                finished_at_utc TEXT
+            );
             CREATE TABLE rc_v2_quarter (
                 quarter_id INTEGER PRIMARY KEY,
                 company_id INTEGER NOT NULL,

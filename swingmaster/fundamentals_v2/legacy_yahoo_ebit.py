@@ -277,6 +277,15 @@ def apply_eligible_rows(
     now: str | None = None,
 ) -> list[dict[str, Any]]:
     now = now or utc_now()
+    if not dry_run and eligible_rows:
+        v2_conn.execute(
+            """
+            INSERT OR IGNORE INTO rc_v2_import_run (
+                import_run_id, market, simfin_dir, builder_version, started_at_utc, finished_at_utc
+            ) VALUES (?, 'usa', ?, 'legacy_yahoo_direct_ebit_v1', ?, ?)
+            """,
+            (run_id, "legacy_db:fundamentals_usa.db", now, now),
+        )
     results: list[dict[str, Any]] = []
     for row in eligible_rows:
         current = v2_conn.execute("SELECT ebit FROM rc_v2_fundamental_quarterly WHERE quarter_id=?", (row["quarter_id"],)).fetchone()

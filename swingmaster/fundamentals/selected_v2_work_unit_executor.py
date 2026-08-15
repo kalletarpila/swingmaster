@@ -243,6 +243,7 @@ def execute_selected_v2_work_unit(
 ) -> V2ExecutorResult:
     now = now_utc or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     _validate_executable_input(work_unit)
+    _validate_company_row(conn, work_unit)
     before_counts = _quarter_value_counts(conn, work_unit)
     quarter = _get_exact_quarter(conn, work_unit)
     fundamental = _get_fundamental(conn, int(quarter["quarter_id"])) if quarter is not None else None
@@ -549,6 +550,27 @@ def _validate_executable_input(work_unit: SelectedV2WorkUnitInput) -> None:
         raise RuntimeError("V2_WORK_UNIT_KEY_MISMATCH")
     if not work_unit.canonical_report_date:
         raise RuntimeError("V2_WORK_UNIT_REPORT_DATE_REQUIRED")
+
+
+def _validate_company_row(conn: sqlite3.Connection, work_unit: SelectedV2WorkUnitInput) -> None:
+    row = conn.execute(
+        """
+        SELECT market, ticker, company_profile, active
+        FROM rc_v2_company
+        WHERE company_id=?
+        """,
+        (work_unit.company_id,),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError("V2_WORK_UNIT_COMPANY_NOT_FOUND")
+    if normalize_market(row["market"]) != normalize_market(work_unit.market):
+        raise RuntimeError("V2_WORK_UNIT_COMPANY_MARKET_MISMATCH")
+    if normalize_ticker(row["ticker"]) != normalize_ticker(work_unit.ticker):
+        raise RuntimeError("V2_WORK_UNIT_COMPANY_TICKER_MISMATCH")
+    if int(row["active"] or 0) != 1:
+        raise RuntimeError("V2_WORK_UNIT_COMPANY_INACTIVE")
+    if str(row["company_profile"] or "").upper() != work_unit.company_profile.upper():
+        raise RuntimeError("V2_WORK_UNIT_COMPANY_PROFILE_MISMATCH")
 
 
 def _provider_due_allows_core_work(work_unit: SelectedV2WorkUnitInput) -> bool:

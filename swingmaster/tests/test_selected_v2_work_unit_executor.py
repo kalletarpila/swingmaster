@@ -204,6 +204,21 @@ def test_executor_refuses_non_executable_action_and_unsupported_profile(tmp_path
         execute_selected_v2_work_unit(conn, _work_unit(V2_ENRICH_CORE, profile="BANK"))
 
 
+def test_executor_requires_existing_matching_company_row_before_structure_write(tmp_path: Path) -> None:
+    conn = _connect(tmp_path / "v2.db")
+    conn.execute("PRAGMA foreign_keys=OFF")
+
+    with pytest.raises(RuntimeError, match="V2_WORK_UNIT_COMPANY_NOT_FOUND"):
+        execute_selected_v2_work_unit(
+            conn,
+            _work_unit(V2_CREATE_QUARTER_AND_FILL_CORE),
+            provider_adapters=[StaticProviderAdapter("SIMFIN_FIXTURE", _simfin_candidates())],
+        )
+
+    assert conn.execute("SELECT COUNT(*) FROM rc_v2_quarter").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM rc_v2_fundamental_quarterly").fetchone()[0] == 0
+
+
 def test_create_structure_fill_core_opportunistic_and_replay_idempotent(tmp_path: Path) -> None:
     conn = _connect(tmp_path / "v2.db")
     _company(conn)

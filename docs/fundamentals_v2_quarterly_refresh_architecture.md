@@ -30,11 +30,13 @@ These invariants constrain 9H implementation:
 12. Replay/idempotency is defined by stable work-unit and observation content identities, not by mutable polling timestamps alone.
 13. `WATERMARK_FIRST_DUAL_STORE_UPDATE`: normal 9H2 Update planning compares each store independently to the selected latest operational target quarter under that store's own detailed rules. Cross-store categories are reporting summaries only, not an authoritative sync state machine.
 14. Normal 9H2 dual-store Update scope starts at `2025 Q1`. Earlier quarters are not automatically repaired by incremental Update.
-15. Check remains the single operational discovery workflow. There is no second V2 discovery queue; V2 evaluates only the ticker/quarter selected by the existing Check plan, except for explicit maintenance/backfill tools outside normal 9H2.
+15. Check remains the single operational workflow. It may merge multiple internal selection sources into one plan: current Legacy/result lifecycle due work and due persisted V2 operational follow-up work. There is no second V2 discovery queue.
 16. Watermarks are derived summaries. They do not replace Legacy lifecycle/status semantics, and V2 must not clone Legacy lifecycle states such as `V2_FUNDAMENTALS_PARTIAL` or `V2_SEC_CONFIRMED`.
 17. V2 first-rollout CORE for operational update planning is revenue, EBITDA, FCF, and shares_outstanding. Cash, total_debt, operating_cashflow, capex, and EBIT are opportunistic fields and do not independently trigger provider acquisition.
 18. Data completeness is not the same as update due. A missing V2 CORE field creates update work only when a currently eligible provider/cache path can improve CORE, retry is due, or safe structural quarter creation is required.
-19. A component-specific blocker must not prevent another component from executing safely. For example, V2 company missing can block V2 while Legacy still updates; the merged result is component-limited/partial, not globally blocked.
+19. A component-specific blocker must not prevent another component from executing safely. For example, V2 company missing can block V2 while Legacy still updates.
+20. V2 retry continuity must survive Legacy becoming current. Persisted V2 operational follow-up metadata can reselect a previously known work unit when retry is due, without becoming canonical data truth, a persistent watermark, a sync table, or a V2 lifecycle clone.
+21. Execution outcome is separate from coverage or rollout limitation. Known non-retry V2 limitations such as company-missing maintenance or unsupported profile deferral must be visible in structured output, but they do not automatically make scheduler execution fail or require retry.
 
 ## 4. Existing Lifecycle/Status Model
 
@@ -50,7 +52,7 @@ Watermark-first Update planning preserves this distinction. Legacy lifecycle/sta
 
 9H2 uses a watermark-first model for dual-store Update planning:
 
-1. Use the existing Check plan as the single source of operational work units.
+1. Use one Check workflow and one merged plan as the source of operational work units.
 2. For each ticker, derive the latest operational target quarter from the selected plan row.
 3. Compute Legacy watermarks/currentness from Legacy rows, ingestion status, retry recommendation, and source-confirmation state.
 4. Compute V2 watermarks/currentness from V2 company/quarter/fundamental rows, CORE field presence, provider/cache due state, profile support, and identity safety.
@@ -59,6 +61,8 @@ Watermark-first Update planning preserves this distinction. Legacy lifecycle/sta
 
 Watermarks are per-run derived summaries. They are not lifecycle states, not persisted sync truth, and not a replacement for detailed status tables.
 
+The single Check workflow may include two internal selection sources. Source A is existing Legacy/result lifecycle selection. Source B is due persisted V2 operational follow-up for previously selected work units. Source B is not result discovery and must not scan broad V2 NULLs, arbitrary historical incompleteness, pre-2025 Q1 gaps, or cross-store numeric differences. Merge by `work_unit_key`; one merged candidate hash covers the deterministic combined set.
+
 Normal operational scope starts at `2025 Q1`. 9H2 must not scan pre-2025 Q1 continuity, lower watermarks because of old gaps, call providers solely for old gaps, or become a historical convergence engine.
 
 For the first V2 rollout, CORE is revenue, EBITDA, FCF, and shares_outstanding. Cash, total_debt, operating_cashflow, capex, and EBIT may be opportunistically NULL-filled only when an already justified provider observation is available; they do not by themselves make V2 update-due.
@@ -66,6 +70,8 @@ For the first V2 rollout, CORE is revenue, EBITDA, FCF, and shares_outstanding. 
 `core_complete` is a data completeness metric. `core_update_required` is an operational due metric. It also requires actionable provider/cache work, retry due state, or safe structural creation. A CORE-incomplete quarter can be settled for the current run with no retry when no provider path is currently actionable.
 
 Component blockers are local unless they make the whole work unit unsafe. V2 company missing and unsupported BANK/INSURANCE ordinary adapters block the V2 component but do not block valid Legacy execution. Provider retry, maintenance-required blockers, and deferred limitations must be reported separately.
+
+Known non-retry V2 limitations are not execution failures. If all currently executable or retriable work succeeds/no-ops, the process may exit successfully while reporting `maintenance_required`, `deferred_limitations_count`, and blocked V2 component counts. Exit/nonzero partial should be reserved for retry-required or recoverable/transient execution failures; hard/global unsafe failures remain failed.
 
 ## 5. Result Discovery Model
 
@@ -228,6 +234,8 @@ It may generate work units for known company + fiscal quarter.
 
 The implemented 9H1 Check contract uses `fundamental_result_check_plan_v2`. A `SUCCESS` result-check may contain executable work units. Overall `PARTIAL` and `FAILED` result-check plans remain non-executable. Provider retry/failure evidence is surfaced as timing/provider observation metadata and summary counters, not as canonical provenance or a new lifecycle state.
 
+Future 9H2 Check planning may add due V2 operational follow-up rows to the same plan when persisted follow-up metadata says retry is due. This preserves retry continuity after Legacy becomes current while keeping one Check workflow.
+
 Define `PRESENCE_CHECK` separately from `FINANCIAL_DATA_ACQUISITION`.
 
 A presence check answers only whether the provider currently exposes enough evidence that this company/quarter exists or is due for Update processing. It may query result/earnings event presence through existing discovery mechanisms, inspect lightweight provider metadata needed for result detected, filing present, provider quarter presence, provider due/retry state, inspect existing cache metadata, persist lifecycle/check state, persist timing/provider observation metadata, generate SUCCESS/PARTIAL/FAILED check results, generate work-lists/plans, and schedule next checks.
@@ -265,10 +273,10 @@ Current SwingMaster quarter-update CLI behavior is summary-line and exit-code or
 9H2 must preserve a deterministic process contract for both UI and RawCandle. The result must separately expose:
 
 - legacy result: attempted, status, writes, and errors.
-- V2 result: attempted, status, writes, retry_required, and errors.
+- V2 result: attempted, status, writes, retry_required, maintenance_required, deferred_reason, and errors.
 - overall execution result: SUCCESS, PARTIAL, or FAILED, or an existing equivalent with the same meaning.
 
-Overall execution must not report ordinary full SUCCESS when legacy succeeds but V2 fails, and must not hide V2 success when legacy fails. During transition, a component failure that leaves the other component committed should be surfaced as PARTIAL when at least one component succeeded and retry/sync work remains, or FAILED when the update as a whole could not produce a usable committed component result. The CLI should emit explicit summary fields for these component statuses and retry requirements. Until RawCandle is updated to parse a richer PARTIAL status, any 9H2 component failure that requires scheduler retry should continue to produce a non-zero process exit or otherwise be mapped by RawCandle to a non-success weekly update status.
+Overall execution must not report ordinary full SUCCESS when executable work failed or retry is required, and must not hide V2 success when legacy fails. During transition, a recoverable/transient component failure that leaves another component committed should be surfaced as PARTIAL when retry is required, or FAILED when the update as a whole could not produce a usable committed component result. Known non-retry V2 limitations are different: company-missing maintenance and unsupported profile deferrals remain visible in structured output but do not by themselves require a nonzero scheduler exit. The CLI should emit explicit summary fields for `overall_status`, `retry_required`, `maintenance_required`, `deferred_limitations_count`, `component_failures_count`, `component_retries_count`, `component_blocked_count`, and component summaries.
 
 ## 20. Timing Instrumentation
 
@@ -301,7 +309,7 @@ Provider acquisition scope may be broader than canonical write scope, but V2 can
 
 Legacy and V2 updates are not a single ACID transaction. 9H2 must explicitly report legacy result, V2 result, and retry/sync state for each work unit. Neither side's success should hide the other side's failure.
 
-9H2 should report retry-required, maintenance-required, and deferred limitations separately. `PARTIAL` does not always mean retry-required: V2 company missing can be maintenance-required, BANK/INSURANCE can be deferred, and a transient provider failure can be retry-required.
+9H2 should report retry-required, maintenance-required, and deferred limitations separately. V2 company missing can be maintenance-required, BANK/INSURANCE can be deferred, and a transient provider failure can be retry-required. RawCandle should use process exit primarily for operational retry/failure, while logging/reporting limitation metadata from SwingMaster structured output.
 
 ## 22. Legacy Coexistence During Transition
 

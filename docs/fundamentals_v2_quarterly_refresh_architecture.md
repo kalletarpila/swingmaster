@@ -35,6 +35,8 @@ The existing model is a layered lifecycle, not one monolithic state. Current cod
 
 Future V2 refresh should reuse this model. New provider timing and provenance observations should be metadata, not new lifecycle states, unless a later implementation proves that existing statuses cannot represent the behavior.
 
+Phase 9H1 implements result-check work-list metadata with `fundamental_result_check_plan_v2`. In that contract, an overall result-check `PARTIAL` remains non-executable. This is distinct from a quarter lifecycle value of `FUNDAMENTALS_PARTIAL`: a lifecycle-PARTIAL quarter may be emitted as a follow-up work unit inside an overall `SUCCESS` result-check plan.
+
 ## 5. Result Discovery Model
 
 Result discovery answers: has a new fiscal-quarter result appeared or become due for follow-up?
@@ -171,6 +173,8 @@ Verified fiscal identity is preferred. Date-inferred matching is allowed only un
 
 The 9H2 canonical write unit is one selected company + one canonical fiscal quarter. The logical `work_unit_key` must be deterministic and stable across retries, using canonical company identity plus canonical fiscal year and fiscal quarter. Ticker and report date may be retained as attributes, but report date must not create duplicate active work units for the same verified company/FY/FQ identity.
 
+The Phase 9H1 result-check implementation emits `work_unit_key` as `market:ticker:fiscal_year:fiscal_quarter`, for example `usa:AAMI:2026:Q2`. The durable company identifier may evolve in a later migration, but the 9H1 plan contract uses this deterministic key and must not create duplicate work units for date offsets inside the same fiscal quarter.
+
 Provider acquisition scope may be broader than canonical write scope:
 
 - SimFin may return multiple quarters for a selected ticker.
@@ -187,6 +191,8 @@ Those broader observations may be cached or audited when provider design require
 It must not write canonical V2 financial values. It must not perform full financial statement retrieval merely for enrichment, and must not run broad SimFin refresh. If current or future result-check logic needs Yahoo event/result information, that use is discovery/status metadata, not V2 financial canonicalization.
 
 It may generate work units for known company + fiscal quarter.
+
+The implemented 9H1 Check contract uses `fundamental_result_check_plan_v2`. A `SUCCESS` result-check may contain executable work units. Overall `PARTIAL` and `FAILED` result-check plans remain non-executable. Provider retry/failure evidence is surfaced as timing/provider observation metadata and summary counters, not as canonical provenance or a new lifecycle state.
 
 Define `PRESENCE_CHECK` separately from `FINANCIAL_DATA_ACQUISITION`.
 
@@ -234,6 +240,8 @@ Overall execution must not report ordinary full SUCCESS when legacy succeeds but
 
 Add a small observation-safe provider timing table or equivalent metadata in 9H. It should record provider, company, quarter identity, observation kind, observed_at_utc, provider-reported timestamp when available, field-presence fingerprint, payload hash/source reference, run id, and outcome.
 
+Phase 9H1 implements this as two tables in the legacy fundamentals DB: `rc_fundamental_provider_observation_content` and `rc_fundamental_provider_observation_seen`. The content table represents semantic provider evidence and deduplicates repeated identical content. The seen table records poll/check events for that content so cadence history is preserved.
+
 Even if an operational provider raw/cache table stores only the latest payload or a refreshed mutable snapshot, timing/observation history must preserve an append-safe observation trail. Each relevant observation should retain provider, company, canonical or provisional quarter identity, observation kind, `observed_at_utc`, provider-reported timestamp if available, field-presence fingerprint, payload hash/source reference, run id, and result/outcome.
 
 A repeated observation with an unchanged payload hash may be compacted or deduplicated only if the timing evidence needed for cadence analysis remains preserved.
@@ -246,6 +254,8 @@ Observation identity has two logical layers:
 - Poll/seen event: when the system checked and saw that same content again. `observed_at_utc` alone must not make an otherwise identical provider payload a new semantic observation, but repeated polling must still preserve enough timing evidence for cadence analysis.
 
 Examples: the same Yahoo payload hash seen twice is one observation content identity with repeated seen events; a new Yahoo payload hash is new provider evidence; the same SEC filing/accession checked twice is not duplicate semantic evidence; a repeated SimFin cache hit should not duplicate canonical provenance; new provider data that NULL-fills one missing field creates one canonical write/provenance identity for that field and work unit.
+
+`PROVIDER_ERROR_RETRY` is a provider/timing observation outcome for retriable provider failures. It is not a lifecycle status, not a Check status, and not canonical field provenance. Production 9H1 validation confirmed that Check creates zero canonical financial writes and zero canonical field-provenance writes.
 
 ## 21. V2 Integration Boundary
 

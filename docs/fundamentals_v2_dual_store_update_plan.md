@@ -4,17 +4,19 @@
 
 This plan defines the 9H2 implementation shape for incremental USA quarterly fundamentals updates while SwingMaster still operates both the legacy fundamentals store and `rc_fundamentals_v2.db`.
 
-The target is one executable Check/plan work-list, followed by Update Fundamentals executing independent legacy and V2 component decisions for each selected company and fiscal quarter. The plan is intentionally implementation-oriented, but it does not authorize provider calls, production writes, schema changes, RawCandle changes, or the actual 9H2 implementation.
+The simplified target is watermark-first. For each ticker, Update Fundamentals should determine the latest operational target quarter from the existing Check plan, compute independent legacy and V2 watermarks, decide what each store needs, then merge only required component actions into company + canonical fiscal-quarter execution units.
 
-## 2. Current problem: legacy and V2 are not synchronized
+This is a design document. It does not authorize provider calls, production writes, schema changes, RawCandle changes, or the actual 9H2 implementation.
 
-Legacy and V2 are not synchronized stores. They have different schemas, different identity keys, different provenance models, and different readiness semantics. During transition, downstream workflows still depend on legacy tables, while V2 is the canonical target being built in parallel.
+## 2. Current Problem
 
-The practical issue is that a work unit can require a legacy update, a V2 update, both, or neither. A legacy row can exist while V2 has no matching canonical quarter. V2 can have a canonical quarter and some fields while the legacy lifecycle still says `FUNDAMENTALS_PARTIAL`. Numeric differences between the stores are not automatically errors in 9H2 because reconciliation and bridge parity are later phases.
+Legacy and V2 are not synchronized stores. They have different schemas, identity keys, provenance models, and readiness semantics. During transition, downstream workflows still depend on legacy tables, while V2 is maintained in parallel.
 
-9H2 must therefore compute per-store state before applying work. It must not infer one store's currentness from the other.
+The initial dual-store plan correctly avoided numeric reconciliation, but its decision framing could be read as a cross-store sync model. 9H2 should not build a heavy temporary synchronization framework. The authoritative question is not "are legacy and V2 synchronized?" The authoritative question is "for the latest operational quarter selected by Check, is this store current enough under its own rules?"
 
-## 3. Existing Check/plan contract
+Cross-store categories remain useful reporting summaries only.
+
+## 3. Existing Check/Plan Contract
 
 9H1 Check for Updates emits `fundamental_result_check_plan_v2`. A plan is executable only when `check_status` is `SUCCESS`, the candidate count and candidate hash validate, the decision date matches execution, and every row has an executable decision.
 
@@ -25,258 +27,428 @@ The current executable decisions are:
 - `RETRY_FETCH_FAILED`
 - `REFRESH_SEC_CONFIRMATION`
 
-Each work unit is selected by the result lifecycle and contains `market`, `ticker`, `target_period_end_date`, `canonical_fiscal_year`, `canonical_fiscal_quarter`, `canonical_report_date`, provider-due metadata, and a deterministic `work_unit_key` such as `usa:AAMI:2026:Q2`.
+Each work unit contains `market`, `ticker`, `target_period_end_date`, `canonical_fiscal_year`, `canonical_fiscal_quarter`, `canonical_report_date`, provider-due metadata, and deterministic `work_unit_key`.
 
-Check owns discovery and due selection. It does not canonicalize V2 financial facts.
+Check remains the one operational discovery workflow. There is no second V2 Check queue.
 
-## 4. Store ownership
+Overall result-check status remains distinct from quarter lifecycle status. An overall result-check `PARTIAL` is a run-level outcome and is non-executable under the current plan contract. A quarter lifecycle state such as `FUNDAMENTALS_PARTIAL` describes one company fiscal quarter and may appear as a follow-up work unit inside an overall `SUCCESS` Check plan.
 
-SwingMaster owns result-check selection, field policies, provider adapters, legacy update behavior, V2 canonicalization, provenance, and status semantics.
+## 4. Watermark Model
+
+Operational scope: fiscal quarters greater than or equal to `2025 Q1`.
+
+```text
+                         latest operational target quarter
+                                      |
+                       +--------------+--------------+
+                       |                             |
+                    Legacy                          V2
+                       |                             |
+          latest_present_quarter          latest_present_quarter
+          latest_complete_quarter         latest_core_complete_quarter
+                       |                             |
+                legacy planner                  V2 planner
+                       |                             |
+                       +--------------+--------------+
+                                      |
+                              merged work unit
+```
+
+The latest operational target quarter normally comes from the existing `fundamental_result_check_plan_v2` work units. For an Update run, this may simply be the latest selected plan quarter for that ticker. This differs from the latest quarter already present in legacy, the latest quarter already present in V2, and the latest future calendar estimate.
+
+The plan must not invent persistent watermark columns or a durable cross-store sync state machine in initial 9H2. Compute watermarks from DB truth at preflight and persist only run/component metadata.
+
+Watermarks are derived summaries. They do not replace legacy lifecycle/status semantics and they do not create a V2 clone of the legacy lifecycle.
+
+## 5. Store Ownership
+
+SwingMaster owns result-check selection, field policies, provider adapters, legacy update behavior, V2 canonicalization, provenance, status semantics, UI backend actions, and scheduler-facing command contracts.
 
 Legacy operational rows live in `fundamentals_usa.db`, primarily `rc_fundamental_quarterly` and `rc_fundamental_quarter_ingestion_status`.
 
 V2 canonical rows live in `rc_fundamentals_v2.db`, primarily `rc_v2_company`, `rc_v2_quarter`, `rc_v2_fundamental_quarterly`, and `rc_v2_fundamental_field_source`.
 
-Provider raw/cache/fetch-state is owned by provider-specific SwingMaster adapters. A provider observation can be shared as evidence, but legacy and V2 still make separate canonicalization decisions.
+RawCandle owns scheduling, process orchestration, logging, and supervision. It must call SwingMaster contracts and must not duplicate candidate eligibility, provider hierarchy, field rules, watermark logic, or canonical write rules.
 
-RawCandle owns scheduling, process orchestration, logging, and supervision. It must not duplicate candidate eligibility, field rules, provider hierarchy, or canonical write logic.
+## 6. Operational Scope Floor
 
-## 5. LegacyState definition
+Normal 9H2 operational planning starts at `2025 Q1`.
 
-`LegacyState` is computed for one selected work unit from `(market, ticker, target_period_end_date)`.
+9H2 must not:
+
+- plan pre-2025 Q1 catch-up
+- lower a watermark because an older quarter is missing
+- scan pre-2025 Q1 continuity
+- call providers solely for old gaps
+- become a historical convergence engine
+
+If a selected target quarter is earlier than `2025 Q1`, mark it `OUT_OF_OPERATIONAL_SCOPE` and take no normal 9H2 action. Fiscal year and fiscal quarter are the primary guard. `report_date` should also be sanity-checked because a contradictory date can signal identity corruption.
+
+## 7. LegacyState
+
+`LegacyState` is computed for one ticker and the selected target quarter using legacy tables only.
 
 Recommended fields:
 
-- `row_present`
-- `ingestion_status`
-- `quarter_basic_complete`
-- `ttm_input_complete`
-- `score_history_complete`
-- `source_confirmation_status`
-- `retry_recommendation`
-- `missing_basic_fields`
-- `last_fetch_status`
-- `legacy_update_required`
+- `latest_present_quarter`
+- `latest_operationally_complete_quarter`
+- `latest_sec_confirmed_quarter`, if useful
+- `latest_retry_pending_quarter`, if useful
+- target row present
+- target ingestion status
+- target `quarter_basic_complete`
+- target source-confirmation status
+- target retry recommendation
+- target missing basic fields
+- `legacy_action`
 - `legacy_blocker`
 
-The primary sources are `rc_fundamental_quarterly`, `rc_fundamental_quarter_ingestion_status`, and the Check candidate decision.
+Legacy state must not be redefined using V2 fields.
 
-## 6. V2State definition
+## 8. Legacy Watermarks
 
-`V2State` is computed for one selected work unit from `(market, ticker, canonical_fiscal_year, canonical_fiscal_quarter, canonical_report_date)`.
+`legacy_latest_present_quarter` is the latest in-scope fiscal quarter where legacy has a meaningful quarterly result row. A row is meaningful only if the target identity is valid and at least one financial value required by legacy operation is non-null/non-empty. An empty shell row must not advance this watermark.
+
+`legacy_latest_operationally_complete_quarter` is the latest in-scope fiscal quarter considered handled under existing legacy semantics. It should use the current lifecycle concepts: row exists, `quarter_basic_complete`, complete ingestion statuses such as `QUARTER_BASIC_COMPLETE` or `INGEST_COMPLETE`, retry recommendation, source confirmation or SEC retry state, and current Check decision.
+
+`quarter_basic_complete` remains a strong legacy completeness signal. It is not the V2 first-rollout CORE signal.
+
+## 9. Why `quarter_basic_complete = 0/44`
+
+The previous 44-row measurement found legacy rows present for 44/44 but `quarter_basic_complete = 0/44`.
+
+This is expected for the active SUCCESS plan population. The plan intentionally contains 5 `FETCH_NEW_QUARTER` rows and 39 `RETRY_PARTIAL_QUARTER` rows. Current legacy result-check logic selects target quarters for retry when `quarter_basic_complete` is false.
+
+The legacy `quarter_basic_complete` assessment is strict. It requires revenue, profitability, free cash flow or OCF plus capex, cash, total debt, shares, valid identity/date, and meaningful financial values. Therefore a row can be present but still operationally partial.
+
+Read-only watermark remeasurement found zero rows that were actually legacy-current despite `quarter_basic_complete=0`. Conclusion: `quarter_basic_complete` remains useful for legacy lifecycle completeness, but preflight should also consult ingestion status, retry recommendation, source-confirmation state, and row meaningfulness to avoid false decisions in other populations.
+
+## 10. V2State
+
+`V2State` is computed for one ticker and selected canonical fiscal quarter using V2 tables and provider cache/fetch-state.
 
 Recommended fields:
 
 - `company_present`
 - `company_id`
 - `company_profile`
-- `quarter_present`
-- `quarter_id`
-- `fundamental_row_present`
-- field presence for `revenue`, `ebitda`, `free_cashflow`, `shares_outstanding`, `cash`, `total_debt`, `operating_cashflow`, `capex`, and `ebit`
-- `p0_complete`
-- `p0p1_complete`
-- `p1_complete`
-- `provenance_count`
-- provider cache/fetch-state summaries relevant to the selected ticker
-- `v2_update_required`
+- `latest_structure_quarter`
+- `latest_present_quarter`
+- `latest_core_complete_quarter`
+- target `quarter_id`
+- target fundamental row present
+- target CORE field presence
+- target opportunistic field presence
+- provider cache/fetch-state
+- `v2_action`
 - `v2_blocker`
 
-The primary sources are `rc_v2_company`, `rc_v2_quarter`, `rc_v2_fundamental_quarterly`, `rc_v2_fundamental_field_source`, SimFin API raw/fetch-state tables, and validated field-specific legacy/Yahoo/SEC observations.
+V2 state is work-unit scoped for update decisions. It must not scan older history to create normal operational work.
 
-## 7. Meaning of "current" per store
+## 11. V2 Watermarks
 
-Legacy current means the selected target period is operationally handled for legacy downstream use: the target row exists where required, managed ingestion status is complete/current, retry is not due, and SEC/source-confirmation retry state does not require follow-up.
+`v2_latest_present_quarter` is the latest in-scope canonical fiscal quarter where V2 has a meaningful canonical quarter/fundamental row. An empty quarter shell should not advance this watermark. If needed, report `v2_latest_structure_quarter` separately.
 
-V2 current means the selected canonical company and fiscal quarter has the required V2 structures and is complete enough under V2 field policy for the current Update objective. For 9H2, this is primarily work-unit-scoped presence and NULL-fill eligibility for P0/P1 fields, not broad historical readiness.
+`v2_latest_core_complete_quarter` is the latest in-scope quarter where V2 first-rollout CORE is complete.
 
-Current does not mean the two stores are numerically equal.
+For initial 9H2 rollout, V2 CORE is:
 
-## 8. Cross-store operational state
+- `revenue`
+- `ebitda`
+- `free_cashflow`
+- `shares_outstanding`
 
-For each selected work unit, preflight should classify one of these operational states:
+`core_complete` is a data completeness metric. It is true only when all first-rollout CORE fields are present.
 
-- `LEGACY_AND_V2_REQUIRED`
-- `LEGACY_ONLY_REQUIRED`
-- `V2_ONLY_REQUIRED`
-- `NOOP_BOTH_CURRENT`
-- `BLOCKED_UNSAFE_IDENTITY`
+`core_update_required` is an operational due metric. It is true only when the quarter is in scope, identity/profile are supported, structure or CORE values need work, and at least one currently eligible provider/cache path can improve CORE, provider retry is due, or safe structural creation is pending.
+
+These are intentionally different. `core_complete = false` and `core_update_required = false` is valid when no provider/update work is currently actionable. Use `NOOP_SETTLED_INCOMPLETE` or an equivalent preflight reason for that case. It is settled for this run, not complete forever.
+
+## 12. Opportunistic Fields
+
+These fields remain important but should not independently force repeated Update-required status in the first 9H2 rollout:
+
+- `cash`
+- `total_debt`
+- `operating_cashflow`
+- `capex`
+- `ebit`
+
+If V2 CORE is complete and only opportunistic fields are missing, do not call a provider solely for those gaps. If a provider payload is already fetched for a CORE reason and contains validated opportunistic values, NULL-fill them under existing rules.
+
+This reduces repeated provider polling and prevents 9H2 from turning into broad completeness repair.
+
+## 13. V2 Watermark Edge Cases
+
+Quarter row exists but all CORE fields are NULL:
+
+- `v2_latest_structure_quarter` may advance.
+- `v2_latest_present_quarter` should not advance unless another meaningful field exists and the plan explicitly treats it as meaningful.
+- `v2_latest_core_complete_quarter` does not advance.
+
+Some CORE fields present:
+
+- `v2_latest_present_quarter` may advance.
+- `v2_latest_core_complete_quarter` does not advance.
+- target action is usually `ENRICH_CORE`.
+
+CORE complete but opportunistic fields missing:
+
+- `v2_latest_core_complete_quarter` advances.
+- no provider call is justified solely for opportunistic gaps.
+- target action is `NOOP_CORE_CURRENT`.
+- report opportunistic gaps as metadata, for example `opportunistic_gaps` and `opportunistic_fill_allowed_if_observation_available`.
+
+Provider `NO_DATA` or retry:
+
+- `NO_DATA` does not make CORE complete.
+- retry/backoff state can classify target action as `RETRY_PROVIDER` or `NO_ELIGIBLE_PROVIDER`.
+- watermark remains based on accepted canonical values, not provider attempts.
+- if all currently eligible provider paths are exhausted or not due, classify as `NOOP_SETTLED_INCOMPLETE`; do not poll every scheduler run.
+
+## 14. Legacy Update Planner
+
+Inputs:
+
+- latest operational target quarter from the Check plan
+- legacy watermarks
+- target legacy lifecycle/retry state
+- operational floor `2025 Q1`
+
+Recommended actions:
+
+- `UPDATE_MISSING_TARGET`
+- `RETRY_OR_UPDATE_TARGET`
+- `REFRESH_SEC_CONFIRMATION`
+- `NOOP`
+- `OUT_OF_OPERATIONAL_SCOPE`
+- `BLOCKED`
+
+Decision examples:
+
+- target quarter is later than legacy complete watermark: update
+- target row exists but retry or SEC confirmation is due: retry/update
+- target row is operationally complete and no retry is due: no-op
+- target quarter is before 2025 Q1: out of scope
+
+The planner may include only work units selected by the current operational Check plan plus explicit retry work attached to that workflow. It must not scan all historical quarters for gaps.
+
+## 15. V2 Update Planner
+
+Inputs:
+
+- latest operational target quarter from the Check plan
+- V2 watermarks
+- selected target quarter state
+- provider/cache due state
+- operational floor `2025 Q1`
+- company profile
+
+Recommended actions:
+
+- `CREATE_QUARTER_AND_FILL_CORE`
+- `ENRICH_CORE`
+- `NOOP_CORE_CURRENT`
+- `NOOP_SETTLED_INCOMPLETE`
+- `BLOCKED_IDENTITY`
+- `BLOCKED_COMPANY_MISSING`
 - `BLOCKED_POLICY_UNSUPPORTED`
+- `NO_ELIGIBLE_PROVIDER`
+- `RETRY_PROVIDER`
+- `OUT_OF_OPERATIONAL_SCOPE`
 
-This classification drives component execution and reporting. It does not replace existing lifecycle statuses.
+The V2 planner must not create work merely because an older quarter has a historical gap.
 
-## 9. Why sync != numeric equality
+`v2_update_required` is not equivalent to "any CORE field missing". It requires currently actionable work: supported identity/profile, safe structure creation or missing CORE, and an eligible provider/cache path, retry due state, or safe structural creation. If CORE is incomplete but no provider path is actionable and no retry is due, the V2 component is a successful no-op for this run with reason `NOOP_SETTLED_INCOMPLETE`.
 
-Legacy and V2 values can differ because of different provider timing, fiscal identity rules, validated fallback tiers, NULL-fill history, and canonical provenance rules. In 9H2, numeric mismatch is a diagnostic signal, not an automatic write trigger.
+## 16. V2 Company-Missing Policy
 
-Replacing V2 non-null canonical values because legacy differs would violate the V2 NULL-fill and conflict policy. Replacing legacy values because V2 differs would change downstream behavior before Phase 11. Reconciliation belongs to later bridge/parity phases, not incremental 9H2 update execution.
+Initial 9H2 policy: `BLOCK_COMPANY_MISSING_IN_INITIAL_9H2`.
 
-## 10. Preflight algorithm
+Current code has V2 company creation inside SimFin API statement apply (`get_or_create_company`) and SimFin seed/specialized import paths. Those paths are tied to provider payloads or historical/local imports and are not a standalone deterministic company bootstrap service for a Check work unit.
 
-Preflight should run before any provider financial acquisition or canonical write:
+Therefore 9H2 should not invent ad-hoc V2 company creation. If `rc_v2_company` is missing for a selected ticker, block the V2 component with `BLOCKED_COMPANY_MISSING`. Legacy may continue its current update path.
 
-1. Validate the Check plan as `fundamental_result_check_plan_v2`.
-2. Normalize every work unit to `market`, `ticker`, `target_period_end_date`, canonical fiscal year, fiscal quarter, and report date.
-3. Load `LegacyState` read-only.
-4. Load `V2State` read-only.
-5. Resolve identity blockers before provider calls.
-6. Compute `legacy_update_required`.
-7. Compute `v2_update_required`.
-8. Emit dry-run/preflight artifacts with per-work-unit and aggregate state.
-9. Execute only components whose required flag is true, unless the user requested dry-run.
+This blocker is actionable maintenance, not provider retry. Recommended metadata: `retry_required=false`, `maintenance_required=true`.
 
-Preflight must be deterministic and replayable. It should not call providers.
+## 17. Bank and Insurance Policy
 
-## 11. `legacy_update_required`
+Initial common V2 incremental adapter policy: `BANK/INSURANCE -> BLOCKED_POLICY_UNSUPPORTED`.
 
-`legacy_update_required` should be true when the Check plan selected an executable legacy-relevant decision and the legacy side is not current for the selected target period.
+Profiles are represented in `rc_v2_company.company_profile`. Existing specialized imports use bank and insurance tables and policies. Ordinary field formulas such as EBITDA, FCF, total debt, and ordinary cash-flow metrics are not universally valid for those profiles.
 
-It is true for missing target rows, `FUNDAMENTALS_PARTIAL`, `FETCH_FAILED`, `PUBLISHED_DATA_NOT_FETCHED`, incomplete `quarter_basic_complete`, or source-confirmation retry states that the plan selected for follow-up.
+Do not route bank or insurance companies through ordinary-company formulas to increase coverage. Legacy may continue its current path.
 
-It is false when the target period is already complete/current and no retry/source-confirmation action is due. It can also be false for a future V2-only operational repair, but that repair type should be explicit and not inferred from arbitrary V2 gaps.
+This blocker is a deferred rollout limitation, not a transient retry. Recommended metadata: `retry_required=false`, `maintenance_required=false`, `deferred_reason=specialized_profile_support`.
 
-The flag must be based on selected work-unit scope, not a broad scan of legacy history.
+## 18. Merged Execution Work Units
 
-## 12. `v2_update_required`
+After independent planners decide component needs, merge by company + canonical fiscal quarter.
 
-`v2_update_required` should be true when the selected work unit lacks required V2 structure or selected V2 fields are missing and eligible for current-quarter provider/cache evaluation under validated rules.
+The merged unit retains:
 
-It is true when `rc_v2_company` or a deterministic `rc_v2_quarter` is missing and can be safely created, when the V2 fundamental row is missing, or when current-quarter fields remain NULL for applicable policy:
+- `legacy_action`
+- `v2_action`
+- shared provider opportunities
+- legacy component outcome
+- V2 component outcome
+- overall outcome
 
-- P0: `revenue`, `ebitda`, `free_cashflow`
-- P0/P1: `shares_outstanding`
-- P1: `cash`, `total_debt`
-- supporting: `operating_cashflow`, `capex`
-- secondary/fallback: `ebit`
+Examples:
 
-It is false when V2 is already current enough for the selected work-unit objective or when a missing field is not eligible under current provider policy. Unsupported eligibility should be represented as a blocker or no-op reason, not a silent broad repair.
+- legacy `NOOP`, V2 `ENRICH_CORE`: execute V2 only
+- legacy `RETRY_OR_UPDATE_TARGET`, V2 `ENRICH_CORE`: execute both
+- legacy `RETRY_OR_UPDATE_TARGET`, V2 `NOOP_CORE_CURRENT`: execute legacy only
+- legacy `RETRY_OR_UPDATE_TARGET`, V2 `BLOCKED_COMPANY_MISSING`: execute legacy; report overall partial/component-limited
+- legacy `NOOP`, V2 `NOOP_CORE_CURRENT`: overall no-op success
 
-## 13. Decision matrix
+Do not store a complex sync status.
 
-| Legacy state | V2 state | Legacy action | V2 action | Overall handling |
-| --- | --- | --- | --- | --- |
-| Not current | Not current | Attempt | Attempt | `SUCCESS` only if both required components succeed or no-op after preflight |
-| Current | Not current | No-op | Attempt | V2-only execution with legacy no-op |
-| Not current | Current | Attempt | No-op | Legacy-only execution with V2 no-op |
-| Current | Current | No-op | No-op | No-op success |
-| Identity ambiguous | Any | Block | Block unless independently safe | Failed or partial with explicit blocker |
-| Unsupported field policy | Current or partial | No-op or block | Block unsupported V2 fields | Do not broaden provider scope |
+## 19. Reporting-Only Cross-Store Summary
 
-Component failures must not be hidden. If one component commits and another required component fails, the work unit is partial and retry-visible.
+The plan may report derived categories:
 
-## 14. Provider acquisition sharing
+- `BOTH_REQUIRE_ACTION`
+- `LEGACY_ONLY`
+- `V2_ONLY`
+- `LEGACY_ACTION_V2_BLOCKED`
+- `BOTH_NOOP`
+- `GLOBALLY_BLOCKED`
 
-A provider payload can be acquired once for a selected ticker when policy allows, then interpreted separately by legacy and V2 adapters.
+These are summaries of independent planner results. They are not persisted authority and not the main decision model.
 
-Yahoo can support discovery/status and validated field-specific fallback rules. SEC can support filing confirmation and only validated fact paths, currently SEC Revenue under its SAFE_SCOPED rule. SimFin statements and shares APIs are V2-oriented operational sources; they should be selected-ticker, cache-aware, rate-limited, and never invoked as broad historical apply runners inside 9H2.
+## 20. Provider Acquisition and Sharing
 
-Provider acquisition scope may be wider than one quarter because an API can return multiple periods. Canonical apply scope remains the selected company and fiscal quarter.
+Retain the principle: fetch once where safe, interpret independently.
 
-## 15. Work-unit canonical scope
+Implementation priority:
 
-The canonical write unit is exactly one company and one canonical fiscal quarter. For 9H1 plans this is represented by `market:ticker:fiscal_year:fiscal_quarter`, with report date retained as identity evidence.
+1. Correct independent planner decisions.
+2. Work-unit write scope.
+3. Component retry and idempotency.
+4. Provider reuse where naturally safe.
+5. Duplicate-provider-call optimization later if needed.
 
-If a provider returns multiple quarters, the adapter must filter before V2 canonical apply. V2 canonical financial values, canonical provenance, completeness decisions, and conflict decisions that affect readiness must only apply to the selected work unit.
+Do not aggressively refactor stable legacy provider acquisition in the first 9H2 rollout solely to share fetches.
 
-## 16. Quarter creation
+## 21. Provider-Call Policy
+
+CORE gaps may justify provider acquisition according to existing provider/cache policy. Opportunistic gaps alone generally should not trigger a provider call.
+
+If V2 CORE is complete but cash is NULL, do not call SimFin solely for cash. If SimFin is fetched for missing EBITDA and contains cash, total debt, OCF, capex, or EBIT candidates under validated policy, opportunistically NULL-fill eligible fields.
+
+Missing CORE values also do not automatically imply an immediate provider call. Provider acquisition requires an eligible provider/cache path or retry-due state. If every eligible path is exhausted or not due, the quarter is incomplete but settled for this run.
+
+Check must not run full financial acquisition for V2 enrichment. Update Fundamentals owns financial provider acquisition.
+
+## 22. Work-Unit Canonical Scope
+
+The canonical write unit is exactly one company and one canonical fiscal quarter.
+
+Provider acquisition may return multiple periods. V2 canonical financial values, canonical provenance, completeness decisions, and conflict decisions that affect readiness must be filtered to the selected work unit.
+
+Existing historical fallback runners must not be called wholesale from incremental Update. Extract or wrap validated field rules into selected-work-unit helpers.
+
+## 23. Quarter Creation
 
 Legacy quarter creation follows the existing legacy Update path and keys rows by `(ticker, period_end_date)`.
 
-V2 quarter creation is allowed only when company identity exists or can be deterministically resolved, fiscal year and fiscal quarter are known, and report date is deterministic enough for `rc_v2_quarter`. If report date or fiscal identity is ambiguous, the V2 component must block rather than invent a quarter.
+V2 quarter creation is allowed only when the company exists, profile is supported, fiscal year and fiscal quarter are known, and report date is deterministic enough for `rc_v2_quarter`. If identity is ambiguous, block the V2 component instead of inventing a quarter.
 
 Creating `rc_v2_quarter` and `rc_v2_fundamental_quarterly` for the selected work unit is in scope for 9H2 implementation. Creating unrelated historical quarters is not.
 
-## 17. Historical-scope boundary
+## 24. Component Result and NOOP Semantics
 
-9H2 is not a historical backfill phase. It must not run existing broad backfill runners wholesale from Update Fundamentals.
+Each merged work unit should emit independent component results.
 
-Existing validated historical modules can contribute reusable helper logic, but the helper must evaluate one company and one canonical quarter. If the current code only exposes runner-shaped functions, 9H2 should extract work-unit helpers and have historical runners call those helpers later where practical.
+Legacy component statuses:
 
-## 18. Component result model
+- `SUCCESS`
+- `NOOP`
+- `RETRY`
+- `FAILED`
+- `BLOCKED`
 
-Each work unit should emit:
+V2 component statuses:
 
-- `legacy_attempted`
-- `legacy_status`
-- `legacy_writes`
-- `legacy_errors`
-- `v2_attempted`
-- `v2_status`
-- `v2_writes`
-- `v2_provenance_writes`
-- `v2_retry_required`
-- `v2_errors`
-- `overall_status`
+- `SUCCESS`
+- `NOOP`
+- `RETRY`
+- `FAILED`
+- `BLOCKED`
 
-Recommended statuses are `SUCCESS`, `NOOP`, `PARTIAL`, `FAILED`, and `BLOCKED`. `NOOP` is successful when preflight determined no component action was required.
+`NOOP` means the component was assessed, no action was required, and the component is successful.
 
-## 19. Mixed failure/retry behavior
+Overall status:
 
-Legacy and V2 updates are not one cross-database ACID transaction during transition. A successful legacy component should not be rolled back solely because a V2 shadow component failed. A successful V2 component should not hide a legacy failure while downstream still depends on legacy.
+- both required components `SUCCESS` or `NOOP`: overall `SUCCESS`
+- retry-required or component-level blocked component while another component succeeds or no-ops: overall `PARTIAL`
+- hard/global/unsafe failure: overall `FAILED`
+- whole-work-unit identity or policy blocker: overall `BLOCKED` or an existing compatible representation
 
-If any required component fails after another required component succeeds or no-ops, the work unit should be reported as partial and retry-required. If no required component produced a usable committed result, the work unit should be failed.
+No-op current stores must not create false partial status.
 
-RawCandle must receive a deterministic process contract. Until RawCandle understands richer partial summaries, scheduler-visible retry cases must not be mapped to ordinary full success.
+Overall `BLOCKED` is reserved for cases where the entire work unit cannot safely proceed, such as ambiguous identity affecting both components. A V2-specific blocker must not prevent valid Legacy execution.
 
-## 20. Idempotency/replay
+## 25. CLI, UI, and RawCandle Contract
 
-Replay with unchanged inputs must produce:
+Recommended CLI exit mapping for 9H2:
 
-- zero duplicate legacy work records
-- zero duplicate V2 canonical financial deltas
-- zero duplicate V2 canonical provenance deltas
-- zero duplicate timing-equivalent observations
-- stable component result summaries
+- exit `0`: all required components are `SUCCESS` or `NOOP`
+- exit `2`: `PARTIAL`, retry-required, or component-limited outcome; safe committed work may exist
+- exit `1`: hard/global/unsafe failure
 
-V2 field provenance should use idempotent keys and `INSERT OR IGNORE`-style behavior only after the canonical field write is accepted. Canonical provenance must not be created for rejected, conflicting, or merely observed provider values.
+Current `run_fundamental_quarter_update.py` primarily reports summary fields and exits non-zero through raised exceptions. Introducing exit `2` for structured partial retry is compatible with the existing Check CLI precedent, where `PARTIAL` maps to exit `2`.
 
-## 21. Dry-run/preflight output
+UI should display SwingMaster backend summaries and must not compute provider or field rules.
 
-Dry-run should emit both aggregate and per-work-unit preflight output:
+RawCandle should treat exit `0` as success, exit `2` as partial/retry-required, and exit `1` as failed. If RawCandle cannot yet distinguish exit `2`, 9H2 must avoid mapping partial retry cases to ordinary full success.
 
-- plan path, candidate count, candidate hash
-- provider call count, expected to be zero for preflight
-- legacy state counts
-- V2 state counts
-- cross-store buckets
-- required-action counts
-- blocker counts
-- selected provider policies that would be due during apply
-- explicit non-goal confirmations
+`PARTIAL` does not necessarily imply `retry_required=true`. Examples:
 
-The read-only 9H2-P measurement against the latest SUCCESS plan found 44 executable work units: 5 `FETCH_NEW_QUARTER` and 39 `RETRY_PARTIAL_QUARTER`. Legacy target rows were present for 44/44, but 0/44 were `quarter_basic_complete`. V2 exact quarter rows were present for 25/44, V2 P0 complete for 20/44, V2 P0/P1 complete for 5/44, and V2 cash/debt P1 complete for 18/44.
+- Legacy `SUCCESS`, V2 `BLOCKED_COMPANY_MISSING`: overall `PARTIAL`, exit `2`, `retry_required=false`, `maintenance_required=true`.
+- Legacy `SUCCESS`, V2 `BLOCKED_POLICY_UNSUPPORTED`: overall `PARTIAL`, exit `2`, `retry_required=false`, deferred limitation reported.
+- Legacy `SUCCESS`, V2 `RETRY_PROVIDER`: overall `PARTIAL`, exit `2`, `retry_required=true`.
 
-## 22. UI contract
+Structured results must expose `overall_status`, `retry_required`, `maintenance_required`, `deferred_limitations_count`, legacy status, and V2 status.
 
-The UI should call SwingMaster backend semantics and display the resulting component summaries. It should not compute provider eligibility or field-level canonicalization rules.
+## 26. Retry Behavior Under Watermarks
 
-The UI should be able to show:
+Watermark-first recomputation naturally handles mixed outcomes.
 
-- total work units
-- legacy attempted/succeeded/no-op/failed
-- V2 attempted/succeeded/no-op/failed
-- partial retry-required rows
-- blocked rows and blocker reasons
-- provider calls made during apply
-- artifact paths
+Run 1: legacy succeeds for Q2, V2 provider transiently fails.
 
-The UI must not present mixed component failure as ordinary full success.
+- legacy complete watermark may advance to Q2
+- V2 core watermark remains before Q2 or Q2 incomplete
+- replay makes legacy `NOOP` and V2 `RETRY_PROVIDER` or `ENRICH_CORE`
 
-## 23. RawCandle contract
+Reverse: V2 succeeds for Q2, legacy transiently fails.
 
-RawCandle should invoke the SwingMaster Check and Update commands, preserve logs, and interpret stable process status and summary fields. It must not duplicate Check eligibility, provider due rules, legacy/V2 preflight rules, or V2 field policies.
+- V2 core watermark may advance to Q2
+- legacy complete watermark remains before Q2 or retry-pending
+- replay makes V2 `NOOP_CORE_CURRENT` and legacy retry/update
 
-If 9H2 adds richer summary keys, RawCandle changes should be limited to parsing and displaying those keys. Business semantics remain in SwingMaster.
+No persistent cross-store synchronization status is required.
 
-## 24. Persistent-state decision
+If a quarter is CORE-incomplete but settled for now because no eligible provider is actionable, replay should remain `NOOP_SETTLED_INCOMPLETE` until provider policy or new evidence reopens work.
 
-Recommendation: `HYBRID_COMPUTED_PLUS_RUN_METADATA`.
+## 27. Persistent State Decision
 
-The authoritative required-action decision should be computed at Update preflight from the current plan, legacy state, V2 state, provider cache/fetch-state, and validated policies. Persist run/component outcomes and retry metadata as evidence. Do not introduce a durable cross-store sync truth table in 9H2.
+Recommendation remains `HYBRID_COMPUTED_PLUS_RUN_METADATA`.
 
-A sync table would create another authority before bridge parity and cutover rules exist. Computed preflight keeps the decision close to actual current state and avoids stale sync flags.
+Compute watermarks and required actions from DB truth at preflight. Persist run/component outcomes, retry evidence, provider observations, and artifacts. Do not create authoritative persistent watermark columns, a watermark table, or a cross-store sync table in initial 9H2.
 
-## 25. Current operational population measurements
+If performance becomes a concern, measure before adding cache.
+
+## 28. Historical Scope Boundary
+
+9H2 is not a historical repair or convergence phase.
+
+Historical pre-2025 Q1 gaps are deferred to targeted backfill, Phase 9I, Phase 10 readiness/maintenance, or explicit historical repair tooling. V2-only repair/backfill may exist later as a diagnostic or maintenance mode, but it is not normal result discovery.
+
+Normal 9H2 operates on the selected Check plan work units and attached retry work only.
+
+## 29. Current Population Measurements
 
 Read-only measurement used:
 
@@ -286,87 +458,101 @@ Read-only measurement used:
 - provider calls: 0
 - production writes: 0
 
-Measured counts:
+Old coarse measurement:
+
+- legacy required: 44
+- V2 required: 42
+
+Watermark-first measurement:
 
 | Metric | Count |
 | --- | ---: |
 | executable work units | 44 |
-| `FETCH_NEW_QUARTER` | 5 |
-| `RETRY_PARTIAL_QUARTER` | 39 |
-| legacy rows present | 44 |
-| legacy `quarter_basic_complete` | 0 |
-| V2 companies present | 38 |
-| V2 exact quarter rows present | 25 |
-| V2 fundamental rows present | 25 |
-| V2 P0 complete | 20 |
-| V2 P0/P1 complete | 5 |
-| V2 P1 cash/debt complete | 18 |
-| preflight legacy update required | 44 |
-| preflight V2 update required | 42 |
+| below 2025 Q1 scope | 0 |
+| legacy `RETRY_OR_UPDATE_TARGET` | 44 |
+| V2 `core_complete` | 5 |
+| V2 `core_incomplete` | 39 |
+| V2 `core_update_required` | 28 |
+| V2 `operationally_settled_but_incomplete` | 0 |
+| V2 `CREATE_QUARTER_AND_FILL_CORE` | 8 |
+| V2 `ENRICH_CORE` | 20 |
+| V2 `NOOP_CORE_CURRENT` | 5 |
+| V2 `NOOP_SETTLED_INCOMPLETE` | 0 |
+| V2 `BLOCKED_COMPANY_MISSING` | 6 |
+| V2 `BLOCKED_POLICY_UNSUPPORTED` | 5 |
+| reporting `BOTH_REQUIRE_ACTION` | 28 |
+| reporting `LEGACY_ONLY` | 5 |
+| reporting `LEGACY_ACTION_V2_BLOCKED` | 11 |
+| maintenance required | 6 |
+| deferred limitations | 5 |
+| retry required | 0 |
 
-V2 field presence among the 44 work units:
+Material difference from old coarse V2 required `42`: corrected V2 CORE update-required is `28`. The prior watermark measurement already found 28 CORE actions, but incorrectly exposed 3 CORE-current/opportunistic-incomplete rows as a V2 action. Under the corrected model those 3 become `NOOP_CORE_CURRENT`, so V2 no-op CORE-current rows are `5`. Six rows are V2 company-missing maintenance blockers, and five rows are deferred bank/insurance limitations. Those 11 are component-limited rows where Legacy can still proceed.
 
-| Field | Present |
-| --- | ---: |
-| revenue | 23 |
-| ebitda | 20 |
-| free_cashflow | 24 |
-| shares_outstanding | 8 |
-| cash | 24 |
-| total_debt | 19 |
-| operating_cashflow | 23 |
-| capex | 15 |
-| ebit | 20 |
+## 30. Proposed Helper Structure
 
-This population confirms that dual-store preflight is required. The current executable plan is not cleanly legacy-only or V2-only.
+Recommended helper boundaries:
 
-## 26. Proposed code/helper structure
+- read-only plan validation reuse
+- inspect legacy ticker watermarks and selected target state
+- inspect V2 ticker watermarks and selected target state
+- plan legacy component action
+- plan V2 component action
+- merge component actions into execution work units
+- serialize component results and aggregate summaries
 
-Recommended new or refactored SwingMaster helpers:
+Likely implementation files:
 
 - `swingmaster/fundamentals/dual_store_update_preflight.py`
 - `swingmaster/fundamentals/dual_store_update_result.py`
 - `swingmaster/fundamentals_v2/work_unit_apply.py`
-- field-specific V2 adapter helpers under `swingmaster/fundamentals_v2/`
-- narrow CLI integration in `swingmaster/cli/run_fundamental_quarter_update.py`
 
-`dual_store_update_preflight.py` should own read-only state loading and required-action computation. `work_unit_apply.py` should own V2 selected-quarter creation, provider/cache evaluation, NULL-fill canonicalization, provenance, and V2 component summaries.
+Names are less important than boundaries: preflight is read-only, apply is selected-work-unit scoped, and historical runners are not called wholesale.
 
-Existing historical modules should expose reusable rule helpers before 9H2 calls them.
-
-## 27. Test strategy
+## 31. Test Strategy
 
 Required tests:
 
 - plan validation still rejects non-success, stale, hash-mismatched, inactive, or non-executable plans
-- preflight classifies legacy-only, V2-only, both-required, both-no-op, and blocked identity cases
-- V2 canonical apply is selected-work-unit scoped even when provider payload includes other periods
+- operational floor blocks pre-2025 Q1 target work
+- legacy watermark ignores empty shell rows
+- legacy planner distinguishes current, retry, missing, and out-of-scope targets
+- V2 watermark separates structure-present, meaningful-present, and CORE-complete
+- V2 planner separates `core_complete` from `core_update_required`
+- V2 planner treats opportunistic-only gaps as no provider-call triggers
+- V2 planner supports `NOOP_SETTLED_INCOMPLETE`
+- V2 company missing blocks initial rollout
+- bank/insurance profiles block ordinary V2 adapters
+- merge logic produces both-required, legacy-only, V2-only, no-op, component-limited, and globally blocked summaries
+- no-op components are successful, not partial
+- component-only blockers produce overall PARTIAL, not global BLOCKED
+- selected-work-unit V2 apply ignores unrelated provider periods
 - canonical non-null V2 fields are not overwritten
 - provenance is inserted only for accepted canonical writes
 - replay produces zero financial and provenance delta
-- mixed legacy/V2 component failure reports partial or failed, not ordinary full success
-- UI and scheduler use the same SwingMaster backend semantics
-- RawCandle parsing, if changed, remains orchestration-only
+- CLI exit `0/2/1` behavior is covered
 
-Tests should prefer fixtures and local provider-cache payloads. Network/provider calls are not needed for preflight tests.
+Tests should use fixtures and local provider/cache payloads. Network/provider calls are not needed for preflight tests.
 
-## 28. Production rollout gates
+## 32. Production Rollout Gates
 
 Before production enablement:
 
-1. Read-only preflight must match the validated Check plan scope.
+1. Read-only watermark preflight must match the validated Check plan scope.
 2. Dry-run must show zero provider calls when provider acquisition is disabled.
 3. V2 apply must prove selected-work-unit scope.
-4. Replay must show zero canonical financial delta and zero provenance delta.
-5. Mixed failure behavior must be visible in CLI summaries and UI.
-6. Final DB integrity checks must pass for both stores.
-7. RawCandle behavior must be validated if CLI process status or summary parsing changes.
+4. CORE-only provider-call gating must be visible in summaries.
+5. Replay must show zero canonical financial delta and zero provenance delta.
+6. Mixed failure behavior must be visible in CLI summaries and UI.
+7. Final DB integrity checks must pass for both stores.
+8. RawCandle behavior must be validated if CLI process status or summary parsing changes.
 
-## 29. Explicit non-goals
+## 33. Explicit Non-Goals
 
 9H2 should not implement:
 
 - broad historical backfill
+- a second V2 discovery queue
 - provider calls during Check for V2 financial enrichment
 - schema changes unless a later implementation phase explicitly approves them
 - RawCandle business logic
@@ -375,30 +561,37 @@ Before production enablement:
 - SEC shares, operating cashflow, or capex semantics beyond already validated paths
 - overwrites of existing V2 canonical non-null values
 - writes outside selected work-unit scope
+- provider calls solely for opportunistic V2 gaps
+- pre-2025 Q1 convergence
+- V2 lifecycle states cloned from legacy statuses
+- repeated polling for settled-incomplete quarters with no actionable provider
 
-## 30. Open questions
+## 34. Open Questions
 
-Open questions for review:
+Closed implementation-policy decisions:
 
-- Should `v2_update_required` initially target all listed fields or only P0/P0-P1 fields for the first production 9H2 rollout?
-- Should V2-only repair work units ever be generated by Check before Phase 11, or only as an explicit maintenance/debug mode?
-- What exact CLI exit-code mapping should represent partial mixed component failure before RawCandle gains richer parsing?
-- Should bank/insurance profiles be excluded from common industrial V2 field adapters in 9H2, or routed to specialized tables immediately?
-- Which existing Yahoo fallback helpers are clean enough to extract before 9H2, and which need wrapper adapters first?
+- `CORE_CURRENT_OPPORTUNISTIC_ENRICHMENT` is not an update action. Use `NOOP_CORE_CURRENT` plus opportunistic metadata.
+- V2-only blocker plus safe Legacy execution produces overall `PARTIAL`, not overall `BLOCKED`.
+- V2 company creation is not in initial 9H2. Revisit only after a deterministic non-provider bootstrap helper exists.
+- BANK/INSURANCE ordinary V2 adapters remain unsupported in initial 9H2 and do not create recurring retry loops.
+- CORE missing with no eligible provider/update path is `NOOP_SETTLED_INCOMPLETE` for this run.
 
-## 31. Recommended implementation decomposition
+No material policy question remains for 9H2-A. Human review can still challenge the choices before implementation.
+
+## 35. Recommended Implementation Decomposition
 
 Recommended next implementation sequence:
 
-1. Add the read-only dual-store preflight helper and tests.
+1. Add read-only watermark/preflight helper and tests.
 2. Wire preflight into Update Fundamentals dry-run output only.
 3. Add component result dataclasses and summary serialization.
-4. Add V2 selected-quarter creation helper with identity blockers.
-5. Extract/adapt one low-risk V2 field/provider helper into work-unit scope.
-6. Prove replay and provenance idempotency on fixtures.
-7. Expand to the remaining approved fields.
-8. Add UI display of component summaries.
-9. Validate RawCandle scheduler behavior and adjust parsing only if required.
-10. Run production dry-run and replay gates before any production apply.
+4. Add merge logic for legacy and V2 planner outputs.
+5. Add CLI exit `0/2/1` mapping behind tests.
+6. Implement 9H2-A: read-only watermark/preflight engine.
+7. Implement 9H2-B: V2 selected-work-unit executor, gated on existing V2 company and supported profile.
+8. Implement 9H2-C: integrated legacy + V2 Update backend with component results and structured JSON.
+9. Implement 9H2-D: necessary RawCandle parsing and production rollout.
 
-Final 9H2-P classification: `PHASE_9H2_P_DUAL_STORE_PLAN_READY_FOR_REVIEW`.
+Do not split into microphases unless implementation proves necessary.
+
+Final 9H2-P-R2 classification: `PHASE_9H2_P_R2_IMPLEMENTATION_SAFE_READY_FOR_9H2_A`.

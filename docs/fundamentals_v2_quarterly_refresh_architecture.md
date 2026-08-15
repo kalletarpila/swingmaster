@@ -28,6 +28,13 @@ These invariants constrain 9H implementation:
 10. `WORK_UNIT_CANONICAL_SCOPE`: a provider adapter may acquire or cache more than one provider period when an external API requires it, but an incremental 9H2 work unit may canonicalize only the selected company + canonical fiscal quarter. Broader provider acquisition must never imply broader V2 apply scope.
 11. `NO_CANONICAL_PROVENANCE_WITHOUT_CANONICAL_WRITE`: canonical field provenance is created only when a value actually populates, or in a later reconciliation phase explicitly replaces, a canonical V2 financial value.
 12. Replay/idempotency is defined by stable work-unit and observation content identities, not by mutable polling timestamps alone.
+13. `WATERMARK_FIRST_DUAL_STORE_UPDATE`: normal 9H2 Update planning compares each store independently to the selected latest operational target quarter under that store's own detailed rules. Cross-store categories are reporting summaries only, not an authoritative sync state machine.
+14. Normal 9H2 dual-store Update scope starts at `2025 Q1`. Earlier quarters are not automatically repaired by incremental Update.
+15. Check remains the single operational discovery workflow. There is no second V2 discovery queue; V2 evaluates only the ticker/quarter selected by the existing Check plan, except for explicit maintenance/backfill tools outside normal 9H2.
+16. Watermarks are derived summaries. They do not replace Legacy lifecycle/status semantics, and V2 must not clone Legacy lifecycle states such as `V2_FUNDAMENTALS_PARTIAL` or `V2_SEC_CONFIRMED`.
+17. V2 first-rollout CORE for operational update planning is revenue, EBITDA, FCF, and shares_outstanding. Cash, total_debt, operating_cashflow, capex, and EBIT are opportunistic fields and do not independently trigger provider acquisition.
+18. Data completeness is not the same as update due. A missing V2 CORE field creates update work only when a currently eligible provider/cache path can improve CORE, retry is due, or safe structural quarter creation is required.
+19. A component-specific blocker must not prevent another component from executing safely. For example, V2 company missing can block V2 while Legacy still updates; the merged result is component-limited/partial, not globally blocked.
 
 ## 4. Existing Lifecycle/Status Model
 
@@ -36,6 +43,29 @@ The existing model is a layered lifecycle, not one monolithic state. Current cod
 Future V2 refresh should reuse this model. New provider timing and provenance observations should be metadata, not new lifecycle states, unless a later implementation proves that existing statuses cannot represent the behavior.
 
 Phase 9H1 implements result-check work-list metadata with `fundamental_result_check_plan_v2`. In that contract, an overall result-check `PARTIAL` remains non-executable. This is distinct from a quarter lifecycle value of `FUNDAMENTALS_PARTIAL`: a lifecycle-PARTIAL quarter may be emitted as a follow-up work unit inside an overall `SUCCESS` result-check plan.
+
+Watermark-first Update planning preserves this distinction. Legacy lifecycle/status remains authoritative for Legacy detail. V2 operational state is computed from canonical quarter presence, CORE completeness, provider NO_DATA/retry state, currently actionable provider/update policy, company/profile/identity support, SEC confirmation as an orthogonal axis where available, and unresolved conflicts where relevant. V2 should not receive a cloned Legacy lifecycle state machine unless a later phase proves it unavoidable.
+
+## 4A. Watermark-First Dual-Store Update
+
+9H2 uses a watermark-first model for dual-store Update planning:
+
+1. Use the existing Check plan as the single source of operational work units.
+2. For each ticker, derive the latest operational target quarter from the selected plan row.
+3. Compute Legacy watermarks/currentness from Legacy rows, ingestion status, retry recommendation, and source-confirmation state.
+4. Compute V2 watermarks/currentness from V2 company/quarter/fundamental rows, CORE field presence, provider/cache due state, profile support, and identity safety.
+5. Plan Legacy and V2 actions independently.
+6. Merge component actions by company + canonical fiscal quarter.
+
+Watermarks are per-run derived summaries. They are not lifecycle states, not persisted sync truth, and not a replacement for detailed status tables.
+
+Normal operational scope starts at `2025 Q1`. 9H2 must not scan pre-2025 Q1 continuity, lower watermarks because of old gaps, call providers solely for old gaps, or become a historical convergence engine.
+
+For the first V2 rollout, CORE is revenue, EBITDA, FCF, and shares_outstanding. Cash, total_debt, operating_cashflow, capex, and EBIT may be opportunistically NULL-filled only when an already justified provider observation is available; they do not by themselves make V2 update-due.
+
+`core_complete` is a data completeness metric. `core_update_required` is an operational due metric. It also requires actionable provider/cache work, retry due state, or safe structural creation. A CORE-incomplete quarter can be settled for the current run with no retry when no provider path is currently actionable.
+
+Component blockers are local unless they make the whole work unit unsafe. V2 company missing and unsupported BANK/INSURANCE ordinary adapters block the V2 component but do not block valid Legacy execution. Provider retry, maintenance-required blockers, and deferred limitations must be reported separately.
 
 ## 5. Result Discovery Model
 
@@ -54,6 +84,8 @@ Yahoo may also provide initial and repeated PARTIAL enrichment. For V2, Yahoo ca
 Yahoo values are mutable snapshots. Raw observations may be appended or refreshed, but canonical V2 values must not use last-provider-wins. Changed Yahoo values should create raw/provider observations, timing observations, and conflict diagnostics if they differ from existing canonical non-null values. They must not create canonical field provenance unless the changed value is accepted into a canonical V2 field by an explicit validated rule.
 
 Yahoo rechecks should stop when the target quarter is no longer PARTIAL for the relevant operational completeness policy, or when retry limits/cadence say the provider is no longer due.
+
+For V2 first rollout, Yahoo or any other provider must not be polled merely because an opportunistic field is missing or because CORE is incomplete with no currently actionable provider path.
 
 ## 7. SEC Role
 
@@ -84,6 +116,8 @@ Provisional role:
 - PARTIAL recheck: supplementary delayed enrichment source after initial Yahoo/SEC checks.
 
 Before a SimFin provider call, 9H2 policy must consider whether the company+quarter is selected, whether relevant canonical fields remain missing, whether cached SimFin data already satisfies the work unit, whether recent NO_DATA/backoff applies, provider call/rate-limit budget, and quarter age/provider-due policy.
+
+Relevant canonical fields for first-rollout V2 update-due are CORE fields. Opportunistic fields may be filled from a SimFin payload that was already justified for CORE work, but they should not independently justify a SimFin call.
 
 SimFin acquisition scope may be broader than canonical write scope. A selected-ticker SimFin response may contain multiple historical quarters, and existing cache may already contain still more provider periods. For incremental refresh, the provider adapter may preserve that raw/cache payload where existing provider design requires it, but canonical V2 writes, canonical provenance, completeness updates, and conflict decisions must be filtered to the selected company + canonical fiscal quarter work unit. Unrelated historical rows must remain untouched.
 
@@ -267,6 +301,8 @@ Provider acquisition scope may be broader than canonical write scope, but V2 can
 
 Legacy and V2 updates are not a single ACID transaction. 9H2 must explicitly report legacy result, V2 result, and retry/sync state for each work unit. Neither side's success should hide the other side's failure.
 
+9H2 should report retry-required, maintenance-required, and deferred limitations separately. `PARTIAL` does not always mean retry-required: V2 company missing can be maintenance-required, BANK/INSURANCE can be deferred, and a transient provider failure can be retry-required.
+
 ## 22. Legacy Coexistence During Transition
 
 Legacy `fundamentals_usa.db` remains operational for current downstream workflows. V2 should be updated and measured in parallel. Phase 11 can remove legacy dependency only after bridge parity, recalibration, and cutover validation.
@@ -287,6 +323,8 @@ Quarter completeness should track:
 - unresolved conflicts.
 
 Do not create a status for every combination. Use computed metrics plus existing lifecycle states.
+
+For 9H2 first-rollout update planning, V2 CORE currentness is narrower than the full operational completeness inventory: revenue, EBITDA, FCF, and shares_outstanding. Missing cash, total_debt, operating_cashflow, capex, or EBIT remains visible but does not independently trigger provider acquisition.
 
 SEC-confirmed state, providers observed, and unresolved conflicts are orthogonal metadata/quality axes, not priority classes.
 

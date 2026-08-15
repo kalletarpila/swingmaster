@@ -29,6 +29,7 @@ from swingmaster.fundamentals.provider_observations import (
     OBS_KIND_SEC_CONFIRMATION_RECHECK,
     OBS_KIND_SEC_FILING_CONFIRMED,
     OBS_KIND_SEC_FILING_NOT_AVAILABLE,
+    OBS_KIND_PROVIDER_ERROR_RETRY,
     OBS_KIND_YAHOO_CALENDAR_STATUS,
     OBS_KIND_YAHOO_RESULT_DETECTED_PRESENT,
     TIMESTAMP_NOT_AVAILABLE,
@@ -114,6 +115,8 @@ def run_manual_result_check(
             ohlcv_stale_days=ohlcv_stale_days,
             created_at_utc=created_at_utc,
             stages=[_stage("ohlcv_activity", CHECK_STATUS_FAILED, error=str(exc))],
+            provider_call_counts={"yahoo_calendar_tickers": 0, "yahoo_completed_event_tickers": 0, "sec": 0, "simfin": 0},
+            timing_summary=_empty_timing_summary(),
         )
 
     calendar_selection = select_calendar_refresh_candidates(
@@ -143,6 +146,15 @@ def run_manual_result_check(
     calendar_summary = _run_calendar_refresh(root, fundamentals_db, calendar_selection["selected_tickers"])
     stages.append(calendar_summary["stage"])
     if calendar_summary["stage"]["status"] == CHECK_STATUS_FAILED:
+        timing_summary = _record_provider_failure_observations(
+            fundamentals_db=fundamentals_db,
+            tickers=calendar_selection["selected_tickers"],
+            provider="YAHOO_FINANCE",
+            source_endpoint="yahoo_earnings_calendar",
+            outcome="CALENDAR_REFRESH_FAILED",
+            observed_at_utc=created_at_utc,
+            run_id=f"result_check:{created_at_utc}",
+        )
         return _write_failed_plan(
             root=root,
             fundamentals_db=fundamentals_db,
@@ -152,6 +164,13 @@ def run_manual_result_check(
             created_at_utc=created_at_utc,
             stages=stages,
             calendar_refresh_summary=calendar_summary,
+            provider_call_counts={
+                "yahoo_calendar_tickers": len(calendar_selection["selected_tickers"]),
+                "yahoo_completed_event_tickers": 0,
+                "sec": 0,
+                "simfin": 0,
+            },
+            timing_summary=timing_summary,
         )
 
     event_candidates = select_completed_event_refresh_candidates(
@@ -778,7 +797,11 @@ def _write_failed_plan(
     created_at_utc: str,
     stages: list[dict[str, Any]],
     calendar_refresh_summary: dict[str, Any] | None = None,
+    provider_call_counts: dict[str, int] | None = None,
+    timing_summary: dict[str, int] | None = None,
 ) -> dict[str, Any]:
+    resolved_timing = timing_summary or _empty_timing_summary()
+    resolved_provider_counts = provider_call_counts or {"yahoo_calendar_tickers": 0, "yahoo_completed_event_tickers": 0, "sec": 0, "simfin": 0}
     plan = _build_plan(
         fundamentals_db=fundamentals_db,
         ohlcv_db=ohlcv_db,
@@ -798,11 +821,11 @@ def _write_failed_plan(
         "candidate_hash": plan["candidate_hash"],
         "work_unit_count": 0,
         "partial_follow_up_count": 0,
-        "provider_timing_observation_count": 0,
-        "provider_timing_content_inserted_count": 0,
-        "provider_timing_content_reused_count": 0,
-        "provider_timing_seen_event_inserted_count": 0,
-        "provider_call_counts_json": json.dumps({"yahoo_calendar_tickers": 0, "yahoo_completed_event_tickers": 0, "sec": 0, "simfin": 0}, sort_keys=True, separators=(",", ":")),
+        "provider_timing_observation_count": resolved_timing["content_observation_count"],
+        "provider_timing_content_inserted_count": resolved_timing["content_inserted_count"],
+        "provider_timing_content_reused_count": resolved_timing["content_reused_count"],
+        "provider_timing_seen_event_inserted_count": resolved_timing["seen_event_inserted_count"],
+        "provider_call_counts_json": json.dumps(resolved_provider_counts, sort_keys=True, separators=(",", ":")),
         "output_root": str(root),
     }
     paths = _write_artifacts(
@@ -983,6 +1006,49 @@ def _record_check_timing_observations(
         }
     with sqlite3.connect(str(fundamentals_db)) as conn:
         return record_provider_observations(conn, observations)
+
+
+def _record_provider_failure_observations(
+    *,
+    fundamentals_db: Path,
+    tickers: list[str],
+    provider: str,
+    source_endpoint: str,
+    outcome: str,
+    observed_at_utc: str,
+    run_id: str,
+) -> dict[str, int]:
+    observations = [
+        ProviderObservation(
+            provider=provider,
+            market="usa",
+            ticker=str(ticker).upper(),
+            company_key=f"usa:{str(ticker).upper()}",
+            observation_kind=OBS_KIND_PROVIDER_ERROR_RETRY,
+            source_endpoint=source_endpoint,
+            outcome=outcome,
+            timestamp_quality=TIMESTAMP_OBSERVED_AT_ONLY,
+            field_presence_fingerprint=fingerprint_mapping({"ticker": str(ticker).upper(), "outcome": outcome}),
+            payload_hash=hash_mapping({"ticker": str(ticker).upper(), "provider": provider, "outcome": outcome}),
+            source_reference=str(ticker).upper(),
+            observed_at_utc=observed_at_utc,
+            run_id=run_id,
+        )
+        for ticker in sorted(dict.fromkeys(str(ticker).upper() for ticker in tickers))
+    ]
+    if not observations:
+        return _empty_timing_summary()
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        return record_provider_observations(conn, observations)
+
+
+def _empty_timing_summary() -> dict[str, int]:
+    return {
+        "content_observation_count": 0,
+        "content_inserted_count": 0,
+        "content_reused_count": 0,
+        "seen_event_inserted_count": 0,
+    }
 
 
 def _load_calendar_observation_rows(fundamentals_db: Path, tickers: list[str]) -> dict[str, sqlite3.Row]:

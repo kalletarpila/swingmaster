@@ -1036,6 +1036,17 @@ def test_failed_calendar_refresh_writes_failed_empty_plan(monkeypatch: pytest.Mo
     assert result["check_status"] == "FAILED"
     assert result["plan"]["candidate_count"] == 0
     assert json.loads(Path(result["artifact_paths"]["plan_json"]).read_text(encoding="utf-8"))["check_status"] == "FAILED"
+    provider_counts = json.loads(result["summary"]["provider_call_counts_json"])
+    assert provider_counts["yahoo_calendar_tickers"] == 1
+    assert result["summary"]["provider_timing_observation_count"] == 1
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        kind = conn.execute(
+            """
+            SELECT observation_kind
+            FROM rc_fundamental_provider_observation_content
+            """
+        ).fetchone()[0]
+    assert kind == "PROVIDER_ERROR_RETRY"
 
 
 def test_result_check_records_timing_content_once_and_poll_seen_events(

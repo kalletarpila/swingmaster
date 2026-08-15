@@ -10,6 +10,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.absolute()
 # Database paths (hardcoded)
 FUNDAMENTALS_USA_DB = PROJECT_ROOT / "fundamentals_usa.db"
 FUNDAMENTALS_FIN_DB = PROJECT_ROOT / "fundamentals_fin.db"
+RC_FUNDAMENTALS_V2_DB = PROJECT_ROOT / "rc_fundamentals_v2.db"
 OSAKEDATA_DB = Path("/home/kalle/projects/rawcandle/data/osakedata.db")
 ANALYSIS_DB = Path("/home/kalle/projects/rawcandle/data/analysis.db")
 

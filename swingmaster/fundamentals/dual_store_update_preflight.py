@@ -221,6 +221,81 @@ class InMemoryV2FollowupRepository:
         return None
 
 
+class SQLiteV2FollowupRepository:
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = db_path
+
+    def list_due_v2_followups(self, *, as_of: date, floor_year: int = OPERATIONAL_FLOOR_YEAR) -> list[V2FollowupRecord]:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if not _table_exists(conn, "rc_v2_operational_followup"):
+                return []
+            rows = conn.execute(
+                """
+                SELECT market, ticker, fiscal_year, fiscal_quarter, canonical_report_date,
+                       active, resolved_at, retry_required, next_retry_at, next_check_at, followup_reason
+                FROM rc_v2_operational_followup
+                WHERE active=1
+                  AND retry_required=1
+                  AND fiscal_year>=?
+                  AND (next_retry_at IS NULL OR next_retry_at='' OR substr(next_retry_at, 1, 10)<=?)
+                  AND (next_check_at IS NULL OR next_check_at='' OR substr(next_check_at, 1, 10)<=?)
+                  AND (maintenance_required IS NULL OR maintenance_required=0)
+                  AND (deferred_reason IS NULL OR deferred_reason='')
+                  AND (resolved_at IS NULL OR resolved_at='')
+                ORDER BY lower(market), upper(ticker), fiscal_year, fiscal_quarter
+                """,
+                (floor_year, as_of.isoformat(), as_of.isoformat()),
+            ).fetchall()
+        followups = [
+            V2FollowupRecord(
+                market=str(row["market"]),
+                ticker=str(row["ticker"]),
+                fiscal_year=int(row["fiscal_year"]),
+                fiscal_quarter=str(row["fiscal_quarter"]),
+                report_date=str(row["canonical_report_date"] or ""),
+                active=bool(int(row["active"] or 0)),
+                resolved=bool(row["resolved_at"]),
+                retry_required=bool(int(row["retry_required"] or 0)),
+                due_at=str(row["next_retry_at"] or row["next_check_at"] or ""),
+                reason=str(row["followup_reason"] or ""),
+                origin="sqlite_v2_operational_followup",
+            )
+            for row in rows
+        ]
+        return [row for row in followups if followup_is_due(row, as_of=as_of, floor_year=floor_year)]
+
+    def get_v2_followup(self, work_unit_key: str) -> V2FollowupRecord | None:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if not _table_exists(conn, "rc_v2_operational_followup"):
+                return None
+            row = conn.execute(
+                """
+                SELECT market, ticker, fiscal_year, fiscal_quarter, canonical_report_date,
+                       active, resolved_at, retry_required, next_retry_at, next_check_at, followup_reason
+                FROM rc_v2_operational_followup
+                WHERE work_unit_key=?
+                """,
+                (work_unit_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        return V2FollowupRecord(
+            market=str(row["market"]),
+            ticker=str(row["ticker"]),
+            fiscal_year=int(row["fiscal_year"]),
+            fiscal_quarter=str(row["fiscal_quarter"]),
+            report_date=str(row["canonical_report_date"] or ""),
+            active=bool(int(row["active"] or 0)),
+            resolved=bool(row["resolved_at"]),
+            retry_required=bool(int(row["retry_required"] or 0)),
+            due_at=str(row["next_retry_at"] or row["next_check_at"] or ""),
+            reason=str(row["followup_reason"] or ""),
+            origin="sqlite_v2_operational_followup",
+        )
+
+
 def utc_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y%m%dT%H%M%SZ")
 

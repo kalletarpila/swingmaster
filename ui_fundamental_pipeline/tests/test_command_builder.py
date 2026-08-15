@@ -52,6 +52,20 @@ class TestCommandBuilder(unittest.TestCase):
         self.assertIn("--quarter-refresh-plan-json", command)
         self.assertEqual(command[command.index("--quarter-refresh-plan-json") + 1], "temp/fundamental_result_check/plan.json")
 
+    def test_build_usa_update_command_with_dual_store_backend(self):
+        command = build_usa_update_command(
+            "USA_QUARTER_UPDATE_2026-05-10__QUARTERLY",
+            quarter_refresh_plan_json=Path("temp/fundamental_result_check/plan.json"),
+            decision_date="2026-08-07",
+            dual_store_update=True,
+            integrated_output_json=Path("temp/fundamental_result_check/update.json"),
+        )
+
+        self.assertIn("--dual-store-update", command)
+        self.assertIn("--v2-db", command)
+        self.assertIn("rc_fundamentals_v2.db", " ".join(command))
+        self.assertIn("--integrated-output-json", command)
+
     def test_build_usa_result_check_command(self):
         command = build_usa_result_check_command(decision_date="2026-08-07")
 

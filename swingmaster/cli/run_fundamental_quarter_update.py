@@ -12,6 +12,10 @@ from swingmaster.cli.run_fundamental_bootstrap_sec_raw import SEC_USER_AGENT, ru
 from swingmaster.cli.run_fundamental_sec_reconstruct_quarterly import run_sec_reconstruct_quarterly
 from swingmaster.fundamentals.build_quarterly import build_and_insert_quarterly_rows
 from swingmaster.fundamentals.dual_store_update_preflight import run_dual_store_preflight
+from swingmaster.fundamentals.dual_store_update_integration import (
+    LegacyComponentResult,
+    run_integrated_dual_store_update,
+)
 from swingmaster.cli.run_fundamental_quarter_state import acknowledge_ingested, load_latest_quarter_rows
 from swingmaster.cli.run_fundamental_quarterly_to_ttm import run_quarterly_to_ttm
 from swingmaster.cli.run_fundamental_valuation import run_fundamental_valuation
@@ -147,6 +151,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Optional temp/ output directory for --preflight-only artifacts",
     )
+    parser.add_argument(
+        "--dual-store-update",
+        action="store_true",
+        help="Run integrated Legacy + V2 selected-work-unit execution for an explicit plan",
+    )
+    parser.add_argument("--integrated-output-json", default=None, help="Optional JSON output path for --dual-store-update")
     parser.add_argument("--skip-ack", action="store_true", help="Run steps but do not acknowledge quarter state")
     parser.add_argument(
         "--write-vintage",
@@ -3299,6 +3309,8 @@ def run_fundamental_quarter_update(
     preflight_only: bool = False,
     v2_db_path: Path | None = None,
     preflight_output_root: Path | None = None,
+    dual_store_update: bool = False,
+    integrated_output_json: Path | None = None,
 ) -> dict[str, object]:
     vintage_summary = validate_vintage_options(
         write_vintage=write_vintage,
@@ -3351,6 +3363,10 @@ def run_fundamental_quarter_update(
         raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_PREFLIGHT_PLAN_REQUIRED")
     if preflight_only and v2_db_path is None:
         raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_PREFLIGHT_V2_DB_REQUIRED")
+    if dual_store_update and not plan_mode:
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_DUAL_STORE_PLAN_REQUIRED")
+    if dual_store_update and v2_db_path is None:
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_DUAL_STORE_V2_DB_REQUIRED")
     plan_payload: dict[str, Any] | None = None
     if plan_mode:
         if market is not None and market.strip().lower() != "usa":
@@ -3394,6 +3410,70 @@ def run_fundamental_quarter_update(
             "run_id": run_id,
             "execution_mode": "quarter_refresh_plan_preflight",
             **result.summary(),
+        }
+        _summary(**summary)
+        return summary
+    if dual_store_update:
+        child_run_ids = derive_child_run_ids(run_id)
+
+        def legacy_runner(work_unit):
+            row = {
+                "ticker": work_unit.ticker,
+                "market": work_unit.market,
+                "latest_db_period_end_date": None,
+                "detected_source_period_end_date": work_unit.target_period_end_date,
+                "new_quarter_available": 0,
+                "decision": work_unit.legacy_state.legacy_action,
+            }
+            process_summary = process_ticker(
+                db_path=db_path,
+                row=row,
+                child_run_ids=child_run_ids,
+                skip_ack=True,
+                target_period_end_date=work_unit.target_period_end_date,
+                execution_source="quarter_refresh_plan",
+            )
+            post_result = str(process_summary.get("post_update_result") or "MANUAL_REVIEW")
+            managed = persist_managed_update_ingestion_status(
+                db_path=db_path,
+                ticker=work_unit.ticker,
+                market=work_unit.market,
+                target_period_end_date=work_unit.target_period_end_date,
+                run_id=run_id,
+                post_update_result=post_result,
+                source_confirmation=process_summary,
+            )
+            writes = int(process_summary.get("quarterly_rows_written") or 0) + int(process_summary.get("ttm_rows_written") or 0)
+            status = "SUCCESS" if post_result in {"UPDATED_COMPLETE", "NO_NEW_DATA"} else "RETRY"
+            return LegacyComponentResult(
+                attempted=True,
+                status=status,
+                writes=writes,
+                retryable=status == "RETRY",
+                post_update_lifecycle_status=post_result,
+                raw_summary={**process_summary, **managed},
+            )
+
+        integrated = run_integrated_dual_store_update(
+            plan_path=quarter_refresh_plan_json,
+            legacy_db_path=db_path,
+            v2_db_path=v2_db_path,
+            execution_decision_date=execution_decision_date,
+            run_id=run_id,
+            legacy_runner=legacy_runner,
+            output_json_path=integrated_output_json,
+        )
+        summary = {
+            "tickers_total": len(integrated.work_units),
+            "tickers_processed": len(integrated.work_units),
+            "tickers_succeeded": sum(1 for row in integrated.work_units if row.overall_status == "SUCCESS"),
+            "tickers_failed": sum(1 for row in integrated.work_units if row.overall_status == "FAILED"),
+            "market": market_label,
+            "dry_run": 0,
+            "skip_ack": 1,
+            "run_id": run_id,
+            "execution_mode": "quarter_refresh_plan_dual_store",
+            **integrated.summary(),
         }
         _summary(**summary)
         return summary
@@ -3652,7 +3732,7 @@ def main() -> None:
     db_path = resolve_db_path(args.db)
     osakedata_db_path = resolve_optional_db_path(args.osakedata_db)
     try:
-        run_fundamental_quarter_update(
+        summary = run_fundamental_quarter_update(
             db_path=db_path,
             osakedata_db_path=osakedata_db_path,
             run_id=args.run_id,
@@ -3674,7 +3754,11 @@ def main() -> None:
             preflight_only=args.preflight_only,
             v2_db_path=resolve_optional_db_path(args.v2_db),
             preflight_output_root=resolve_optional_db_path(args.preflight_output_root),
+            dual_store_update=args.dual_store_update,
+            integrated_output_json=resolve_optional_db_path(args.integrated_output_json),
         )
+        if args.dual_store_update:
+            raise SystemExit(int(summary.get("exit_code") or 0))
     except Exception as exc:
         raise SystemExit(str(exc))
 

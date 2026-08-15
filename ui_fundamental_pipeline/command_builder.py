@@ -17,6 +17,7 @@ try:
         FUNDAMENTALS_FIN_DB,
         FUNDAMENTALS_USA_DB,
         OSAKEDATA_DB,
+        RC_FUNDAMENTALS_V2_DB,
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
         SEC_LATEST_WRITER_VINTAGE_APPLY_APPROVAL_TOKEN,
@@ -38,6 +39,7 @@ except ImportError:  # pragma: no cover
         FUNDAMENTALS_FIN_DB,
         FUNDAMENTALS_USA_DB,
         OSAKEDATA_DB,
+        RC_FUNDAMENTALS_V2_DB,
         ANALYSIS_DB,
         PYTHON_EXECUTABLE,
         SEC_LATEST_WRITER_VINTAGE_APPLY_APPROVAL_TOKEN,
@@ -103,6 +105,8 @@ def build_usa_update_command(
     vintage_options: UsaQuarterUpdateVintageOptions | None = None,
     quarter_refresh_plan_json: Path | None = None,
     decision_date: str | None = None,
+    dual_store_update: bool = False,
+    integrated_output_json: Path | None = None,
 ) -> list[str]:
     command = [
         str(PYTHON_EXECUTABLE),
@@ -120,6 +124,10 @@ def build_usa_update_command(
         command.extend(["--decision-date", decision_date])
     if quarter_refresh_plan_json is not None:
         command.extend(["--quarter-refresh-plan-json", str(quarter_refresh_plan_json)])
+    if dual_store_update:
+        command.extend(["--dual-store-update", "--v2-db", str(RC_FUNDAMENTALS_V2_DB)])
+        if integrated_output_json is not None:
+            command.extend(["--integrated-output-json", str(integrated_output_json)])
     return command
 
 

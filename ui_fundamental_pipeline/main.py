@@ -465,6 +465,8 @@ class SwingMasterApp:
             run_id=run_id,
             quarter_refresh_plan_json=Path(self.latest_usa_plan_path),
             decision_date=decision_date,
+            dual_store_update=True,
+            integrated_output_json=TEMP_DIR / "fundamental_result_check" / f"{run_id}_dual_store_update.json",
         )
         self._run_in_background(lambda: self._execute_single_command(command, "USA Quarter Update", "usa"))
 

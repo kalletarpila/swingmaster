@@ -507,6 +507,44 @@ def validate_candidate_hash(plan: Mapping[str, Any]) -> bool:
     return str(plan.get("candidate_hash")) == candidate_hash([dict(row) for row in plan.get("candidates", [])])
 
 
+def merge_v2_followups_into_plan(plan: Mapping[str, Any], followup_rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """Merge due V2 operational follow-ups into one Check plan without provider or canonical writes."""
+    merged = dict(plan)
+    candidates = [dict(row) for row in plan.get("candidates", [])]
+    by_key: dict[str, dict[str, Any]] = {}
+    for row in candidates:
+        work_unit = dict(row.get("work_unit") or {})
+        key = str(work_unit.get("work_unit_key") or _work_unit_key_from_plan_row(row))
+        if key:
+            by_key[key] = row
+    source_b_added = 0
+    source_b_merged = 0
+    for followup in followup_rows:
+        candidate = _source_b_candidate_from_followup(followup)
+        key = str(candidate["work_unit"]["work_unit_key"])
+        existing = by_key.get(key)
+        if existing is None:
+            by_key[key] = candidate
+            candidates.append(candidate)
+            source_b_added += 1
+        else:
+            work_unit = dict(existing.get("work_unit") or {})
+            work_unit["source_b_v2_followup"] = dict(followup)
+            work_unit["source_b_selected"] = True
+            existing["work_unit"] = work_unit
+            existing["source_b_selected"] = True
+            source_b_merged += 1
+    candidates.sort(key=lambda row: (str(row.get("ticker")), str(row.get("target_period_end_date"))))
+    merged["candidates"] = candidates
+    merged["candidate_count"] = len(candidates)
+    merged["executable_work_unit_count"] = len(candidates)
+    merged["candidate_hash"] = candidate_hash(candidates)
+    merged["work_units"] = [row["work_unit"] for row in candidates if row.get("work_unit")]
+    merged["source_b_v2_followup_added_count"] = source_b_added
+    merged["source_b_v2_followup_merged_count"] = source_b_merged
+    return merged
+
+
 def _decision_rows(
     *,
     fundamentals_db: Path,
@@ -785,6 +823,51 @@ def _build_plan(
         "candidates": candidate_rows,
         "work_units": [row["work_unit"] for row in candidate_rows if row.get("work_unit")],
     }
+
+
+def _source_b_candidate_from_followup(row: Mapping[str, Any]) -> dict[str, Any]:
+    market = str(row["market"]).lower()
+    ticker = str(row["ticker"]).upper()
+    fiscal_year = int(row["fiscal_year"])
+    fiscal_quarter = str(row["fiscal_quarter"]).upper()
+    report_date = str(row["canonical_report_date"] or row.get("report_date") or "")
+    work_unit_key = str(row.get("work_unit_key") or f"{market}|{ticker}|{fiscal_year}|{fiscal_quarter}")
+    return {
+        "market": market,
+        "ticker": ticker,
+        "decision": DECISION_RETRY_PARTIAL_QUARTER,
+        "planned_action": "PLAN_V2_FOLLOWUP_RETRY",
+        "target_period_end_date": report_date,
+        "canonical_report_date": report_date,
+        "canonical_fiscal_year": fiscal_year,
+        "canonical_fiscal_quarter": fiscal_quarter,
+        "fundamental_fetch_enabled": 1,
+        "eligible_for_execution": 1,
+        "providers_due": {"v2_followup": "FOLLOWUP_RETRY_DUE"},
+        "selector_group": "SOURCE_B_V2_FOLLOWUP",
+        "priority": "P1_V2_FOLLOWUP",
+        "reason": str(row.get("followup_reason") or "Persisted V2 operational follow-up is due."),
+        "source_b_selected": True,
+        "work_unit": {
+            "work_unit_key": work_unit_key,
+            "market": market,
+            "ticker": ticker,
+            "canonical_fiscal_year": fiscal_year,
+            "canonical_fiscal_quarter": fiscal_quarter,
+            "canonical_report_date": report_date,
+            "target_period_end_date": report_date,
+            "source_b_selected": True,
+            "source_b_v2_followup": dict(row),
+        },
+    }
+
+
+def _work_unit_key_from_plan_row(row: Mapping[str, Any]) -> str:
+    market = str(row.get("market") or "").lower()
+    ticker = str(row.get("ticker") or "").upper()
+    fiscal_year = int(row.get("canonical_fiscal_year") or 0)
+    fiscal_quarter = str(row.get("canonical_fiscal_quarter") or "").upper()
+    return f"{market}|{ticker}|{fiscal_year}|{fiscal_quarter}"
 
 
 def _write_failed_plan(

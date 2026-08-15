@@ -139,6 +139,7 @@ class IntegratedUpdateResult:
 
 
 LegacyRunner = Callable[[WorkUnitPreflight], LegacyComponentResult]
+ProviderAdapterFactory = Callable[[WorkUnitPreflight], list[SelectedWorkUnitProviderAdapter]]
 
 
 def ensure_v2_followup_schema(conn: sqlite3.Connection) -> None:
@@ -261,6 +262,7 @@ def run_integrated_dual_store_update(
     run_id: str,
     legacy_runner: LegacyRunner,
     provider_adapters_by_work_unit: Mapping[str, list[SelectedWorkUnitProviderAdapter]] | None = None,
+    provider_adapter_factory: ProviderAdapterFactory | None = None,
     output_json_path: Path | None = None,
     followup_persistor: Callable[[sqlite3.Connection, WorkUnitPreflight, V2ComponentResult, str], str] | None = None,
 ) -> IntegratedUpdateResult:
@@ -276,7 +278,12 @@ def run_integrated_dual_store_update(
     metadata_errors: list[str] = []
     for work_unit in preflight.work_units:
         legacy = _run_legacy_component(work_unit, legacy_runner)
-        v2 = _run_v2_component(v2_db_path, work_unit, run_id=run_id, provider_adapters=provider_map.get(work_unit.work_unit_key, []))
+        provider_adapters = (
+            provider_adapter_factory(work_unit)
+            if provider_adapter_factory is not None
+            else provider_map.get(work_unit.work_unit_key, [])
+        )
+        v2 = _run_v2_component(v2_db_path, work_unit, run_id=run_id, provider_adapters=provider_adapters)
         if v2.retry_required or v2.status in {STATUS_SUCCESS, STATUS_NOOP, STATUS_BLOCKED}:
             try:
                 with sqlite3.connect(v2_db_path) as followup_conn:

@@ -238,6 +238,26 @@ def test_end_to_end_retry_continuity_and_resolution(tmp_path: Path) -> None:
     assert SQLiteV2FollowupRepository(v2).list_due_v2_followups(as_of=__import__("datetime").date(2026, 8, 16)) == []
 
 
+def test_integrated_update_uses_provider_adapter_factory(tmp_path: Path) -> None:
+    legacy, v2 = _setup_dual_store(tmp_path)
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate()])
+
+    result = run_integrated_dual_store_update(
+        plan_path=plan,
+        legacy_db_path=legacy,
+        v2_db_path=v2,
+        execution_decision_date="2026-08-15",
+        run_id="run",
+        legacy_runner=_legacy_success,
+        provider_adapter_factory=lambda _work_unit: [_simfin_adapter()],
+    )
+
+    assert result.overall_status == OVERALL_SUCCESS
+    assert result.summary()["v2_canonical_writes"] == 4
+    assert result.work_units[0].v2.raw_summary["cache_hits"] == ["SIMFIN_FIXTURE"]
+
+
 @pytest.mark.parametrize(
     ("legacy", "v2_kwargs", "expected_status", "expected_exit"),
     [

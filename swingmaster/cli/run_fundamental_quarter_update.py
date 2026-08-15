@@ -16,6 +16,7 @@ from swingmaster.fundamentals.dual_store_update_integration import (
     LegacyComponentResult,
     run_integrated_dual_store_update,
 )
+from swingmaster.fundamentals.operational_v2_provider_adapters import build_operational_v2_provider_adapter_factory
 from swingmaster.cli.run_fundamental_quarter_state import acknowledge_ingested, load_latest_quarter_rows
 from swingmaster.cli.run_fundamental_quarterly_to_ttm import run_quarterly_to_ttm
 from swingmaster.cli.run_fundamental_valuation import run_fundamental_valuation
@@ -3461,6 +3462,7 @@ def run_fundamental_quarter_update(
             execution_decision_date=execution_decision_date,
             run_id=run_id,
             legacy_runner=legacy_runner,
+            provider_adapter_factory=build_operational_v2_provider_adapter_factory(),
             output_json_path=integrated_output_json,
         )
         summary = {

@@ -11,6 +11,7 @@ from typing import Any
 from swingmaster.cli.run_fundamental_bootstrap_sec_raw import SEC_USER_AGENT, run_sec_raw_bootstrap
 from swingmaster.cli.run_fundamental_sec_reconstruct_quarterly import run_sec_reconstruct_quarterly
 from swingmaster.fundamentals.build_quarterly import build_and_insert_quarterly_rows
+from swingmaster.fundamentals.dual_store_update_preflight import run_dual_store_preflight
 from swingmaster.cli.run_fundamental_quarter_state import acknowledge_ingested, load_latest_quarter_rows
 from swingmaster.cli.run_fundamental_quarterly_to_ttm import run_quarterly_to_ttm
 from swingmaster.cli.run_fundamental_valuation import run_fundamental_valuation
@@ -135,6 +136,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="OHLCV SQLite database path used for final USA valuation step (required when market is usa or omitted)",
     )
     parser.add_argument("--dry-run", action="store_true", help="Read-only preview without running write paths")
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Read-only dual-store watermark/preflight for an explicit quarter refresh plan",
+    )
+    parser.add_argument("--v2-db", default=None, help="V2 fundamentals SQLite database path for --preflight-only")
+    parser.add_argument(
+        "--preflight-output-root",
+        default=None,
+        help="Optional temp/ output directory for --preflight-only artifacts",
+    )
     parser.add_argument("--skip-ack", action="store_true", help="Run steps but do not acknowledge quarter state")
     parser.add_argument(
         "--write-vintage",
@@ -3284,6 +3296,9 @@ def run_fundamental_quarter_update(
     vintage_yahoo_aware_action: str = VINTAGE_YAHOO_AWARE_ACTION_PLAN_ONLY,
     final_mixed_execution_runner: Callable[..., dict[str, object]] | None = None,
     final_mixed_inputs_by_key: Mapping[tuple[Any, ...], Mapping[str, Any]] | None = None,
+    preflight_only: bool = False,
+    v2_db_path: Path | None = None,
+    preflight_output_root: Path | None = None,
 ) -> dict[str, object]:
     vintage_summary = validate_vintage_options(
         write_vintage=write_vintage,
@@ -3332,6 +3347,10 @@ def run_fundamental_quarter_update(
         if not dry_run and final_mixed_execution_runner is None and final_mixed_inputs_by_key is None:
             raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_FINAL_MIXED_INPUTS_REQUIRED")
     plan_mode = quarter_refresh_plan_json is not None
+    if preflight_only and not plan_mode:
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_PREFLIGHT_PLAN_REQUIRED")
+    if preflight_only and v2_db_path is None:
+        raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_PREFLIGHT_V2_DB_REQUIRED")
     plan_payload: dict[str, Any] | None = None
     if plan_mode:
         if market is not None and market.strip().lower() != "usa":
@@ -3352,6 +3371,32 @@ def run_fundamental_quarter_update(
     else:
         rows = load_eligible_rows(db_path, market, ticker, limit)
     market_label = market.strip().lower() if market is not None else "ALL"
+    if preflight_only:
+        if execution_decision_date is None:
+            raise RuntimeError("FUNDAMENTAL_QUARTER_UPDATE_DECISION_DATE_REQUIRED")
+        result = run_dual_store_preflight(
+            plan_path=quarter_refresh_plan_json,
+            legacy_db_path=db_path,
+            v2_db_path=v2_db_path,
+            execution_decision_date=execution_decision_date,
+            output_root=preflight_output_root,
+            ticker=ticker,
+            limit=limit,
+        )
+        summary = {
+            "tickers_total": result.merged_work_unit_count,
+            "tickers_processed": 0,
+            "tickers_succeeded": 0,
+            "tickers_failed": 0,
+            "market": market_label,
+            "dry_run": 1,
+            "skip_ack": 1,
+            "run_id": run_id,
+            "execution_mode": "quarter_refresh_plan_preflight",
+            **result.summary(),
+        }
+        _summary(**summary)
+        return summary
     strict_single_ticker_mode = ticker is not None
     if dry_run:
         for row in rows:
@@ -3626,6 +3671,9 @@ def main() -> None:
             vintage_normalization_run_id=args.vintage_normalization_run_id,
             vintage_mode=args.vintage_mode,
             vintage_yahoo_aware_action=args.vintage_yahoo_aware_action,
+            preflight_only=args.preflight_only,
+            v2_db_path=resolve_optional_db_path(args.v2_db),
+            preflight_output_root=resolve_optional_db_path(args.preflight_output_root),
         )
     except Exception as exc:
         raise SystemExit(str(exc))

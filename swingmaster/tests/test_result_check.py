@@ -10,6 +10,7 @@ import pytest
 from swingmaster.cli.run_fundamental_migrations import run_migration
 from swingmaster.fundamentals.earnings_calendar import record_earnings_calendar_check_failure
 from swingmaster.fundamentals import result_check
+from swingmaster.fundamentals.provider_observations import work_unit_identity
 
 
 def _migrated_db(tmp_path: Path) -> Path:
@@ -249,8 +250,24 @@ def test_result_check_builds_executable_plan_after_completed_event(monkeypatch: 
     assert result["plan"]["candidate_count"] == 1
     assert result["plan"]["candidates"][0]["ticker"] == "AAPL"
     assert result["plan"]["candidates"][0]["target_period_end_date"] == "2026-06-30"
+    assert result["plan"]["plan_schema_version"] == 2
+    assert result["plan"]["executable_work_unit_count"] == 1
+    work_unit = result["plan"]["work_units"][0]
+    assert work_unit["work_unit_key"] == "usa:AAPL:2026:Q2"
+    assert work_unit["canonical_fiscal_year"] == 2026
+    assert work_unit["canonical_fiscal_quarter"] == "Q2"
+    assert result["plan"]["candidates"][0]["work_unit_key"] == "usa:AAPL:2026:Q2"
     assert result_check.validate_candidate_hash(result["plan"])
     assert Path(result["artifact_paths"]["plan_json"]).exists()
+    work_units = json.loads(Path(result["artifact_paths"]["work_units_json"]).read_text(encoding="utf-8"))
+    assert [row["work_unit_key"] for row in work_units] == ["usa:AAPL:2026:Q2"]
+
+
+def test_work_unit_key_is_stable_for_same_fiscal_quarter_date_offset() -> None:
+    exact = work_unit_identity(market="usa", ticker="AAPL", period_end_date="2026-06-30")
+    offset = work_unit_identity(market="usa", ticker="aapl", period_end_date="2026-06-29")
+
+    assert exact.work_unit_key == offset.work_unit_key == "usa:AAPL:2026:Q2"
 
 
 def test_stale_ohlcv_suppresses_provider_candidate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -812,6 +829,9 @@ def test_result_check_reconstructs_mixed_unresolved_decisions_after_calendar_win
         "PART": "RETRY_PARTIAL_QUARTER",
     }
     assert _candidate_pairs(result["plan"]) == [("FAIL", "2026-06-30"), ("NEW", "2026-06-30"), ("PART", "2026-06-30")]
+    work_unit_keys = sorted(row["work_unit_key"] for row in result["plan"]["candidates"])
+    assert work_unit_keys == ["usa:FAIL:2026:Q2", "usa:NEW:2026:Q2", "usa:PART:2026:Q2"]
+    assert result["summary"]["partial_follow_up_count"] == 1
 
 
 def test_historical_unknown_partial_is_manual_review_not_plan_candidate(
@@ -954,6 +974,8 @@ def test_partial_event_refresh_disables_executable_plan(monkeypatch: pytest.Monk
 
     assert result["check_status"] == "PARTIAL"
     assert result["plan"]["candidate_count"] == 0
+    assert result["plan"]["executable_work_unit_count"] == 0
+    assert result["plan"]["work_units"] == []
 
 
 def test_ambiguous_target_period_is_manual_review_not_executable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1014,6 +1036,76 @@ def test_failed_calendar_refresh_writes_failed_empty_plan(monkeypatch: pytest.Mo
     assert result["check_status"] == "FAILED"
     assert result["plan"]["candidate_count"] == 0
     assert json.loads(Path(result["artifact_paths"]["plan_json"]).read_text(encoding="utf-8"))["check_status"] == "FAILED"
+
+
+def test_result_check_records_timing_content_once_and_poll_seen_events(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    ohlcv_db = _ohlcv_db(tmp_path)
+    _mock_result_check_provider_stages(monkeypatch)
+    _insert_quarter(fundamentals_db, "AAPL")
+    _insert_calendar(fundamentals_db, "AAPL", "DUE_TODAY", "2026-08-07")
+    _insert_event_and_match(fundamentals_db, "AAPL", "2026-08-07", "2026-06-30")
+
+    first = result_check.run_manual_result_check(
+        fundamentals_db=fundamentals_db,
+        ohlcv_db=ohlcv_db,
+        decision_date="2026-08-07",
+        output_root=Path.cwd() / "temp" / "pytest_result_check_timing_first",
+        tickers=["AAPL"],
+    )
+    second = result_check.run_manual_result_check(
+        fundamentals_db=fundamentals_db,
+        ohlcv_db=ohlcv_db,
+        decision_date="2026-08-07",
+        output_root=Path.cwd() / "temp" / "pytest_result_check_timing_second",
+        tickers=["AAPL"],
+    )
+
+    assert first["summary"]["provider_timing_content_inserted_count"] >= 2
+    assert second["summary"]["provider_timing_content_inserted_count"] == 0
+    assert second["summary"]["provider_timing_content_reused_count"] >= 2
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        content_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_provider_observation_content").fetchone()[0]
+        seen_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_provider_observation_seen").fetchone()[0]
+        provenance_count = conn.execute("SELECT COUNT(*) FROM rc_fundamental_quarterly_field_provenance").fetchone()[0]
+    assert content_count >= 2
+    assert seen_count >= content_count * 2
+    assert provenance_count == 0
+
+
+def test_result_check_changed_provider_payload_creates_new_content_observation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    ohlcv_db = _ohlcv_db(tmp_path)
+    _mock_result_check_provider_stages(monkeypatch)
+    _insert_quarter(fundamentals_db, "AAPL")
+    _insert_calendar(fundamentals_db, "AAPL", "DUE_TODAY", "2026-08-07")
+    _insert_event_and_match(fundamentals_db, "AAPL", "2026-08-07", "2026-06-30")
+
+    result_check.run_manual_result_check(
+        fundamentals_db=fundamentals_db,
+        ohlcv_db=ohlcv_db,
+        decision_date="2026-08-07",
+        output_root=Path.cwd() / "temp" / "pytest_result_check_changed_payload_first",
+        tickers=["AAPL"],
+    )
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        conn.execute("UPDATE rc_earnings_calendar SET estimated_session='BMO' WHERE ticker='AAPL'")
+        conn.commit()
+    second = result_check.run_manual_result_check(
+        fundamentals_db=fundamentals_db,
+        ohlcv_db=ohlcv_db,
+        decision_date="2026-08-07",
+        output_root=Path.cwd() / "temp" / "pytest_result_check_changed_payload_second",
+        tickers=["AAPL"],
+    )
+
+    assert second["summary"]["provider_timing_content_inserted_count"] >= 1
 
 
 def test_output_root_must_be_under_temp(tmp_path: Path) -> None:

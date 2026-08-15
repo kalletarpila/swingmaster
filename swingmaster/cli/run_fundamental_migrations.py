@@ -27,6 +27,8 @@ REQUIRED_TABLES = (
     "rc_earnings_event",
     "rc_fundamental_quarter_earnings_match",
     "rc_fundamental_historical_backfill_result",
+    "rc_fundamental_provider_observation_content",
+    "rc_fundamental_provider_observation_seen",
 )
 SCHEMA_VERSION = 1
 TTM_COMPONENT_COLUMNS = (
@@ -454,6 +456,16 @@ def get_historical_backfill_result_migration_file_path() -> Path:
     )
 
 
+def get_provider_observation_migration_file_path() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent
+        / "infra"
+        / "sqlite"
+        / "migrations"
+        / "037_rc_fundamental_provider_observation.sql"
+    )
+
+
 def resolve_db_path(db_arg: str) -> Path:
     return Path(db_arg).expanduser().resolve()
 
@@ -482,6 +494,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
         get_quarter_ingestion_status_migration_file_path(),
         get_earnings_calendar_migration_file_path(),
         get_historical_backfill_result_migration_file_path(),
+        get_provider_observation_migration_file_path(),
     )
     for current_migration_file in migration_files:
         sql_text = current_migration_file.read_text(encoding="utf-8")
@@ -499,6 +512,7 @@ def apply_fundamental_migration(conn: sqlite3.Connection, migration_file: Path) 
     ensure_quarter_ingestion_status_schema(conn)
     ensure_earnings_calendar_check_state_columns(conn)
     ensure_historical_backfill_result_schema(conn)
+    ensure_provider_observation_schema(conn)
     conn.commit()
 
 
@@ -772,6 +786,10 @@ def ensure_earnings_calendar_check_state_columns(conn: sqlite3.Connection) -> No
 
 def ensure_historical_backfill_result_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(get_historical_backfill_result_migration_file_path().read_text(encoding="utf-8"))
+
+
+def ensure_provider_observation_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(get_provider_observation_migration_file_path().read_text(encoding="utf-8"))
 
 
 def _create_quarter_ingestion_status_indexes(conn: sqlite3.Connection) -> None:

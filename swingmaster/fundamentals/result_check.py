@@ -25,9 +25,24 @@ from swingmaster.fundamentals.quarter_refresh_decision import (
     summarize_quarter_refresh_decisions,
     validate_temp_path,
 )
+from swingmaster.fundamentals.provider_observations import (
+    OBS_KIND_SEC_CONFIRMATION_RECHECK,
+    OBS_KIND_SEC_FILING_CONFIRMED,
+    OBS_KIND_SEC_FILING_NOT_AVAILABLE,
+    OBS_KIND_YAHOO_CALENDAR_STATUS,
+    OBS_KIND_YAHOO_RESULT_DETECTED_PRESENT,
+    TIMESTAMP_NOT_AVAILABLE,
+    TIMESTAMP_OBSERVED_AT_ONLY,
+    TIMESTAMP_PROVIDER_REPORTED,
+    ProviderObservation,
+    fingerprint_mapping,
+    hash_mapping,
+    record_provider_observations,
+    work_unit_identity,
+)
 
 
-PLAN_VERSION = "fundamental_result_check_plan_v1"
+PLAN_VERSION = "fundamental_result_check_plan_v2"
 CHECK_STATUS_SUCCESS = "SUCCESS"
 CHECK_STATUS_PARTIAL = "PARTIAL"
 CHECK_STATUS_FAILED = "FAILED"
@@ -161,6 +176,16 @@ def run_manual_result_check(
     )
     stages.append(_stage("quarter_refresh_decisions", CHECK_STATUS_SUCCESS, total_tickers=len(final_rows)))
 
+    timing_summary = _record_check_timing_observations(
+        fundamentals_db=fundamentals_db,
+        final_rows=final_rows,
+        calendar_selected_tickers=calendar_selection["selected_tickers"],
+        event_candidates=event_candidates,
+        observed_at_utc=created_at_utc,
+        run_id=f"result_check:{created_at_utc}",
+    )
+    stages.append(_stage("provider_timing_observations", CHECK_STATUS_SUCCESS, **timing_summary))
+
     check_status = _overall_status(stages)
     if check_status == CHECK_STATUS_PARTIAL:
         executable_rows: list[dict[str, Any]] = []
@@ -182,7 +207,25 @@ def run_manual_result_check(
         "check_status": check_status,
         "created_at_utc": created_at_utc,
         "candidate_count": len(executable_rows),
+        "executable_work_unit_count": len(executable_rows),
+        "plan_version": PLAN_VERSION,
         "candidate_hash": plan["candidate_hash"],
+        "work_unit_count": len(executable_rows),
+        "partial_follow_up_count": sum(1 for row in final_rows if row.decision == DECISION_RETRY_PARTIAL_QUARTER),
+        "provider_timing_observation_count": timing_summary["content_observation_count"],
+        "provider_timing_content_inserted_count": timing_summary["content_inserted_count"],
+        "provider_timing_content_reused_count": timing_summary["content_reused_count"],
+        "provider_timing_seen_event_inserted_count": timing_summary["seen_event_inserted_count"],
+        "provider_call_counts_json": json.dumps(
+            {
+                "yahoo_calendar_tickers": len(calendar_selection["selected_tickers"]),
+                "yahoo_completed_event_tickers": len(event_candidates),
+                "sec": 0,
+                "simfin": 0,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
         "completed_event_refresh_candidate_count": len(event_candidates),
         "due_for_result_check_count": len(calendar_selection["due_for_result_check"]),
         "due_for_confirmation_watch_count": len(calendar_selection["due_for_confirmation_watch"]),
@@ -202,6 +245,7 @@ def run_manual_result_check(
         summary=summary_payload,
         calendar_refresh_summary=calendar_summary,
         completed_event_refresh_summary=event_summary,
+        work_unit_rows=executable_rows,
     )
     return {"check_status": check_status, "plan": plan, "artifact_paths": paths, "stages": stages, "summary": summary_payload}
 
@@ -604,6 +648,7 @@ def _plan_row(row: Any) -> dict[str, Any]:
     current_quarter_exists = 1 if row.quarter_basic_complete is not None else 0
     resolution = "MATCHED_EARNINGS_EVENT" if row.matched_latest_event_period_end_date else "AMBIGUOUS_OR_UNRESOLVED"
     eligible = _row_is_executable(row)
+    work_unit = _work_unit_payload(row) if eligible else None
     return {
         "market": row.market,
         "ticker": row.ticker,
@@ -627,6 +672,69 @@ def _plan_row(row: Any) -> dict[str, Any]:
         "planned_action": row.planned_action if eligible else "MANUAL_REVIEW",
         "reason": row.decision_reason,
         "eligible_for_execution": 1 if eligible else 0,
+        "selector_group": _selector_group(row),
+        "result_detected_date": row.latest_completed_earnings_event_date,
+        "providers_due": _providers_due(row) if eligible else {"simfin": "NOT_CHECKED_IN_9H1"},
+        "next_check": _next_check_metadata(row),
+        "work_unit": work_unit,
+        "work_unit_key": work_unit["work_unit_key"] if work_unit else None,
+        "canonical_fiscal_year": work_unit["canonical_fiscal_year"] if work_unit else None,
+        "canonical_fiscal_quarter": work_unit["canonical_fiscal_quarter"] if work_unit else None,
+        "canonical_report_date": work_unit["canonical_report_date"] if work_unit else None,
+    }
+
+
+def _work_unit_payload(row: Any) -> dict[str, Any]:
+    identity = work_unit_identity(market=row.market, ticker=row.ticker, period_end_date=str(row.target_period_end_date))
+    return {
+        "work_unit_key": identity.work_unit_key,
+        "company_key": identity.company_key,
+        "market": identity.market,
+        "ticker": identity.ticker,
+        "canonical_fiscal_year": identity.fiscal_year,
+        "canonical_fiscal_quarter": identity.fiscal_quarter,
+        "canonical_report_date": identity.report_date,
+        "current_lifecycle_status": row.ingestion_status,
+        "selector_group": _selector_group(row),
+        "reason_selected": row.decision_reason,
+        "result_detected_date": row.latest_completed_earnings_event_date,
+        "providers_due": _providers_due(row),
+        "next_check": _next_check_metadata(row),
+    }
+
+
+def _selector_group(row: Any) -> str:
+    if row.decision == DECISION_FETCH_NEW_QUARTER:
+        return "DUE_FOR_RESULT_CHECK"
+    if row.decision == DECISION_REFRESH_SEC_CONFIRMATION:
+        return "DUE_FOR_CONFIRMATION"
+    if row.decision == DECISION_RETRY_PARTIAL_QUARTER:
+        return "PARTIAL_FOLLOW_UP"
+    if row.decision == DECISION_RETRY_FETCH_FAILED:
+        return "FETCH_FAILED_RETRY"
+    return "NON_EXECUTABLE"
+
+
+def _providers_due(row: Any) -> dict[str, str]:
+    due = {
+        "yahoo": "NOT_DUE",
+        "sec": "NOT_DUE",
+        "simfin": "NOT_CHECKED_IN_9H1",
+    }
+    if row.decision in {DECISION_FETCH_NEW_QUARTER, DECISION_RETRY_PARTIAL_QUARTER, DECISION_RETRY_FETCH_FAILED}:
+        due["yahoo"] = "DUE_FOR_UPDATE_PROCESSING"
+        due["sec"] = "DUE_FOR_CONFIRMATION_OR_UPDATE_PROCESSING"
+    if row.decision == DECISION_REFRESH_SEC_CONFIRMATION:
+        due["sec"] = "DUE_FOR_CONFIRMATION"
+    return due
+
+
+def _next_check_metadata(row: Any) -> dict[str, Any]:
+    return {
+        "decision_date": row.decision_date,
+        "decision": row.decision,
+        "retry_recommendation": row.last_fetch_status,
+        "cadence_policy": "EXISTING_RESULT_CHECK_CADENCE",
     }
 
 
@@ -644,16 +752,19 @@ def _build_plan(
     digest = candidate_hash(candidate_rows)
     return {
         "plan_version": PLAN_VERSION,
+        "plan_schema_version": 2,
         "created_at_utc": created_at_utc,
         "decision_date": decision_date.isoformat(),
         "fundamentals_db": str(fundamentals_db.resolve()),
         "ohlcv_db": str(ohlcv_db.resolve()),
         "ohlcv_stale_days": ohlcv_stale_days,
         "candidate_count": len(candidate_rows),
+        "executable_work_unit_count": len(candidate_rows),
         "candidate_hash": digest,
         "check_status": check_status,
         "stages": stages,
         "candidates": candidate_rows,
+        "work_units": [row["work_unit"] for row in candidate_rows if row.get("work_unit")],
     }
 
 
@@ -682,7 +793,16 @@ def _write_failed_plan(
         "check_status": CHECK_STATUS_FAILED,
         "created_at_utc": created_at_utc,
         "candidate_count": 0,
+        "executable_work_unit_count": 0,
+        "plan_version": PLAN_VERSION,
         "candidate_hash": plan["candidate_hash"],
+        "work_unit_count": 0,
+        "partial_follow_up_count": 0,
+        "provider_timing_observation_count": 0,
+        "provider_timing_content_inserted_count": 0,
+        "provider_timing_content_reused_count": 0,
+        "provider_timing_seen_event_inserted_count": 0,
+        "provider_call_counts_json": json.dumps({"yahoo_calendar_tickers": 0, "yahoo_completed_event_tickers": 0, "sec": 0, "simfin": 0}, sort_keys=True, separators=(",", ":")),
         "output_root": str(root),
     }
     paths = _write_artifacts(
@@ -693,6 +813,7 @@ def _write_failed_plan(
         summary=summary_payload,
         calendar_refresh_summary=calendar_refresh_summary or {"summary": {}},
         completed_event_refresh_summary={"summary": {}},
+        work_unit_rows=[],
     )
     return {"check_status": CHECK_STATUS_FAILED, "plan": plan, "artifact_paths": paths, "stages": stages, "summary": summary_payload}
 
@@ -706,9 +827,11 @@ def _write_artifacts(
     summary: dict[str, Any],
     calendar_refresh_summary: dict[str, Any],
     completed_event_refresh_summary: dict[str, Any],
+    work_unit_rows: list[dict[str, Any]],
 ) -> dict[str, str]:
     paths = {
         "plan_json": root / "plan.json",
+        "work_units_json": root / "work_units.json",
         "candidates_csv": root / "candidates.csv",
         "manual_review_csv": root / "manual_review.csv",
         "summary_json": root / "summary.json",
@@ -716,6 +839,7 @@ def _write_artifacts(
         "completed_event_refresh_summary_json": root / "completed_event_refresh_summary.json",
     }
     _write_json(paths["plan_json"], plan)
+    _write_json(paths["work_units_json"], [row["work_unit"] for row in work_unit_rows if row.get("work_unit")])
     _write_csv(paths["candidates_csv"], candidate_rows)
     _write_csv(paths["manual_review_csv"], manual_review_rows)
     _write_json(paths["summary_json"], summary)
@@ -735,6 +859,175 @@ def _overall_status(stages: list[Mapping[str, Any]]) -> str:
     if CHECK_STATUS_PARTIAL in statuses:
         return CHECK_STATUS_PARTIAL
     return CHECK_STATUS_SUCCESS
+
+
+def _record_check_timing_observations(
+    *,
+    fundamentals_db: Path,
+    final_rows: list[Any],
+    calendar_selected_tickers: list[str],
+    event_candidates: list[str],
+    observed_at_utc: str,
+    run_id: str,
+) -> dict[str, int]:
+    observations: list[ProviderObservation] = []
+    rows_by_ticker = {str(row.ticker).upper(): row for row in final_rows}
+    selected = sorted(dict.fromkeys(str(ticker).upper() for ticker in calendar_selected_tickers))
+    calendar_rows = _load_calendar_observation_rows(fundamentals_db, selected)
+    for ticker in selected:
+        row = calendar_rows.get(ticker)
+        decision_row = rows_by_ticker.get(ticker)
+        period = str(decision_row.target_period_end_date) if decision_row is not None and decision_row.target_period_end_date else None
+        identity = work_unit_identity(market="usa", ticker=ticker, period_end_date=period) if period else None
+        payload = dict(row) if row is not None else {"ticker": ticker, "calendar_status": "ROW_MISSING"}
+        observations.append(
+            ProviderObservation(
+                provider="YAHOO_FINANCE",
+                market="usa",
+                ticker=ticker,
+                company_key=identity.company_key if identity else f"usa:{ticker}",
+                canonical_fiscal_year=identity.fiscal_year if identity else None,
+                canonical_fiscal_quarter=identity.fiscal_quarter if identity else None,
+                period_end_date=identity.report_date if identity else None,
+                observation_kind=OBS_KIND_YAHOO_CALENDAR_STATUS,
+                source_endpoint="yahoo_earnings_calendar",
+                provider_reported_at_utc=str(payload.get("estimated_announcement_at") or "") or None,
+                timestamp_quality=TIMESTAMP_PROVIDER_REPORTED if payload.get("estimated_announcement_at") else TIMESTAMP_OBSERVED_AT_ONLY,
+                field_presence_fingerprint=fingerprint_mapping(payload),
+                payload_hash=hash_mapping(payload),
+                source_reference=str(payload.get("id") or ticker),
+                outcome=str(payload.get("calendar_status") or "ROW_MISSING"),
+                observed_at_utc=observed_at_utc,
+                run_id=run_id,
+            )
+        )
+
+    event_rows = _load_event_observation_rows(fundamentals_db, sorted(dict.fromkeys(str(ticker).upper() for ticker in event_candidates)))
+    for ticker, row in event_rows.items():
+        decision_row = rows_by_ticker.get(ticker)
+        period = str(decision_row.target_period_end_date) if decision_row is not None and decision_row.target_period_end_date else None
+        identity = work_unit_identity(market="usa", ticker=ticker, period_end_date=period) if period else None
+        payload = dict(row)
+        observations.append(
+            ProviderObservation(
+                provider="YAHOO_FINANCE",
+                market="usa",
+                ticker=ticker,
+                company_key=identity.company_key if identity else f"usa:{ticker}",
+                canonical_fiscal_year=identity.fiscal_year if identity else None,
+                canonical_fiscal_quarter=identity.fiscal_quarter if identity else None,
+                period_end_date=identity.report_date if identity else None,
+                observation_kind=OBS_KIND_YAHOO_RESULT_DETECTED_PRESENT,
+                source_endpoint="yahoo_earnings_events",
+                provider_reported_at_utc=str(payload.get("announcement_at") or "") or None,
+                timestamp_quality=TIMESTAMP_PROVIDER_REPORTED if payload.get("announcement_at") else TIMESTAMP_OBSERVED_AT_ONLY,
+                field_presence_fingerprint=fingerprint_mapping(payload),
+                payload_hash=hash_mapping(payload),
+                source_reference=str(payload.get("id") or ticker),
+                outcome="RESULT_PRESENT" if int(payload.get("is_reported") or 0) == 1 else "EVENT_PRESENT",
+                observed_at_utc=observed_at_utc,
+                run_id=run_id,
+            )
+        )
+
+    for row in final_rows:
+        if not _row_is_executable(row):
+            continue
+        if not row.source_confirmation_status:
+            continue
+        if row.target_period_end_date is None:
+            continue
+        identity = work_unit_identity(market=row.market, ticker=row.ticker, period_end_date=str(row.target_period_end_date))
+        status = str(row.source_confirmation_status)
+        if status.startswith("SEC_CONFIRMED"):
+            kind = OBS_KIND_SEC_FILING_CONFIRMED
+            outcome = status
+        elif "SEC_FAILED" in status or "RETRY" in status:
+            kind = OBS_KIND_SEC_CONFIRMATION_RECHECK
+            outcome = status
+        else:
+            kind = OBS_KIND_SEC_FILING_NOT_AVAILABLE
+            outcome = status
+        payload = {
+            "ticker": row.ticker,
+            "period_end_date": row.target_period_end_date,
+            "source_confirmation_status": status,
+        }
+        observations.append(
+            ProviderObservation(
+                provider="SEC_EDGAR",
+                market=str(row.market).lower(),
+                ticker=str(row.ticker).upper(),
+                company_key=identity.company_key,
+                canonical_fiscal_year=identity.fiscal_year,
+                canonical_fiscal_quarter=identity.fiscal_quarter,
+                period_end_date=identity.report_date,
+                observation_kind=kind,
+                source_endpoint="quarter_ingestion_status",
+                timestamp_quality=TIMESTAMP_NOT_AVAILABLE,
+                field_presence_fingerprint=fingerprint_mapping(payload),
+                payload_hash=hash_mapping(payload),
+                source_reference=f"{identity.work_unit_key}:source_confirmation_status",
+                outcome=outcome,
+                observed_at_utc=observed_at_utc,
+                run_id=run_id,
+            )
+        )
+
+    if not observations:
+        return {
+            "content_observation_count": 0,
+            "content_inserted_count": 0,
+            "content_reused_count": 0,
+            "seen_event_inserted_count": 0,
+        }
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        return record_provider_observations(conn, observations)
+
+
+def _load_calendar_observation_rows(fundamentals_db: Path, tickers: list[str]) -> dict[str, sqlite3.Row]:
+    if not tickers:
+        return {}
+    placeholders = ",".join("?" for _ in tickers)
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        conn.row_factory = sqlite3.Row
+        return {
+            str(row["ticker"]).upper(): row
+            for row in conn.execute(
+                f"""
+                SELECT id, market, ticker, estimated_announcement_at, estimated_announcement_date,
+                       estimated_session, calendar_status, source, source_observed_at_utc,
+                       first_observed_at_utc, last_observed_at_utc, calendar_last_checked_at_utc,
+                       calendar_check_status, calendar_failure_count
+                FROM rc_earnings_calendar
+                WHERE market = 'usa' AND ticker IN ({placeholders})
+                """,
+                tickers,
+            )
+        }
+
+
+def _load_event_observation_rows(fundamentals_db: Path, tickers: list[str]) -> dict[str, sqlite3.Row]:
+    if not tickers:
+        return {}
+    placeholders = ",".join("?" for _ in tickers)
+    with sqlite3.connect(str(fundamentals_db)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM rc_earnings_event
+            WHERE market = 'usa' AND ticker IN ({placeholders})
+            ORDER BY announcement_date DESC, id DESC
+            """,
+            tickers,
+        ).fetchall()
+    output: dict[str, sqlite3.Row] = {}
+    for row in rows:
+        ticker = str(row["ticker"]).upper()
+        if ticker not in output:
+            output[ticker] = row
+    return output
 
 
 def _write_json(path: Path, payload: Any) -> None:

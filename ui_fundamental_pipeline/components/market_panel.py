@@ -249,8 +249,10 @@ class MarketPanel:
             f"upcoming={summary.get('no_action_upcoming', 0)} | "
             f"due_today={summary.get('watch_due_today', 0)} | "
             f"ready={summary.get('candidate_count', 0)} | "
+            f"work_units={summary.get('executable_work_unit_count', summary.get('candidate_count', 0))} | "
             f"partial_retries={summary.get('retry_partial_quarter', 0)} | "
             f"failed_retries={summary.get('retry_fetch_failed', 0)} | "
+            f"timing_obs={summary.get('provider_timing_observation_count', 0)} | "
             f"manual_review={summary.get('manual_review_count', 0)}"
         )
         rows = []

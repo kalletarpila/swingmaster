@@ -37,6 +37,7 @@ These invariants constrain 9H implementation:
 19. A component-specific blocker must not prevent another component from executing safely. For example, V2 company missing can block V2 while Legacy still updates.
 20. V2 retry continuity must survive Legacy becoming current. Persisted V2 operational follow-up metadata can reselect a previously known work unit when retry is due, without becoming canonical data truth, a persistent watermark, a sync table, or a V2 lifecycle clone.
 21. Execution outcome is separate from coverage or rollout limitation. Known non-retry V2 limitations such as company-missing maintenance or unsupported profile deferral must be visible in structured output, but they do not automatically make scheduler execution fail or require retry.
+22. `CANONICAL_FUNDAMENTAL_MARKET_AVAILABILITY`: for all accepted canonical quarterly fundamental values, historical market availability is anchored to the canonical quarterly result publication date. If a value is accepted as belonging to a canonical company + fiscal quarter under the field's semantic, identity, unit, transformation, and validation rules, it is treated as market-available from that quarter's canonical result publication date. Provider first-seen time, local ingestion time, SEC filing availability time, provider-specific publication latency, and first observation timestamp do not delay or redefine that historical market-availability date.
 
 ## 4. Existing Lifecycle/Status Model
 
@@ -102,6 +103,8 @@ SEC is the authoritative filing confirmation and fiscal-period corroboration pro
 The implemented SEC Revenue path is production validated for SAFE_SCOPED reconstructed quarterly `Total Revenue`. Other SEC paths from Phase 9 remain audit-only unless later 9I phases validate field-specific semantics for shares, operating cashflow, capex, or other fields.
 
 Standard concepts are not automatically safe. Extension concepts require explicit semantic mapping and validation. YTD-derived quarters require deterministic context subtraction and duplicate/context review before canonical writes.
+
+SEC filing date, accession, and filing identity remain important for source/provenance identity, filing confirmation, fiscal/context evidence, audit, and reconciliation. Under `CANONICAL_FUNDAMENTAL_MARKET_AVAILABILITY`, SEC filing date does not determine the historical market-availability date of an accepted quarterly fundamental value. This is especially important when a quarterly result publication precedes the SEC filing, or when a later SEC filing provides better or more complete evidence for the same quarter. If that SEC-derived value is accepted as the canonical value for the quarter, historical market availability remains anchored to the quarter's canonical result publication date.
 
 ## 8. SimFin Role
 
@@ -290,6 +293,8 @@ A repeated observation with an unchanged payload hash may be compacted or dedupl
 
 Timing logs must not embed canonical semantics. They collect evidence for later empirical measurement of Yahoo progressive enrichment, SEC first-seen timing, SimFin first-seen timing, and provider stabilization/recheck cadence.
 
+Operational provider timing and historical fundamental market availability are separate concerns. Provider observation content, provider seen/poll events, Yahoo progressive-enrichment timing, SEC first-seen timing, SimFin timing, retry cadence, and backoff remain operationally useful and audit-relevant. They are not used to reconstruct provider-specific or ingestion-specific historical market availability for accepted canonical quarterly fundamental values.
+
 Observation identity has two logical layers:
 
 - Observation content identity: company, canonical or provisional quarter identity, provider, observation kind, provider source endpoint/dataset, provider-reported timestamp where meaningful, payload hash, field-presence fingerprint, and relevant context/accession identity. This distinguishes semantically new evidence from repeated polling.
@@ -298,6 +303,20 @@ Observation identity has two logical layers:
 Examples: the same Yahoo payload hash seen twice is one observation content identity with repeated seen events; a new Yahoo payload hash is new provider evidence; the same SEC filing/accession checked twice is not duplicate semantic evidence; a repeated SimFin cache hit should not duplicate canonical provenance; new provider data that NULL-fills one missing field creates one canonical write/provenance identity for that field and work unit.
 
 `PROVIDER_ERROR_RETRY` is a provider/timing observation outcome for retriable provider failures. It is not a lifecycle status, not a Check status, and not canonical field provenance. Production 9H1 validation confirmed that Check creates zero canonical financial writes and zero canonical field-provenance writes.
+
+## 20A. Canonical Fundamental Market Availability
+
+For historical and backtest use, every accepted canonical quarterly fundamental value is treated as market-available from the canonical quarterly result publication date for its company + fiscal quarter. The system does not attempt to reconstruct provider-specific or ingestion-specific historical availability for accepted quarterly fundamentals from provider first-seen time, local ingestion time, SEC filing availability time, provider-specific publication latency, or first observation timestamp.
+
+This assumption applies uniformly to all fundamental fields: revenue, EBITDA, EBIT, operating_cashflow, capex, free_cashflow, cash, total_debt, shares_outstanding, and future validated fundamental fields. Do not introduce field-specific historical availability timestamps unless a later architecture phase explicitly changes this global assumption.
+
+This invariant changes market-availability timing assumptions, not field semantics. A value must still pass the field's semantic, fiscal-quarter identity, unit, dimensions, formula/reconstruction, company-profile, provider-concept, and validation rules before it can become canonical. `shares_outstanding` must still represent an appropriate instant or period-end shares concept; weighted-average shares, diluted weighted-average shares, and EPS denominator shares do not become equivalent to period-end shares outstanding. Similarly, duration facts for operating_cashflow, capex, and free_cashflow must still represent the selected quarter. A 6-month YTD OCF fact is not automatically Q2 OCF; if a quarterly value requires deterministic reconstruction such as `Q2 OCF = H1 YTD OCF - Q1 OCF`, that reconstruction must pass semantic and context validation before acceptance. Once the reconstructed quarterly value is accepted for the canonical quarter, its historical market availability is the quarter's canonical result publication date.
+
+If a later provider observation or SEC fact is accepted through controlled reconciliation as a better canonical value for an already known fiscal quarter, the replacement value belongs semantically to that quarter and keeps the same historical market-availability date: the canonical result publication date for that quarter. Do not introduce provider-arrival-time vintage gating for the replacement value. This does not weaken replacement evidence requirements, reconciliation audit trail, provenance, old/new value recording, or controlled overwrite policy.
+
+Future semantic audits, including 9I2 operating_cashflow, 9I3 capex, and later field audits, should evaluate semantic concept, fiscal-period identity, duration, unit, dimensions, formula/reconstruction, ambiguity, and source quality. They should not reject an otherwise valid quarterly value merely because provider or SEC evidence was observed or ingested later than the quarterly result publication date. Once accepted for that quarter, historical market availability is anchored to the quarter's canonical result publication date.
+
+The 9I1 SEC shares conclusion follows this distinction. SEC shares remains audit-only because current evidence does not safely prove semantic equivalence between reconstructed SEC `Ordinary Shares Number` and canonical period-end `shares_outstanding`: source concept provenance is missing, raw evidence is weighted-average dominated, and class/ADR/depositary semantics remain unresolved. The issue is not provider availability time, SEC filing latency, or local ingestion timing.
 
 ## 21. V2 Integration Boundary
 

@@ -99,6 +99,12 @@ class IntegratedUpdateResult:
     provider_calls: int
     preflight: Mapping[str, Any]
     work_units: list[IntegratedWorkUnitResult]
+    explicit_scope_enabled: bool = False
+    authorized_work_unit_keys: list[str] = field(default_factory=list)
+    operational_merged_count: int = 0
+    executable_after_scope_count: int = 0
+    excluded_by_scope_keys: list[str] = field(default_factory=list)
+    authorized_missing_keys: list[str] = field(default_factory=list)
     followup_metadata_errors: list[str] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
@@ -127,12 +133,21 @@ class IntegratedUpdateResult:
             "component_failure_count": self.component_failure_count,
             "provider_calls": self.provider_calls,
             "followup_metadata_error_count": len(self.followup_metadata_errors),
+            "explicit_scope_enabled": int(self.explicit_scope_enabled),
+            "authorized_work_unit_count": len(self.authorized_work_unit_keys),
+            "operational_merged_count": self.operational_merged_count,
+            "executable_after_scope_count": self.executable_after_scope_count,
+            "excluded_by_scope_count": len(self.excluded_by_scope_keys),
+            "authorized_missing_count": len(self.authorized_missing_keys),
         }
 
     def to_dict(self) -> dict[str, Any]:
         return {
             **self.summary(),
             "preflight": dict(self.preflight),
+            "authorized_work_unit_keys": self.authorized_work_unit_keys,
+            "excluded_by_scope_keys": self.excluded_by_scope_keys,
+            "authorized_missing_keys": self.authorized_missing_keys,
             "followup_metadata_errors": self.followup_metadata_errors,
             "work_units": [asdict(row) for row in self.work_units],
         }
@@ -263,6 +278,7 @@ def run_integrated_dual_store_update(
     legacy_runner: LegacyRunner,
     provider_adapters_by_work_unit: Mapping[str, list[SelectedWorkUnitProviderAdapter]] | None = None,
     provider_adapter_factory: ProviderAdapterFactory | None = None,
+    authorized_work_unit_keys: set[str] | list[str] | tuple[str, ...] | None = None,
     output_json_path: Path | None = None,
     followup_persistor: Callable[[sqlite3.Connection, WorkUnitPreflight, V2ComponentResult, str], str] | None = None,
 ) -> IntegratedUpdateResult:
@@ -273,10 +289,24 @@ def run_integrated_dual_store_update(
         execution_decision_date=execution_decision_date,
         followup_repository=SQLiteV2FollowupRepository(v2_db_path),
     )
+    scope = _normalize_authorized_work_unit_keys(authorized_work_unit_keys)
+    operational_work_units = list(preflight.work_units)
+    if scope is None:
+        executable_work_units = operational_work_units
+        excluded_by_scope_keys: list[str] = []
+        authorized_missing_keys: list[str] = []
+    else:
+        executable_work_units = [row for row in operational_work_units if row.work_unit_key in scope]
+        operational_keys = {row.work_unit_key for row in operational_work_units}
+        excluded_by_scope_keys = [row.work_unit_key for row in operational_work_units if row.work_unit_key not in scope]
+        authorized_missing_keys = sorted(scope - operational_keys)
+        unexpected = [row.work_unit_key for row in executable_work_units if row.work_unit_key not in scope]
+        if unexpected:
+            raise RuntimeError(f"DUAL_STORE_AUTHORIZATION_SCOPE_BREACH:{unexpected}")
     provider_map = provider_adapters_by_work_unit or {}
     results: list[IntegratedWorkUnitResult] = []
     metadata_errors: list[str] = []
-    for work_unit in preflight.work_units:
+    for work_unit in executable_work_units:
         legacy = _run_legacy_component(work_unit, legacy_runner)
         provider_adapters = (
             provider_adapter_factory(work_unit)
@@ -328,12 +358,27 @@ def run_integrated_dual_store_update(
         provider_calls=sum(len(row.v2.raw_summary.get("providers_called", [])) for row in results if row.v2.raw_summary),
         preflight=preflight.summary(),
         work_units=results,
+        explicit_scope_enabled=scope is not None,
+        authorized_work_unit_keys=sorted(scope) if scope is not None else [],
+        operational_merged_count=len(operational_work_units),
+        executable_after_scope_count=len(executable_work_units),
+        excluded_by_scope_keys=excluded_by_scope_keys,
+        authorized_missing_keys=authorized_missing_keys,
         followup_metadata_errors=metadata_errors,
     )
     if output_json_path is not None:
         output_json_path.parent.mkdir(parents=True, exist_ok=True)
         output_json_path.write_text(json.dumps(result.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
     return result
+
+
+def _normalize_authorized_work_unit_keys(keys: set[str] | list[str] | tuple[str, ...] | None) -> set[str] | None:
+    if keys is None:
+        return None
+    normalized = {str(key).strip() for key in keys}
+    if any(not key for key in normalized):
+        raise ValueError("DUAL_STORE_AUTHORIZED_WORK_UNIT_KEY_EMPTY")
+    return normalized
 
 
 def exit_code_for_overall_status(status: str) -> int:

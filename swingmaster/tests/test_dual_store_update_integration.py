@@ -23,6 +23,7 @@ from swingmaster.fundamentals.dual_store_update_preflight import SQLiteV2Followu
 from swingmaster.fundamentals.result_check import PLAN_VERSION, candidate_hash, merge_v2_followups_into_plan
 from swingmaster.fundamentals.selected_v2_work_unit_executor import StaticProviderAdapter, build_simfin_statement_candidates
 from swingmaster.fundamentals.selected_v2_work_unit_executor import build_simfin_share_candidate
+from swingmaster.cli.run_fundamental_quarter_update import parse_args
 from swingmaster.tests.test_dual_store_update_preflight import _create_legacy_db, _insert_legacy_complete
 from swingmaster.tests.test_selected_v2_work_unit_executor import _connect as _connect_v2
 from swingmaster.tests.test_selected_v2_work_unit_executor import _company as _insert_v2_company
@@ -126,6 +127,61 @@ def _setup_dual_store(
                 )
                 conn.commit()
     return legacy, v2
+
+
+def _setup_multi_ticker_dual_store(tmp_path: Path, tickers: list[str]) -> tuple[Path, Path]:
+    legacy = tmp_path / "legacy.db"
+    v2 = tmp_path / "v2.db"
+    _create_legacy_db(legacy)
+    with _connect_v2(v2) as conn:
+        for index, ticker in enumerate(tickers, start=1):
+            _insert_legacy_complete(legacy, ticker, "2026-06-30")
+            with sqlite3.connect(legacy) as legacy_conn:
+                legacy_conn.execute(
+                    """
+                    UPDATE rc_fundamental_quarter_ingestion_status
+                    SET ingestion_status='FETCH_FAILED', retry_recommendation='RETRY'
+                    WHERE ticker=? AND market='usa' AND period_end_date='2026-06-30'
+                    """,
+                    (ticker,),
+                )
+            _insert_v2_company(conn, ticker=ticker, company_id=index, profile="ORDINARY")
+            _insert_v2_quarter(conn, company_id=index, quarter_id=index * 10)
+    return legacy, v2
+
+
+def _insert_due_followup(v2: Path, ticker: str, *, company_id: int) -> None:
+    with sqlite3.connect(v2) as conn:
+        ensure_v2_followup_schema(conn)
+        conn.execute(
+            """
+            INSERT INTO rc_v2_operational_followup (
+                work_unit_key, market, ticker, company_id, fiscal_year, fiscal_quarter, canonical_report_date,
+                last_v2_component_status, followup_reason, retry_required, maintenance_required,
+                last_attempt_at, last_run_id, active, created_at, updated_at
+            ) VALUES (?, 'usa', ?, ?, 2026, 'Q2', '2026-06-30',
+                      'RETRY', 'PROVIDER_NO_DATA', 1, 0,
+                      '2026-08-14T00:00:00Z', 'source-b-run', 1, '2026-08-14T00:00:00Z', '2026-08-14T00:00:00Z')
+            """,
+            (f"usa|{ticker}|2026|Q2", ticker, company_id),
+        )
+        conn.commit()
+
+
+def _recording_legacy_success(calls: list[str]):
+    def runner(work_unit) -> LegacyComponentResult:
+        calls.append(work_unit.work_unit_key)
+        return _legacy_success(work_unit)
+
+    return runner
+
+
+def _recording_simfin_factory(calls: list[str]):
+    def factory(work_unit):
+        calls.append(work_unit.work_unit_key)
+        return [_simfin_adapter()]
+
+    return factory
 
 
 def test_followup_schema_idempotent_and_source_b_due_filter(tmp_path: Path) -> None:
@@ -256,6 +312,155 @@ def test_integrated_update_uses_provider_adapter_factory(tmp_path: Path) -> None
     assert result.overall_status == OVERALL_SUCCESS
     assert result.summary()["v2_canonical_writes"] == 4
     assert result.work_units[0].v2.raw_summary["cache_hits"] == ["SIMFIN_FIXTURE"]
+
+
+def test_authorized_scope_filters_due_source_b_after_merge_and_preserves_followup(tmp_path: Path) -> None:
+    legacy, v2 = _setup_multi_ticker_dual_store(tmp_path, ["ADP", "AES"])
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("ADP")])
+    _insert_due_followup(v2, "AES", company_id=2)
+    legacy_calls: list[str] = []
+    adapter_calls: list[str] = []
+
+    result = run_integrated_dual_store_update(
+        plan_path=plan,
+        legacy_db_path=legacy,
+        v2_db_path=v2,
+        execution_decision_date="2026-08-15",
+        run_id="run",
+        legacy_runner=_recording_legacy_success(legacy_calls),
+        provider_adapter_factory=_recording_simfin_factory(adapter_calls),
+        authorized_work_unit_keys={"usa|ADP|2026|Q2"},
+    )
+
+    assert [row.work_unit_key for row in result.work_units] == ["usa|ADP|2026|Q2"]
+    assert legacy_calls == ["usa|ADP|2026|Q2"]
+    assert adapter_calls == ["usa|ADP|2026|Q2"]
+    assert result.summary()["explicit_scope_enabled"] == 1
+    assert result.summary()["operational_merged_count"] == 2
+    assert result.summary()["executable_after_scope_count"] == 1
+    assert result.excluded_by_scope_keys == ["usa|AES|2026|Q2"]
+    with sqlite3.connect(v2) as conn:
+        row = conn.execute("SELECT last_run_id, active FROM rc_v2_operational_followup WHERE work_unit_key='usa|AES|2026|Q2'").fetchone()
+    assert tuple(row) == ("source-b-run", 1)
+
+
+def test_without_authorized_scope_source_b_retry_continuity_is_preserved(tmp_path: Path) -> None:
+    legacy, v2 = _setup_multi_ticker_dual_store(tmp_path, ["ADP", "AES"])
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("ADP")])
+    _insert_due_followup(v2, "AES", company_id=2)
+    legacy_calls: list[str] = []
+
+    result = run_integrated_dual_store_update(
+        plan_path=plan,
+        legacy_db_path=legacy,
+        v2_db_path=v2,
+        execution_decision_date="2026-08-15",
+        run_id="run",
+        legacy_runner=_recording_legacy_success(legacy_calls),
+        provider_adapters_by_work_unit={
+            "usa|ADP|2026|Q2": [_simfin_adapter()],
+            "usa|AES|2026|Q2": [_simfin_adapter()],
+        },
+    )
+
+    assert [row.work_unit_key for row in result.work_units] == ["usa|ADP|2026|Q2", "usa|AES|2026|Q2"]
+    assert legacy_calls == ["usa|ADP|2026|Q2", "usa|AES|2026|Q2"]
+    assert result.summary()["explicit_scope_enabled"] == 0
+    assert result.summary()["operational_merged_count"] == 2
+    assert result.summary()["executable_after_scope_count"] == 2
+
+
+def test_multi_key_authorized_scope_filters_unrelated_source_b(tmp_path: Path) -> None:
+    legacy, v2 = _setup_multi_ticker_dual_store(tmp_path, ["ABR", "AES", "ADP", "X"])
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("ABR"), _candidate("AES"), _candidate("ADP")])
+    _insert_due_followup(v2, "X", company_id=4)
+    legacy_calls: list[str] = []
+
+    result = run_integrated_dual_store_update(
+        plan_path=plan,
+        legacy_db_path=legacy,
+        v2_db_path=v2,
+        execution_decision_date="2026-08-15",
+        run_id="run",
+        legacy_runner=_recording_legacy_success(legacy_calls),
+        provider_adapter_factory=lambda _work_unit: [_simfin_adapter()],
+        authorized_work_unit_keys={"usa|ABR|2026|Q2", "usa|AES|2026|Q2", "usa|ADP|2026|Q2"},
+    )
+
+    assert [row.work_unit_key for row in result.work_units] == [
+        "usa|ABR|2026|Q2",
+        "usa|ADP|2026|Q2",
+        "usa|AES|2026|Q2",
+    ]
+    assert "usa|X|2026|Q2" not in legacy_calls
+    assert result.excluded_by_scope_keys == ["usa|X|2026|Q2"]
+
+
+def test_authorized_scope_filters_unrelated_source_a(tmp_path: Path) -> None:
+    legacy, v2 = _setup_multi_ticker_dual_store(tmp_path, ["ADP", "Y"])
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("ADP"), _candidate("Y")])
+    legacy_calls: list[str] = []
+
+    result = run_integrated_dual_store_update(
+        plan_path=plan,
+        legacy_db_path=legacy,
+        v2_db_path=v2,
+        execution_decision_date="2026-08-15",
+        run_id="run",
+        legacy_runner=_recording_legacy_success(legacy_calls),
+        provider_adapter_factory=lambda _work_unit: [_simfin_adapter()],
+        authorized_work_unit_keys={"usa|ADP|2026|Q2"},
+    )
+
+    assert [row.work_unit_key for row in result.work_units] == ["usa|ADP|2026|Q2"]
+    assert legacy_calls == ["usa|ADP|2026|Q2"]
+    assert result.excluded_by_scope_keys == ["usa|Y|2026|Q2"]
+
+
+def test_authorized_scope_rejects_malformed_key_before_execution(tmp_path: Path) -> None:
+    legacy, v2 = _setup_multi_ticker_dual_store(tmp_path, ["ADP"])
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("ADP")])
+    legacy_calls: list[str] = []
+
+    with pytest.raises(ValueError, match="DUAL_STORE_AUTHORIZED_WORK_UNIT_KEY_EMPTY"):
+        run_integrated_dual_store_update(
+            plan_path=plan,
+            legacy_db_path=legacy,
+            v2_db_path=v2,
+            execution_decision_date="2026-08-15",
+            run_id="run",
+            legacy_runner=_recording_legacy_success(legacy_calls),
+            authorized_work_unit_keys={""},
+        )
+
+    assert legacy_calls == []
+
+
+def test_cli_parses_repeatable_only_work_unit_key() -> None:
+    args = parse_args(
+        [
+            "--db",
+            "legacy.db",
+            "--run-id",
+            "run",
+            "--dual-store-update",
+            "--quarter-refresh-plan-json",
+            "temp/plan.json",
+            "--v2-db",
+            "v2.db",
+            "--only-work-unit-key",
+            "usa|ABR|2026|Q1",
+            "--only-work-unit-key",
+            "usa|ADP|2026|Q2",
+        ]
+    )
+
+    assert args.only_work_unit_key == ["usa|ABR|2026|Q1", "usa|ADP|2026|Q2"]
 
 
 @pytest.mark.parametrize(

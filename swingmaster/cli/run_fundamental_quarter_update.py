@@ -157,6 +157,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Run integrated Legacy + V2 selected-work-unit execution for an explicit plan",
     )
+    parser.add_argument(
+        "--only-work-unit-key",
+        action="append",
+        default=None,
+        help="Restrict --dual-store-update execution to an explicit authorized work-unit key; repeat for limited batches",
+    )
     parser.add_argument("--integrated-output-json", default=None, help="Optional JSON output path for --dual-store-update")
     parser.add_argument("--skip-ack", action="store_true", help="Run steps but do not acknowledge quarter state")
     parser.add_argument(
@@ -3312,6 +3318,7 @@ def run_fundamental_quarter_update(
     preflight_output_root: Path | None = None,
     dual_store_update: bool = False,
     integrated_output_json: Path | None = None,
+    only_work_unit_keys: list[str] | None = None,
 ) -> dict[str, object]:
     vintage_summary = validate_vintage_options(
         write_vintage=write_vintage,
@@ -3463,6 +3470,7 @@ def run_fundamental_quarter_update(
             run_id=run_id,
             legacy_runner=legacy_runner,
             provider_adapter_factory=build_operational_v2_provider_adapter_factory(),
+            authorized_work_unit_keys=only_work_unit_keys,
             output_json_path=integrated_output_json,
         )
         summary = {
@@ -3758,6 +3766,7 @@ def main() -> None:
             preflight_output_root=resolve_optional_db_path(args.preflight_output_root),
             dual_store_update=args.dual_store_update,
             integrated_output_json=resolve_optional_db_path(args.integrated_output_json),
+            only_work_unit_keys=args.only_work_unit_key,
         )
         if args.dual_store_update:
             raise SystemExit(int(summary.get("exit_code") or 0))

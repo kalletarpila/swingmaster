@@ -15,6 +15,7 @@ from swingmaster.fundamentals_v2.sec_ocf_backfill import (
     build_ocf_company_rule_quality,
     build_ocf_candidate_inventory,
     evaluate_sec_ocf_candidate,
+    validate_source_period_uniqueness,
 )
 
 
@@ -228,6 +229,96 @@ def test_narrowed_rule_rejects_company_rule_with_overlap_outlier() -> None:
     assert [row for row in narrowed if row["current_canonical_value"] is None][0]["narrowed_safe_for_production"] == 0
 
 
+def test_source_period_uniqueness_allows_q2_different_h1_and_q1_values() -> None:
+    result = validate_source_period_uniqueness(
+        "SAFE_RECONSTRUCTED_Q2_V2",
+        [_fact_payload("2026-01-01", "2026-06-30", 25.0), _fact_payload("2026-01-01", "2026-03-31", 10.0)],
+    )
+
+    assert result["passes"] is True
+    assert result["period_count"] == 2
+
+
+def test_source_period_uniqueness_allows_q3_different_9m_and_h1_values() -> None:
+    result = validate_source_period_uniqueness(
+        "SAFE_RECONSTRUCTED_Q3_V2",
+        [_fact_payload("2026-01-01", "2026-09-30", 45.0), _fact_payload("2026-01-01", "2026-06-30", 25.0)],
+    )
+
+    assert result["passes"] is True
+    assert result["period_count"] == 2
+
+
+def test_source_period_uniqueness_rejects_two_distinct_h1_values_for_q2() -> None:
+    result = validate_source_period_uniqueness(
+        "SAFE_RECONSTRUCTED_Q2_V2",
+        [
+            _fact_payload("2026-01-01", "2026-06-30", 25.0),
+            _fact_payload("2026-01-01", "2026-06-30", 26.0),
+            _fact_payload("2026-01-01", "2026-03-31", 10.0),
+        ],
+    )
+
+    assert result["passes"] is False
+    assert result["reason"] == "MULTIPLE_DISTINCT_VALUES_WITHIN_SOURCE_PERIOD"
+
+
+def test_source_period_uniqueness_rejects_two_distinct_q1_values_for_q2() -> None:
+    result = validate_source_period_uniqueness(
+        "SAFE_RECONSTRUCTED_Q2_V2",
+        [
+            _fact_payload("2026-01-01", "2026-06-30", 25.0),
+            _fact_payload("2026-01-01", "2026-03-31", 10.0),
+            _fact_payload("2026-01-01", "2026-03-31", 11.0),
+        ],
+    )
+
+    assert result["passes"] is False
+    assert result["reason"] == "MULTIPLE_DISTINCT_VALUES_WITHIN_SOURCE_PERIOD"
+
+
+def test_source_period_uniqueness_rejects_two_distinct_9m_values_for_q3() -> None:
+    result = validate_source_period_uniqueness(
+        "SAFE_RECONSTRUCTED_Q3_V2",
+        [
+            _fact_payload("2026-01-01", "2026-09-30", 45.0),
+            _fact_payload("2026-01-01", "2026-09-30", 46.0),
+            _fact_payload("2026-01-01", "2026-06-30", 25.0),
+        ],
+    )
+
+    assert result["passes"] is False
+    assert result["reason"] == "MULTIPLE_DISTINCT_VALUES_WITHIN_SOURCE_PERIOD"
+
+
+def test_source_period_uniqueness_rejects_two_distinct_h1_values_for_q3() -> None:
+    result = validate_source_period_uniqueness(
+        "SAFE_RECONSTRUCTED_Q3_V2",
+        [
+            _fact_payload("2026-01-01", "2026-09-30", 45.0),
+            _fact_payload("2026-01-01", "2026-06-30", 25.0),
+            _fact_payload("2026-01-01", "2026-06-30", 26.0),
+        ],
+    )
+
+    assert result["passes"] is False
+    assert result["reason"] == "MULTIPLE_DISTINCT_VALUES_WITHIN_SOURCE_PERIOD"
+
+
+def test_source_period_uniqueness_dedupes_identical_facts_within_period() -> None:
+    result = validate_source_period_uniqueness(
+        "SAFE_RECONSTRUCTED_Q2_V2",
+        [
+            _fact_payload("2026-01-01", "2026-06-30", 25.0),
+            _fact_payload("2026-01-01", "2026-06-30", 25.0),
+            _fact_payload("2026-01-01", "2026-03-31", 10.0),
+        ],
+    )
+
+    assert result["passes"] is True
+    assert [row for row in result["periods"] if row["context_end"] == "2026-06-30"][0]["fact_count"] == 2
+
+
 def _quarter(fq: str, report_date: str, *, operating_cashflow: float | None = None) -> V2OcfQuarter:
     return V2OcfQuarter(
         ticker="TEST",
@@ -268,6 +359,19 @@ def _fact(
         run_id="legacy",
         raw_field_name=field_name,
     )
+
+
+def _fact_payload(start: str, end: str, value: float) -> dict[str, object]:
+    return {
+        "concept": SEC_OCF_CONCEPT,
+        "context_start": start,
+        "context_end": end,
+        "duration_days": 90 if end.endswith("03-31") else 181 if end.endswith("06-30") else 273,
+        "unit": "USD",
+        "currency": "USD",
+        "dimensions": "undimensioned",
+        "source_value": value,
+    }
 
 
 def _facts(*facts: SecCashflowFact) -> dict[tuple[str, str], list[SecCashflowFact]]:

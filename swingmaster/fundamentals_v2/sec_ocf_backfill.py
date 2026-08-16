@@ -352,6 +352,70 @@ def build_narrowed_ocf_candidate_inventory(
     return out
 
 
+def validate_source_period_uniqueness(rule_type: str, source_facts: str | Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    facts = json.loads(source_facts) if isinstance(source_facts, str) else list(source_facts)
+    if rule_type in {"SAFE_DIRECT_Q1_V2", OCF_DIRECT_Q1}:
+        expected_periods = 1
+    elif rule_type in {
+        "SAFE_RECONSTRUCTED_Q2_V2",
+        "SAFE_RECONSTRUCTED_Q3_V2",
+        "SAFE_RECONSTRUCTED_Q4_V2",
+        OCF_RECONSTRUCTED_Q2,
+        OCF_RECONSTRUCTED_Q3,
+        OCF_RECONSTRUCTED_Q4,
+    }:
+        expected_periods = 2
+    else:
+        return {
+            "passes": False,
+            "reason": "UNSUPPORTED_RULE_TYPE",
+            "period_count": 0,
+            "expected_period_count": 0,
+            "periods": [],
+        }
+    grouped: dict[tuple[Any, ...], set[float]] = defaultdict(set)
+    period_rows: dict[tuple[Any, ...], list[Mapping[str, Any]]] = defaultdict(list)
+    for fact in facts:
+        key = (
+            fact.get("concept"),
+            fact.get("context_start"),
+            fact.get("context_end"),
+            fact.get("duration_days"),
+            fact.get("unit"),
+            fact.get("dimensions"),
+        )
+        grouped[key].add(float(fact["source_value"]))
+        period_rows[key].append(fact)
+    periods = [
+        {
+            "concept": key[0],
+            "context_start": key[1],
+            "context_end": key[2],
+            "duration_days": key[3],
+            "unit": key[4],
+            "dimensions": key[5],
+            "fact_count": len(period_rows[key]),
+            "distinct_source_value_count": len(values),
+            "distinct_source_values": sorted(values),
+        }
+        for key, values in grouped.items()
+    ]
+    bad_periods = [row for row in periods if row["distinct_source_value_count"] != 1]
+    if len(periods) != expected_periods:
+        reason = "SOURCE_PERIOD_COUNT_MISMATCH"
+    elif bad_periods:
+        reason = "MULTIPLE_DISTINCT_VALUES_WITHIN_SOURCE_PERIOD"
+    else:
+        reason = ""
+    return {
+        "passes": reason == "",
+        "reason": reason,
+        "period_count": len(periods),
+        "expected_period_count": expected_periods,
+        "periods": periods,
+    }
+
+
 def apply_sec_ocf_rows(
     conn: sqlite3.Connection,
     rows: list[dict[str, Any]],

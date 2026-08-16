@@ -12,6 +12,7 @@ from swingmaster.cli.run_fundamental_bootstrap_sec_raw import SEC_USER_AGENT, ru
 from swingmaster.cli.run_fundamental_sec_reconstruct_quarterly import run_sec_reconstruct_quarterly
 from swingmaster.fundamentals.build_quarterly import build_and_insert_quarterly_rows
 from swingmaster.fundamentals.dual_store_update_preflight import run_dual_store_preflight
+from swingmaster.fundamentals.dual_store_update_preflight import SQLiteV2FollowupRepository
 from swingmaster.fundamentals.dual_store_update_integration import (
     LegacyComponentResult,
     run_integrated_dual_store_update,
@@ -3406,6 +3407,7 @@ def run_fundamental_quarter_update(
             output_root=preflight_output_root,
             ticker=ticker,
             limit=limit,
+            followup_repository=SQLiteV2FollowupRepository(v2_db_path),
         )
         summary = {
             "tickers_total": result.merged_work_unit_count,

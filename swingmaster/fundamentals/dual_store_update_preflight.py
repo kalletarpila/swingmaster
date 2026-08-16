@@ -158,8 +158,11 @@ class WorkUnitPreflight:
 @dataclass
 class PreflightResult:
     plan_candidate_hash: str
+    execution_scope_hash: str
     source_a_count: int
     source_b_due_count: int
+    source_b_only_count: int
+    source_overlap_count: int
     merged_work_unit_count: int
     duplicate_merge_count: int
     floor_excluded_count: int
@@ -178,8 +181,11 @@ class PreflightResult:
                 provider_buckets[status] = provider_buckets.get(status, 0) + 1
         return {
             "plan_candidate_hash": self.plan_candidate_hash,
+            "execution_scope_hash": self.execution_scope_hash,
             "source_a_count": self.source_a_count,
             "source_b_due_count": self.source_b_due_count,
+            "source_b_only_count": self.source_b_only_count,
+            "source_overlap_count": self.source_overlap_count,
             "merged_work_unit_count": self.merged_work_unit_count,
             "duplicate_merge_count": self.duplicate_merge_count,
             "floor_excluded_count": self.floor_excluded_count,
@@ -470,6 +476,25 @@ def merge_work_units(source_a_rows: list[WorkUnit], source_b_rows: list[WorkUnit
     return sorted(merged.values(), key=lambda row: (row.market, row.ticker, row.fiscal_year, row.fiscal_quarter)), duplicate_count
 
 
+def execution_scope_hash(rows: list[WorkUnit]) -> str:
+    payload = [
+        {
+            "work_unit_key": row.key,
+            "market": row.market,
+            "ticker": row.ticker,
+            "fiscal_year": row.fiscal_year,
+            "fiscal_quarter": row.fiscal_quarter,
+            "report_date": row.report_date,
+            "source_a_selected": row.source_a is not None,
+            "source_b_selected": row.source_b is not None,
+        }
+        for row in sorted(rows, key=lambda item: item.key)
+    ]
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
+
+
 def inspect_legacy_state(conn: sqlite3.Connection, work_unit: WorkUnit) -> LegacyState:
     target = conn.execute(
         """
@@ -665,6 +690,8 @@ def run_dual_store_preflight(
     source_a_rows = [row for row in source_a_rows if is_at_or_after_operational_floor(row.fiscal_year, row.fiscal_quarter)]
     source_b_rows = [row for row in source_b_rows if is_at_or_after_operational_floor(row.fiscal_year, row.fiscal_quarter)]
     merged_rows, duplicate_count = merge_work_units(source_a_rows, source_b_rows)
+    source_a_keys = {row.key for row in source_a_rows}
+    source_b_keys = {row.key for row in source_b_rows}
     with open_readonly_sqlite(legacy_db_path) as legacy_conn, open_readonly_sqlite(v2_db_path) as v2_conn:
         work_units = [
             WorkUnitPreflight(
@@ -684,8 +711,11 @@ def run_dual_store_preflight(
         ]
     result = PreflightResult(
         plan_candidate_hash=str(plan["candidate_hash"]),
+        execution_scope_hash=execution_scope_hash(merged_rows),
         source_a_count=len(source_a_rows),
         source_b_due_count=len(source_b_rows),
+        source_b_only_count=len(source_b_keys - source_a_keys),
+        source_overlap_count=len(source_a_keys & source_b_keys),
         merged_work_unit_count=len(merged_rows),
         duplicate_merge_count=duplicate_count,
         floor_excluded_count=floor_excluded_count,

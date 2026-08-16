@@ -23,7 +23,7 @@ from swingmaster.fundamentals.dual_store_update_preflight import SQLiteV2Followu
 from swingmaster.fundamentals.result_check import PLAN_VERSION, candidate_hash, merge_v2_followups_into_plan
 from swingmaster.fundamentals.selected_v2_work_unit_executor import StaticProviderAdapter, build_simfin_statement_candidates
 from swingmaster.fundamentals.selected_v2_work_unit_executor import build_simfin_share_candidate
-from swingmaster.cli.run_fundamental_quarter_update import parse_args
+from swingmaster.cli.run_fundamental_quarter_update import parse_args, run_fundamental_quarter_update
 from swingmaster.tests.test_dual_store_update_preflight import _create_legacy_db, _insert_legacy_complete
 from swingmaster.tests.test_selected_v2_work_unit_executor import _connect as _connect_v2
 from swingmaster.tests.test_selected_v2_work_unit_executor import _company as _insert_v2_company
@@ -343,6 +343,40 @@ def test_authorized_scope_filters_due_source_b_after_merge_and_preserves_followu
     with sqlite3.connect(v2) as conn:
         row = conn.execute("SELECT last_run_id, active FROM rc_v2_operational_followup WHERE work_unit_key='usa|AES|2026|Q2'").fetchone()
     assert tuple(row) == ("source-b-run", 1)
+
+
+def test_preflight_only_uses_sqlite_followups_and_emits_execution_scope(tmp_path: Path) -> None:
+    legacy, v2 = _setup_multi_ticker_dual_store(tmp_path, ["ADP", "AES"])
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("ADP")])
+    _insert_due_followup(v2, "AES", company_id=2)
+    output_root = Path("temp/test_dual_store_update_integration/sqlite_followup_preflight")
+
+    summary = run_fundamental_quarter_update(
+        db_path=legacy,
+        run_id="preflight",
+        market="usa",
+        osakedata_db_path=None,
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        quarter_refresh_plan_json=plan,
+        execution_decision_date="2026-08-15",
+        v2_db_path=v2,
+        preflight_only=True,
+        dual_store_update=False,
+        skip_ack=False,
+        preflight_output_root=output_root,
+    )
+
+    assert summary["source_a_count"] == 1
+    assert summary["source_b_due_count"] == 1
+    assert summary["source_b_only_count"] == 1
+    assert summary["source_overlap_count"] == 0
+    assert summary["merged_work_unit_count"] == 2
+    assert summary["execution_scope_hash"]
+    persisted = json.loads((output_root / "summary.json").read_text(encoding="utf-8"))
+    assert persisted["execution_scope_hash"] == summary["execution_scope_hash"]
 
 
 def test_without_authorized_scope_source_b_retry_continuity_is_preserved(tmp_path: Path) -> None:

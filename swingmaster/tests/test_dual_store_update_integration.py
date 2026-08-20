@@ -19,7 +19,7 @@ from swingmaster.fundamentals.dual_store_update_integration import (
     exit_code_for_overall_status,
     run_integrated_dual_store_update,
 )
-from swingmaster.fundamentals.dual_store_update_preflight import SQLiteV2FollowupRepository
+from swingmaster.fundamentals.dual_store_update_preflight import SQLiteV2FollowupRepository, canonical_execution_scope_hash, run_dual_store_preflight
 from swingmaster.fundamentals.result_check import PLAN_VERSION, candidate_hash, merge_v2_followups_into_plan
 from swingmaster.fundamentals.selected_v2_work_unit_executor import StaticProviderAdapter, build_simfin_statement_candidates
 from swingmaster.fundamentals.selected_v2_work_unit_executor import build_simfin_share_candidate
@@ -521,6 +521,31 @@ def test_without_authorized_scope_source_b_retry_continuity_is_preserved(tmp_pat
     assert result.summary()["executable_after_scope_count"] == 2
 
 
+def test_unscoped_source_a_source_b_execution_hash_uses_canonical_identity_set(tmp_path: Path) -> None:
+    legacy, v2 = _setup_multi_ticker_dual_store(tmp_path, ["ABR", "AES", "ADP", "X"])
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("ABR"), _candidate("AES"), _candidate("ADP")])
+    _insert_due_followup(v2, "X", company_id=4)
+
+    result = run_integrated_dual_store_update(
+        plan_path=plan,
+        legacy_db_path=legacy,
+        v2_db_path=v2,
+        execution_decision_date="2026-08-15",
+        run_id="run",
+        legacy_runner=_legacy_success,
+        provider_adapter_factory=lambda _work_unit: [_simfin_adapter()],
+    )
+
+    assert [row.work_unit_key for row in result.work_units] == [
+        "usa|ABR|2026|Q2",
+        "usa|ADP|2026|Q2",
+        "usa|AES|2026|Q2",
+        "usa|X|2026|Q2",
+    ]
+    assert result.summary()["execution_scope_hash"] == "2b864b70def31d204a5e55e36aecdac8ad45c323242a21309fe635b578c8a02e"
+
+
 def test_multi_key_authorized_scope_filters_unrelated_source_b(tmp_path: Path) -> None:
     legacy, v2 = _setup_multi_ticker_dual_store(tmp_path, ["ABR", "AES", "ADP", "X"])
     plan = _safe_plan_path(tmp_path)
@@ -546,6 +571,77 @@ def test_multi_key_authorized_scope_filters_unrelated_source_b(tmp_path: Path) -
     ]
     assert "usa|X|2026|Q2" not in legacy_calls
     assert result.excluded_by_scope_keys == ["usa|X|2026|Q2"]
+    expected_hash = canonical_execution_scope_hash(["usa|ABR|2026|Q2", "usa|AES|2026|Q2", "usa|ADP|2026|Q2"])
+    assert result.summary()["execution_scope_hash"] == expected_hash
+    assert result.summary()["authorized_work_unit_count"] == 3
+    assert result.summary()["executable_after_scope_count"] == 3
+
+
+def test_authorized_preflight_and_execution_scope_hash_match(tmp_path: Path) -> None:
+    legacy, v2 = _setup_multi_ticker_dual_store(tmp_path, ["ABR", "AES", "ADP", "X"])
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("ABR"), _candidate("AES"), _candidate("ADP")])
+    _insert_due_followup(v2, "X", company_id=4)
+    scope = ["usa|AES|2026|Q2", "usa|ABR|2026|Q2", "usa|ADP|2026|Q2"]
+
+    preflight = run_dual_store_preflight(
+        plan_path=plan,
+        legacy_db_path=legacy,
+        v2_db_path=v2,
+        execution_decision_date="2026-08-15",
+        followup_repository=SQLiteV2FollowupRepository(v2),
+        authorized_work_unit_keys=scope,
+    )
+    execution = run_integrated_dual_store_update(
+        plan_path=plan,
+        legacy_db_path=legacy,
+        v2_db_path=v2,
+        execution_decision_date="2026-08-15",
+        run_id="run",
+        legacy_runner=_legacy_success,
+        provider_adapter_factory=lambda _work_unit: [_simfin_adapter()],
+        authorized_work_unit_keys=scope,
+    )
+
+    assert preflight.summary()["execution_scope_hash"] == execution.summary()["execution_scope_hash"]
+    assert execution.summary()["execution_scope_hash"] == canonical_execution_scope_hash(scope)
+
+
+def test_cli_preflight_and_direct_preflight_scope_hash_match(tmp_path: Path) -> None:
+    legacy, v2 = _setup_multi_ticker_dual_store(tmp_path, ["ABR", "AES", "ADP", "X"])
+    osakedata = tmp_path / "osakedata.db"
+    osakedata.touch()
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("ABR"), _candidate("AES"), _candidate("ADP")])
+    _insert_due_followup(v2, "X", company_id=4)
+    scope = ["usa|AES|2026|Q2", "usa|ABR|2026|Q2", "usa|ADP|2026|Q2"]
+
+    direct = run_dual_store_preflight(
+        plan_path=plan,
+        legacy_db_path=legacy,
+        v2_db_path=v2,
+        execution_decision_date="2026-08-15",
+        followup_repository=SQLiteV2FollowupRepository(v2),
+        authorized_work_unit_keys=scope,
+    )
+    cli = run_fundamental_quarter_update(
+        db_path=legacy,
+        osakedata_db_path=osakedata,
+        run_id="run",
+        market="usa",
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        skip_ack=False,
+        quarter_refresh_plan_json=plan,
+        execution_decision_date="2026-08-15",
+        preflight_only=True,
+        v2_db_path=v2,
+        only_work_unit_keys=scope,
+    )
+
+    assert cli["execution_scope_hash"] == direct.summary()["execution_scope_hash"]
+    assert cli["execution_scope_hash"] == canonical_execution_scope_hash(scope)
 
 
 def test_authorized_scope_filters_unrelated_source_a(tmp_path: Path) -> None:
@@ -576,7 +672,7 @@ def test_authorized_scope_rejects_malformed_key_before_execution(tmp_path: Path)
     _write_plan(plan, legacy, [_candidate("ADP")])
     legacy_calls: list[str] = []
 
-    with pytest.raises(ValueError, match="DUAL_STORE_AUTHORIZED_WORK_UNIT_KEY_EMPTY"):
+    with pytest.raises(ValueError, match="DUAL_STORE_WORK_UNIT_KEY_MALFORMED"):
         run_integrated_dual_store_update(
             plan_path=plan,
             legacy_db_path=legacy,

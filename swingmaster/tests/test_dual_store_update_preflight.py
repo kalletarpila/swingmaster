@@ -16,14 +16,31 @@ from swingmaster.fundamentals.dual_store_update_preflight import (
     V2_NOOP_SETTLED_INCOMPLETE,
     V2_RETRY_PROVIDER,
     V2_DEFERRED_POLICY_UNSUPPORTED,
+    canonical_execution_scope_hash,
+    canonical_execution_scope_keys,
+    canonical_execution_scope_serialization,
     followup_is_due,
     load_validated_source_a_plan,
     merge_work_units,
+    normalize_work_unit_key,
     normalize_source_a,
     run_dual_store_preflight,
     source_b_work_units,
 )
 from swingmaster.fundamentals.result_check import PLAN_VERSION, candidate_hash
+
+
+def test_canonical_execution_scope_hash_contract_is_order_and_format_stable() -> None:
+    keys = [" usa|adp|2026|q2 ", "usa|ABR|2026|Q2", "usa|ADP|2026|Q2", "usa|AES|2026|Q2\r\n"]
+
+    assert canonical_execution_scope_keys(keys) == ["usa|ABR|2026|Q2", "usa|ADP|2026|Q2", "usa|AES|2026|Q2"]
+    assert canonical_execution_scope_serialization(keys) == "usa|ABR|2026|Q2\nusa|ADP|2026|Q2\nusa|AES|2026|Q2\n"
+    assert canonical_execution_scope_hash(keys) == "57fb156019f821274b3046ba1fd7c6aa174a3b8777479e384cbef5ed83d99dee"
+
+
+def test_canonical_execution_scope_hash_rejects_malformed_key() -> None:
+    with pytest.raises(ValueError, match="DUAL_STORE_WORK_UNIT_KEY_MALFORMED"):
+        normalize_work_unit_key("usa|ADP|2026")
 
 
 def _create_legacy_db(path: Path) -> None:

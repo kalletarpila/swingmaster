@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any, Mapping, Protocol
 
@@ -53,6 +54,8 @@ ACTIONABLE_PROVIDER_STATUSES = {
     "CACHE_AVAILABLE",
     "FOLLOWUP_RETRY_DUE",
 }
+
+_WORK_UNIT_KEY_RE = re.compile(r"^(?P<market>[A-Za-z0-9_]+)\|(?P<ticker>[A-Za-z0-9.\-]+)\|(?P<year>[0-9]{4})\|(?P<quarter>Q[1-4]|q[1-4])$")
 
 
 @dataclass(frozen=True)
@@ -161,15 +164,21 @@ class WorkUnitPreflight:
 class PreflightResult:
     plan_candidate_hash: str
     execution_scope_hash: str
+    operational_execution_scope_hash: str
     source_a_count: int
     source_b_due_count: int
     source_b_only_count: int
     source_overlap_count: int
     merged_work_unit_count: int
+    executable_work_unit_count: int
     duplicate_merge_count: int
     floor_excluded_count: int
     provider_calls: int
     writes: int
+    explicit_scope_enabled: bool = False
+    authorized_work_unit_keys: list[str] = field(default_factory=list)
+    excluded_by_scope_keys: list[str] = field(default_factory=list)
+    authorized_missing_keys: list[str] = field(default_factory=list)
     work_units: list[WorkUnitPreflight] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
@@ -184,15 +193,21 @@ class PreflightResult:
         return {
             "plan_candidate_hash": self.plan_candidate_hash,
             "execution_scope_hash": self.execution_scope_hash,
+            "operational_execution_scope_hash": self.operational_execution_scope_hash,
             "source_a_count": self.source_a_count,
             "source_b_due_count": self.source_b_due_count,
             "source_b_only_count": self.source_b_only_count,
             "source_overlap_count": self.source_overlap_count,
             "merged_work_unit_count": self.merged_work_unit_count,
+            "executable_work_unit_count": self.executable_work_unit_count,
             "duplicate_merge_count": self.duplicate_merge_count,
             "floor_excluded_count": self.floor_excluded_count,
             "provider_calls": self.provider_calls,
             "writes": self.writes,
+            "explicit_scope_enabled": int(self.explicit_scope_enabled),
+            "authorized_work_unit_count": len(self.authorized_work_unit_keys),
+            "excluded_by_scope_count": len(self.excluded_by_scope_keys),
+            "authorized_missing_count": len(self.authorized_missing_keys),
             "legacy_action_counts": legacy_counts,
             "v2_action_counts": v2_counts,
             "provider_due_buckets": provider_buckets,
@@ -349,6 +364,28 @@ def work_unit_key(market: Any, ticker: Any, fiscal_year: int, fiscal_quarter: st
     return "|".join([normalize_market(market), normalize_ticker(ticker), str(int(fiscal_year)), normalize_fiscal_quarter(fiscal_quarter)])
 
 
+def normalize_work_unit_key(key: Any) -> str:
+    raw = str(key).strip()
+    match = _WORK_UNIT_KEY_RE.fullmatch(raw)
+    if match is None:
+        raise ValueError(f"DUAL_STORE_WORK_UNIT_KEY_MALFORMED:{raw}")
+    return work_unit_key(match.group("market"), match.group("ticker"), int(match.group("year")), match.group("quarter"))
+
+
+def canonical_execution_scope_keys(keys: list[Any] | set[Any] | tuple[Any, ...]) -> list[str]:
+    return sorted({normalize_work_unit_key(key) for key in keys})
+
+
+def canonical_execution_scope_serialization(keys: list[Any] | set[Any] | tuple[Any, ...]) -> str:
+    canonical_keys = canonical_execution_scope_keys(keys)
+    return "".join(f"{key}\n" for key in canonical_keys)
+
+
+def canonical_execution_scope_hash(keys: list[Any] | set[Any] | tuple[Any, ...]) -> str:
+    payload = canonical_execution_scope_serialization(keys).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def load_validated_source_a_plan(
     *,
     plan_path: Path,
@@ -483,22 +520,7 @@ def merge_work_units(source_a_rows: list[WorkUnit], source_b_rows: list[WorkUnit
 
 
 def execution_scope_hash(rows: list[WorkUnit]) -> str:
-    payload = [
-        {
-            "work_unit_key": row.key,
-            "market": row.market,
-            "ticker": row.ticker,
-            "fiscal_year": row.fiscal_year,
-            "fiscal_quarter": row.fiscal_quarter,
-            "report_date": row.report_date,
-            "source_a_selected": row.source_a is not None,
-            "source_b_selected": row.source_b is not None,
-        }
-        for row in sorted(rows, key=lambda item: item.key)
-    ]
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-    ).hexdigest()
+    return canonical_execution_scope_hash([row.key for row in rows])
 
 
 def inspect_legacy_state(conn: sqlite3.Connection, work_unit: WorkUnit) -> LegacyState:
@@ -676,6 +698,7 @@ def run_dual_store_preflight(
     ticker: str | None = None,
     limit: int | None = None,
     followup_repository: V2FollowupRepository | None = None,
+    authorized_work_unit_keys: set[str] | list[str] | tuple[str, ...] | None = None,
 ) -> PreflightResult:
     plan, source_a_plan_rows = load_validated_source_a_plan(
         plan_path=plan_path,
@@ -698,8 +721,9 @@ def run_dual_store_preflight(
     merged_rows, duplicate_count = merge_work_units(source_a_rows, source_b_rows)
     source_a_keys = {row.key for row in source_a_rows}
     source_b_keys = {row.key for row in source_b_rows}
+    scope = None if authorized_work_unit_keys is None else set(canonical_execution_scope_keys(authorized_work_unit_keys))
     with open_readonly_sqlite(legacy_db_path) as legacy_conn, open_readonly_sqlite(v2_db_path) as v2_conn:
-        work_units = [
+        operational_work_units = [
             WorkUnitPreflight(
                 work_unit_key=row.key,
                 market=row.market,
@@ -719,19 +743,34 @@ def run_dual_store_preflight(
             )
             for row in merged_rows
         ]
+    if scope is None:
+        executable_work_units = operational_work_units
+        excluded_by_scope_keys: list[str] = []
+        authorized_missing_keys: list[str] = []
+    else:
+        operational_keys = {row.work_unit_key for row in operational_work_units}
+        executable_work_units = [row for row in operational_work_units if row.work_unit_key in scope]
+        excluded_by_scope_keys = [row.work_unit_key for row in operational_work_units if row.work_unit_key not in scope]
+        authorized_missing_keys = sorted(scope - operational_keys)
     result = PreflightResult(
         plan_candidate_hash=str(plan["candidate_hash"]),
-        execution_scope_hash=execution_scope_hash(merged_rows),
+        execution_scope_hash=canonical_execution_scope_hash([row.work_unit_key for row in executable_work_units]),
+        operational_execution_scope_hash=canonical_execution_scope_hash([row.work_unit_key for row in operational_work_units]),
         source_a_count=len(source_a_rows),
         source_b_due_count=len(source_b_rows),
         source_b_only_count=len(source_b_keys - source_a_keys),
         source_overlap_count=len(source_a_keys & source_b_keys),
         merged_work_unit_count=len(merged_rows),
+        executable_work_unit_count=len(executable_work_units),
         duplicate_merge_count=duplicate_count,
         floor_excluded_count=floor_excluded_count,
         provider_calls=0,
         writes=0,
-        work_units=work_units,
+        explicit_scope_enabled=scope is not None,
+        authorized_work_unit_keys=sorted(scope) if scope is not None else [],
+        excluded_by_scope_keys=excluded_by_scope_keys,
+        authorized_missing_keys=authorized_missing_keys,
+        work_units=executable_work_units,
     )
     if output_root is not None:
         write_preflight_artifacts(result, output_root)

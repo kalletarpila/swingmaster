@@ -19,6 +19,8 @@ from swingmaster.fundamentals.dual_store_update_preflight import (
     V2_RETRY_PROVIDER,
     PreflightResult,
     WorkUnitPreflight,
+    canonical_execution_scope_hash,
+    canonical_execution_scope_keys,
     run_dual_store_preflight,
 )
 from swingmaster.fundamentals.selected_v2_work_unit_executor import (
@@ -138,6 +140,7 @@ class IntegratedUpdateResult:
             "v2_provider_calls": self.provider_calls,
             "plan_candidate_hash": self.preflight.get("plan_candidate_hash"),
             "execution_scope_hash": self.preflight.get("execution_scope_hash"),
+            "operational_execution_scope_hash": self.preflight.get("operational_execution_scope_hash"),
             "source_a_count": self.preflight.get("source_a_count", 0),
             "source_b_due_count": self.preflight.get("source_b_due_count", 0),
             "source_b_only_count": self.preflight.get("source_b_only_count", 0),
@@ -300,18 +303,18 @@ def run_integrated_dual_store_update(
         v2_db_path=v2_db_path,
         execution_decision_date=execution_decision_date,
         followup_repository=SQLiteV2FollowupRepository(v2_db_path),
+        authorized_work_unit_keys=authorized_work_unit_keys,
     )
-    scope = _normalize_authorized_work_unit_keys(authorized_work_unit_keys)
+    scope = None if authorized_work_unit_keys is None else set(canonical_execution_scope_keys(authorized_work_unit_keys))
     operational_work_units = list(preflight.work_units)
     if scope is None:
         executable_work_units = operational_work_units
         excluded_by_scope_keys: list[str] = []
         authorized_missing_keys: list[str] = []
     else:
-        executable_work_units = [row for row in operational_work_units if row.work_unit_key in scope]
-        operational_keys = {row.work_unit_key for row in operational_work_units}
-        excluded_by_scope_keys = [row.work_unit_key for row in operational_work_units if row.work_unit_key not in scope]
-        authorized_missing_keys = sorted(scope - operational_keys)
+        executable_work_units = operational_work_units
+        excluded_by_scope_keys = list(preflight.excluded_by_scope_keys)
+        authorized_missing_keys = list(preflight.authorized_missing_keys)
         unexpected = [row.work_unit_key for row in executable_work_units if row.work_unit_key not in scope]
         if unexpected:
             raise RuntimeError(f"DUAL_STORE_AUTHORIZATION_SCOPE_BREACH:{unexpected}")
@@ -368,11 +371,14 @@ def run_integrated_dual_store_update(
             int(row.legacy.status == STATUS_FAILED) + int(row.v2.status == STATUS_FAILED) for row in results
         ),
         provider_calls=sum(len(row.v2.raw_summary.get("providers_called", [])) for row in results if row.v2.raw_summary),
-        preflight=preflight.summary(),
+        preflight={
+            **preflight.summary(),
+            "execution_scope_hash": canonical_execution_scope_hash([row.work_unit_key for row in executable_work_units]),
+        },
         work_units=results,
         explicit_scope_enabled=scope is not None,
         authorized_work_unit_keys=sorted(scope) if scope is not None else [],
-        operational_merged_count=len(operational_work_units),
+        operational_merged_count=preflight.merged_work_unit_count,
         executable_after_scope_count=len(executable_work_units),
         excluded_by_scope_keys=excluded_by_scope_keys,
         authorized_missing_keys=authorized_missing_keys,
@@ -387,7 +393,7 @@ def run_integrated_dual_store_update(
 def _normalize_authorized_work_unit_keys(keys: set[str] | list[str] | tuple[str, ...] | None) -> set[str] | None:
     if keys is None:
         return None
-    normalized = {str(key).strip() for key in keys}
+    normalized = set(canonical_execution_scope_keys(keys))
     if any(not key for key in normalized):
         raise ValueError("DUAL_STORE_AUTHORIZED_WORK_UNIT_KEY_EMPTY")
     return normalized

@@ -3418,6 +3418,7 @@ def run_fundamental_quarter_update(
             ticker=ticker,
             limit=limit,
             followup_repository=SQLiteV2FollowupRepository(v2_db_path),
+            authorized_work_unit_keys=only_work_unit_keys,
         )
         summary = {
             "tickers_total": result.merged_work_unit_count,

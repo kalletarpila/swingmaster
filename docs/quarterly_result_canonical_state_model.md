@@ -277,7 +277,7 @@ Read-only verification on 2026-08-20 found:
 | System | Fiscal labels | Period end/report date | Period start date | Reliable max-overlap derivability | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Legacy `fundamentals_usa.db` | Not stored on `rc_fundamental_quarterly` or ingestion status rows. Provider observation content may have fiscal labels for some observations. | `period_end_date` exists on `156094/156094` quarterly rows. | No explicit actual start-date column found in the current quarterly/status/provenance tables inspected. | Approximate method can be applied where `period_end_date` is valid. | Period-end-only calendar-quarter classification remains unsafe. Legacy fiscal identity remains ambiguous without additional evidence. |
-| V2 `rc_fundamentals_v2.db` | `rc_v2_quarter.fiscal_year` and `fiscal_period` are explicit. | `rc_v2_quarter.report_date` exists on `85424/85424` quarter rows; `64910` belong to active companies. Current V2 sources name this as fiscal-period report date/logical period end. | No explicit actual start-date column found in V2 tables. | Approximate method can be applied where `report_date` is valid as period-end-like evidence. | `14108` V2 rows have fiscal label different from the calendar year/quarter of `report_date`, proving calendar-date substitution is unsafe. |
+| V2 `rc_fundamentals_v2.db` | `rc_v2_quarter.fiscal_year` and `fiscal_period` are explicit. | `rc_v2_quarter.report_date` exists on `85424/85424` quarter rows; `64910` belong to active companies. Code verification shows this is populated from SimFin `Report Date` and mapped by the V2 bridge as logical period end; `publish_date` is populated separately from SimFin `Publish Date`. | No explicit actual start-date column found in V2 tables. | Approximate method can be applied where SimFin `Report Date` is valid as period-end-like evidence. | `14108` V2 rows have fiscal label different from the calendar year/quarter of `report_date`, proving calendar-date substitution is unsafe. Groups with the same fiscal label but multiple report dates need fiscal-period-end validation, not publication-date treatment. |
 
 Because reliable actual start dates are not currently present in the primary Legacy or V2 quarter
 tables, the current agreed practical method is:
@@ -336,14 +336,28 @@ for the same Q identity.
 `Q_RESULT_LIFECYCLE` is the minimal sequential lifecycle of the quarterly result itself. It must not
 carry readiness, provider, retry, SEC, score, or historical backfill meaning.
 
+Expected future results should be persisted in a result-calendar or expected-result structure, not
+as fake canonical Q rows. A canonical Q row starts when a result is detected or when a
+migration/import has enough fiscal identity evidence to create the reported fiscal-period row.
+`REOPENED` is represented as an event/transition back to active enrichment, not as a persisted
+lifecycle value.
+
 | Canonical name | Plain-language description | Precise meaning | Entry condition | Exit condition | Normal next state | Can be skipped? | Can be revisited? | Applies to | Does not imply |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `EXPECTED` | A result is expected but not observed. | Calendar or provider evidence says a future Q result should arrive. | Expected date or calendar estimate exists. | Result is observed or the expectation is withdrawn/stale. | `RESULT_DETECTED` | Yes, if a result appears without prior calendar evidence. | Yes, for future expected quarters as estimates change. | Future/latest context, run/event level. | No canonical data, no provider success, no readiness. |
-| `RESULT_DETECTED` | The system has seen evidence that the Q exists. | A result event or source period indicates the Q result has appeared, but canonical ingestion is not complete. | New result event/source period detected. | Canonical identity row or target mapping exists. | `CANONICALIZED` | Yes, if historical data is imported directly. | Yes, if a settled Q is later re-detected through new evidence. | Any Q, especially latest/current operations. | Core ready, SEC confirmed, score ready. |
-| `CANONICALIZED` | The Q exists in canonical storage or mapped Legacy storage. | The system can identify a concrete Q row/target. It may have no fields or partial fields. | V2 quarter row exists or Legacy target/fact row exists. | Provider/enrichment work starts, or no work remains. | `INGESTING` or `OPERATIONALLY_SETTLED` | Yes, for conceptual expected-only records. | Yes. | Any Q. | Complete data, source assurance, or no historical debt. |
-| `INGESTING` | The system is actively trying to fill or confirm the Q. | Fetch, enrichment, provider retry, or confirmation work is active under current policy. | Work is selected, retry due, or followup active. | Work succeeds, becomes blocked, or no eligible work remains. | `OPERATIONALLY_SETTLED` | Yes, if no work is needed. | Yes. | Any Q; normal new-result ingestion is latest/current. | Core readiness, score readiness, or SEC confirmation. |
-| `OPERATIONALLY_SETTLED` | No normal immediate work is pending. | There is currently no normal immediate operational work pending for this Q in the standard quarterly-result workflow. | No due action remains under current policy. | New evidence, correction, backfill selection, or retry reopens the Q. | Usually stable; can go to `REOPENED`. | Yes. | Yes. | Any Q. | Core ready, SEC confirmed, score ready, historically complete, or all enrichment complete. |
-| `REOPENED` | A previously settled Q needs renewed processing. | A settled Q is selected again because new evidence, correction, enrichment, or backfill is now relevant. | New evidence, accepted correction, new enrichment opportunity, or controlled backfill selection. | Reprocessing starts. | `INGESTING` | No, only after prior settlement. | Yes. | Any Q. | The prior data was wrong; only that it needs renewed handling. |
+| `RESULT_DETECTED` | The system has seen evidence that the Q exists. | A result event, provider source period, or migration source indicates that the reported fiscal Q exists, but no normal automatic enrichment state has been decided yet. | New result event/source period detected, or migration/import has sufficient fiscal identity evidence. | Work is due, or no work is currently due. | `ENRICHING` or `OPERATIONALLY_SETTLED` | Yes, if historical data is imported directly into an active or settled state. | Yes, if a settled Q is later re-detected through new evidence. | Any Q, especially latest/current operations. | Core ready, SEC confirmed, score ready, or canonical value completeness. |
+| `ENRICHING` | Automatic work is active or due. | One or more normal automatic Q-level tasks are currently active or due: initial acquisition, provider enrichment, safe NULL-fill, provider retry, or due SEC confirmation check. | Work is selected, retry is due, or followup is active. | Work succeeds, creates a durable resolution issue, or no eligible automatic work remains. | `OPERATIONALLY_SETTLED` | Yes, if no work is needed. | Yes. | Any Q; normal new-result enrichment is latest/current. | Core readiness, score readiness, SEC confirmation, or absence of manual review issues. |
+| `OPERATIONALLY_SETTLED` | No normal immediate work is pending. | No useful normal automatic Q-result work is currently due under current policy. | No due automatic action remains. | New evidence, retry due, correction, or backfill selection reopens the Q. | Stable until `Q_REOPENED` event returns it to `ENRICHING`. | Yes. | Yes. | Any Q. | Core ready, SEC confirmed, score ready, historically complete, all providers succeeded, or every optional field exists. |
+
+The following terms are intentionally not persisted Q lifecycle states:
+
+| Term | Classification | Reason |
+| --- | --- | --- |
+| `EXPECTED` | Result-calendar / scheduling state | A future expected result may exist before the canonical Q exists. |
+| `INITIAL_DATA_ACQUIRED` | Event or derived condition | It is derived from provider acquisition and canonical field presence. |
+| `CANONICALIZED` | Storage milestone / event | It says a row or mapping exists, not where the Q is in operational progression. |
+| `RECONCILING` | Transient processing phase | Durable unresolved reconciliation creates a resolution issue and possibly `NEXT_ACTION=MANUAL_REVIEW`. |
+| `REOPENED` / `Q_REOPENED` | Event / transition | A settled Q moves back to `ENRICHING`; the event is useful, the state is not. |
+| `BLOCKED_REVIEW` / `MANUAL_REVIEW` | Action or resolution issue | Review need is orthogonal to lifecycle and may coexist with settled or enriching Qs. |
 
 ### Reopened Semantics
 
@@ -355,12 +369,9 @@ carry readiness, provider, retry, SEC, score, or historical backfill meaning.
 - a historical backfill phase selects the Q
 - a previously failed provider path becomes retryable
 
-The current discovery supports `REOPENED` as a lifecycle concept, but the implementation detail is
-not locked. It may be persisted as a state, or represented as an event/transition back to
-`INGESTING`.
-
-Open implementation marker: `TERM_REQUIRES_FINAL_IMPLEMENTATION_CONTRACT` for whether `REOPENED`
-is stored as a state or emitted only as a transition event.
+The current architecture represents `REOPENED` as an event/transition back to active processing, not
+as a persisted lifecycle state. Other implementations may still expose the concept in reporting, but
+they should avoid storing it as a separate stable state unless there is a durable operational reason.
 
 ## Q Role
 
@@ -687,7 +698,7 @@ as a newly detected latest quarter. It is historical data debt.
 
 | Canonical name | Type | Allowed values | Scope | Mutually exclusive? | Can coexist with | Plain-language meaning | Technical meaning | Latest Q? | Historical Q? | Persistence recommendation |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `Q_RESULT_LIFECYCLE` | LIFECYCLE | `EXPECTED`, `RESULT_DETECTED`, `CANONICALIZED`, `INGESTING`, `OPERATIONALLY_SETTLED`, `REOPENED` | Any Q plus event context for expected | Yes within dimension | All parallel dimensions | Where the Q is in the standard result flow | Sequential lifecycle only | Yes | Yes | Derive initially |
+| `Q_RESULT_LIFECYCLE` | LIFECYCLE | `RESULT_DETECTED`, `ENRICHING`, `OPERATIONALLY_SETTLED` | Detected/imported canonical Qs | Yes within dimension | All parallel dimensions | Where the Q is in the standard result flow | Sequential lifecycle only | Yes | Yes | Derive initially; persist only if runtime needs a snapshot |
 | `Q_ROLE` | ROLE | `FUTURE_EXPECTED_Q`, `LATEST_OPERATIONAL_Q`, `HISTORICAL_Q` | Contextual | Yes within dimension | Lifecycle/readiness/action | Whether the Q is future, latest, or historical | Derived from ordering and decision date | Yes | Yes | Derive |
 | `CALENDAR_COMPARISON_PERIOD` | ANALYTICAL_METADATA | `calendar_comparison_year + calendar_comparison_quarter + method + quality` | Any Q where period-end evidence exists | Yes within metadata value | All state dimensions | Cross-company seasonal comparison bucket | Currently derived by maximum temporal overlap from an approximate three-calendar-month interval ending at period end; future actual-period-range method may supersede it | Yes | Yes | Derive; schema later only if consumers need it |
 | `Q_CORE_FIELDS_READY` | READINESS | `true`, `false`, `not_applicable`, `not_derivable` | Any Q | Yes within dimension | SEC pending, score false, enrichment incomplete | Required ordinary fields exist | Six-field positive-share rule | Yes | Yes | Derive |
@@ -822,7 +833,7 @@ Update reporting should separate:
 
 | During-run event | Post-run state |
 | --- | --- |
-| `Q_CREATED` | `Q_RESULT_LIFECYCLE=CANONICALIZED` or later |
+| `Q_CREATED` | Canonical row/storage milestone; lifecycle is `RESULT_DETECTED`, `ENRICHING`, or `OPERATIONALLY_SETTLED` depending on due work |
 | `Q_ENRICHED` | Field/provenance state changed |
 | `CORE_FIELDS_BECAME_READY` | `Q_CORE_FIELDS_READY=true` |
 | `SEC_CONFIRMATION_RECEIVED` | `SEC_CONFIRMATION_STATE=CONFIRMED` |
@@ -845,22 +856,20 @@ FUTURE_EXPECTED_Q -> LATEST_OPERATIONAL_Q -> HISTORICAL_Q
 
 SEQUENTIAL Q_RESULT_LIFECYCLE
 
-EXPECTED
-   |
-   v
 RESULT_DETECTED
    |
    v
-CANONICALIZED
-   |
-   v
-INGESTING
+ENRICHING
    |
    v
 OPERATIONALLY_SETTLED
    ^                 |
    |                 v
-   +----------- REOPENED
+   +----------- Q_REOPENED event
+
+EXPECTED lives in result-calendar state. CANONICALIZED and INITIAL_DATA_ACQUIRED are events or
+derived milestones. RECONCILING is a transient process phase. MANUAL_REVIEW is NEXT_ACTION plus a
+resolution issue.
 
 PARALLEL DIMENSIONS
 
@@ -915,8 +924,6 @@ Conceptual model already decided:
 
 Implementation details still open:
 
-- Whether `REOPENED` is persisted as a lifecycle state or represented as a transition marker back to
-  `INGESTING`.
 - Which events need durable event-history persistence for reliable daily "today" metrics.
 - Exact persistence strategy for canonical derived helper output, if any.
 - How much SEC/equivalent assurance can be derived from V2 provenance without a new explicit

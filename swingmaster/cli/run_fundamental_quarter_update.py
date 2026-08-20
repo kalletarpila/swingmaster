@@ -2978,6 +2978,7 @@ def process_ticker(
     yahoo_fallback_vintage_options: dict[str, object] | None = None,
     sec_latest_writer_vintage_options: dict[str, object] | None = None,
     vintage_yahoo_aware_action: str = VINTAGE_YAHOO_AWARE_ACTION_PLAN_ONLY,
+    force_provider_refresh: bool | None = None,
 ) -> dict[str, object]:
     ticker = str(row["ticker"]).upper()
     market = str(row["market"]).lower()
@@ -2987,10 +2988,11 @@ def process_ticker(
 
     print(f"TICKER {ticker} market={market} detected_period={detected_source_period_end_date} execution_source={execution_source}")
     decision = str(row["decision"]) if "decision" in row.keys() else ""
-    force_provider_refresh = execution_source == "quarter_refresh_plan" and decision in {
-        "RETRY_PARTIAL_QUARTER",
-        "RETRY_FETCH_FAILED",
-    }
+    if force_provider_refresh is None:
+        force_provider_refresh = execution_source == "quarter_refresh_plan" and decision in {
+            "RETRY_PARTIAL_QUARTER",
+            "RETRY_FETCH_FAILED",
+        }
     target_scoped_normalized = execution_source == "quarter_refresh_plan"
     quarterly_refresh_summary = run_quarterly_refresh(
         db_path=db_path,
@@ -3114,6 +3116,9 @@ def process_ticker(
         str(target_assessment.get("post_update_result") or ""),
     )
     quarterly_rows_written = quarterly_refresh_rows_written(quarterly_refresh_summary)
+    legacy_sec_provider_calls = int(bool(quarterly_refresh_summary.get("sec_refresh_required")))
+    legacy_yahoo_provider_calls = int(bool(quarterly_refresh_summary.get("yahoo_live_refresh_attempted")))
+    legacy_provider_calls = legacy_sec_provider_calls + legacy_yahoo_provider_calls
     ttm_rows_written = int(ttm_summary["rows_written"])
     material_fundamentals_changed = int(
         quarterly_rows_written > 0
@@ -3129,6 +3134,11 @@ def process_ticker(
         "score_rows_written": score_rows_written,
         "ack_rows_written": ack_rows_written,
         "material_fundamentals_changed": material_fundamentals_changed,
+        "legacy_provider_calls": legacy_provider_calls,
+        "legacy_sec_provider_calls": legacy_sec_provider_calls,
+        "legacy_yahoo_provider_calls": legacy_yahoo_provider_calls,
+        "legacy_force_provider_refresh": int(bool(force_provider_refresh)),
+        "legacy_refresh_decision": decision,
         **target_assessment,
         **source_confirmation,
         "sec_latest_writer_vintage_summary": sec_latest_writer_vintage_summary,
@@ -3442,6 +3452,7 @@ def run_fundamental_quarter_update(
                 skip_ack=True,
                 target_period_end_date=work_unit.target_period_end_date,
                 execution_source="quarter_refresh_plan",
+                force_provider_refresh=work_unit.legacy_force_provider_refresh,
             )
             post_result = str(process_summary.get("post_update_result") or "MANUAL_REVIEW")
             managed = persist_managed_update_ingestion_status(

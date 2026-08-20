@@ -151,6 +151,8 @@ class WorkUnitPreflight:
     target_period_end_date: str
     source_a_selected: bool
     source_b_selected: bool
+    legacy_refresh_decision: str | None
+    legacy_force_provider_refresh: bool
     legacy_state: LegacyState
     v2_state: V2State
 
@@ -419,6 +421,10 @@ def normalize_source_a(row: Mapping[str, Any]) -> WorkUnit:
         target_period_end_date=period,
         source_a=dict(row),
     )
+
+
+def legacy_force_provider_refresh_from_decision(decision: Any) -> bool:
+    return str(decision or "") in {DECISION_RETRY_PARTIAL_QUARTER, DECISION_RETRY_FETCH_FAILED}
 
 
 def followup_is_due(row: V2FollowupRecord, *, as_of: date, floor_year: int = OPERATIONAL_FLOOR_YEAR) -> bool:
@@ -704,6 +710,10 @@ def run_dual_store_preflight(
                 target_period_end_date=row.target_period_end_date,
                 source_a_selected=row.source_a is not None,
                 source_b_selected=row.source_b is not None,
+                legacy_refresh_decision=None if row.source_a is None else str(row.source_a.get("decision") or ""),
+                legacy_force_provider_refresh=(
+                    row.source_a is not None and legacy_force_provider_refresh_from_decision(row.source_a.get("decision"))
+                ),
                 legacy_state=inspect_legacy_state(legacy_conn, row),
                 v2_state=inspect_v2_state(v2_conn, row),
             )

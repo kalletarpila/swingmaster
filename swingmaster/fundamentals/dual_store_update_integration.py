@@ -132,6 +132,10 @@ class IntegratedUpdateResult:
             "deferred_limitation_count": self.deferred_limitation_count,
             "component_failure_count": self.component_failure_count,
             "provider_calls": self.provider_calls,
+            "legacy_provider_calls": _legacy_provider_call_count(self.work_units),
+            "legacy_sec_provider_calls": _legacy_provider_call_count(self.work_units, "legacy_sec_provider_calls"),
+            "legacy_yahoo_provider_calls": _legacy_provider_call_count(self.work_units, "legacy_yahoo_provider_calls"),
+            "v2_provider_calls": self.provider_calls,
             "plan_candidate_hash": self.preflight.get("plan_candidate_hash"),
             "execution_scope_hash": self.preflight.get("execution_scope_hash"),
             "source_a_count": self.preflight.get("source_a_count", 0),
@@ -499,6 +503,17 @@ def _component_counts(statuses: list[str]) -> dict[str, int]:
     for status in statuses:
         counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+def _legacy_provider_call_count(rows: list[IntegratedWorkUnitResult], key: str = "legacy_provider_calls") -> int:
+    total = 0
+    for row in rows:
+        raw = row.legacy.raw_summary or {}
+        try:
+            total += int(raw.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
 
 
 def _followup_reason(v2_result: V2ComponentResult) -> str:

@@ -23,6 +23,7 @@ from swingmaster.fundamentals.dual_store_update_preflight import SQLiteV2Followu
 from swingmaster.fundamentals.result_check import PLAN_VERSION, candidate_hash, merge_v2_followups_into_plan
 from swingmaster.fundamentals.selected_v2_work_unit_executor import StaticProviderAdapter, build_simfin_statement_candidates
 from swingmaster.fundamentals.selected_v2_work_unit_executor import build_simfin_share_candidate
+import swingmaster.cli.run_fundamental_quarter_update as quarter_update_module
 from swingmaster.cli.run_fundamental_quarter_update import parse_args, run_fundamental_quarter_update
 from swingmaster.tests.test_dual_store_update_preflight import _create_legacy_db, _insert_legacy_complete
 from swingmaster.tests.test_selected_v2_work_unit_executor import _connect as _connect_v2
@@ -30,11 +31,11 @@ from swingmaster.tests.test_selected_v2_work_unit_executor import _company as _i
 from swingmaster.tests.test_selected_v2_work_unit_executor import _quarter as _insert_v2_quarter
 
 
-def _candidate(ticker: str = "TEST", period: str = "2026-06-30") -> dict[str, object]:
+def _candidate(ticker: str = "TEST", period: str = "2026-06-30", decision: str = "RETRY_PARTIAL_QUARTER") -> dict[str, object]:
     return {
         "market": "usa",
         "ticker": ticker,
-        "decision": "RETRY_PARTIAL_QUARTER",
+        "decision": decision,
         "planned_action": "PLAN_RETRY_QUARTERLY_FUNDAMENTALS",
         "target_period_end_date": period,
         "canonical_report_date": period,
@@ -182,6 +183,120 @@ def _recording_simfin_factory(calls: list[str]):
         return [_simfin_adapter()]
 
     return factory
+
+
+def test_dual_store_plan_retry_preserves_legacy_force_provider_refresh_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legacy, v2 = _setup_dual_store(tmp_path, legacy_complete=False)
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("TEST", decision="RETRY_PARTIAL_QUARTER")])
+    captured: list[dict[str, object]] = []
+
+    def fake_process_ticker(**kwargs):
+        captured.append(kwargs)
+        return {
+            "post_update_result": "UPDATED_PARTIAL",
+            "quarterly_rows_written": 0,
+            "ttm_rows_written": 0,
+            "legacy_provider_calls": 1,
+            "legacy_sec_provider_calls": 1,
+            "legacy_yahoo_provider_calls": 0,
+        }
+
+    monkeypatch.setattr(quarter_update_module, "process_ticker", fake_process_ticker)
+    monkeypatch.setattr(quarter_update_module, "persist_managed_update_ingestion_status", lambda **_kwargs: {})
+
+    summary = run_fundamental_quarter_update(
+        db_path=legacy,
+        run_id="run",
+        market="usa",
+        osakedata_db_path=None,
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        quarter_refresh_plan_json=plan,
+        execution_decision_date="2026-08-15",
+        v2_db_path=v2,
+        dual_store_update=True,
+        skip_ack=False,
+    )
+
+    assert captured[0]["force_provider_refresh"] is True
+    assert captured[0]["row"]["decision"] != "RETRY_PARTIAL_QUARTER"
+    assert summary["legacy_provider_calls"] == 1
+    assert summary["legacy_sec_provider_calls"] == 1
+    assert summary["legacy_yahoo_provider_calls"] == 0
+    assert summary["v2_provider_calls"] == 0
+    assert summary["provider_calls"] == 0
+    assert summary["overall_status"] == OVERALL_PARTIAL
+
+
+def test_dual_store_plan_fetch_failed_preserves_legacy_force_provider_refresh_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legacy, v2 = _setup_dual_store(tmp_path, legacy_complete=False)
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("TEST", decision="RETRY_FETCH_FAILED")])
+    captured: list[dict[str, object]] = []
+
+    def fake_process_ticker(**kwargs):
+        captured.append(kwargs)
+        return {"post_update_result": "NO_NEW_DATA", "quarterly_rows_written": 0, "ttm_rows_written": 0}
+
+    monkeypatch.setattr(quarter_update_module, "process_ticker", fake_process_ticker)
+    monkeypatch.setattr(quarter_update_module, "persist_managed_update_ingestion_status", lambda **_kwargs: {})
+
+    summary = run_fundamental_quarter_update(
+        db_path=legacy,
+        run_id="run",
+        market="usa",
+        osakedata_db_path=None,
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        quarter_refresh_plan_json=plan,
+        execution_decision_date="2026-08-15",
+        v2_db_path=v2,
+        dual_store_update=True,
+        skip_ack=False,
+    )
+
+    assert captured[0]["force_provider_refresh"] is True
+    assert summary["legacy_success"] == 1
+
+
+def test_dual_store_non_retry_origin_does_not_force_legacy_provider_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legacy, v2 = _setup_dual_store(tmp_path, legacy_complete=False)
+    plan = _safe_plan_path(tmp_path)
+    _write_plan(plan, legacy, [_candidate("TEST", decision="FETCH_NEW_QUARTER")])
+    captured: list[dict[str, object]] = []
+
+    def fake_process_ticker(**kwargs):
+        captured.append(kwargs)
+        return {"post_update_result": "NO_NEW_DATA", "quarterly_rows_written": 0, "ttm_rows_written": 0}
+
+    monkeypatch.setattr(quarter_update_module, "process_ticker", fake_process_ticker)
+    monkeypatch.setattr(quarter_update_module, "persist_managed_update_ingestion_status", lambda **_kwargs: {})
+
+    run_fundamental_quarter_update(
+        db_path=legacy,
+        run_id="run",
+        market="usa",
+        osakedata_db_path=None,
+        ticker=None,
+        limit=None,
+        dry_run=False,
+        quarter_refresh_plan_json=plan,
+        execution_decision_date="2026-08-15",
+        v2_db_path=v2,
+        dual_store_update=True,
+        skip_ack=False,
+    )
+
+    assert captured[0]["force_provider_refresh"] is False
 
 
 def test_followup_schema_idempotent_and_source_b_due_filter(tmp_path: Path) -> None:

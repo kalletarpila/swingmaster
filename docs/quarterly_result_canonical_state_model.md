@@ -926,8 +926,8 @@ Implementation details still open:
   `period_end_date`.
 - Where current date-derived work-unit identity should be replaced or guarded for non-calendar
   fiscal-year companies.
-- Which provider/source should supply reliable `period_start_date` for calendar comparison period,
-  or whether a validated company fiscal-calendar table is needed.
+- Whether a future reliable actual `period_start_date` source should supersede the currently agreed
+  `APPROX_3_CALENDAR_MONTHS_FROM_PERIOD_END` method for `CALENDAR_COMPARISON_PERIOD`.
 - Whether `CALENDAR_COMPARISON_PERIOD` should remain purely derived or later be persisted for
   cross-sectional analytics.
 - Exact implementation details for subtracting three calendar months should follow the documented

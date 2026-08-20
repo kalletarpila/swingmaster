@@ -611,6 +611,13 @@ Profile support is separate from readiness.
 Do not call a bank `SCORE_NOT_READY` merely because the ordinary scoring model does not apply. That
 is unsupported or profile-specific, not incomplete ordinary data.
 
+For V3, initial company-universe admission is an architecture decision, not a quarterly-result
+state. The initial V3 company universe contains only eligible Legacy `ORDINARY` companies. Expected
+calendar entries, Yahoo observations, provider discoveries, V2-only companies, OHLCV/osakedata
+symbols, and other provider evidence do not create V3 companies by themselves. `UNKNOWN_PROFILE` and
+unapproved profile cases remain outside the initial V3 universe until explicitly reviewed and
+approved.
+
 ## Event Catalogue
 
 An event happens at a point in time. A state describes what is true now.

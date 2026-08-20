@@ -83,6 +83,39 @@ Use a surrogate `company_id` for foreign keys plus a unique natural key on `mark
 Supported company profiles are `ORDINARY`, `BANK`, and `INSURANCE`. Only `ORDINARY` is in scope for
 the current core/score model. Provider aliases are optional rows, not columns on company.
 
+## Initial V3 Universe
+
+The initial V3 company universe is derived from the current Legacy fundamentals database,
+`fundamentals_usa.db`, using distinct tickers from `rc_fundamental_quarterly`.
+
+The initial universe is not derived from:
+
+- the full `osakedata.db` / OHLCV market-data universe
+- the full V2 company universe
+- Yahoo-returned symbols
+- provider discovery
+- result-calendar feeds
+
+The broad market-data universe contains ETFs, funds, and other securities that are not intended for
+the ordinary-company fundamentals model. V2 company/profile data may be used as current profile
+classification evidence for Legacy tickers, but the full V2 universe is not the V3 universe
+authority.
+
+Read-only universe audit on 2026-08-20:
+
+| Population | Count | Initial V3 treatment |
+| --- | ---: | --- |
+| Legacy fundamentals tickers | 2,936 | Universe authority before eligibility exclusions. |
+| Eligible Legacy `ORDINARY` tickers | 2,451 | Initial V3 company universe. |
+| Legacy `BANK` tickers | 82 | Excluded until bank-specific model is approved. |
+| Legacy `INSURANCE` tickers | 42 | Excluded until insurance-specific model is approved. |
+| Legacy tickers without approved profile evidence | 361 | Excluded until explicitly reviewed/approved. |
+
+Provider bootstrap, provider aliases, V2 migration, and Legacy/V2 gap-fill may enrich only tickers
+already admitted to the eligible Legacy `ORDINARY` universe. Tickers that exist only in V2, Yahoo,
+provider discovery, calendar feeds, or OHLCV/osakedata do not enter the initial V3 database unless a
+later explicit universe-expansion decision approves them.
+
 ## Canonical Quarter Model
 
 `v3_quarter` stores:
@@ -220,7 +253,7 @@ Minimum provider-Q contract:
 Initial V3 migration order is:
 
 ```text
-Ticker universe
+Eligible Legacy ORDINARY universe
       |
       v
 Yahoo historical fetch
@@ -251,6 +284,9 @@ in 1998 is excluded even if it was published in 1999.
 Yahoo bootstrap is not Yahoo-always-wins. It is seed order. Canonical selection still uses semantic
 validation, cross-source reconciliation, retained accepted values, NULL-fill rules, and controlled
 resolution issues.
+
+Yahoo bootstrap does not discover the initial V3 company universe. It fetches/stages data only for
+the eligible Legacy `ORDINARY` tickers admitted by the universe policy above.
 
 The bootstrap runner must be resumable by ticker/provider/run, cache raw responses, throttle calls,
 record per-ticker completion, and avoid restarting from ticker 1 after a partial failure. Normal V3
@@ -354,7 +390,8 @@ The design-phase projection used only local read-only DB access. It made no prov
 | Metric | Value |
 | --- | ---: |
 | Legacy companies | 2,936 |
-| V2 ORDINARY migration companies | 4,323 |
+| Eligible Legacy ORDINARY companies for initial V3 | 2,451 |
+| V2 ORDINARY source/profile population, not V3 universe authority | 4,323 |
 | Local Yahoo-cache companies | 2,933 |
 | Legacy quarter rows, 1999+ | 156,070 |
 | V2 quarter rows, 1999+ | 82,812 |
@@ -366,10 +403,11 @@ The design-phase projection used only local read-only DB access. It made no prov
 | V2 rows in those groups | 638 |
 | Multi-report-date groups auto-importable by R1 heuristic | 221 |
 | Multi-report-date groups requiring review/block | 87 |
-| R1 staged latest-Q denominator, migration ordinary | 4,323 |
+| R1 staged latest-Q denominator, V2 source/profile population | 4,323 |
 | R1 staged latest-Q core ready after local Yahoo + Legacy + V2 | 1,829, or 42.31% |
 
-Field coverage after local Yahoo + Legacy + V2 on the strict V2 fiscal-identity denominator:
+Field coverage after local Yahoo + Legacy + V2 on the strict V2 fiscal-identity projection
+denominator. This is source-projection evidence, not the initial V3 universe denominator:
 
 | Field | Coverage |
 | --- | ---: |
@@ -383,7 +421,8 @@ Field coverage after local Yahoo + Legacy + V2 on the strict V2 fiscal-identity 
 | operating_cashflow | 99.56% |
 | capex | 91.58% |
 
-Current 8Q completeness from V2 projection:
+Current 8Q completeness from V2 projection. These counts describe the V2 source/profile population,
+not the locked initial V3 company universe:
 
 | Metric | Companies complete |
 | --- | ---: |
@@ -407,30 +446,31 @@ Legacy identity recovery projection:
 | `DATE_ONLY_UNRESOLVED` | 97,937 | No local V2/Yahoo fiscal identity evidence. |
 | `EXCLUDED` | 0 | 1999+ projection excludes earlier rows before this classification. |
 
-The strict V2 fiscal-identity denominator is a local projection denominator, not the final V3
-universe. Final V3 can grow when live Yahoo historical bootstrap supplies additional reported fiscal
-identities or when Legacy date-only rows are recovered through provider fiscal labels, validated
-company calendars, or period-end continuity.
+The strict V2 fiscal-identity denominator is a local source-projection denominator, not the initial
+V3 universe. Reported fiscal identities from Yahoo, V2, Legacy recovery, validated company
+calendars, or period-end continuity may help create quarter rows for already admitted companies.
+They must not admit new companies into the initial V3 universe.
 
 Population denominators must remain explicit:
 
 | Population | Count | Definition |
 | --- | ---: | --- |
-| Migration universe | 4,613 | V2 companies with ticker; historical/archive migration denominator. |
-| Migration ordinary universe | 4,323 | V2 ORDINARY companies with ticker; ordinary historical migration denominator. |
-| Active operational universe | 2,575 | V2 active companies eligible for current Check/Update. |
-| Active ORDINARY score universe | 2,451 | V2 active ORDINARY companies eligible for ordinary readiness/score semantics. |
+| Initial V3 company universe | 2,451 | Eligible Legacy `ORDINARY` tickers. This is the V3 company denominator. |
+| Legacy fundamentals universe before exclusions | 2,936 | Distinct Legacy tickers in `fundamentals_usa.db.rc_fundamental_quarterly`. |
+| V2 source/profile population | 4,613 | V2 companies with ticker; useful as source/profile evidence, not V3 universe authority. |
+| V2 ORDINARY source/profile population | 4,323 | V2 `ORDINARY` companies with ticker; useful as source/projection evidence, not V3 universe authority. |
+| V2 active operational population | 2,575 | V2 active companies eligible for current Check/Update; not V3 universe authority. |
 
 Readiness by denominator:
 
 | Metric | Numerator | Denominator | Coverage |
 | --- | ---: | ---: | ---: |
-| latest-Q core ready, all migration ordinary companies | 1,696 | 4,323 | 39.23% |
-| latest-Q core ready, active ORDINARY companies | 1,696 | 2,451 | 69.20% |
-| active ORDINARY 4Q EBITDA complete | 2,166 | 2,451 | 88.37% |
-| active ORDINARY 8Q EBITDA complete | 2,110 | 2,451 | 86.09% |
-| active ORDINARY 8Q FCF complete | 1,962 | 2,451 | 80.05% |
-| active ORDINARY 8Q shares complete | 953 | 2,451 | 38.88% |
+| latest-Q core ready, V2 ORDINARY source/profile population | 1,696 | 4,323 | 39.23% |
+| latest-Q core ready, initial V3 eligible Legacy ORDINARY universe | 1,696 | 2,451 | 69.20% |
+| initial V3 universe 4Q EBITDA complete | 2,166 | 2,451 | 88.37% |
+| initial V3 universe 8Q EBITDA complete | 2,110 | 2,451 | 86.09% |
+| initial V3 universe 8Q FCF complete | 1,962 | 2,451 | 80.05% |
+| initial V3 universe 8Q shares complete | 953 | 2,451 | 38.88% |
 
 Calendar comparison derivability is separate from fiscal-identity derivability:
 

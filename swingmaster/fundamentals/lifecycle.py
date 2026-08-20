@@ -6,7 +6,8 @@ from typing import Any
 
 
 FUND_LIFECYCLE_RULE_V2 = "FUND_LIFECYCLE_RULE_V2"
-FUND_LIFECYCLE_RULE_V1 = FUND_LIFECYCLE_RULE_V2
+FUND_LIFECYCLE_RULE_V3_EBITDA_L2 = "FUND_LIFECYCLE_RULE_V3_EBITDA_L2"
+FUND_LIFECYCLE_RULE_V1 = FUND_LIFECYCLE_RULE_V3_EBITDA_L2
 LIFECYCLE_CLASSES = (
     "STARTUP",
     "GROWTH",
@@ -33,6 +34,8 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
                     revenue_growth_ttm_yoy,
                     ebit_margin_ttm,
                     ebit_margin_trend_4q,
+                    ebitda_margin_ttm,
+                    ebitda_margin_trend_4q,
                     fcf_margin_ttm,
                     fundamental_score,
                     lifecycle_class
@@ -50,6 +53,8 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
                     revenue_growth_ttm_yoy,
                     ebit_margin_ttm,
                     ebit_margin_trend_4q,
+                    ebitda_margin_ttm,
+                    ebitda_margin_trend_4q,
                     fcf_margin_ttm,
                     fundamental_score,
                     lifecycle_class
@@ -71,33 +76,33 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
 
 def classify_lifecycle(row: sqlite3.Row) -> str:
     revenue_growth_ttm_yoy = row["revenue_growth_ttm_yoy"]
-    ebit_margin_ttm = row["ebit_margin_ttm"]
-    ebit_margin_trend_4q = row["ebit_margin_trend_4q"]
+    ebitda_margin_ttm = row["ebitda_margin_ttm"]
+    ebitda_margin_trend_4q = row["ebitda_margin_trend_4q"]
     fcf_margin_ttm = row["fcf_margin_ttm"]
 
     if (
-        _is_true(ebit_margin_ttm is not None and ebit_margin_ttm < -0.20)
+        _is_true(ebitda_margin_ttm is not None and ebitda_margin_ttm < -0.30)
         and _is_true(fcf_margin_ttm is not None and fcf_margin_ttm < -0.20)
     ):
         return "DISTRESSED"
 
     if (
         _is_true(revenue_growth_ttm_yoy is not None and revenue_growth_ttm_yoy > 0.30)
-        and _is_true(ebit_margin_ttm is not None and ebit_margin_ttm < -0.05)
+        and _is_true(ebitda_margin_ttm is not None and ebitda_margin_ttm < 0)
         and _is_true(fcf_margin_ttm is not None and fcf_margin_ttm < 0)
     ):
         return "STARTUP"
 
     if (
         _is_true(revenue_growth_ttm_yoy is not None and revenue_growth_ttm_yoy > 0.20)
-        and _is_true(ebit_margin_ttm is not None and ebit_margin_ttm < 0.10)
+        and _is_true(ebitda_margin_ttm is not None and ebitda_margin_ttm < 0.15)
     ):
         return "GROWTH"
 
     if (
         _is_true(revenue_growth_ttm_yoy is not None and revenue_growth_ttm_yoy > 0.10)
-        and _is_true(ebit_margin_trend_4q is not None and ebit_margin_trend_4q > 0)
-        and _is_true(ebit_margin_ttm is not None and ebit_margin_ttm >= 0)
+        and _is_true(ebitda_margin_trend_4q is not None and ebitda_margin_trend_4q > 0)
+        and _is_true(ebitda_margin_ttm is not None and ebitda_margin_ttm >= 0)
     ):
         return "SCALING"
 
@@ -106,7 +111,7 @@ def classify_lifecycle(row: sqlite3.Row) -> str:
         or _is_true(revenue_growth_ttm_yoy >= -0.05)
     )
     if (
-        _is_true(ebit_margin_ttm is not None and ebit_margin_ttm >= 0.15)
+        _is_true(ebitda_margin_ttm is not None and ebitda_margin_ttm >= 0.25)
         and _is_true(fcf_margin_ttm is not None and fcf_margin_ttm >= 0.05)
         and mature_growth_ok
     ):
@@ -117,12 +122,12 @@ def classify_lifecycle(row: sqlite3.Row) -> str:
         or _is_true(revenue_growth_ttm_yoy >= -0.05)
     )
     transition_margin_trend_ok = (
-        ebit_margin_trend_4q is None
-        or _is_true(ebit_margin_trend_4q >= -0.05)
+        ebitda_margin_trend_4q is None
+        or _is_true(ebitda_margin_trend_4q >= -0.07)
     )
     if (
-        _is_true(ebit_margin_ttm is not None and ebit_margin_ttm >= 0)
-        and _is_true(ebit_margin_ttm is not None and ebit_margin_ttm < 0.15)
+        _is_true(ebitda_margin_ttm is not None and ebitda_margin_ttm >= 0)
+        and _is_true(ebitda_margin_ttm is not None and ebitda_margin_ttm < 0.25)
         and _is_true(fcf_margin_ttm is not None and fcf_margin_ttm >= 0)
         and transition_growth_ok
         and transition_margin_trend_ok
@@ -131,7 +136,7 @@ def classify_lifecycle(row: sqlite3.Row) -> str:
 
     if (
         _is_true(revenue_growth_ttm_yoy is not None and revenue_growth_ttm_yoy < -0.05)
-        or _is_true(ebit_margin_trend_4q is not None and ebit_margin_trend_4q < -0.05)
+        or _is_true(ebitda_margin_trend_4q is not None and ebitda_margin_trend_4q < -0.07)
     ):
         return "DECLINING"
 

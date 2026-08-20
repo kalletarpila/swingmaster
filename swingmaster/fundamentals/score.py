@@ -1,13 +1,36 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 from statistics import mean, pstdev
 from typing import Any, Mapping
 
 
 FUND_SCORE_RULE_V1_1 = "FUND_SCORE_RULE_V1_1"
-FUND_SCORE_RULE_V1 = FUND_SCORE_RULE_V1_1
 FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE = "FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE"
+FUND_SCORE_RULE_V2_EBITDA_PROFITABILITY = "FUND_SCORE_RULE_V2_EBITDA_PROFITABILITY"
+FUND_SCORE_RULE_V3_EBITDA_LIFECYCLE = "FUND_SCORE_RULE_V3_EBITDA_LIFECYCLE"
+FUND_SCORE_RULE_V1 = FUND_SCORE_RULE_V2_EBITDA_PROFITABILITY
+ACTIVE_FUND_SCORE_RULE = FUND_SCORE_RULE_V2_EBITDA_PROFITABILITY
+ACTIVE_FUND_SCORE_LIFECYCLE_RULE = FUND_SCORE_RULE_V3_EBITDA_LIFECYCLE
+SUPPORTED_SCORE_PROFILE = "ORDINARY"
+SCORE_PROFILE_UNSUPPORTED = "SCORE_PROFILE_UNSUPPORTED"
+SCORE_READY = "SCORE_READY"
+SCORE_NOT_READY = "SCORE_NOT_READY"
+
+
+@dataclass(frozen=True)
+class ScoreReadiness:
+    score_ready: bool
+    score_profile_status: str
+    growth_ready: bool
+    ebitda_margin_ready: bool
+    ebitda_margin_trend_ready: bool
+    fcf_ready: bool
+    ebitda_consistency_ready: bool
+    leverage_ready: bool
+    dilution_ready: bool
+    missing_reasons: tuple[str, ...]
 
 
 def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.Row]:
@@ -23,6 +46,8 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
                     revenue_growth_ttm_yoy,
                     ebit_margin_ttm,
                     ebit_margin_trend_4q,
+                    ebitda_margin_ttm,
+                    ebitda_margin_trend_4q,
                     fcf_margin_ttm,
                     net_debt_to_ebitda,
                     net_debt_to_ebit,
@@ -61,6 +86,8 @@ def load_ttm_rows(conn: sqlite3.Connection, ticker: str | None) -> list[sqlite3.
                     revenue_growth_ttm_yoy,
                     ebit_margin_ttm,
                     ebit_margin_trend_4q,
+                    ebitda_margin_ttm,
+                    ebitda_margin_trend_4q,
                     fcf_margin_ttm,
                     net_debt_to_ebitda,
                     net_debt_to_ebit,
@@ -114,8 +141,8 @@ def explain_score_components(
     ttm_series_history: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, float]:
     growth_component = float(_growth_component(row["revenue_growth_ttm_yoy"]))
-    margin_component = float(_margin_component(row["ebit_margin_ttm"]))
-    margin_trend_component = float(_margin_trend_component(row["ebit_margin_trend_4q"]))
+    margin_component = float(_margin_component(row["ebitda_margin_ttm"]))
+    margin_trend_component = float(_margin_trend_component(row["ebitda_margin_trend_4q"]))
     fcf_component = float(_fcf_component(row["fcf_margin_ttm"]))
     leverage_component = float(_leverage_component(_leverage_ratio(row)))
     dilution_component = float(_dilution_component(row["share_dilution_yoy"]))
@@ -248,7 +275,7 @@ def compute_lifecycle_score_components(
         "lifecycle_component_lifecycle": float(lifecycle_component_lifecycle),
         "consistency_component_lifecycle": float(consistency_component_lifecycle),
         "fundamental_score_lifecycle": fundamental_score_lifecycle,
-        "score_rule_lifecycle": FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE,
+        "score_rule_lifecycle": ACTIVE_FUND_SCORE_LIFECYCLE_RULE,
     }
 
 
@@ -269,11 +296,11 @@ def _growth_component(value: float | None) -> int:
 def _margin_component(value: float | None) -> int:
     if value is None:
         return 0
-    if value >= 0.25:
+    if value >= 0.35:
         return 15
-    if value >= 0.15:
+    if value >= 0.25:
         return 12
-    if value >= 0.08:
+    if value >= 0.15:
         return 8
     if value >= 0:
         return 4
@@ -283,9 +310,9 @@ def _margin_component(value: float | None) -> int:
 def _margin_trend_component(value: float | None) -> int:
     if value is None:
         return 6
-    if value >= 0.05:
+    if value >= 0.10:
         return 15
-    if value >= 0.02:
+    if value >= 0.04:
         return 10
     if value >= 0:
         return 6
@@ -370,7 +397,7 @@ def compute_consistency_component(ttm_series_history: list[Mapping[str, Any]]) -
     )
     metric_names = (
         "revenue_growth_ttm_yoy",
-        "ebit_margin_ttm",
+        "ebitda_margin_ttm",
         "fcf_margin_ttm",
     )
     collected_values: list[list[float]] = []
@@ -412,6 +439,86 @@ def _mapping_value(row: Mapping[str, Any], key: str) -> Any:
     if isinstance(row, sqlite3.Row):
         return row[key]
     return row.get(key)
+
+
+def assess_latest_q_core_fields(row: Mapping[str, Any]) -> tuple[bool, tuple[str, ...]]:
+    missing: list[str] = []
+    for field in ("ticker", "period_end_date", "revenue", "ebitda", "free_cashflow", "cash", "total_debt"):
+        if not _metric_available(_mapping_value(row, field)):
+            missing.append(field)
+    shares = _mapping_value(row, "shares_outstanding")
+    if not _metric_available(shares) or float(shares) <= 0:
+        missing.append("shares_outstanding")
+    return not missing, tuple(missing)
+
+
+def assess_score_readiness(
+    latest_row: Mapping[str, Any],
+    ttm_series_history: list[Mapping[str, Any]],
+    *,
+    score_profile: str | None = SUPPORTED_SCORE_PROFILE,
+) -> ScoreReadiness:
+    if score_profile != SUPPORTED_SCORE_PROFILE:
+        return ScoreReadiness(
+            score_ready=False,
+            score_profile_status=SCORE_PROFILE_UNSUPPORTED,
+            growth_ready=False,
+            ebitda_margin_ready=False,
+            ebitda_margin_trend_ready=False,
+            fcf_ready=False,
+            ebitda_consistency_ready=False,
+            leverage_ready=False,
+            dilution_ready=False,
+            missing_reasons=(SCORE_PROFILE_UNSUPPORTED,),
+        )
+
+    growth_ready = _metric_available(_mapping_value(latest_row, "revenue_growth_ttm_yoy"))
+    ebitda_margin_ready = _metric_available(_mapping_value(latest_row, "ebitda_margin_ttm"))
+    ebitda_margin_trend_ready = _metric_available(_mapping_value(latest_row, "ebitda_margin_trend_4q"))
+    fcf_ready = _metric_available(_mapping_value(latest_row, "fcf_margin_ttm"))
+    ebitda_consistency_ready = _consistency_inputs_ready(ttm_series_history)
+    leverage_ready = _leverage_ratio(latest_row) is not None
+    dilution_value = _mapping_value(latest_row, "share_dilution_yoy")
+    dilution_ready = _metric_available(dilution_value) and abs(float(dilution_value)) <= 0.50
+    checks = {
+        "GROWTH_READY": growth_ready,
+        "EBITDA_MARGIN_READY": ebitda_margin_ready,
+        "EBITDA_MARGIN_TREND_READY": ebitda_margin_trend_ready,
+        "FCF_READY": fcf_ready,
+        "EBITDA_CONSISTENCY_READY": ebitda_consistency_ready,
+        "LEVERAGE_READY": leverage_ready,
+        "DILUTION_READY": dilution_ready,
+    }
+    missing = tuple(name for name, ready in checks.items() if not ready)
+    return ScoreReadiness(
+        score_ready=not missing,
+        score_profile_status=SCORE_READY if not missing else SCORE_NOT_READY,
+        growth_ready=growth_ready,
+        ebitda_margin_ready=ebitda_margin_ready,
+        ebitda_margin_trend_ready=ebitda_margin_trend_ready,
+        fcf_ready=fcf_ready,
+        ebitda_consistency_ready=ebitda_consistency_ready,
+        leverage_ready=leverage_ready,
+        dilution_ready=dilution_ready,
+        missing_reasons=missing,
+    )
+
+
+def _metric_available(value: Any) -> bool:
+    return value is not None
+
+
+def _consistency_inputs_ready(ttm_series_history: list[Mapping[str, Any]]) -> bool:
+    ordered_history = sorted(
+        ttm_series_history,
+        key=lambda row: str(_mapping_value(row, "as_of_date") or _mapping_value(row, "latest_period_end_date") or ""),
+        reverse=True,
+    )
+    for metric_name in ("revenue_growth_ttm_yoy", "ebitda_margin_ttm", "fcf_margin_ttm"):
+        values = [row for row in ordered_history if _mapping_value(row, metric_name) is not None]
+        if len(values) < 3:
+            return False
+    return True
 
 
 def update_scores(
@@ -464,7 +571,7 @@ def update_scores(
             explained_components["dilution_component"],
             explained_components["lifecycle_component"],
             explained_components["consistency_component"],
-            FUND_SCORE_RULE_V1_1,
+            ACTIVE_FUND_SCORE_RULE,
             lifecycle_components["fundamental_score_lifecycle"],
             lifecycle_components["growth_component_lifecycle"],
             lifecycle_components["margin_component_lifecycle"],

@@ -173,6 +173,8 @@ def _insert_ttm_row(
             ebit_growth_ttm_yoy,
             ebit_margin_ttm,
             ebit_margin_trend_4q,
+            ebitda_margin_ttm,
+            ebitda_margin_trend_4q,
             gross_margin_trend_4q,
             fcf_ttm,
             fcf_margin_ttm,
@@ -183,13 +185,15 @@ def _insert_ttm_row(
             lifecycle_class,
             fundamental_score,
             run_id
-        ) VALUES (?, ?, ?, 1000.0, ?, NULL, NULL, ?, ?, NULL, NULL, ?, NULL, NULL, ?, ?, ?, ?, 'TTM_RUN_V1')
+        ) VALUES (?, ?, ?, 1000.0, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, ?, ?, ?, ?, 'TTM_RUN_V1')
         """,
         (
             ticker,
             as_of_date,
             as_of_date,
             revenue_growth_ttm_yoy,
+            ebit_margin_ttm,
+            ebit_margin_trend_4q,
             ebit_margin_ttm,
             ebit_margin_trend_4q,
             fcf_margin_ttm,

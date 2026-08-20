@@ -264,19 +264,22 @@ def _insert_score(
         INSERT INTO rc_fundamental_ttm (
             ticker, as_of_date, latest_period_end_date,
             revenue_growth_ttm_yoy, ebit_margin_ttm, ebit_margin_trend_4q,
+            ebitda_margin_ttm, ebitda_margin_trend_4q,
             fcf_margin_ttm, net_debt_to_ebit, share_dilution_yoy,
             consistency_component_lifecycle, lifecycle_class,
             fundamental_score_lifecycle, score_rule_lifecycle,
             score_effective_trading_date, score_effective_date_status,
             score_effective_date_policy, score_effective_date_source_ttm_as_of_date,
             run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNCLASSIFIED', ?, 'FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE',
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'UNCLASSIFIED', ?, 'FUND_SCORE_RULE_V2_LIFECYCLE_SCALING_PRE',
                   ?, ?, 'SOURCE_TTM_EFFECTIVE_DATE', ?, 'fixture')
         """,
         (
             ticker,
             as_of_date,
             as_of_date,
+            value,
+            value,
             value,
             value,
             value,

@@ -849,19 +849,23 @@ def _insert_percentile_ttm_row(
             revenue_growth_ttm_yoy,
             ebit_margin_ttm,
             ebit_margin_trend_4q,
+            ebitda_margin_ttm,
+            ebitda_margin_trend_4q,
             fcf_margin_ttm,
             net_debt_to_ebit,
             share_dilution_yoy,
             consistency_component_lifecycle,
             fundamental_score_lifecycle,
             run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             ticker,
             as_of_date,
             as_of_date,
             growth,
+            margin,
+            margin_trend,
             margin,
             margin_trend,
             fcf,

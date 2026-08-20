@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from swingmaster.fundamentals.score import FUND_SCORE_RULE_V1_1, explain_score_components, load_ttm_rows
+from swingmaster.fundamentals.score import ACTIVE_FUND_SCORE_RULE, explain_score_components, load_ttm_rows
 
 
 COMPONENT_ROWS = (
@@ -24,8 +24,8 @@ COMPONENT_ROWS = (
 
 RAW_FACTOR_ROWS = (
     "revenue_growth_ttm_yoy",
-    "ebit_margin_ttm",
-    "ebit_margin_trend_4q",
+    "ebitda_margin_ttm",
+    "ebitda_margin_trend_4q",
     "fcf_margin_ttm",
     "net_debt_to_ebitda",
     "net_debt_to_ebit",
@@ -41,7 +41,7 @@ class ExplainRows(list[sqlite3.Row]):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Explain FUND_SCORE_RULE_V1_1 score breakdown for TTM rows")
+    parser = argparse.ArgumentParser(description="Explain active EBITDA fundamental score breakdown for TTM rows")
     parser.add_argument("--db", required=True, help="SQLite database path")
     parser.add_argument("--ticker", required=True, help="Ticker symbol")
     parser.add_argument("--limit", type=int, default=None, help="Optional latest N rows to include")
@@ -100,8 +100,8 @@ def build_explain_rows(
                 "stored_fundamental_score": stored_score,
                 "recomputed_fundamental_score": recomputed_score,
                 "revenue_growth_ttm_yoy": row["revenue_growth_ttm_yoy"],
-                "ebit_margin_ttm": row["ebit_margin_ttm"],
-                "ebit_margin_trend_4q": row["ebit_margin_trend_4q"],
+                "ebitda_margin_ttm": row["ebitda_margin_ttm"],
+                "ebitda_margin_trend_4q": row["ebitda_margin_trend_4q"],
                 "fcf_margin_ttm": row["fcf_margin_ttm"],
                 "net_debt_to_ebitda": row["net_debt_to_ebitda"],
                 "net_debt_to_ebit": row["net_debt_to_ebit"],
@@ -118,7 +118,7 @@ def format_explain_output(ticker: str, explain_rows: list[dict[str, Any]]) -> st
     lines = [
         "FUNDAMENTAL SCORE EXPLAIN",
         f"ticker={ticker}",
-        f"rule_id={FUND_SCORE_RULE_V1_1}",
+        f"rule_id={ACTIVE_FUND_SCORE_RULE}",
         "",
         "SCORE COMPONENTS",
         _format_table(COMPONENT_ROWS, as_of_dates, explain_rows, component_mode=True),
@@ -184,7 +184,7 @@ def main() -> None:
     print(format_explain_output(args.ticker, explain_rows))
     first_as_of_date = explain_rows[0]["as_of_date"] if explain_rows else "NULL"
     last_as_of_date = explain_rows[-1]["as_of_date"] if explain_rows else "NULL"
-    _summary(rule_id=FUND_SCORE_RULE_V1_1)
+    _summary(rule_id=ACTIVE_FUND_SCORE_RULE)
     _summary(ticker=args.ticker)
     _summary(rows_explained=len(explain_rows))
     _summary(first_as_of_date=first_as_of_date)

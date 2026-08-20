@@ -21,7 +21,7 @@ from swingmaster.fundamentals.fetch_raw_statements import (
     validate_non_empty_statements,
 )
 from swingmaster.fundamentals.lifecycle import (
-    FUND_LIFECYCLE_RULE_V2,
+    FUND_LIFECYCLE_RULE_V1,
     classify_lifecycle,
     run_lifecycle_classification,
 )
@@ -152,7 +152,7 @@ def run_fundamental_pipeline(
                     "explain_status": explain_status,
                     "status": "ok",
                     "child_run_ids": child_run_ids,
-                    "lifecycle_rule_id": FUND_LIFECYCLE_RULE_V2,
+                    "lifecycle_rule_id": FUND_LIFECYCLE_RULE_V1,
                     "score_rule_id": FUND_SCORE_RULE_V1,
                 }
     else:

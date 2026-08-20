@@ -43,8 +43,8 @@ TTM_CONSUMER_FIELDS = (
 )
 SCORE_HISTORY_TTM_FIELDS = (
     "revenue_growth_ttm_yoy",
-    "ebit_margin_ttm",
-    "ebit_margin_trend_4q",
+    "ebitda_margin_ttm",
+    "ebitda_margin_trend_4q",
     "fcf_margin_ttm",
     "fcf_margin_trend_4q",
     "net_debt_to_ebitda",

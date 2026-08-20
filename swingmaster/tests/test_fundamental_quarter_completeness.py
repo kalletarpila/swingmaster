@@ -158,9 +158,10 @@ def test_history_readiness_and_status_persistence_are_separate() -> None:
             """
             INSERT INTO rc_fundamental_ttm (
                 ticker, as_of_date, revenue_growth_ttm_yoy, ebit_margin_ttm,
-                ebit_margin_trend_4q, fcf_margin_ttm, fcf_margin_trend_4q,
+                ebit_margin_trend_4q, ebitda_margin_ttm, ebitda_margin_trend_4q,
+                fcf_margin_ttm, fcf_margin_trend_4q,
                 net_debt_to_ebit, share_dilution_yoy
-            ) VALUES ('AAA', '2024-12-31', 0.1, 0.2, 0.01, 0.08, 0.02, 0.4, 0.03)
+            ) VALUES ('AAA', '2024-12-31', 0.1, 0.2, 0.01, 0.25, 0.04, 0.08, 0.02, 0.4, 0.03)
             """
         )
 
@@ -264,6 +265,8 @@ def _build_db() -> Path:
                 revenue_growth_ttm_yoy REAL,
                 ebit_margin_ttm REAL,
                 ebit_margin_trend_4q REAL,
+                ebitda_margin_ttm REAL,
+                ebitda_margin_trend_4q REAL,
                 fcf_margin_ttm REAL,
                 fcf_margin_trend_4q REAL,
                 net_debt_to_ebit REAL,

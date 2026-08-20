@@ -612,11 +612,12 @@ Do not call a bank `SCORE_NOT_READY` merely because the ordinary scoring model d
 is unsupported or profile-specific, not incomplete ordinary data.
 
 For V3, initial company-universe admission is an architecture decision, not a quarterly-result
-state. The initial V3 company universe contains only eligible Legacy `ORDINARY` companies. Expected
-calendar entries, Yahoo observations, provider discoveries, V2-only companies, OHLCV/osakedata
-symbols, and other provider evidence do not create V3 companies by themselves. `UNKNOWN_PROFILE` and
-unapproved profile cases remain outside the initial V3 universe until explicitly reviewed and
-approved.
+state. The initial V3 company universe starts from Legacy fundamentals membership and excludes only
+tickers with positive BANK, INSURANCE, ETF/fund, or other non-company evidence. Expected calendar
+entries, Yahoo observations, provider discoveries, V2-only companies, OHLCV/osakedata symbols, and
+other provider evidence do not create V3 companies by themselves. Absence of V2 profile evidence is
+not an exclusion reason for a Legacy ticker; contradictory instrument-type evidence may still create
+a review item.
 
 ## Event Catalogue
 

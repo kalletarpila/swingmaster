@@ -958,17 +958,18 @@ Conceptual model already decided:
 - `SCORE_READY` and `TTM_READY` are company-window readiness concepts.
 - There is no persistent `historical_backfill_actionable` state in the agreed model.
 
-Implementation details still open:
+Phase 1 implementation contracts are locked in
+`docs/fundamentals_v3_implementation_readiness_contract.md`. The items below are validation or
+future-extension topics, not blockers for V3 schema/repository/workflow coding:
 
-- Which events need durable event-history persistence for reliable daily "today" metrics.
+- Whether the compact event list needs extension for reliable daily "today" metrics after real V3
+  run observability exists.
 - Exact persistence strategy for canonical derived helper output, if any.
 - How much SEC/equivalent assurance can be derived from V2 provenance without a new explicit
   quarter-level confirmation projection.
-- Final implementation contract for `INGESTION_COMPLETE` if that term is retained.
-- How Legacy should obtain reported fiscal year/quarter for rows that currently expose only
-  `period_end_date`.
-- Where current date-derived work-unit identity should be replaced or guarded for non-calendar
-  fiscal-year companies.
+- Legacy fiscal identity recovery coverage for rows that currently expose only `period_end_date`.
+- Replacement or guarding of current date-derived work-unit identity as V3 implementation adopts
+  reported fiscal identity.
 - Whether a future reliable actual `period_start_date` source should supersede the currently agreed
   `APPROX_3_CALENDAR_MONTHS_FROM_PERIOD_END` method for `CALENDAR_COMPARISON_PERIOD`.
 - Whether `CALENDAR_COMPARISON_PERIOD` should remain purely derived or later be persisted for

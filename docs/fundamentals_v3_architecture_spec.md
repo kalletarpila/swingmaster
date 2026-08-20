@@ -7,6 +7,9 @@ call providers, write production data, change RawCandle, or execute the EBITDA s
 The conceptual state terminology must remain aligned with
 `docs/quarterly_result_canonical_state_model.md`. If the two documents differ, this document defines
 the V3 implementation architecture and the canonical state document defines shared terminology.
+The implementation-readiness contract is locked in
+`docs/fundamentals_v3_implementation_readiness_contract.md` and should be used for Phase 1
+schema/repository/workflow coding decisions.
 
 ## Goals
 
@@ -62,7 +65,7 @@ Minimum useful V3 tables:
 | `v3_company` | `market + ticker` | Company/security identity, profile, active flag. | Persisted. |
 | `v3_provider_symbol_alias` | `company_id + provider + provider_symbol` | Provider symbol mapping when Yahoo/SEC/SimFin differ from ticker. | Persisted. |
 | `v3_quarter` | `company_id + fiscal_year + fiscal_quarter` | Canonical reported fiscal Q identity and Q-level metadata. | Persisted. |
-| `v3_quarter_fundamentals` | `quarter_id` | One canonical value per supported field. Could be folded into `v3_quarter`; use 1:1 table if it keeps metadata cleaner. | Persisted canonical values. |
+| `v3_quarter_fundamentals` | `quarter_id` | One canonical value per supported field in a 1:1 table with `v3_quarter`. | Persisted canonical values. |
 | `v3_provider_q_acquisition` | `quarter_id + provider` | Independent provider acquisition outcome plus provider-specific scheduling metadata. | Persisted operational/provider state. |
 | external raw/cache store | `provider + provider_symbol + fetch_run_id + payload_hash` | Reproducible raw/staging cache for bootstrap and parser fixes. | Outside canonical V3 DB. |
 | `v3_result_calendar` | Stable provider event key where available; else `company_id + provider + target fiscal identity`; fallback to one active unmatched expectation per company/provider/window | Future expected results and calendar maintenance. `expected_result_date` is mutable metadata, not identity. | Persisted scheduling state. |
@@ -779,16 +782,21 @@ downstream snapshots.
 
 ## Open Questions
 
+The design phase is closed for Phase 1 implementation. The following items are validation or
+future-extension work, not architecture blockers for schema/repository/workflow coding:
+
 - Live Yahoo historical depth, endpoint limits, and reported fiscal-label availability require a
   later network-authorized validation.
 - Whether actual period-start dates from a future reliable source should supersede
   `APPROX_3_CALENDAR_MONTHS_FROM_PERIOD_END`.
-- Whether calendar comparison fields stay derived or become persisted for query performance.
+- Whether calendar comparison fields should become persisted after a concrete query/UI consumer
+  requires it. Phase 1 implements the calculation as a derived helper.
 - Exact field-specific precedence after comparing `Yahoo -> Legacy -> V2` with
-  `Yahoo -> V2 -> Legacy`.
+  `Yahoo -> V2 -> Legacy`; the implementation-readiness contract locks the default seed/fill order
+  while this remains a read-only validation item.
 - How many of the 87 review/block multi-Report-Date groups can be resolved by adjacent-period
   fiscal-calendar validation.
-- Which event types are necessary for durable "today" reporting after implementation.
+- Whether the compact event catalogue needs extension after real run observability needs are seen.
 
 ## Implementation Phases
 
@@ -810,6 +818,8 @@ downstream snapshots.
 ## Validation
 
 - One eventual production DB: yes, `rc_fundamentals_v3.db`.
+- Implementation-readiness contract exists: yes,
+  `docs/fundamentals_v3_implementation_readiness_contract.md`.
 - No permanent Legacy/V2 dual-write: yes.
 - Fiscal identity remains company-reported: yes.
 - Calendar comparison remains separate analytical metadata: yes.
@@ -821,3 +831,4 @@ downstream snapshots.
 - TTM and SCORE are company-window outputs: yes.
 - Provenance is minimized: yes.
 - Migration conflict complexity does not become permanent runtime complexity: yes.
+- Phase 1 can proceed without new material architecture decisions: yes.

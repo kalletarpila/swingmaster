@@ -109,8 +109,10 @@ Authoritative rule:
 > period is a derived analytical alignment used to compare companies whose fiscal calendars differ
 > but whose reported periods substantially cover the same calendar/seasonal economic period.
 
-Calendar comparison period should be derived primarily from the actual reporting-period date range,
-not merely from the period end date.
+Until reliable actual period-start dates are available, the calendar comparison period is derived
+from an approximate three-calendar-month interval ending at the reported period end date. This
+approximation is intentionally used for analytical peer alignment and must not be represented as the
+company's actual fiscal-period start date.
 
 ### Purpose
 
@@ -139,30 +141,84 @@ does not change scoring or TTM behavior.
 
 ### Recommended Definition
 
-Where reliable `period_start_date` and `period_end_date` are available:
+Calendar comparison is conceptually based on the reporting-period date range. The current practical
+method uses an approximate date range because the current production databases do not reliably store
+actual fiscal-period start dates.
+
+Current practical method:
+
+```text
+derived_period_start_date = period_end_date - 3 calendar months
+```
+
+`derived_period_start_date` is not the company's actual reported fiscal-period start date. It is an
+analytical approximation used only to derive calendar comparison alignment.
+
+When subtracting three calendar months, preserve the day-of-month where possible. If the target
+month does not have that day, clamp to the target month's last valid day.
+
+Given the approximate interval:
 
 ```text
 CALENDAR_COMPARISON_PERIOD =
-  the calendar quarter with the maximum number of overlapped reporting-period days
+  the calendar quarter with the maximum number of overlapped days
+  in derived_period_start_date -> period_end_date
 ```
 
 Recommended fields:
 
 ```text
+period_end_date
+derived_period_start_date
 calendar_comparison_year
 calendar_comparison_quarter
+calendar_comparison_method
 calendar_comparison_quality
 ```
 
 Avoid the shorter name `calendar_quarter`; it can be misread as the calendar quarter containing
 `period_end_date`.
 
+Recommended method value for the current practical method:
+
+```text
+calendar_comparison_method = APPROX_3_CALENDAR_MONTHS_FROM_PERIOD_END
+```
+
+Future higher-quality method:
+
+```text
+calendar_comparison_method = ACTUAL_PERIOD_RANGE
+```
+
+may supersede the approximation for rows where reliable actual period start and end dates become
+available.
+
 ### Derivation Rule
 
 For one reported fiscal quarter:
 
-1. determine all calendar quarters overlapped by `period_start_date -> period_end_date`
-2. count reporting-period days inside each calendar quarter
+1. compute `derived_period_start_date = period_end_date - 3 calendar months`
+2. determine all calendar quarters overlapped by `derived_period_start_date -> period_end_date`
+3. count approximate-interval days inside each calendar quarter
+4. choose the calendar quarter with the largest overlap
+5. if there is an exact tie, use the calendar quarter containing the midpoint of the approximate
+   interval
+6. if still unresolved, set `calendar_comparison_quality=AMBIGUOUS` and do not silently choose
+
+If `period_end_date` is unavailable or invalid:
+
+```text
+CALENDAR_COMPARISON_PERIOD = UNKNOWN
+calendar_comparison_quality = INSUFFICIENT_DATES
+```
+
+Do not invent calendar comparison values from fiscal labels alone.
+
+Higher-quality future rule:
+
+1. determine all calendar quarters overlapped by actual `period_start_date -> period_end_date`
+2. count actual reporting-period days inside each calendar quarter
 3. choose the calendar quarter with the largest overlap
 4. if there is an exact tie, use the period midpoint's calendar quarter
 5. if still ambiguous, set `calendar_comparison_quality=AMBIGUOUS` and do not silently choose
@@ -172,8 +228,8 @@ Recommended quality values:
 | Quality | Meaning |
 | --- | --- |
 | `EXACT_NORMAL` | The fiscal period is calendar-quarter aligned. |
-| `NORMAL_OVERLAP` | The period is normal length and has a clear maximum-overlap calendar quarter. |
-| `IRREGULAR_PERIOD` | The period is unusually short, long, a transition/stub period, or a 14-week/53-week effect. |
+| `NORMAL_OVERLAP` | The approximate or actual period has a clear maximum-overlap calendar quarter. |
+| `IRREGULAR_PERIOD` | Actual-period evidence, if available, shows an unusually short, long, transition/stub, 14-week, or 53-week period. |
 | `AMBIGUOUS` | Overlap does not produce a safe deterministic comparison period. |
 | `INSUFFICIENT_DATES` | Start/end date evidence is missing or unreliable. |
 
@@ -186,22 +242,33 @@ Example:
 ```text
 fiscal_year     = 2026
 fiscal_quarter  = Q2
-period_start    = 2025-11-01
-period_end      = 2026-01-31
+period_end_date = 2026-01-31
+derived_start   = 2025-10-31
 ```
 
-A period-end-only rule would classify this as `2026 Q1`. The maximum-overlap rule classifies it as
-`2025 Q4`, because November and December contribute more reporting-period days than January.
+A period-end-only rule would classify this as `2026 Q1`. The approximate maximum-overlap rule
+classifies it as `2025 Q4`, because most of the approximate interval falls in calendar Q4 2025.
 
 The fiscal identity remains `FY2026 Q2`.
+
+Do not confuse:
+
+```text
+FY2026 Q2   = canonical fiscal identity
+2025 Q4     = calendar comparison period
+2026-01-31  = period end date
+2025-10-31  = derived analytical start date
+```
+
+These are four different concepts.
 
 ### Examples
 
 | Example | Fiscal identity | Reporting period | Calendar comparison period | Explanation |
 | --- | --- | --- | --- | --- |
-| Normal calendar-aligned company | `FY2025 Q4` | `2025-10-01 -> 2025-12-31` | `2025 Q4` | Fiscal quarter and calendar season align. |
-| Shifted fiscal calendar | `FY2026 Q2` | `2025-11-01 -> 2026-01-31` | `2025 Q4` | Most reporting days are in calendar Q4 2025; fiscal identity remains FY2026 Q2. |
-| Current-data limitation | Example V2 rows such as `AAP FY2024 Q1 report_date=2024-04-30` | start date not stored in current V2 quarter table | `UNKNOWN`, `INSUFFICIENT_DATES` | V2 proves reported fiscal period differs from report-date calendar quarter, but start date is not stored, so maximum-overlap derivation is not reliable from V2 alone. |
+| Normal calendar-aligned company | `FY2025 Q4` | actual `2025-10-01 -> 2025-12-31`; approximate `2025-09-30 -> 2025-12-31` | `2025 Q4` | Fiscal quarter and calendar season align; the approximation still selects Q4. |
+| Shifted fiscal calendar | `FY2026 Q2` | period end `2026-01-31`; derived analytical start `2025-10-31` | `2025 Q4` | Most approximate-interval days are in calendar Q4 2025; fiscal identity remains FY2026 Q2. |
+| Current-data approximation | Example V2 rows such as `AAP FY2024 Q1 report_date=2024-04-30` | actual start not stored; derived analytical start `2024-01-30` | derived by maximum overlap from the approximate interval | V2 proves fiscal period can differ from report-date calendar quarter; the comparison period is analytical metadata, not identity. |
 
 ### Current Derivability in Legacy and V2
 
@@ -209,45 +276,34 @@ Read-only verification on 2026-08-20 found:
 
 | System | Fiscal labels | Period end/report date | Period start date | Reliable max-overlap derivability | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Legacy `fundamentals_usa.db` | Not stored on `rc_fundamental_quarterly` or ingestion status rows. Provider observation content may have fiscal labels for some observations. | `period_end_date` exists on `156094/156094` quarterly rows. | No explicit start-date column found in the current quarterly/status/provenance tables inspected. | `0` directly derivable from canonical quarterly rows. | Period-end-only fallback would be unsafe. Legacy fiscal identity remains ambiguous without additional evidence. |
-| V2 `rc_fundamentals_v2.db` | `rc_v2_quarter.fiscal_year` and `fiscal_period` are explicit. | `rc_v2_quarter.report_date` exists on `85424/85424` quarter rows; `64910` belong to active companies. | No explicit start-date column found in V2 tables. | `0` directly derivable from V2 quarter rows. | `14108` V2 rows have fiscal label different from the calendar year/quarter of `report_date`, proving calendar-date substitution is unsafe. |
+| Legacy `fundamentals_usa.db` | Not stored on `rc_fundamental_quarterly` or ingestion status rows. Provider observation content may have fiscal labels for some observations. | `period_end_date` exists on `156094/156094` quarterly rows. | No explicit actual start-date column found in the current quarterly/status/provenance tables inspected. | Approximate method can be applied where `period_end_date` is valid. | Period-end-only calendar-quarter classification remains unsafe. Legacy fiscal identity remains ambiguous without additional evidence. |
+| V2 `rc_fundamentals_v2.db` | `rc_v2_quarter.fiscal_year` and `fiscal_period` are explicit. | `rc_v2_quarter.report_date` exists on `85424/85424` quarter rows; `64910` belong to active companies. Current V2 sources name this as fiscal-period report date/logical period end. | No explicit actual start-date column found in V2 tables. | Approximate method can be applied where `report_date` is valid as period-end-like evidence. | `14108` V2 rows have fiscal label different from the calendar year/quarter of `report_date`, proving calendar-date substitution is unsafe. |
 
-Because reliable start dates are not currently present in the primary Legacy or V2 quarter tables,
-the safe current value is:
+Because reliable actual start dates are not currently present in the primary Legacy or V2 quarter
+tables, the current agreed practical method is:
 
 ```text
-CALENDAR_COMPARISON_PERIOD = UNKNOWN
-calendar_comparison_quality = INSUFFICIENT_DATES
+derived_period_start_date = period_end_date - 3 calendar months
+calendar_comparison_method = APPROX_3_CALENDAR_MONTHS_FROM_PERIOD_END
 ```
 
-unless a future provider-specific source supplies a reliable period start/end range or a validated
-company fiscal-calendar mapping.
+Rows with missing or invalid period-end evidence remain `UNKNOWN` with `INSUFFICIENT_DATES`.
 
 ### Legacy/V2 Comparison
 
-For matching canonical Q identities, a reliable Legacy/V2 comparison of `CALENDAR_COMPARISON_PERIOD`
-is not currently available from primary quarterly rows:
+For matching canonical Q identities, Legacy/V2 comparison of `CALENDAR_COMPARISON_PERIOD` can be
+defined only after applying the same documented method to each side:
 
-- Legacy lacks consistently stored reported fiscal year/quarter and period start.
-- V2 has reported fiscal year/quarter and report date, but not period start.
-- Neither system can directly derive maximum-overlap calendar comparison periods for the main
-  quarterly row set today.
+- Legacy can use valid `period_end_date` with the approximation.
+- V2 can use valid `report_date` as period-end-like evidence with the approximation.
+- Actual-period-range agreement cannot be evaluated today because neither primary store has actual
+  period start.
 
-Therefore current comparison categories are:
-
-```text
-exact agreement:        not meaningfully computable
-disagreement:           not meaningfully computable
-only Legacy derivable:  0 from primary quarterly rows
-only V2 derivable:      0 from primary V2 quarter rows
-neither derivable:      all primary rows without external period-start evidence
-```
-
-No disagreement should be resolved by choosing period-end calendar quarter silently.
+No disagreement should be resolved by choosing the calendar quarter containing period end silently.
 
 ### Relationship to the State Model
 
-`CALENDAR_COMPARISON_PERIOD` is not:
+`CALENDAR_COMPARISON_PERIOD` is analytical period metadata. It is not:
 
 - lifecycle state
 - readiness state
@@ -633,7 +689,7 @@ as a newly detected latest quarter. It is historical data debt.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `Q_RESULT_LIFECYCLE` | LIFECYCLE | `EXPECTED`, `RESULT_DETECTED`, `CANONICALIZED`, `INGESTING`, `OPERATIONALLY_SETTLED`, `REOPENED` | Any Q plus event context for expected | Yes within dimension | All parallel dimensions | Where the Q is in the standard result flow | Sequential lifecycle only | Yes | Yes | Derive initially |
 | `Q_ROLE` | ROLE | `FUTURE_EXPECTED_Q`, `LATEST_OPERATIONAL_Q`, `HISTORICAL_Q` | Contextual | Yes within dimension | Lifecycle/readiness/action | Whether the Q is future, latest, or historical | Derived from ordering and decision date | Yes | Yes | Derive |
-| `CALENDAR_COMPARISON_PERIOD` | ANALYTICAL_METADATA | `calendar_comparison_year + calendar_comparison_quarter + quality` | Any Q where reliable date range exists | Yes within metadata value | All state dimensions | Cross-company seasonal comparison bucket | Derived by maximum temporal overlap from reporting-period start/end dates | Yes | Yes | Derive; schema later only if consumers need it |
+| `CALENDAR_COMPARISON_PERIOD` | ANALYTICAL_METADATA | `calendar_comparison_year + calendar_comparison_quarter + method + quality` | Any Q where period-end evidence exists | Yes within metadata value | All state dimensions | Cross-company seasonal comparison bucket | Currently derived by maximum temporal overlap from an approximate three-calendar-month interval ending at period end; future actual-period-range method may supersede it | Yes | Yes | Derive; schema later only if consumers need it |
 | `Q_CORE_FIELDS_READY` | READINESS | `true`, `false`, `not_applicable`, `not_derivable` | Any Q | Yes within dimension | SEC pending, score false, enrichment incomplete | Required ordinary fields exist | Six-field positive-share rule | Yes | Yes | Derive |
 | `FIELD_COMPLETENESS_LAYER` | READINESS | `CORE_REQUIRED`, `DOWNSTREAM_HISTORY_REQUIRED`, `OPTIONAL_ENRICHMENT`, `PROVENANCE_ONLY` | Any Q/field | No | Core readiness/action/provenance | Which fields matter to which consumers | Static field classification | Yes | Yes | Static helper |
 | `DOWNSTREAM_READINESS` | READINESS | `TTM_READY`, `SCORE_READY`, `VALUATION_READY` booleans | Company/window or latest-context | No | Q core ready true/false | Whether consumers can run comparably | Derived from multi-quarter/window inputs | Yes | As contributor | Derive |
@@ -874,6 +930,8 @@ Implementation details still open:
   or whether a validated company fiscal-calendar table is needed.
 - Whether `CALENDAR_COMPARISON_PERIOD` should remain purely derived or later be persisted for
   cross-sectional analytics.
+- Exact implementation details for subtracting three calendar months should follow the documented
+  day-preserving, end-of-month-clamped rule.
 
 ## Authoritative Terminology
 
@@ -887,6 +945,8 @@ Implementation details still open:
 | period-end date | Metadata/evidence attached to a Q, not a substitute for fiscal identity. |
 | `CALENDAR_COMPARISON_PERIOD` | Derived analytical bucket for cross-company same-season comparison. |
 | `calendar_comparison_quality` | Quality flag explaining whether calendar comparison derivation is reliable. |
+| `calendar_comparison_method` | Method label explaining how the comparison period was derived. |
+| `derived_period_start_date` | Approximate analytical start date, currently period end minus three calendar months. |
 | `SEC_CONFIRMATION_STATE` | Authoritative source assurance. |
 | `NEXT_ACTION` | What the system should do next. |
 | `HISTORICAL_BACKFILL_STATE` | Historical data debt. |

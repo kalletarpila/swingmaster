@@ -40,7 +40,7 @@ Lifecycle:    OPERATIONALLY_SETTLED
 Core fields:  Q_CORE_FIELDS_READY=true
 SEC:          PENDING
 Score:        SCORE_READY=false
-Action:       NO_ACTION
+Due actions:  none
 Backfill:     company has older historical debt
 ```
 
@@ -227,11 +227,11 @@ Recommended quality values:
 
 | Quality | Meaning |
 | --- | --- |
-| `EXACT_NORMAL` | The fiscal period is calendar-quarter aligned. |
-| `NORMAL_OVERLAP` | The approximate or actual period has a clear maximum-overlap calendar quarter. |
-| `IRREGULAR_PERIOD` | Actual-period evidence, if available, shows an unusually short, long, transition/stub, 14-week, or 53-week period. |
+| `APPROX_OVERLAP` | The approximate three-calendar-month interval has a clear maximum-overlap calendar quarter. This does not claim actual fiscal-period exactness. |
+| `ACTUAL_RANGE_OVERLAP` | A validated actual period range has a clear maximum-overlap calendar quarter. |
 | `AMBIGUOUS` | Overlap does not produce a safe deterministic comparison period. |
 | `INSUFFICIENT_DATES` | Start/end date evidence is missing or unreliable. |
+| `IRREGULAR_ACTUAL_PERIOD` | Actual-period evidence shows an unusually short, long, transition/stub, 14-week, or 53-week period. |
 
 ### Why Period-End Date Alone Is Not Enough
 
@@ -355,7 +355,7 @@ The following terms are intentionally not persisted Q lifecycle states:
 | `EXPECTED` | Result-calendar / scheduling state | A future expected result may exist before the canonical Q exists. |
 | `INITIAL_DATA_ACQUIRED` | Event or derived condition | It is derived from provider acquisition and canonical field presence. |
 | `CANONICALIZED` | Storage milestone / event | It says a row or mapping exists, not where the Q is in operational progression. |
-| `RECONCILING` | Transient processing phase | Durable unresolved reconciliation creates a resolution issue and possibly `NEXT_ACTION=MANUAL_REVIEW`. |
+| `RECONCILING` | Transient processing phase | Durable unresolved reconciliation creates a resolution issue and possibly `OPERATIONAL_ACTION=MANUAL_REVIEW`. |
 | `REOPENED` / `Q_REOPENED` | Event / transition | A settled Q moves back to `ENRICHING`; the event is useful, the state is not. |
 | `BLOCKED_REVIEW` / `MANUAL_REVIEW` | Action or resolution issue | Review need is orthogonal to lifecycle and may coexist with settled or enriching Qs. |
 
@@ -379,11 +379,13 @@ they should avoid storing it as a separate stable state unless there is a durabl
 
 | Role | Meaning | Scope | Persistence recommendation |
 | --- | --- | --- | --- |
-| `FUTURE_EXPECTED_Q` | A future result is expected but is not yet a canonical/detected result. | Future expected context. | Derive from calendar/event evidence and decision date. |
 | `LATEST_OPERATIONAL_Q` | The newest operational quarter for a ticker/company under the current decision date. | Latest Q only. | Derive from quarter ordering. |
 | `HISTORICAL_Q` | A canonical/detected Q older than the current latest operational Q. | Historical Q. | Derive from quarter ordering. |
 
 The role values are mutually exclusive for a given Q at a given decision time.
+
+A future expected result belongs to result-calendar or expected-result scheduling state. It is not a
+role of an existing canonical Q row.
 
 A Q can move from `LATEST_OPERATIONAL_Q` to `HISTORICAL_Q` when a newer result becomes the
 operational latest quarter. That role change does not automatically change lifecycle, core readiness,
@@ -398,10 +400,16 @@ For an `ORDINARY` company, the rule is:
 - valid Q identity
 - `revenue` present
 - `ebitda` present
-- `free_cashflow` present as a direct canonical value
+- accepted canonical `free_cashflow` present
 - `cash` present
 - `total_debt` present
 - `shares_outstanding` present and greater than zero
+
+`Q_CORE_FIELDS_READY` is source-agnostic. It tests canonical data availability and semantics, not
+provider source, direct-vs-derived origin, SEC confirmation, or provenance richness. Accepted
+canonical values from approved deterministic derivations, such as `free_cashflow = operating_cashflow
++ capex` under the established negative-capex convention, satisfy readiness the same way valid direct
+provider values do. The same principle applies to approved EBITDA and total-debt derivations.
 
 `LATEST_Q_CORE_READY` means:
 
@@ -505,16 +513,31 @@ Examples:
 - SimFin shares observed
 - provider `NO_DATA`
 - provider `ERROR`
-- retryable response
+- retry/backoff metadata
 - cache hit
 - source file/hash
 - validation tier
 - transformation
 
 Provider outcomes generally must not become Q lifecycle states. A provider error may create
-`NEXT_ACTION=RETRY_PROVIDER`; it does not mean the Q lifecycle itself is `ERROR`.
+`OPERATIONAL_ACTION=RETRY_PROVIDER`; it does not mean the Q lifecycle itself is `ERROR`.
 
-## Next Action / Retry Dimension
+Provider acquisition outcome is a pure provider-result dimension:
+
+| Provider acquisition result | Meaning |
+| --- | --- |
+| `NOT_CHECKED` | Provider has not been checked for this Q/target. |
+| `ACQUIRED` | Provider supplied usable data. |
+| `PARTIAL` | Provider supplied usable partial data. |
+| `NO_DATA` | Provider checked successfully but had no data. |
+| `FAILED` | Provider acquisition failed. |
+| `UNSUPPORTED` | Provider cannot support this Q/field/profile target. |
+
+Retry eligibility, `next_retry_at`, attempt count, and provider-work-due are operational scheduling
+facts. Provider "settled" is derived as no useful provider-specific automatic work currently due; it
+must not erase the last acquisition result.
+
+## Operational Action / Retry Dimension
 
 State means what is true. Action means what the system should do next.
 
@@ -525,23 +548,24 @@ Examples:
 - SEC pending is an assurance state
 - check SEC later is an action
 
-| Action | Meaning | Typical trigger | Latest Q? | Historical Q? | Coexistence |
+| Operational action | Meaning | Typical trigger | Latest Q? | Historical Q? | Coexistence |
 | --- | --- | --- | --- | --- | --- |
-| `NO_ACTION` | No work is due under current policy. | Settled/no due work. | Yes | Yes | Can coexist with score not ready or SEC pending if not due. |
 | `CHECK_EXPECTED_RESULT` | Check whether an expected result has appeared. | Calendar/expected date due. | Usually yes | No for normal daily flow. | May coexist with provider scheduling metadata. |
 | `FETCH_NEW_RESULT` | Fetch first canonical data for a detected result. | New result detected and target resolved. | Usually yes | Rare/import/backfill only. | Can coexist with SEC pending. |
 | `ENRICH_Q` | Fill eligible missing canonical or enrichment fields. | Partial row and provider/cache evidence. | Yes | Yes under controlled enrichment/backfill. | Can coexist with core ready if enrichment is optional. |
 | `RETRY_PROVIDER` | Retry provider after failure, no-data, or backoff policy. | Retry/followup due. | Yes | Yes if controlled. | Can target provider evidence while Q is otherwise usable. |
-| `CHECK_SEC_CONFIRMATION` | Check authoritative filing/source confirmation. | SEC pending and check due. | Yes | Yes. | Can coexist with core ready. |
+| `CHECK_SEC` | Check authoritative filing/source confirmation. | SEC pending and check due. | Yes | Yes. | Can coexist with core ready. |
 | `BACKFILL_HISTORICAL` | Controlled historical data-debt handling. | Historical Q materially blocks downstream calculations. | No as historical action. | Yes. | Can coexist with settled lifecycle. |
 | `MANUAL_REVIEW` | Human review needed. | Ambiguous identity, unsupported conflict, or policy limitation. | Yes | Yes. | May coexist with any non-terminal uncertainty. |
-| `NOT_DERIVABLE` | Current evidence cannot determine the action. | Missing evidence. | Yes | Yes. | Use only when needed. |
+
+`DUE_ACTIONS` is a derived set of currently due actions. Multiple actions can coexist. If a UI needs
+one primary action, derive it by precedence; do not make that primary action canonical truth.
 
 Avoid generic `WAITING`. Use exact scheduling conditions instead:
 
 - waiting for expected date: `CHECK_EXPECTED_RESULT` plus expected date
 - waiting for provider retry: `RETRY_PROVIDER` plus `next_retry_at`
-- waiting for SEC: `SEC_CONFIRMATION_STATE=PENDING` plus due/not-due schedule
+- waiting for SEC: `SEC_CONFIRMATION_STATE=PENDING` plus `CHECK_SEC` scheduling metadata
 
 ## Historical Backfill
 
@@ -570,7 +594,7 @@ HAS_HISTORICAL_BACKFILL_DEBT=true
 means one or more historical Qs for that company have material backfill debt.
 
 There is no persistent `historical_backfill_actionable` state in the agreed model. Actionability is
-derived through `NEXT_ACTION` or a controlled backfill planner.
+derived through `DUE_ACTIONS` or a controlled backfill planner.
 
 ## Profile / Support
 
@@ -595,12 +619,16 @@ An event happens at a point in time. A state describes what is true now.
 | --- | --- | --- | --- | --- | --- |
 | `CALENDAR_UPDATED` | Calendar estimate/status changed. | Company/ticker | Event timing, action schedule | Partially | Yes |
 | `RESULT_EXPECTED_DATE_REACHED` | The expected result date is now due. | Run/event | Action scheduling | Current snapshot only | Yes |
-| `NEW_Q_RESULT_DETECTED` | A new quarterly result was observed. | Any Q/latest context | Lifecycle, action | Partially | Yes |
+| `RESULT_DETECTED` | A quarterly result was observed. | Any Q/latest context | Lifecycle, action | Partially | Yes |
 | `Q_CREATED` | A canonical Q row was created. | Any Q | Lifecycle | Partially; stronger in V2 | Useful |
+| `INITIAL_DATA_ACQUIRED` | First usable fundamental data for a detected Q was acquired. | Any Q | Provider/canonical data | Partially | Useful |
 | `Q_ENRICHED` | Additional fields/evidence were added. | Any Q | Field/provenance readiness | Partially via provenance | Useful |
-| `CORE_FIELDS_BECAME_READY` | Required core fields changed from not ready to ready. | Any Q | Core readiness | Current snapshot only | Yes |
+| `CORE_READINESS_CHANGED` | Core readiness changed; details contain before/after. | Any Q | Core readiness | Current snapshot only | Yes |
 | `SEC_CONFIRMATION_RECEIVED` | Authoritative confirmation arrived. | Any Q | Assurance | Partially | Yes |
-| `SCORE_BECAME_READY` | Score dependencies became comparable-ready. | Company window | Downstream readiness | Current snapshot only | Yes |
+| `SCORE_READINESS_CHANGED` | Score readiness changed; details contain before/after. | Company window | Downstream readiness | Current snapshot only | Yes |
+| `PROVIDER_FAILED` | Provider acquisition failed. | Provider/Q or provider/company | Provider acquisition | Partially | Useful |
+| `RESOLUTION_ISSUE_CREATED` | Durable issue/manual-review item was created. | Any Q/source identity | Action/resolution | Yes | Yes |
+| `Q_REOPENED` | A settled Q was returned to active enrichment. | Any Q | Lifecycle/action | Partially | Yes |
 | `Q_BECAME_HISTORICAL` | A newer Q became latest. | Any Q | Role | Yes from ordering | Usually no |
 | `BACKFILL_COMPLETED` | Historical data debt was resolved. | Any Q/company | Historical backfill | Partially | Yes |
 
@@ -608,9 +636,9 @@ An event happens at a point in time. A state describes what is true now.
 
 | Event | Current state after the event |
 | --- | --- |
-| `CORE_FIELDS_BECAME_READY` | `Q_CORE_FIELDS_READY=true` |
+| `CORE_READINESS_CHANGED` | `Q_CORE_FIELDS_READY` changed; details describe before/after |
 | `SEC_CONFIRMATION_RECEIVED` | `SEC_CONFIRMATION_STATE=CONFIRMED` |
-| `NEW_Q_RESULT_DETECTED` | `Q_RESULT_LIFECYCLE=RESULT_DETECTED` or later |
+| `RESULT_DETECTED` | `Q_RESULT_LIFECYCLE=RESULT_DETECTED` or later |
 | `Q_BECAME_HISTORICAL` | `Q_ROLE=HISTORICAL_Q` |
 | `BACKFILL_COMPLETED` | `HISTORICAL_BACKFILL_STATE=NO_HISTORICAL_BACKFILL_DEBT` |
 
@@ -635,7 +663,7 @@ Validated contradictions:
 
 - `Q_CORE_FIELDS_READY=true` while a required core field is NULL or `shares_outstanding <= 0`.
 - `SCORE_READY=true` for an unsupported profile under ordinary score rules.
-- `Q_ROLE=FUTURE_EXPECTED_Q` while the same Q is already detected or canonicalized.
+- result-calendar expectation represented as a canonical Q role before the Q exists.
 - A resolved followup should not remain active.
 - An inactive followup should not retain retry-required semantics.
 - `SEC_CONFIRMATION_STATE=CONFIRMED` and `SEC_CONFIRMATION_STATE=NOT_YET_EXPECTED` at the same time.
@@ -655,7 +683,7 @@ Do not use `done` alone. It is ambiguous.
 | `RESULT_DETECTED` | The result exists and has been recognized. |
 | `INGESTION_COMPLETE` | Current ingestion policy has produced a complete-enough row under that system's ingestion rules. `TERM_REQUIRES_FINAL_IMPLEMENTATION_CONTRACT` before using as canonical synonym. |
 | `CORE_READY` | Required ordinary core fields exist under `Q_CORE_FIELDS_READY`. |
-| `SEC_CONFIRMED` | SEC or equivalent authoritative assurance has been obtained. |
+| `SEC_CONFIRMATION_STATE=CONFIRMED` | SEC or equivalent authoritative assurance has been obtained. |
 | `SCORE_READY` | Required historical/window data exists for a comparable score. |
 | `OPERATIONALLY_SETTLED` | No normal immediate work remains in the Q-result workflow. |
 | `HISTORICALLY_COMPLETE` | No material historical backfill debt remains under agreed requirements. |
@@ -669,7 +697,7 @@ Lifecycle:           OPERATIONALLY_SETTLED
 Q core fields:       READY
 SEC confirmation:    PENDING
 Score readiness:     NOT_READY
-Next action:         CHECK_SEC_CONFIRMATION later, not currently due
+Due actions:         none; `CHECK_SEC` scheduled later
 Historical backfill: company has older Q debt
 Profile:             ORDINARY_SUPPORTED
 ```
@@ -699,14 +727,14 @@ as a newly detected latest quarter. It is historical data debt.
 | Canonical name | Type | Allowed values | Scope | Mutually exclusive? | Can coexist with | Plain-language meaning | Technical meaning | Latest Q? | Historical Q? | Persistence recommendation |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `Q_RESULT_LIFECYCLE` | LIFECYCLE | `RESULT_DETECTED`, `ENRICHING`, `OPERATIONALLY_SETTLED` | Detected/imported canonical Qs | Yes within dimension | All parallel dimensions | Where the Q is in the standard result flow | Sequential lifecycle only | Yes | Yes | Derive initially; persist only if runtime needs a snapshot |
-| `Q_ROLE` | ROLE | `FUTURE_EXPECTED_Q`, `LATEST_OPERATIONAL_Q`, `HISTORICAL_Q` | Contextual | Yes within dimension | Lifecycle/readiness/action | Whether the Q is future, latest, or historical | Derived from ordering and decision date | Yes | Yes | Derive |
+| `Q_ROLE` | ROLE | `LATEST_OPERATIONAL_Q`, `HISTORICAL_Q` | Existing canonical Qs | Yes within dimension | Lifecycle/readiness/action | Whether the existing Q is latest or historical | Derived from ordering and decision date | Yes | Yes | Derive |
 | `CALENDAR_COMPARISON_PERIOD` | ANALYTICAL_METADATA | `calendar_comparison_year + calendar_comparison_quarter + method + quality` | Any Q where period-end evidence exists | Yes within metadata value | All state dimensions | Cross-company seasonal comparison bucket | Currently derived by maximum temporal overlap from an approximate three-calendar-month interval ending at period end; future actual-period-range method may supersede it | Yes | Yes | Derive; schema later only if consumers need it |
 | `Q_CORE_FIELDS_READY` | READINESS | `true`, `false`, `not_applicable`, `not_derivable` | Any Q | Yes within dimension | SEC pending, score false, enrichment incomplete | Required ordinary fields exist | Six-field positive-share rule | Yes | Yes | Derive |
 | `FIELD_COMPLETENESS_LAYER` | READINESS | `CORE_REQUIRED`, `DOWNSTREAM_HISTORY_REQUIRED`, `OPTIONAL_ENRICHMENT`, `PROVENANCE_ONLY` | Any Q/field | No | Core readiness/action/provenance | Which fields matter to which consumers | Static field classification | Yes | Yes | Static helper |
 | `DOWNSTREAM_READINESS` | READINESS | `TTM_READY`, `SCORE_READY`, `VALUATION_READY` booleans | Company/window or latest-context | No | Q core ready true/false | Whether consumers can run comparably | Derived from multi-quarter/window inputs | Yes | As contributor | Derive |
 | `SEC_CONFIRMATION_STATE` | ASSURANCE | `NOT_APPLICABLE`, `NOT_YET_EXPECTED`, `PENDING`, `CHECKED_NO_EVIDENCE`, `PARTIAL_EVIDENCE`, `CONFIRMED`, `UNSUPPORTED`, `ERROR_RETRY`, `NOT_DERIVABLE` | Any Q | Yes within dimension | Core ready true/false | Authoritative source assurance | SEC/equivalent confirmation state | Yes | Yes | Derive; event history later if needed |
-| `PROVIDER_PROVENANCE_STATE` | PROVENANCE | Provider-specific facts plus small aggregates | Any Q/run event | No | All dimensions | Where data came from and provider outcomes | Field source, fetch state, cache/backoff/error | Yes | Yes | Persist facts, derive aggregates |
-| `NEXT_ACTION` | ACTION | `NO_ACTION`, `CHECK_EXPECTED_RESULT`, `FETCH_NEW_RESULT`, `ENRICH_Q`, `RETRY_PROVIDER`, `CHECK_SEC_CONFIRMATION`, `BACKFILL_HISTORICAL`, `MANUAL_REVIEW`, `NOT_DERIVABLE` | Any Q/run event | Not necessarily | Readiness/assurance/provider states | What the system should do next | Selector/followup/planner output | Yes | Yes, controlled actions only | Derive; persist queues where needed |
+| `PROVIDER_ACQUISITION_RESULT` | PROVIDER_OUTCOME | `NOT_CHECKED`, `ACQUIRED`, `PARTIAL`, `NO_DATA`, `FAILED`, `UNSUPPORTED` | Provider/Q or provider/target | Yes within provider target | Scheduling/action/provenance facts | Last meaningful provider acquisition outcome | Provider result only; retry/settlement derived separately | Yes | Yes | Persist provider rows where operationally useful |
+| `DUE_ACTIONS` / `OPERATIONAL_ACTION` | ACTION | `CHECK_EXPECTED_RESULT`, `FETCH_NEW_RESULT`, `ENRICH_Q`, `RETRY_PROVIDER`, `CHECK_SEC`, `BACKFILL_HISTORICAL`, `MANUAL_REVIEW` | Q/company/calendar target | No, multiple may coexist | Readiness/assurance/provider states | What work is due or scheduled | Action set/planner output, not state truth | Yes | Yes, controlled actions only | Derive due set; persist durable queue rows where needed |
 | `HISTORICAL_BACKFILL_STATE` | BACKFILL | `NOT_HISTORICAL`, `NO_HISTORICAL_BACKFILL_DEBT`, `NEEDS_HISTORICAL_BACKFILL`, `NOT_DERIVABLE` | Historical Q plus company summary | Yes within dimension | Settled lifecycle, core false | Whether older Q gaps block historical consumers | Derived historical data debt | Not as historical debt | Yes | Derive |
 | `PROFILE_SUPPORT_STATE` | SUPPORT | `ORDINARY_SUPPORTED`, `BANK_PROFILE`, `INSURANCE_PROFILE`, `UNSUPPORTED_PROFILE`, `UNKNOWN_PROFILE` | Company/ticker | Yes within dimension | All dimensions | Which rules apply | Accounting/profile support gate | Yes | Yes | Persist profile, derive support label |
 | Canonical events | EVENT | See event catalogue | Point in time | No | States they change | Something happened | Transition/run metric | Yes | Yes | Persist only when reliable daily metrics require it |
@@ -720,7 +748,7 @@ Good or usable mappings:
 - `rc_fundamental_quarterly` maps to canonical Q content.
 - `rc_fundamental_quarter_ingestion_status.ingestion_status` approximates ingestion lifecycle.
 - `source_confirmation_status` maps to SEC/assurance states.
-- `retry_recommendation` and Check decisions map to `NEXT_ACTION`.
+- `retry_recommendation` and Check decisions map to `OPERATIONAL_ACTION` / `DUE_ACTIONS`.
 - `rc_fundamental_ttm` contributes to downstream readiness.
 
 Approximate or overloaded mappings:
@@ -816,12 +844,12 @@ V2 is weaker or insufficient alone for:
 | Concept | Canonical classification | Notes |
 | --- | --- | --- |
 | Calendar updated | Event or state snapshot | Calendar/provider maintenance; not Q completion. |
-| New Q result detected | Event and transition | Usually `EXPECTED -> RESULT_DETECTED`; can produce `FETCH_NEW_RESULT`. |
+| New Q result detected | Event and transition | Result-calendar expectation can produce `RESULT_DETECTED` and `FETCH_NEW_RESULT`. |
 | Q enriched | Event | Fields/provenance added; may or may not affect core readiness. |
-| Q core ready | State snapshot or transition if newly ready | `Q_CORE_FIELDS_READY=true`; transition event is `CORE_FIELDS_BECAME_READY`. |
+| Q core ready | State snapshot or transition if changed | `Q_CORE_FIELDS_READY=true`; transition event is `CORE_READINESS_CHANGED`. |
 | Waiting for SEC confirmation | Assurance state plus scheduling | Prefer `SEC_CONFIRMATION_STATE=PENDING`; avoid vague waiting status. |
 | SEC confirmation received | Event and state | Event `SEC_CONFIRMATION_RECEIVED`; state `SEC_CONFIRMATION_STATE=CONFIRMED`. |
-| Retry/action work required | Action count | `NEXT_ACTION=RETRY_PROVIDER`, `ENRICH_Q`, `CHECK_SEC_CONFIRMATION`, etc. |
+| Retry/action work required | Action count | `DUE_ACTIONS` may include `RETRY_PROVIDER`, `ENRICH_Q`, `CHECK_SEC`, etc. |
 | Historical backfill debt | Historical state snapshot | Separate from latest-result Check counts. |
 
 ## Update Fundamentals Terminology
@@ -835,10 +863,10 @@ Update reporting should separate:
 | --- | --- |
 | `Q_CREATED` | Canonical row/storage milestone; lifecycle is `RESULT_DETECTED`, `ENRICHING`, or `OPERATIONALLY_SETTLED` depending on due work |
 | `Q_ENRICHED` | Field/provenance state changed |
-| `CORE_FIELDS_BECAME_READY` | `Q_CORE_FIELDS_READY=true` |
+| `CORE_READINESS_CHANGED` | `Q_CORE_FIELDS_READY` changed; details include before/after |
 | `SEC_CONFIRMATION_RECEIVED` | `SEC_CONFIRMATION_STATE=CONFIRMED` |
 | `BACKFILL_COMPLETED` | `HISTORICAL_BACKFILL_STATE=NO_HISTORICAL_BACKFILL_DEBT` |
-| provider retry remains | `NEXT_ACTION=RETRY_PROVIDER` plus retry schedule |
+| provider retry remains | `DUE_ACTIONS` includes `RETRY_PROVIDER` plus retry schedule |
 
 A successful update can still end with SEC pending, score not ready, or historical backfill debt.
 
@@ -851,7 +879,7 @@ market + ticker + fiscal_year + fiscal_quarter
    v
 
 ROLE
-FUTURE_EXPECTED_Q -> LATEST_OPERATIONAL_Q -> HISTORICAL_Q
+LATEST_OPERATIONAL_Q -> HISTORICAL_Q
 (role is contextual; it does not rewrite lifecycle)
 
 SEQUENTIAL Q_RESULT_LIFECYCLE
@@ -868,7 +896,7 @@ OPERATIONALLY_SETTLED
    +----------- Q_REOPENED event
 
 EXPECTED lives in result-calendar state. CANONICALIZED and INITIAL_DATA_ACQUIRED are events or
-derived milestones. RECONCILING is a transient process phase. MANUAL_REVIEW is NEXT_ACTION plus a
+derived milestones. RECONCILING is a transient process phase. MANUAL_REVIEW is an operational action plus a
 resolution issue.
 
 PARALLEL DIMENSIONS
@@ -877,10 +905,10 @@ CORE:       Q_CORE_FIELDS_READY=false | true | not_applicable | not_derivable
 FIELDS:     CORE_REQUIRED | DOWNSTREAM_HISTORY_REQUIRED | OPTIONAL_ENRICHMENT | PROVENANCE_ONLY
 SEC:        NOT_APPLICABLE | NOT_YET_EXPECTED | PENDING | CHECKED_NO_EVIDENCE
             PARTIAL_EVIDENCE | CONFIRMED | UNSUPPORTED | ERROR_RETRY | NOT_DERIVABLE
-ACTION:     NO_ACTION | CHECK_EXPECTED_RESULT | FETCH_NEW_RESULT | ENRICH_Q
-            RETRY_PROVIDER | CHECK_SEC_CONFIRMATION | BACKFILL_HISTORICAL
-            MANUAL_REVIEW | NOT_DERIVABLE
-PROVIDER:   observations | cache | no-data | error | retry/backoff | provenance rows
+ACTION:     DUE_ACTIONS set of CHECK_EXPECTED_RESULT | FETCH_NEW_RESULT | ENRICH_Q
+            RETRY_PROVIDER | CHECK_SEC | BACKFILL_HISTORICAL | MANUAL_REVIEW
+PROVIDER:   NOT_CHECKED | ACQUIRED | PARTIAL | NO_DATA | FAILED | UNSUPPORTED
+            plus scheduling/cache/provenance metadata
 BACKFILL:   NOT_HISTORICAL | NO_HISTORICAL_BACKFILL_DEBT
             NEEDS_HISTORICAL_BACKFILL | NOT_DERIVABLE
 PROFILE:    ORDINARY_SUPPORTED | BANK_PROFILE | INSURANCE_PROFILE
@@ -906,7 +934,7 @@ TTM/SCORE:  company-window readiness, not one-Q lifecycle
 | Provenance | Evidence describing where data came from and how it was transformed. |
 | Readiness | Whether a Q or company window has enough data for a specific consumer. |
 | Retry | A next action caused by provider, confirmation, or enrichment work that may be attempted later. |
-| Role | Contextual position of a Q as future, latest, or historical. |
+| Role | Contextual position of an existing canonical Q as latest or historical. |
 | Score ready | A supported company window has enough comparable data for score calculation. |
 | TTM ready | A company window has enough quarters for trailing-twelve-month calculations. |
 
@@ -945,7 +973,7 @@ Implementation details still open:
 | Preferred canonical term | Use for |
 | --- | --- |
 | `Q_RESULT_LIFECYCLE` | Sequential result lifecycle. |
-| `Q_ROLE` | Future/latest/historical context. |
+| `Q_ROLE` | Latest/historical context for existing canonical Qs. |
 | `Q_CORE_FIELDS_READY` | Six-field ordinary core readiness for any Q. |
 | `LATEST_Q_CORE_READY` | `Q_CORE_FIELDS_READY` on the latest operational Q. |
 | reported fiscal year/quarter | The company's reported fiscal period identity. |
@@ -955,10 +983,10 @@ Implementation details still open:
 | `calendar_comparison_method` | Method label explaining how the comparison period was derived. |
 | `derived_period_start_date` | Approximate analytical start date, currently period end minus three calendar months. |
 | `SEC_CONFIRMATION_STATE` | Authoritative source assurance. |
-| `NEXT_ACTION` | What the system should do next. |
+| `OPERATIONAL_ACTION` / `DUE_ACTIONS` | What work is scheduled or due; multiple actions may coexist. |
 | `HISTORICAL_BACKFILL_STATE` | Historical data debt. |
 | `PROFILE_SUPPORT_STATE` | Ordinary/bank/insurance/support gate. |
-| `CORE_FIELDS_BECAME_READY` | Event where core readiness changed to true. |
+| `CORE_READINESS_CHANGED` | Event where core readiness changed; details include before/after. |
 
 | Terms to avoid or qualify | Why |
 | --- | --- |

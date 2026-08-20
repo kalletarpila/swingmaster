@@ -63,9 +63,9 @@ Minimum useful V3 tables:
 | `v3_provider_symbol_alias` | `company_id + provider + provider_symbol` | Provider symbol mapping when Yahoo/SEC/SimFin differ from ticker. | Persisted. |
 | `v3_quarter` | `company_id + fiscal_year + fiscal_quarter` | Canonical reported fiscal Q identity and Q-level metadata. | Persisted. |
 | `v3_quarter_fundamentals` | `quarter_id` | One canonical value per supported field. Could be folded into `v3_quarter`; use 1:1 table if it keeps metadata cleaner. | Persisted canonical values. |
-| `v3_provider_q_acquisition` | `quarter_id + provider` | Independent provider acquisition/retry state. | Persisted operational state. |
-| `v3_raw_provider_payload` | `provider + provider_symbol + fetch_run_id + payload_hash` | Reproducible raw/staging store for bootstrap and parser fixes. | Persisted compact raw evidence. |
-| `v3_result_calendar` | `company_id + provider + expected_result_date` | Future expected results and calendar maintenance. | Persisted scheduling state. |
+| `v3_provider_q_acquisition` | `quarter_id + provider` | Independent provider acquisition outcome plus provider-specific scheduling metadata. | Persisted operational/provider state. |
+| external raw/cache store | `provider + provider_symbol + fetch_run_id + payload_hash` | Reproducible raw/staging cache for bootstrap and parser fixes. | Outside canonical V3 DB. |
+| `v3_result_calendar` | Stable provider event key where available; else `company_id + provider + target fiscal identity`; fallback to one active unmatched expectation per company/provider/window | Future expected results and calendar maintenance. `expected_result_date` is mutable metadata, not identity. | Persisted scheduling state. |
 | `v3_operational_action` | `action_id` | Durable retry/backoff/manual-review queue where derived action is not enough. | Persisted selectively. |
 | `v3_event` | `event_id` | Run observability: result detected, enriched, core ready changed, SEC confirmed, score ready changed. | Persisted compact history. |
 | `v3_ttm` | `company_id + as_of_quarter_id` | Company-window TTM outputs. | Persisted outputs. |
@@ -100,8 +100,13 @@ the current core/score model. Provider aliases are optional rows, not columns on
 
 The unique canonical identity is `company_id + fiscal_year + fiscal_quarter`. `period_end_date`
 means the accepted fiscal period end-like date for that reported fiscal Q. `publish_date` means the
-result publication/availability evidence date. `market_availability_date` is a downstream timing
-date and may be derived from publish date plus trading-calendar policy.
+canonical quarterly result publication date/evidence date. For accepted canonical quarterly
+fundamentals, `market_availability_date` follows the established publication-date availability
+invariant: accepted values are historically available from the canonical quarterly result
+publication date. Provider first-seen time, local ingestion latency, and SEC filing latency do not
+redefine historical market availability. If a trading-calendar transformation is needed by a
+specific backtest consumer, treat that as downstream execution-date logic, not a different
+fundamental-data availability truth.
 
 The deterministic V3 historical cutoff is:
 
@@ -147,18 +152,23 @@ Required downstream/supporting fields:
 Optional fields include `gross_profit` and `net_income`. Weighted-average shares are not canonical
 `shares_outstanding` and should not be migrated as equivalent.
 
-`Q_CORE_FIELDS_READY` is derived for ordinary companies:
+`Q_CORE_FIELDS_READY` is derived for ordinary companies and is source-agnostic:
 
 ```text
 valid reported fiscal identity
-AND revenue IS NOT NULL
-AND ebitda IS NOT NULL
-AND free_cashflow IS NOT NULL
-AND cash IS NOT NULL
-AND total_debt IS NOT NULL
-AND shares_outstanding IS NOT NULL
-AND shares_outstanding > 0
+AND accepted canonical revenue IS NOT NULL
+AND accepted canonical EBITDA IS NOT NULL
+AND accepted canonical free_cashflow IS NOT NULL
+AND accepted canonical cash IS NOT NULL
+AND accepted canonical total_debt IS NOT NULL
+AND accepted canonical shares_outstanding > 0
 ```
+
+Readiness does not depend on provider source, direct-vs-derived origin, SEC confirmation, or
+provenance richness. Accepted canonical FCF may be direct or an approved deterministic
+`operating_cashflow + capex` derivation under the established negative-capex convention. Accepted
+canonical EBITDA and total debt may likewise be direct or approved safe derivations if their
+field-specific semantic contracts are satisfied.
 
 ## Q Lifecycle
 
@@ -173,27 +183,37 @@ Persist the smallest useful V3 lifecycle:
 `EXPECTED` belongs in `v3_result_calendar`, not persisted Q lifecycle. `INITIAL_DATA_ACQUIRED` is
 an event or derived from provider acquisition rows. `RECONCILING` is a transient Update/migration
 phase. Durable unresolved reconciliation creates a `v3_resolution_issue` and may set
-`NEXT_ACTION=MANUAL_REVIEW`; it does not create a Q lifecycle state. `REOPENED` is an
+`OPERATIONAL_ACTION=MANUAL_REVIEW`; it does not create a Q lifecycle state. `Q_REOPENED` is an
 event/transition back to `ENRICHING`, not a persisted state.
 
 ## Provider Acquisition Model
 
-`v3_provider_q_acquisition` tracks provider progress independently:
+`v3_provider_q_acquisition` tracks provider acquisition outcome independently:
 
-| Status | Meaning |
+| Provider acquisition result | Meaning |
 | --- | --- |
 | `NOT_CHECKED` | Provider has not been checked for this Q. |
 | `ACQUIRED` | Provider supplied usable accepted or stageable data. |
 | `PARTIAL` | Provider supplied usable partial data but not all expected fields. |
 | `NO_DATA` | Provider checked successfully and returned no data for this Q. |
-| `RETRYABLE` | Provider failure or partial state is eligible for retry. |
-| `FAILED` | Provider failed and is not currently retryable under policy. |
+| `FAILED` | Provider acquisition failed. |
 | `UNSUPPORTED` | Provider cannot supply this field/Q/profile class. |
-| `SETTLED` | No further useful provider work is due for this provider/Q under policy. |
 
 Rows include `last_checked_at_utc`, `next_retry_at_utc`, `attempt_count`, `usable_field_count`,
-`provider_payload_ref`, `last_error_code`, and `updated_at_utc`. Do not create composite Q states
-such as `YAHOO_DONE_SEC_PENDING_SIMFIN_RETRY`.
+`provider_cache_ref`, `last_error_code`, and `updated_at_utc`. `acquisition_result` is provider
+outcome. `next_retry_at` and `attempt_count` are scheduling metadata. Whether provider work is due is
+derived from the result, policy, due dates, and operational action rows. Provider "settled" means no
+useful provider-specific automatic work is currently due; it is derived and must not replace the last
+meaningful acquisition result. Do not create composite Q states such as
+`YAHOO_DONE_SEC_PENDING_SIMFIN_RETRY`.
+
+Minimum provider-Q contract:
+
+- provider observation/outcome: `quarter_id`, `provider`, `acquisition_result`, `last_checked_at_utc`,
+  `last_success_at_utc`, `usable_field_count`, `last_error_code`, `provider_cache_ref`
+- scheduling metadata: `next_retry_at_utc`, `attempt_count`
+- derived due-action state: computed from provider outcome, retry policy, current time, and
+  `v3_operational_action`
 
 ## Yahoo-First Bootstrap
 
@@ -236,12 +256,13 @@ The bootstrap runner must be resumable by ticker/provider/run, cache raw respons
 record per-ticker completion, and avoid restarting from ticker 1 after a partial failure. Normal V3
 daily Update must not re-fetch all historical Yahoo periods.
 
-`v3_raw_provider_payload` is bootstrap staging/cache, parser-recovery input, and reproducibility aid.
-It is not permanent heavy analytical provenance. Retain raw payloads through successful canonical
-ingestion, migration/update validation, and a safety window; after that, prune or archive compressed
-raw outside the canonical DB. Permanent V3 rows should keep only compact accepted-source metadata:
-`accepted_source_provider`, `accepted_at`, `update_run_id`, `derivation_method`, and a resolution
-issue reference where applicable.
+Raw provider payload storage is bootstrap staging/cache, parser-recovery input, and reproducibility
+aid. It is not canonical fundamentals data and should live outside `rc_fundamentals_v3.db`, either in
+`rc_fundamentals_v3_raw.db` or a repository cache/filesystem location. Retain raw payloads through
+successful canonical ingestion, migration/update validation, and a safety window; after that, prune
+or archive compressed raw outside the canonical DB. Permanent V3 rows should keep only compact
+accepted-source metadata: `accepted_source_provider`, `accepted_at`, `update_run_id`,
+`derivation_method`, and a resolution issue reference where applicable.
 
 ## Source Precedence and Migration
 
@@ -333,7 +354,7 @@ The design-phase projection used only local read-only DB access. It made no prov
 | Metric | Value |
 | --- | ---: |
 | Legacy companies | 2,936 |
-| V2 companies | 4,323 |
+| V2 ORDINARY migration companies | 4,323 |
 | Local Yahoo-cache companies | 2,933 |
 | Legacy quarter rows, 1999+ | 156,070 |
 | V2 quarter rows, 1999+ | 82,812 |
@@ -345,8 +366,8 @@ The design-phase projection used only local read-only DB access. It made no prov
 | V2 rows in those groups | 638 |
 | Multi-report-date groups auto-importable by R1 heuristic | 221 |
 | Multi-report-date groups requiring review/block | 87 |
-| Latest-Q denominator | 4,323 |
-| Projected latest-Q core ready after local Yahoo + Legacy + V2 | 1,829, or 42.31% |
+| R1 staged latest-Q denominator, migration ordinary | 4,323 |
+| R1 staged latest-Q core ready after local Yahoo + Legacy + V2 | 1,829, or 42.31% |
 
 Field coverage after local Yahoo + Legacy + V2 on the strict V2 fiscal-identity denominator:
 
@@ -391,6 +412,41 @@ universe. Final V3 can grow when live Yahoo historical bootstrap supplies additi
 identities or when Legacy date-only rows are recovered through provider fiscal labels, validated
 company calendars, or period-end continuity.
 
+Population denominators must remain explicit:
+
+| Population | Count | Definition |
+| --- | ---: | --- |
+| Migration universe | 4,613 | V2 companies with ticker; historical/archive migration denominator. |
+| Migration ordinary universe | 4,323 | V2 ORDINARY companies with ticker; ordinary historical migration denominator. |
+| Active operational universe | 2,575 | V2 active companies eligible for current Check/Update. |
+| Active ORDINARY score universe | 2,451 | V2 active ORDINARY companies eligible for ordinary readiness/score semantics. |
+
+Readiness by denominator:
+
+| Metric | Numerator | Denominator | Coverage |
+| --- | ---: | ---: | ---: |
+| latest-Q core ready, all migration ordinary companies | 1,696 | 4,323 | 39.23% |
+| latest-Q core ready, active ORDINARY companies | 1,696 | 2,451 | 69.20% |
+| active ORDINARY 4Q EBITDA complete | 2,166 | 2,451 | 88.37% |
+| active ORDINARY 8Q EBITDA complete | 2,110 | 2,451 | 86.09% |
+| active ORDINARY 8Q FCF complete | 1,962 | 2,451 | 80.05% |
+| active ORDINARY 8Q shares complete | 953 | 2,451 | 38.88% |
+
+Calendar comparison derivability is separate from fiscal-identity derivability:
+
+| Source | Fiscal identity derivability | Approximate calendar-comparison derivability |
+| --- | --- | --- |
+| Legacy | Legacy primary quarterly rows do not reliably expose reported fiscal year/quarter; `period_end_date` alone must not create canonical fiscal identity. | `156,094 / 156,094` total Legacy rows and `156,070 / 156,070` 1999+ rows have valid `period_end_date` for the approved approximate method. |
+| V2 | V2 has explicit fiscal labels and SimFin `Report Date` as period-end-like evidence. | `85,424 / 85,424` rows have valid `report_date` usable for the approved approximate method after acceptance as period-end evidence. |
+
+Calendar comparison method and quality:
+
+- method values: `APPROX_3_CALENDAR_MONTHS_FROM_PERIOD_END`, `ACTUAL_PERIOD_RANGE`
+- quality values: `APPROX_OVERLAP`, `ACTUAL_RANGE_OVERLAP`, `AMBIGUOUS`,
+  `INSUFFICIENT_DATES`, `IRREGULAR_ACTUAL_PERIOD`
+
+The approximate method must not claim exact actual fiscal-period evidence.
+
 Detailed R1 artifacts are under `temp/fundamentals_v3_design_r1/20260820_214554/`.
 
 ## SEC and Assurance
@@ -399,7 +455,7 @@ SEC can be both provider evidence and assurance. Keep assurance separate from Q 
 quarter-level assurance states:
 
 - `NOT_APPLICABLE`
-- `NOT_YET_DUE`
+- `NOT_YET_EXPECTED`
 - `PENDING`
 - `CHECKED_NO_EVIDENCE`
 - `PARTIAL_EVIDENCE`
@@ -408,7 +464,8 @@ quarter-level assurance states:
 - `ERROR_RETRY`
 
 SEC confirmation should not be required for operational settlement, core readiness, TTM readiness,
-or score readiness unless a field-specific policy explicitly requires SEC evidence.
+or score readiness unless a field-specific policy explicitly requires SEC evidence. Due checks,
+`next_sec_check_at`, and retry timing are action/scheduling metadata, not assurance-state names.
 
 ## Action, Retry, and Resolution Issues
 
@@ -426,6 +483,23 @@ Minimal actions:
 - `BACKFILL_HISTORICAL`
 - `MANUAL_REVIEW`
 
+Minimum `v3_operational_action` contract:
+
+- `action_id`
+- `action_type`
+- `company_id`
+- nullable `quarter_id` for calendar/company-level actions
+- nullable `provider`
+- `due_at_utc`
+- `status`
+- `attempt_count`
+- `last_error`
+- `created_at_utc`
+- `updated_at_utc`
+
+Prevent duplicate active instances of the same semantic action. Do not encode Q readiness into
+action status.
+
 Durable conflicts and manual-review cases live in `v3_resolution_issue`, not Q lifecycle. One table
 is enough for migration identity conflicts, non-null value corrections, and manual-review items.
 Conceptual fields:
@@ -440,24 +514,36 @@ Conceptual fields:
 - `resolution`
 - compact source-value/details JSON
 
-`NEXT_ACTION=MANUAL_REVIEW` may coexist with `q_lifecycle=OPERATIONALLY_SETTLED` when no automatic
-work remains, or with `q_lifecycle=ENRICHING` when other automatic work is still due.
+`OPERATIONAL_ACTION=MANUAL_REVIEW` may coexist with `q_lifecycle=OPERATIONALLY_SETTLED` when no
+automatic work remains, or with `q_lifecycle=ENRICHING` when other automatic work is still due.
+`DUE_ACTIONS` is a set, so provider enrichment, SEC check, backfill, and manual review can coexist.
 
 ## Event History
 
 Persist compact events for run reporting:
 
 - `RESULT_DETECTED`
+- `Q_CREATED`
 - `INITIAL_DATA_ACQUIRED`
 - `Q_ENRICHED`
-- `CORE_READY_CHANGED`
-- `SEC_CONFIRMED`
-- `SCORE_READY_CHANGED`
+- `CORE_READINESS_CHANGED`
+- `SEC_CONFIRMATION_RECEIVED`
+- `SCORE_READINESS_CHANGED`
 - `PROVIDER_FAILED`
 - `RESOLUTION_ISSUE_CREATED`
-- `REOPENED`
+- `Q_REOPENED`
 
 This is not event sourcing. Canonical tables remain authoritative snapshots.
+
+Minimum `v3_event` contract:
+
+- `event_id`
+- `event_type`
+- `event_at_utc`
+- `run_id`
+- `company_id`
+- nullable `quarter_id`
+- compact details JSON with before/after values for readiness transitions
 
 ## Historical Backfill
 

@@ -801,8 +801,20 @@ class V3RawCacheRepository:
         apply_v3_schema(conn, include_raw_cache=True)
         return conn
 
-    def put_payload(self, *, provider: str, provider_symbol: str, fetch_run_id: str, payload_json: str, observed_at_utc: str | None = None) -> str:
+    def put_payload(
+        self,
+        *,
+        provider: str,
+        provider_symbol: str,
+        fetch_run_id: str,
+        payload_json: str,
+        status: str = "OK",
+        error_message: str | None = None,
+        observed_at_utc: str | None = None,
+    ) -> str:
         provider = _normalize_provider(provider)
+        if status not in {"OK", "EMPTY", "ERROR"}:
+            raise ValueError(f"V3_INVALID_RAW_CACHE_STATUS:{status}")
         payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
         now = utc_now_text()
         with self.connect() as conn:
@@ -810,11 +822,21 @@ class V3RawCacheRepository:
                 """
                 INSERT OR IGNORE INTO v3_raw_cache_entry (
                     provider, provider_symbol, fetch_run_id, payload_hash,
-                    payload_json, observed_at_utc, created_at_utc
+                    payload_json, status, error_message, observed_at_utc, created_at_utc
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (provider, provider_symbol, fetch_run_id, payload_hash, payload_json, observed_at_utc or now, now),
+                (
+                    provider,
+                    provider_symbol,
+                    fetch_run_id,
+                    payload_hash,
+                    payload_json,
+                    status,
+                    error_message,
+                    observed_at_utc or now,
+                    now,
+                ),
             )
             conn.commit()
         return payload_hash

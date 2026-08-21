@@ -28,6 +28,7 @@ from swingmaster.fundamentals.v3_repositories import (
     V3OutputRepository,
     V3ProviderAcquisitionRepository,
     V3QuarterRepository,
+    V3RawCacheRepository,
     V3ResolutionIssueRepository,
 )
 from swingmaster.fundamentals.v3_schema import V3_REQUIRED_TABLES, apply_v3_schema, run_v3_schema_migration, validate_v3_schema
@@ -86,6 +87,39 @@ def test_v3_schema_can_create_explicit_external_raw_cache(tmp_path: Path) -> Non
             WHERE type='table' AND name='v3_raw_cache_entry'
             """
         ).fetchone() == ("v3_raw_cache_entry",)
+        columns = {
+            str(row[1])
+            for row in conn.execute(
+                """
+                PRAGMA table_info(v3_raw_cache_entry)
+                """
+            )
+        }
+        assert {"status", "error_message", "observed_at_utc", "payload_hash", "payload_json"}.issubset(columns)
+
+
+def test_v3_raw_cache_repository_preserves_fetch_status_and_error(tmp_path: Path) -> None:
+    db_path = tmp_path / "rc_fundamentals_v3_raw.db"
+    repo = V3RawCacheRepository(db_path)
+
+    payload_hash = repo.put_payload(
+        provider="YAHOO",
+        provider_symbol="AAPL",
+        fetch_run_id="RUN1",
+        payload_json='{"quarterly_income_stmt":{"columns":["2026-06-30"]}}',
+        status="ERROR",
+        error_message="rate limited",
+        observed_at_utc=NOW,
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT provider, provider_symbol, fetch_run_id, payload_hash, status, error_message, observed_at_utc
+            FROM v3_raw_cache_entry
+            """
+        ).fetchone()
+    assert row == ("YAHOO", "AAPL", "RUN1", payload_hash, "ERROR", "rate limited", NOW)
 
 
 def test_v3_schema_rejects_unsupported_schema_version(tmp_path: Path) -> None:
@@ -227,6 +261,51 @@ def test_v3_fundamentals_repository_incoming_null_is_noop() -> None:
     assert second == {"inserted": [], "filled": [], "preserved": [], "conflicts": []}
     assert row["revenue"] is None
     assert row["cash"] == 10.0
+
+
+def test_v3_fundamentals_storage_accepts_yahoo_bootstrap_value_contract() -> None:
+    conn = sqlite3.connect(":memory:")
+    apply_v3_schema(conn)
+    company_id = V3CompanyRepository(conn).admit_company(market="usa", ticker="AAPL", now_utc=NOW)
+    quarter_id = V3QuarterRepository(conn).upsert_quarter(
+        company_id=company_id,
+        fiscal_year=2026,
+        fiscal_quarter="Q3",
+        period_end_date="2026-06-30",
+        publish_date="2026-07-30",
+        market_availability_date="2026-07-30",
+        q_lifecycle="OPERATIONALLY_SETTLED",
+        now_utc=NOW,
+    )
+    values = {
+        "revenue": 109417000000.0,
+        "gross_profit": 54770000000.0,
+        "ebit": 35695000000.0,
+        "ebitda": 39015000000.0,
+        "net_income": 29789000000.0,
+        "operating_cashflow": 34369000000.0,
+        "capex": -2455000000.0,
+        "free_cashflow": 31914000000.0,
+        "cash": 39544000000.0,
+        "total_debt": 84344000000.0,
+        "shares_outstanding": 14687356000.0,
+    }
+
+    result = V3FundamentalsRepository(conn).write_null_preserving_fields(
+        quarter_id=quarter_id,
+        values=values,
+        accepted_source_provider="YAHOO",
+        accepted_at_utc=NOW,
+        update_run_id="YAHOO_BOOTSTRAP_TEST",
+        derivation_method="YAHOO_DIRECT_OR_PROVIDER_NORMALIZED",
+    )
+    row = V3FundamentalsRepository(conn).get_fundamentals(quarter_id=quarter_id)
+
+    assert sorted(result["filled"]) == sorted(values)
+    for field_name, expected_value in values.items():
+        assert row[field_name] == expected_value
+    assert row["accepted_source_provider"] == "YAHOO"
+    assert row["derivation_method"] == "YAHOO_DIRECT_OR_PROVIDER_NORMALIZED"
 
 
 def test_v3_provider_actions_resolution_and_outputs() -> None:

@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS v3_raw_cache_entry (
     fetch_run_id TEXT NOT NULL,
     payload_hash TEXT NOT NULL,
     payload_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'OK' CHECK (status IN ('OK', 'EMPTY', 'ERROR')),
+    error_message TEXT,
     observed_at_utc TEXT NOT NULL,
     created_at_utc TEXT NOT NULL,
     UNIQUE (provider, provider_symbol, fetch_run_id, payload_hash)

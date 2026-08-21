@@ -189,7 +189,7 @@ def _mock_result_check_provider_stages(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         result_check,
         "_run_calendar_refresh",
-        lambda root, db, tickers: {
+        lambda root, db, tickers, **kwargs: {
             "stage": {"stage": "calendar_refresh", "status": "SUCCESS", "selected_tickers": len(tickers)},
             "summary": {"selected_tickers": len(tickers), "inserted_count": 0, "updated_count": 0},
         },
@@ -197,7 +197,7 @@ def _mock_result_check_provider_stages(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         result_check,
         "_run_completed_event_refresh",
-        lambda root, db, tickers: {
+        lambda root, db, tickers, **kwargs: {
             "stage": {"stage": "completed_event_refresh", "status": "SUCCESS", "selected_tickers": len(tickers)},
             "summary": {"selected_tickers": len(tickers), "failed_tickers": 0, "results": []},
         },
@@ -205,11 +205,68 @@ def _mock_result_check_provider_stages(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         result_check,
         "_run_match_rebuild",
-        lambda root, db, enabled: {
+        lambda root, db, enabled, **kwargs: {
             "stage": {"stage": "event_match_rebuild", "status": "SUCCESS", "enabled": enabled},
             "summary": {"mocked": True},
         },
     )
+
+
+def test_result_check_creates_one_run_level_backup_before_mutating_stages(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    ohlcv_db = _ohlcv_db(tmp_path)
+    output_root = Path.cwd() / "temp" / "pytest_result_check_run_backup"
+    _insert_quarter(fundamentals_db, "AAPL")
+    _insert_calendar(fundamentals_db, "AAPL", "DUE_TODAY", "2026-08-07")
+
+    created_backups: list[Path] = []
+    received_backups: list[dict[str, object]] = []
+
+    def fake_backup(db_path: Path, backup_arg: str | None = None) -> Path:
+        assert db_path == fundamentals_db
+        assert backup_arg is not None
+        backup_path = Path(backup_arg)
+        assert backup_path.name.startswith("fundamentals.db.pre_result_check.")
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(str(backup_path)) as conn:
+            conn.execute("CREATE TABLE backup_marker (id INTEGER)")
+            conn.commit()
+        created_backups.append(backup_path)
+        return backup_path.resolve()
+
+    def fake_calendar(root: Path, db: Path, tickers: list[str], **kwargs: object) -> dict[str, object]:
+        received_backups.append(dict(kwargs["result_check_backup"]))  # type: ignore[arg-type]
+        return {"stage": {"stage": "calendar_refresh", "status": "SUCCESS"}, "summary": {}}
+
+    def fake_completed(root: Path, db: Path, tickers: list[str], **kwargs: object) -> dict[str, object]:
+        received_backups.append(dict(kwargs["result_check_backup"]))  # type: ignore[arg-type]
+        return {"stage": {"stage": "completed_event_refresh", "status": "SUCCESS"}, "summary": {"selected_tickers": len(tickers)}}
+
+    def fake_match(root: Path, db: Path, *, enabled: bool, **kwargs: object) -> dict[str, object]:
+        received_backups.append(dict(kwargs["result_check_backup"]))  # type: ignore[arg-type]
+        return {"stage": {"stage": "event_match_rebuild", "status": "SUCCESS", "enabled": enabled}, "summary": {}}
+
+    monkeypatch.setattr(result_check.apply_yahoo_earnings_events, "create_sqlite_backup", fake_backup)
+    monkeypatch.setattr(result_check, "_run_calendar_refresh", fake_calendar)
+    monkeypatch.setattr(result_check, "_run_completed_event_refresh", fake_completed)
+    monkeypatch.setattr(result_check, "_run_match_rebuild", fake_match)
+
+    result = result_check.run_manual_result_check(
+        fundamentals_db=fundamentals_db,
+        ohlcv_db=ohlcv_db,
+        decision_date="2026-08-07",
+        output_root=output_root,
+        tickers=["AAPL"],
+    )
+
+    assert result["check_status"] == "SUCCESS"
+    assert len(created_backups) == 1
+    assert created_backups[0].parent == output_root / "backups"
+    assert all(backup["backup_verified"] is True for backup in received_backups)
+    assert {backup["backup_path"] for backup in received_backups} == {str(created_backups[0].resolve())}
+    backup_stages = [stage for stage in result["stages"] if stage["stage"] == "result_check_backup"]
+    assert len(backup_stages) == 1
+    assert backup_stages[0]["backup_path"] == str(created_backups[0].resolve())
 
 
 def _run_check(fundamentals_db: Path, ohlcv_db: Path, decision_date: date, label: str) -> dict[str, object]:
@@ -234,9 +291,9 @@ def test_result_check_builds_executable_plan_after_completed_event(monkeypatch: 
     _insert_calendar(fundamentals_db, "AAPL", "DUE_TODAY", "2026-08-07")
     _insert_event_and_match(fundamentals_db, "AAPL", "2026-08-07", "2026-06-30")
 
-    monkeypatch.setattr(result_check, "_run_calendar_refresh", lambda root, db, tickers: {"stage": {"stage": "calendar_refresh", "status": "SUCCESS"}, "summary": {}})
-    monkeypatch.setattr(result_check, "_run_completed_event_refresh", lambda root, db, tickers: {"stage": {"stage": "completed_event_refresh", "status": "SUCCESS"}, "summary": {"selected_tickers": len(tickers)}})
-    monkeypatch.setattr(result_check, "_run_match_rebuild", lambda root, db, enabled: {"stage": {"stage": "event_match_rebuild", "status": "SUCCESS", "enabled": enabled}, "summary": {}})
+    monkeypatch.setattr(result_check, "_run_calendar_refresh", lambda root, db, tickers, **kwargs: {"stage": {"stage": "calendar_refresh", "status": "SUCCESS"}, "summary": {}})
+    monkeypatch.setattr(result_check, "_run_completed_event_refresh", lambda root, db, tickers, **kwargs: {"stage": {"stage": "completed_event_refresh", "status": "SUCCESS"}, "summary": {"selected_tickers": len(tickers)}})
+    monkeypatch.setattr(result_check, "_run_match_rebuild", lambda root, db, enabled, **kwargs: {"stage": {"stage": "event_match_rebuild", "status": "SUCCESS", "enabled": enabled}, "summary": {}})
 
     result = result_check.run_manual_result_check(
         fundamentals_db=fundamentals_db,
@@ -278,9 +335,9 @@ def test_stale_ohlcv_suppresses_provider_candidate(monkeypatch: pytest.MonkeyPat
     _insert_calendar(fundamentals_db, "STALE", "DUE_TODAY", "2026-08-07")
     _insert_event_and_match(fundamentals_db, "STALE", "2026-08-07", "2026-06-30")
 
-    monkeypatch.setattr(result_check, "_run_calendar_refresh", lambda root, db, tickers: {"stage": {"stage": "calendar_refresh", "status": "SUCCESS", "selected_tickers": len(tickers)}, "summary": {}})
-    monkeypatch.setattr(result_check, "_run_completed_event_refresh", lambda root, db, tickers: {"stage": {"stage": "completed_event_refresh", "status": "SUCCESS"}, "summary": {}})
-    monkeypatch.setattr(result_check, "_run_match_rebuild", lambda root, db, enabled: {"stage": {"stage": "event_match_rebuild", "status": "SUCCESS"}, "summary": {}})
+    monkeypatch.setattr(result_check, "_run_calendar_refresh", lambda root, db, tickers, **kwargs: {"stage": {"stage": "calendar_refresh", "status": "SUCCESS", "selected_tickers": len(tickers)}, "summary": {}})
+    monkeypatch.setattr(result_check, "_run_completed_event_refresh", lambda root, db, tickers, **kwargs: {"stage": {"stage": "completed_event_refresh", "status": "SUCCESS"}, "summary": {}})
+    monkeypatch.setattr(result_check, "_run_match_rebuild", lambda root, db, enabled, **kwargs: {"stage": {"stage": "event_match_rebuild", "status": "SUCCESS"}, "summary": {}})
 
     result = result_check.run_manual_result_check(
         fundamentals_db=fundamentals_db,
@@ -399,6 +456,55 @@ def test_completed_event_refresh_backup_failure_stops_before_ticker_apply(monkey
     assert payload["summary"]["batch_backup"]["error_type"] == "RuntimeError"
     assert payload["summary"]["results"] == []
     assert apply_started is False
+
+
+def test_result_check_substeps_reuse_verified_run_backup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fundamentals_db = _migrated_db(tmp_path)
+    root = Path.cwd() / "temp" / "pytest_result_check_substep_backup_reuse"
+    run_backup = {"backup_verified": True, "backup_path": str(root / "backups" / "fundamentals.db.pre_result_check.TEST.bak")}
+    calendar_argv: list[str] = []
+    match_args: list[object] = []
+
+    def fake_calendar_main(argv: list[str]) -> int:
+        calendar_argv.extend(argv)
+        summary_path = Path(argv[argv.index("--summary-json") + 1])
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(json.dumps({"selected_tickers": 1}) + "\n", encoding="utf-8")
+        return 0
+
+    def fail_completed_backup(*_: object, **__: object) -> Path:
+        raise AssertionError("completed-event substep should reuse the result-check backup")
+
+    def fake_apply(args: object) -> tuple[dict[str, object], int]:
+        assert getattr(args, "backup_already_created") is True
+        return {"mode": "apply", "backup_path": None, "apply_summary": {"transaction_status": "COMMITTED"}}, 0
+
+    def fake_match_run_cli(args: object) -> dict[str, object]:
+        match_args.append(args)
+        return {"backup": {"created": False, "verified": True, "path": getattr(args, "backup")}, "summary": {}}
+
+    monkeypatch.setattr(result_check.refresh_yahoo_earnings_calendar, "main", fake_calendar_main)
+    monkeypatch.setattr(result_check.apply_yahoo_earnings_events, "create_sqlite_backup", fail_completed_backup)
+    monkeypatch.setattr(result_check.apply_yahoo_earnings_events, "build_apply_summary", fake_apply)
+    monkeypatch.setattr(result_check.rebuild_earnings_event_matches, "run_cli", fake_match_run_cli)
+
+    calendar_payload = result_check._run_calendar_refresh(root, fundamentals_db, ["AAPL"], result_check_backup=run_backup)
+    completed_payload = result_check._run_completed_event_refresh(root, fundamentals_db, ["AAPL"], result_check_backup=run_backup)
+    match_payload = result_check._run_match_rebuild(root, fundamentals_db, enabled=True, result_check_backup=run_backup)
+
+    assert calendar_payload["stage"]["status"] == result_check.CHECK_STATUS_SUCCESS
+    assert "--backup-already-created" in calendar_argv
+    assert completed_payload["summary"]["batch_backup"] == {
+        "created": False,
+        "path": run_backup["backup_path"],
+        "verified": True,
+        "reused_from_result_check": True,
+    }
+    assert completed_payload["stage"]["backup_reused"] is True
+    assert len(match_args) == 1
+    assert getattr(match_args[0], "backup_already_created") is True
+    assert getattr(match_args[0], "backup") == run_backup["backup_path"]
+    assert match_payload["summary"]["backup"]["created"] is False
 
 
 def test_calendar_selector_normal_day_bounds_provider_work_to_due_and_maintenance(tmp_path: Path) -> None:
@@ -960,9 +1066,9 @@ def test_partial_event_refresh_disables_executable_plan(monkeypatch: pytest.Monk
     _insert_calendar(fundamentals_db, "AAPL", "DUE_TODAY", "2026-08-07")
     _insert_event_and_match(fundamentals_db, "AAPL", "2026-08-07", "2026-06-30")
 
-    monkeypatch.setattr(result_check, "_run_calendar_refresh", lambda root, db, tickers: {"stage": {"stage": "calendar_refresh", "status": "SUCCESS"}, "summary": {}})
-    monkeypatch.setattr(result_check, "_run_completed_event_refresh", lambda root, db, tickers: {"stage": {"stage": "completed_event_refresh", "status": "PARTIAL"}, "summary": {}})
-    monkeypatch.setattr(result_check, "_run_match_rebuild", lambda root, db, enabled: {"stage": {"stage": "event_match_rebuild", "status": "SUCCESS", "enabled": enabled}, "summary": {}})
+    monkeypatch.setattr(result_check, "_run_calendar_refresh", lambda root, db, tickers, **kwargs: {"stage": {"stage": "calendar_refresh", "status": "SUCCESS"}, "summary": {}})
+    monkeypatch.setattr(result_check, "_run_completed_event_refresh", lambda root, db, tickers, **kwargs: {"stage": {"stage": "completed_event_refresh", "status": "PARTIAL"}, "summary": {}})
+    monkeypatch.setattr(result_check, "_run_match_rebuild", lambda root, db, enabled, **kwargs: {"stage": {"stage": "event_match_rebuild", "status": "SUCCESS", "enabled": enabled}, "summary": {}})
 
     result = result_check.run_manual_result_check(
         fundamentals_db=fundamentals_db,
@@ -998,9 +1104,9 @@ def test_ambiguous_target_period_is_manual_review_not_executable(monkeypatch: py
         )
         conn.commit()
 
-    monkeypatch.setattr(result_check, "_run_calendar_refresh", lambda root, db, tickers: {"stage": {"stage": "calendar_refresh", "status": "SUCCESS"}, "summary": {}})
-    monkeypatch.setattr(result_check, "_run_completed_event_refresh", lambda root, db, tickers: {"stage": {"stage": "completed_event_refresh", "status": "SUCCESS"}, "summary": {}})
-    monkeypatch.setattr(result_check, "_run_match_rebuild", lambda root, db, enabled: {"stage": {"stage": "event_match_rebuild", "status": "SUCCESS"}, "summary": {}})
+    monkeypatch.setattr(result_check, "_run_calendar_refresh", lambda root, db, tickers, **kwargs: {"stage": {"stage": "calendar_refresh", "status": "SUCCESS"}, "summary": {}})
+    monkeypatch.setattr(result_check, "_run_completed_event_refresh", lambda root, db, tickers, **kwargs: {"stage": {"stage": "completed_event_refresh", "status": "SUCCESS"}, "summary": {}})
+    monkeypatch.setattr(result_check, "_run_match_rebuild", lambda root, db, enabled, **kwargs: {"stage": {"stage": "event_match_rebuild", "status": "SUCCESS"}, "summary": {}})
 
     result = result_check.run_manual_result_check(
         fundamentals_db=fundamentals_db,
@@ -1023,7 +1129,7 @@ def test_failed_calendar_refresh_writes_failed_empty_plan(monkeypatch: pytest.Mo
     _insert_quarter(fundamentals_db, "AAPL")
     _insert_calendar(fundamentals_db, "AAPL", "DUE_TODAY", "2026-08-07")
 
-    monkeypatch.setattr(result_check, "_run_calendar_refresh", lambda root, db, tickers: {"stage": {"stage": "calendar_refresh", "status": "FAILED"}, "summary": {"error": "boom"}})
+    monkeypatch.setattr(result_check, "_run_calendar_refresh", lambda root, db, tickers, **kwargs: {"stage": {"stage": "calendar_refresh", "status": "FAILED"}, "summary": {"error": "boom"}})
 
     result = result_check.run_manual_result_check(
         fundamentals_db=fundamentals_db,

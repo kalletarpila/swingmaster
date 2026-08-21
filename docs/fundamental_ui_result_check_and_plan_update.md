@@ -58,15 +58,15 @@ DATE_PASSED_EVENT_NOT_FOUND within --event-watch-days-after of decision_date
 
 Far-future `UPCOMING`, stale/inactive tickers, and old `NO_CURRENT_ESTIMATE` rows are not completed-event refresh candidates in this phase.
 
-## Completed-Event Backup Scope
+## Result-Check Backup Scope
 
-Completed-event refresh is batch orchestration. When one or more completed-event candidates are selected, it creates one verified pre-batch SQLite backup under:
+`run_manual_result_check` creates one verified run-level SQLite backup before the first result-check database mutation:
 
 ```text
-temp/fundamental_result_check/<UTC_TIMESTAMP>/completed_event_refresh/backups/
+temp/fundamental_result_check/<UTC_TIMESTAMP>/backups/fundamentals_usa.db.pre_result_check.<UTC_TIMESTAMP>.bak
 ```
 
-The per-ticker Yahoo earnings apply helper is then called with an explicit internal marker that the batch backup already exists, so it does not create another full database backup for each ticker. Direct standalone `apply_yahoo_earnings_events --apply` keeps its guarded single-ticker backup behavior. This prevents backup amplification where N candidate tickers could otherwise create N full copies of `fundamentals_usa.db`.
+Calendar refresh, completed-event refresh, earnings-event match rebuild, and provider timing observation writes are all protected by that one backup during the orchestrated result-check run. The substeps receive an internal verified-backup context and do not create additional full database backups inside result-check. Standalone `refresh_yahoo_earnings_calendar --apply`, `apply_yahoo_earnings_events --apply`, and `rebuild_earnings_event_matches --apply` keep their independent backup behavior.
 
 ## Plan Contract
 

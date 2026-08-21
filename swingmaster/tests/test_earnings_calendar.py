@@ -261,6 +261,7 @@ def test_calendar_refresh_future_wins_over_historical_completed_event(monkeypatc
         ]
 
     monkeypatch.setattr(refresh_yahoo_earnings_calendar, "fetch_yahoo_earnings_calendar_rows", fake_fetch)
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar, "new_york_today_from_utc", lambda *_args, **_kwargs: "2026-08-06")
     monkeypatch.setattr(refresh_yahoo_earnings_calendar.time, "sleep", lambda _seconds: None)
     root = _temp_root("future_wins")
     assert (
@@ -322,6 +323,7 @@ def test_calendar_refresh_future_only_response(monkeypatch: pytest.MonkeyPatch, 
         return [{"Earnings Date": "2026-08-10 16:00:00", "Reported EPS": None}]
 
     monkeypatch.setattr(refresh_yahoo_earnings_calendar, "fetch_yahoo_earnings_calendar_rows", fake_fetch)
+    monkeypatch.setattr(refresh_yahoo_earnings_calendar, "new_york_today_from_utc", lambda *_args, **_kwargs: "2026-08-06")
     monkeypatch.setattr(refresh_yahoo_earnings_calendar.time, "sleep", lambda _seconds: None)
     root = _temp_root("future_only")
     assert (

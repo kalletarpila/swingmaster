@@ -143,7 +143,23 @@ def run_manual_result_check(
         )
     )
 
-    calendar_summary = _run_calendar_refresh(root, fundamentals_db, calendar_selection["selected_tickers"])
+    try:
+        result_check_backup = _create_result_check_backup(root, fundamentals_db)
+        stages.append(_stage("result_check_backup", CHECK_STATUS_SUCCESS, **result_check_backup))
+    except Exception as exc:
+        return _write_failed_plan(
+            root=root,
+            fundamentals_db=fundamentals_db,
+            ohlcv_db=ohlcv_db,
+            decision_date=parsed_decision_date,
+            ohlcv_stale_days=ohlcv_stale_days,
+            created_at_utc=created_at_utc,
+            stages=[*stages, _stage("result_check_backup", CHECK_STATUS_FAILED, error_type=type(exc).__name__, error_message=str(exc))],
+            provider_call_counts={"yahoo_calendar_tickers": 0, "yahoo_completed_event_tickers": 0, "sec": 0, "simfin": 0},
+            timing_summary=_empty_timing_summary(),
+        )
+
+    calendar_summary = _run_calendar_refresh(root, fundamentals_db, calendar_selection["selected_tickers"], result_check_backup=result_check_backup)
     stages.append(calendar_summary["stage"])
     if calendar_summary["stage"]["status"] == CHECK_STATUS_FAILED:
         timing_summary = _record_provider_failure_observations(
@@ -181,9 +197,14 @@ def run_manual_result_check(
     )
     stages.append(_stage("completed_event_candidate_selection", CHECK_STATUS_SUCCESS, selected_tickers=len(event_candidates)))
 
-    event_summary = _run_completed_event_refresh(root, fundamentals_db, event_candidates)
+    event_summary = _run_completed_event_refresh(root, fundamentals_db, event_candidates, result_check_backup=result_check_backup)
     stages.append(event_summary["stage"])
-    match_summary = _run_match_rebuild(root, fundamentals_db, enabled=bool(event_candidates) and event_summary["stage"]["status"] == CHECK_STATUS_SUCCESS)
+    match_summary = _run_match_rebuild(
+        root,
+        fundamentals_db,
+        enabled=bool(event_candidates) and event_summary["stage"]["status"] == CHECK_STATUS_SUCCESS,
+        result_check_backup=result_check_backup,
+    )
     stages.append(match_summary["stage"])
 
     final_rows = _decision_rows(
@@ -564,7 +585,27 @@ def _decision_rows(
         )
 
 
-def _run_calendar_refresh(root: Path, fundamentals_db: Path, active_tickers: list[str]) -> dict[str, Any]:
+def _create_result_check_backup(root: Path, fundamentals_db: Path) -> dict[str, Any]:
+    backup_path = validate_temp_path(root / "backups" / f"{fundamentals_db.name}.pre_result_check.{utc_timestamp()}.bak")
+    created = apply_yahoo_earnings_events.create_sqlite_backup(fundamentals_db, str(backup_path))
+    if created.stat().st_size <= 0:
+        raise RuntimeError(f"RESULT_CHECK_BACKUP_EMPTY:{created}")
+    _verify_sqlite_backup(created)
+    return {
+        "backup_created": True,
+        "backup_verified": True,
+        "backup_path": str(created),
+        "backup_size_bytes": created.stat().st_size,
+    }
+
+
+def _run_calendar_refresh(
+    root: Path,
+    fundamentals_db: Path,
+    active_tickers: list[str],
+    *,
+    result_check_backup: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     output_root = root / "calendar_refresh"
     tickers_file = output_root / "active_tickers.txt"
     output_root.mkdir(parents=True, exist_ok=True)
@@ -574,47 +615,68 @@ def _run_calendar_refresh(root: Path, fundamentals_db: Path, active_tickers: lis
         payload = {"selected_tickers": 0, "status": CHECK_STATUS_SUCCESS}
         _write_json(summary_json, payload)
         return {"stage": _stage("calendar_refresh", CHECK_STATUS_SUCCESS, selected_tickers=0), "summary": payload}
-    exit_code = refresh_yahoo_earnings_calendar.main(
-        [
-            "--fundamentals-db",
-            str(fundamentals_db),
-            "--tickers-file",
-            str(tickers_file),
-            "--output-root",
-            str(output_root),
-            "--summary-json",
-            str(summary_json),
-            "--apply",
-        ]
-    )
+    argv = [
+        "--fundamentals-db",
+        str(fundamentals_db),
+        "--tickers-file",
+        str(tickers_file),
+        "--output-root",
+        str(output_root),
+        "--summary-json",
+        str(summary_json),
+        "--apply",
+    ]
+    if result_check_backup and result_check_backup.get("backup_verified"):
+        argv.extend(
+            [
+                "--backup",
+                str(result_check_backup["backup_path"]),
+                "--backup-already-created",
+            ]
+        )
+    exit_code = refresh_yahoo_earnings_calendar.main(argv)
     payload = _read_json(summary_json)
     status = CHECK_STATUS_SUCCESS if exit_code == 0 else CHECK_STATUS_FAILED
     return {"stage": _stage("calendar_refresh", status, selected_tickers=len(active_tickers), exit_code=exit_code), "summary": payload}
 
 
-def _run_completed_event_refresh(root: Path, fundamentals_db: Path, tickers: list[str]) -> dict[str, Any]:
+def _run_completed_event_refresh(
+    root: Path,
+    fundamentals_db: Path,
+    tickers: list[str],
+    *,
+    result_check_backup: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     output_root = root / "completed_event_refresh"
     backup_root = output_root / "backups"
     output_root.mkdir(parents=True, exist_ok=True)
     batch_backup: dict[str, Any] = {"created": False, "path": None, "verified": False}
     if tickers:
-        try:
-            backup_path = _create_completed_event_refresh_backup(fundamentals_db, backup_root)
-            batch_backup = {"created": True, "path": str(backup_path), "verified": True}
-        except Exception as exc:
+        if result_check_backup and result_check_backup.get("backup_verified"):
             batch_backup = {
                 "created": False,
-                "path": None,
-                "verified": False,
-                "error_type": type(exc).__name__,
-                "error_message": str(exc),
+                "path": result_check_backup.get("backup_path"),
+                "verified": True,
+                "reused_from_result_check": True,
             }
-            payload = {"selected_tickers": len(tickers), "failed_tickers": len(tickers), "batch_backup": batch_backup, "results": []}
-            _write_json(output_root / "completed_event_refresh_summary.json", payload)
-            return {
-                "stage": _stage("completed_event_refresh", CHECK_STATUS_FAILED, selected_tickers=len(tickers), failed_tickers=len(tickers), backup_created=False),
-                "summary": payload,
-            }
+        else:
+            try:
+                backup_path = _create_completed_event_refresh_backup(fundamentals_db, backup_root)
+                batch_backup = {"created": True, "path": str(backup_path), "verified": True}
+            except Exception as exc:
+                batch_backup = {
+                    "created": False,
+                    "path": None,
+                    "verified": False,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                }
+                payload = {"selected_tickers": len(tickers), "failed_tickers": len(tickers), "batch_backup": batch_backup, "results": []}
+                _write_json(output_root / "completed_event_refresh_summary.json", payload)
+                return {
+                    "stage": _stage("completed_event_refresh", CHECK_STATUS_FAILED, selected_tickers=len(tickers), failed_tickers=len(tickers), backup_created=False),
+                    "summary": payload,
+                }
     rows: list[dict[str, Any]] = []
     failures = 0
     for ticker in tickers:
@@ -647,7 +709,14 @@ def _run_completed_event_refresh(root: Path, fundamentals_db: Path, tickers: lis
     _write_json(output_root / "completed_event_refresh_summary.json", payload)
     status = CHECK_STATUS_SUCCESS if failures == 0 else CHECK_STATUS_PARTIAL
     return {
-        "stage": _stage("completed_event_refresh", status, selected_tickers=len(tickers), failed_tickers=failures, backup_created=batch_backup["created"]),
+        "stage": _stage(
+            "completed_event_refresh",
+            status,
+            selected_tickers=len(tickers),
+            failed_tickers=failures,
+            backup_created=batch_backup["created"],
+            backup_reused=bool(batch_backup.get("reused_from_result_check")),
+        ),
         "summary": payload,
     }
 
@@ -667,7 +736,13 @@ def _verify_sqlite_backup(path: Path) -> None:
         raise RuntimeError(f"BACKUP_QUICK_CHECK_FAILED:{path}")
 
 
-def _run_match_rebuild(root: Path, fundamentals_db: Path, *, enabled: bool) -> dict[str, Any]:
+def _run_match_rebuild(
+    root: Path,
+    fundamentals_db: Path,
+    *,
+    enabled: bool,
+    result_check_backup: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     output_root = root / "event_match_rebuild"
     output_root.mkdir(parents=True, exist_ok=True)
     summary_json = output_root / "event_match_rebuild_summary.json"
@@ -675,6 +750,11 @@ def _run_match_rebuild(root: Path, fundamentals_db: Path, *, enabled: bool) -> d
         payload = {"skipped": True, "reason": "NO_COMPLETED_EVENT_REFRESH_CHANGES_OR_PARTIAL"}
         _write_json(summary_json, payload)
         return {"stage": _stage("event_match_rebuild", CHECK_STATUS_SUCCESS, skipped=True), "summary": payload}
+    backup_path = (
+        str(result_check_backup["backup_path"])
+        if result_check_backup and result_check_backup.get("backup_verified")
+        else str(output_root / "backups" / f"{fundamentals_db.name}.pre_event_match_rebuild.bak")
+    )
     args = Namespace(
         fundamentals_db=str(fundamentals_db),
         max_delay_days=DEFAULT_MAX_REPORTING_DELAY_DAYS,
@@ -682,7 +762,8 @@ def _run_match_rebuild(root: Path, fundamentals_db: Path, *, enabled: bool) -> d
         exclude_low_confidence=False,
         dry_run=False,
         apply=True,
-        backup=str(output_root / "backups" / f"{fundamentals_db.name}.pre_event_match_rebuild.bak"),
+        backup=backup_path,
+        backup_already_created=bool(result_check_backup and result_check_backup.get("backup_verified")),
         checkpoint_json=str(output_root / "checkpoint.json"),
         summary_json=str(summary_json),
         output_csv=str(output_root / "matches.csv"),

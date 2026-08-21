@@ -55,6 +55,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--resume-from-json", default=None)
     parser.add_argument("--output-root", default=None)
     parser.add_argument("--backup", default=None)
+    parser.add_argument("--backup-already-created", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true", dest="json_output")
@@ -84,8 +85,11 @@ def main(argv: list[str] | None = None) -> int:
         validate_temp_path(Path(args.resume_from_json), must_exist=True)
 
     tickers = _select_tickers(db_path, args)
-    if args.apply:
+    if args.apply and args.backup_already_created:
+        validate_temp_path(backup_path, must_exist=True)
+    if args.apply and not args.backup_already_created:
         _backup(db_path, backup_path)
+    if args.apply:
         run_migration(db_path)
 
     today_new_york = new_york_today_from_utc()

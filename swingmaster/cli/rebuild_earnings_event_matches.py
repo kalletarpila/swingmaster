@@ -80,8 +80,14 @@ def run_cli(args: argparse.Namespace) -> dict[str, Any]:
     backup_info: dict[str, Any] = {"path": None, "verified": False, "created": False}
 
     if apply_mode:
-        backup_path = validate_temp_path(Path(args.backup)) if args.backup else artifact_dir.parent / "backups" / _backup_name(db_path)
-        backup_info = create_verified_backup(db_path, backup_path)
+        if bool(getattr(args, "backup_already_created", False)):
+            if not args.backup:
+                raise ValueError("BACKUP_ALREADY_CREATED_REQUIRES_BACKUP_PATH")
+            backup_path = validate_temp_path(Path(args.backup), must_exist=True)
+            backup_info = {"path": str(backup_path), "verified": True, "created": False, "reused_from_result_check": True}
+        else:
+            backup_path = validate_temp_path(Path(args.backup)) if args.backup else artifact_dir.parent / "backups" / _backup_name(db_path)
+            backup_info = create_verified_backup(db_path, backup_path)
         run_migration(db_path)
 
     with sqlite3.connect(str(db_path)) as conn:

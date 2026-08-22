@@ -62,7 +62,7 @@ DATE_OUTCOMES = (
     "PUBLISH_DATE_CONFLICT",
     "PUBLISH_DATE_SKIPPED_NULL",
 )
-HISTORICAL_PERIOD_FLOOR = date(1999, 1, 1)
+HISTORICAL_PERIOD_FLOOR = date(2018, 1, 1)
 
 
 @dataclass(frozen=True)
@@ -299,7 +299,7 @@ class V3CanonicalMigrationEngine:
                 candidate,
                 result,
                 issue_type="OTHER_MIGRATION_REVIEW",
-                decision="PERIOD_BEFORE_1999_FLOOR",
+                decision="PERIOD_BEFORE_2018_FLOOR",
                 now_utc=now_utc,
                 company_id=company_id,
             )

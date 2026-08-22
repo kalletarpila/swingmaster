@@ -3,11 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from swingmaster.fundamentals.v3_legacy_backward_validation import (
+    BackwardValidationPolicy,
+    V3_HISTORICAL_PERIOD_END_FLOOR,
     adjacent_q_results,
     anchor_summary,
+    anchor_accounting_rows,
+    company_status_accounting_rows,
     conflict_typology,
+    corrected_breakpoint_reason,
     depth_years,
     final_classification,
+    final_classification_3c1c,
+    missing_quarter_gap,
     legacy_income_fingerprint,
     period_continuity,
     predecessor,
@@ -144,8 +151,8 @@ def test_wrong_fyfq_label_creates_sequence_violation() -> None:
     assert sequence_validation(rows)[0]["violation"] == "DUPLICATE_FYFQ"
 
 
-def test_pre_1999_rows_are_excluded_from_chain() -> None:
-    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2000, "Q1", "2000-03-31"), legacy_rows=[_legacy("1998-12-31")], v2_rows={})
+def test_pre_2018_rows_are_excluded_from_chain() -> None:
+    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2018, "Q1", "2018-03-31"), legacy_rows=[_legacy("2017-12-31")], v2_rows={}, policy=BackwardValidationPolicy())
 
     assert result.row_classifications == []
 
@@ -216,6 +223,129 @@ def test_anchor_summary_counts_no_reliable_anchor() -> None:
 
     assert summary["companies_with_2026_anchor"] == 1
     assert summary["companies_with_no_reliable_anchor"] == 1
+
+
+def test_2017_12_31_excluded_by_2018_floor() -> None:
+    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2018, "Q1", "2018-03-31"), legacy_rows=[_legacy("2017-12-31")], v2_rows={}, policy=BackwardValidationPolicy())
+
+    assert result.row_classifications == []
+
+
+def test_2018_01_01_included_by_2018_floor() -> None:
+    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2018, "Q2", "2018-04-01"), legacy_rows=[_legacy("2018-01-01")], v2_rows={}, policy=BackwardValidationPolicy())
+
+    assert result.ready_rows[0]["period_end_date"] == "2018-01-01"
+
+
+def test_newer_than_2018_floor_included() -> None:
+    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2019, "Q1", "2019-03-31"), legacy_rows=[_legacy("2018-12-31")], v2_rows={}, policy=BackwardValidationPolicy())
+
+    assert result.ready_rows[0]["diagnostic_disposition"] == "READY_DIRECT_CHAIN"
+
+
+def test_pre_2018_does_not_create_breakpoint() -> None:
+    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2018, "Q1", "2018-03-31"), legacy_rows=[_legacy("2017-12-31")], v2_rows={}, policy=BackwardValidationPolicy())
+
+    assert result.breakpoints == []
+
+
+def test_chain_stops_successfully_at_2018_floor() -> None:
+    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2018, "Q2", "2018-04-01"), legacy_rows=[_legacy("2018-01-01"), _legacy("2017-10-01")], v2_rows={}, policy=BackwardValidationPolicy())
+
+    assert result.summary["validated_to_historical_floor"] == 1
+
+
+def test_ordinary_q1_to_previous_fy_q4_is_not_transition_anomaly() -> None:
+    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2026, "Q1", "2026-03-31"), legacy_rows=[_legacy("2025-12-31")], v2_rows={}, policy=BackwardValidationPolicy())
+
+    assert result.ready_rows[0]["fiscal_quarter"] == "Q4"
+    assert result.breakpoints == []
+
+
+def test_explicit_q4_sequence_is_direct_ready() -> None:
+    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2026, "Q1", "2026-03-31"), legacy_rows=[_legacy("2025-12-31"), _legacy("2025-09-30")], v2_rows={}, policy=BackwardValidationPolicy())
+
+    assert [row["diagnostic_disposition"] for row in result.ready_rows] == ["READY_DIRECT_CHAIN", "READY_DIRECT_CHAIN"]
+
+
+def test_missing_q4_with_coherent_q3_bridge() -> None:
+    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2026, "Q1", "2026-03-31"), legacy_rows=[_legacy("2025-09-30")], v2_rows={}, policy=BackwardValidationPolicy())
+
+    assert result.ready_rows[0]["diagnostic_disposition"] == "READY_BRIDGED_CHAIN"
+
+
+def test_missing_q4_without_enough_evidence_blocks() -> None:
+    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2026, "Q1", "2026-03-31"), legacy_rows=[_legacy("2025-06-30")], v2_rows={}, policy=BackwardValidationPolicy())
+
+    assert result.breakpoints[0]["breakpoint_reason"] == "MULTI_QUARTER_DATA_GAP"
+
+
+def test_annual_row_q4_representation_diagnostic_reason() -> None:
+    assert corrected_breakpoint_reason("TRANSITION_PERIOD", 1, "Q4") == "MISSING_EXPLICIT_Q4"
+
+
+def test_one_quarter_gap_bridge() -> None:
+    assert missing_quarter_gap("2026-03-31", "2025-09-30") == 1
+
+
+def test_two_quarter_gap_conservative_handling() -> None:
+    assert corrected_breakpoint_reason("TRANSITION_PERIOD", 2, "Q2") == "MULTI_QUARTER_DATA_GAP"
+
+
+def test_more_than_two_quarter_gap_blocks() -> None:
+    assert missing_quarter_gap("2026-03-31", "2025-01-01") == 3
+
+
+def test_13_week_cadence_is_expected_interval() -> None:
+    assert period_continuity("2026-03-29", "2025-12-28") == "EXPECTED_QUARTER_INTERVAL"
+
+
+def test_53_week_cadence_variant_is_supported() -> None:
+    assert period_continuity("2026-03-31", "2025-12-15") == "SAFE_52_53_WEEK_VARIANT"
+
+
+def test_small_provider_date_variant_still_supported() -> None:
+    assert period_continuity("2026-03-31", "2025-11-30") == "SMALL_PROVIDER_DATE_VARIANT"
+
+
+def test_true_fiscal_year_change_blocks() -> None:
+    result = validate_legacy_backward_chain(ticker="AAA", anchor=_v3(2026, "Q1", "2026-03-31"), legacy_rows=[_legacy("2025-03-31")], v2_rows={}, policy=BackwardValidationPolicy())
+
+    assert result.ready_rows == []
+    assert result.breakpoints[0]["bridgeability"] == "REQUIRES_3C2B_REVIEW"
+
+
+def test_fy_naming_mismatch_classification_placeholder() -> None:
+    assert corrected_breakpoint_reason("OUT_OF_ORDER", 0, "Q4") == "PERIOD_END_TRUE_BREAK"
+
+
+def test_duplicate_predecessor_blocks_under_3c1c() -> None:
+    assert corrected_breakpoint_reason("DUPLICATE_PERIOD", 0, "Q4") == "DUPLICATE_PERIOD"
+
+
+def test_mutually_exclusive_anchor_accounting() -> None:
+    rows = anchor_accounting_rows([{"anchor_category": "ANCHOR_2026"}, {"anchor_category": "NO_LEGACY_2018_PLUS_HISTORY"}], 2)
+
+    assert rows[-2]["companies"] == 2
+    assert rows[-1]["companies"] == 2
+
+
+def test_company_status_reconciliation_to_universe() -> None:
+    rows = company_status_accounting_rows([{"company_status": "FULL_OR_PARTIAL_VALID_CHAIN"}, {"company_status": "NO_RELIABLE_ANCHOR"}], 2)
+
+    assert rows[-2]["companies"] == 2
+
+
+def test_ready_rows_contain_no_pre_2018_dates() -> None:
+    violations = sequence_validation([_ready(2017, "Q4", "2017-12-31")], historical_floor=V3_HISTORICAL_PERIOD_END_FLOOR)
+
+    assert violations[0]["violation"] == "PERIOD_BEFORE_HISTORICAL_FLOOR"
+
+
+def test_final_classification_3c1c_ready_gate() -> None:
+    recent = [{"overlap_rows": 1, "same_quarter_confirmed": 1, "period_end_exact_or_compatible": 1}]
+
+    assert final_classification_3c1c(recent, [_ready(2018, "Q1", "2018-01-01")], []).endswith("READY_FOR_3C2")
 
 
 def _v3(fy: int, fq: str, period: str, **values: float) -> dict:

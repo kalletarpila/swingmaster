@@ -449,10 +449,10 @@ def legacy_only_inventory(legacy_rows: dict[tuple[str, str], dict[str, Any]], v3
             continue
         available = [field for field in CANONICAL_FIELD_NAMES if legacy.get(field) is not None]
         try:
-            pre_1999 = date.fromisoformat(period_end) < date(1999, 1, 1)
+            pre_2018 = date.fromisoformat(period_end) < date(2018, 1, 1)
         except ValueError:
-            pre_1999 = False
-        classification = "PRE_1999_EXCLUDED" if pre_1999 else "READY_FOR_DEEP_HISTORY_IDENTITY_VALIDATION"
+            pre_2018 = False
+        classification = "PRE_2018_EXCLUDED" if pre_2018 else "READY_FOR_DEEP_HISTORY_IDENTITY_VALIDATION"
         classes[classification] += 1
         v2 = v2_by_period.get(key)
         v2_status = "V2_EXACT_PERIOD_COUNTERPART" if v2 else "NO_V2_COUNTERPART"
@@ -465,7 +465,7 @@ def legacy_only_inventory(legacy_rows: dict[tuple[str, str], dict[str, Any]], v3
         "ready_for_phase3d_identity_validation": classes["READY_FOR_DEEP_HISTORY_IDENTITY_VALIDATION"],
         "identity_ambiguous": classes["IDENTITY_AMBIGUOUS"],
         "duplicate_source_rows": classes["DUPLICATE_SOURCE_ROWS"],
-        "pre_1999_excluded": classes["PRE_1999_EXCLUDED"],
+        "pre_2018_excluded": classes["PRE_2018_EXCLUDED"],
         "other_review": classes["OTHER_REVIEW"],
         "with_v2_counterpart": v2_cross["V2_EXACT_PERIOD_COUNTERPART"],
         "without_v2_counterpart": v2_cross["NO_V2_COUNTERPART"],

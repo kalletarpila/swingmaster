@@ -162,11 +162,11 @@ fundamental-data availability truth.
 The deterministic V3 historical cutoff is:
 
 ```text
-include Q only if accepted period_end_date >= 1999-01-01
+include Q only if accepted period_end_date >= 2018-01-01
 ```
 
-A quarter beginning in late 1998 but ending in 1999 is included. A quarter ending in 1998 is
-excluded even if published in 1999. If period-end evidence is unavailable, do not silently use
+A quarter beginning before 2018 but ending on or after 2018-01-01 is included. A quarter ending in
+2017 is excluded even if published in 2018. If period-end evidence is unavailable, do not silently use
 publish date; classify the row for identity recovery or exclusion.
 
 SimFin migration mapping:
@@ -296,8 +296,8 @@ TTM + Score + Valuation rebuild
 ```
 
 The historical floor is deterministic: include a Q only if the accepted `period_end_date` is
-`>= 1999-01-01`. A quarter beginning in late 1998 but ending in 1999 is included. A quarter ending
-in 1998 is excluded even if it was published in 1999.
+`>= 2018-01-01`. A quarter beginning before 2018 but ending on or after 2018-01-01 is included. A
+quarter ending in 2017 is excluded even if it was published in 2018.
 
 Yahoo bootstrap is not Yahoo-always-wins. It is seed order. Canonical selection still uses semantic
 validation, cross-source reconciliation, retained accepted values, NULL-fill rules, and controlled
@@ -354,8 +354,9 @@ automatically replace values previously accepted from Yahoo, V2, Legacy, or anot
 Legacy-only historical rows are deep-history candidates for the separate history-extension phase.
 
 Current Legacy implementation order is explicit: Phase 3C-1 performs Legacy existing-Q enrichment,
-Phase 3C-1B validates Legacy-only history backward from recent anchors without writes, and Phase
-3C-2 may create only the deep-history rows that Phase 3C-1B classified as
+Phase 3C-1B validates Legacy-only history backward from recent anchors without writes, Phase 3C-1C
+applies the 2018-01-01 historical floor and breakpoint diagnostic, and Phase 3C-2 may create only
+the deep-history rows that the latest validation dry plan classifies as
 `READY_FOR_PHASE3C2_IMPORT`.
 
 This order must not mean Yahoo always wins. Migration reconciliation classifies competing non-null
@@ -445,9 +446,9 @@ The design-phase projection used only local read-only DB access. It made no prov
 | osakedata-only tickers excluded from initial V3 | 1,545 |
 | V2 ORDINARY source/profile population, not V3 universe authority | 4,323 |
 | Local Yahoo-cache companies | 2,933 |
-| Approved Legacy quarter rows, 1999+ | 148,033 |
-| V2 quarter rows, 1999+ | 82,812 |
-| Local Yahoo-cache quarter rows, 1999+ | 15,186 |
+| Approved Legacy quarter rows, historical Phase 0 projection with old 1999+ floor | 148,033 |
+| V2 quarter rows, historical Phase 0 projection with old 1999+ floor | 82,812 |
+| Local Yahoo-cache quarter rows, historical Phase 0 projection with old 1999+ floor | 15,186 |
 | V2 strict canonical fiscal Q identities | 82,482 |
 | Approved Legacy rows date-matched to V2 | 54,979 |
 | Approved Legacy rows date-matched to local Yahoo cache | 12,896 |
@@ -499,7 +500,7 @@ Legacy identity recovery projection:
 | `FISCAL_IDENTITY_RESOLVED` | 55,231 | Approved Legacy rows date-matched to V2 explicit fiscal identity or local provider observation fiscal labels. |
 | `FISCAL_IDENTITY_RECOVERABLE` | 2,471 | Approved Legacy rows date-matched to local Yahoo cache; live Yahoo may improve this materially. |
 | `DATE_ONLY_UNRESOLVED` | 90,331 | Approved Legacy rows with no current local V2/Yahoo fiscal identity evidence. |
-| `EXCLUDED` | 0 | 1999+ projection excludes earlier rows before this classification. |
+| `EXCLUDED` | 0 | Historical old-floor projection excluded earlier rows before this classification. Current V3 historical floor is 2018-01-01. |
 
 Legacy-only fiscal identity recovery projection:
 
@@ -561,7 +562,7 @@ Calendar comparison derivability is separate from fiscal-identity derivability:
 
 | Source | Fiscal identity derivability | Approximate calendar-comparison derivability |
 | --- | --- | --- |
-| Legacy | Legacy primary quarterly rows do not reliably expose reported fiscal year/quarter; `period_end_date` alone must not create canonical fiscal identity. | `156,094 / 156,094` total Legacy rows and `156,070 / 156,070` 1999+ rows have valid `period_end_date` for the approved approximate method. |
+| Legacy | Legacy primary quarterly rows do not reliably expose reported fiscal year/quarter; `period_end_date` alone must not create canonical fiscal identity. | `156,094 / 156,094` total Legacy rows and `91,306` rows at or above the current 2018-01-01 V3 historical floor have valid `period_end_date` for the approved approximate method. |
 | V2 | V2 has explicit fiscal labels and SimFin `Report Date` as period-end-like evidence. | `85,424 / 85,424` rows have valid `report_date` usable for the approved approximate method after acceptance as period-end evidence. |
 
 Calendar comparison method and quality:

@@ -185,7 +185,7 @@ def test_period_and_publication_date_conflicts_create_issues_without_replacement
     assert conn.execute("SELECT COUNT(*) FROM v3_resolution_issue").fetchone()[0] == 2
 
 
-def test_legacy_like_deep_history_inactive_company_and_pre_1999_rejection() -> None:
+def test_legacy_like_deep_history_inactive_company_and_pre_2018_rejection() -> None:
     conn = _conn()
     company_id = V3CompanyRepository(conn).admit_company(market="usa", ticker="OLD", active=False, now_utc=NOW)
     engine = V3CanonicalMigrationEngine(conn)
@@ -193,22 +193,22 @@ def test_legacy_like_deep_history_inactive_company_and_pre_1999_rejection() -> N
         [
             _candidate(
                 source_system="LEGACY",
-                source_record_id="LEGACY:OLD:2000:Q1",
+                source_record_id="LEGACY:OLD:2018:Q1",
                 migration_run_id="RUN-LEGACY",
                 ticker="OLD",
-                fiscal_year=2000,
-                period_end_date="2000-03-31",
+                fiscal_year=2018,
+                period_end_date="2018-01-01",
                 values={"revenue": 50.0},
                 approved_company_active=None,
             ),
             _candidate(
                 source_system="LEGACY",
-                source_record_id="LEGACY:OLD:1998:Q4",
+                source_record_id="LEGACY:OLD:2017:Q4",
                 migration_run_id="RUN-LEGACY",
                 ticker="OLD",
-                fiscal_year=1998,
+                fiscal_year=2017,
                 fiscal_quarter="Q4",
-                period_end_date="1998-12-31",
+                period_end_date="2017-12-31",
                 values={"revenue": 40.0},
                 approved_company_active=None,
             ),

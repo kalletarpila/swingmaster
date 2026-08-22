@@ -75,7 +75,7 @@ A new canonical quarter requires:
 - approved or existing company
 - resolved fiscal year and quarter
 - accepted `period_end_date`
-- `period_end_date >= 1999-01-01`
+- `period_end_date >= 2018-01-01`
 - `candidate_can_create_quarter = true`
 
 `publish_date` may be null. Provider-period variants can be audited and excluded with `candidate_can_create_quarter = false`.

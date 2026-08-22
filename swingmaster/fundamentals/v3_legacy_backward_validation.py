@@ -28,6 +28,10 @@ ALL_FIELDS = ("revenue", "gross_profit", "operating_income", "ebit", "ebitda", "
 INCOME_FIELDS = ("revenue", "gross_profit", "operating_income", "net_income")
 TRUSTED_FIELDS = ("revenue", "gross_profit", "operating_income", "net_income", "operating_cashflow", "cash", "total_debt")
 SPECIAL_CASES = ("CAVA", "NEUP", "LFCR", "BNC", "SJM", "LYTS")
+V3_HISTORICAL_PERIOD_END_FLOOR = "2018-01-01"
+OLD_HISTORICAL_PERIOD_END_FLOOR = "1999-01-01"
+PHASE3C_1B_ARTIFACT_ROOT = Path("temp/fundamentals_v3_phase3c_1b_legacy_backward_validation/20260822T_PHASE3C_1B_LEGACY_BACKWARD_VALIDATION")
+PHASE3C_1C_ARTIFACT_ROOT = Path("temp/fundamentals_v3_phase3c_1c_legacy_breakpoint_diagnostic/20260822T_PHASE3C_1C_LEGACY_BREAKPOINT_DIAGNOSTIC")
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,13 @@ class CompanyChainResult:
     breakpoints: list[dict[str, Any]]
     dry_plan: list[dict[str, Any]]
     sequence_violations: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class BackwardValidationPolicy:
+    historical_floor: str = V3_HISTORICAL_PERIOD_END_FLOOR
+    allow_one_quarter_bridge: bool = True
+    phase_label: str = "PHASE3C_1C"
 
 
 def run_legacy_backward_validation(*, v3_db: Path, legacy_db: Path, v2_db: Path, artifact_root: Path) -> dict[str, Any]:
@@ -132,6 +143,122 @@ def run_legacy_backward_validation(*, v3_db: Path, legacy_db: Path, v2_db: Path,
     return summary
 
 
+def run_legacy_breakpoint_diagnostic(*, v3_db: Path, legacy_db: Path, v2_db: Path, artifact_root: Path) -> dict[str, Any]:
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    policy = BackwardValidationPolicy()
+    before_counts = db_counts(v3_db, legacy_db, v2_db)
+    baseline = summarize_baseline(v3_db)
+    assert_baseline(baseline)
+    v3_conn = connect_readonly(v3_db)
+    legacy_conn = connect_readonly(legacy_db)
+    v2_conn = connect_readonly(v2_db)
+    v3_companies = load_v3_companies(v3_conn)
+    v3_rows = load_v3_rows(v3_conn)
+    legacy_rows = load_legacy_rows_with_publish(legacy_conn)
+    v2_rows = load_v2_rows(v2_conn)
+    v3_conn.close()
+    legacy_conn.close()
+    v2_conn.close()
+
+    overlap = build_overlap(v3_rows, legacy_rows)
+    legacy_only = build_legacy_only(v3_rows, legacy_rows)
+    baseline_reconciliation = reconcile_phase3c1(baseline, overlap, legacy_only)
+    if not baseline_reconciliation["passed"]:
+        raise RuntimeError("FUNDAMENTALS_V3_PHASE3C_1C_BASELINE_DRIFT:" + json.dumps(baseline_reconciliation, sort_keys=True))
+
+    population = legacy_2018plus_population(v3_companies, legacy_rows, overlap, legacy_only, policy.historical_floor)
+    overlap_2018 = [row for row in overlap if row["v3_period_end_date"] >= policy.historical_floor]
+    legacy_only_2018 = {ticker: [row for row in rows if row["period_end_date"] >= policy.historical_floor] for ticker, rows in legacy_only.items()}
+    legacy_only_2018 = {ticker: rows for ticker, rows in legacy_only_2018.items() if rows}
+    anchors = select_anchors(v3_rows, overlap_2018, legacy_only_2018, historical_floor=policy.historical_floor, company_tickers=set(v3_companies))
+    chain_results = validate_all_backward_chains(anchors, legacy_only_2018, v2_rows, policy=policy)
+    row_classifications = [row for result in chain_results for row in result.row_classifications]
+    ready_rows = [row for result in chain_results for row in result.ready_rows]
+    hold_rows = [row for result in chain_results for row in result.hold_rows]
+    breakpoints = [row for result in chain_results for row in result.breakpoints]
+    dry_plan = [row for result in chain_results for row in result.dry_plan]
+    sequence_violations = sequence_validation(ready_rows, historical_floor=policy.historical_floor)
+    company_summaries = [result.summary for result in chain_results]
+
+    recent_anchor_quality = recent_anchor_rows(overlap_2018)
+    adjacent = adjacent_q_results(v3_rows, legacy_rows, overlap_2018)
+    typology_rows = conflict_typology_3c1c(overlap_2018, adjacent)
+    q4_diagnostic = q4_representation_diagnostic(breakpoints, legacy_only_2018)
+    period_breaks = period_end_breakpoint_rows(breakpoints)
+    spacing = period_spacing_distribution(overlap_2018, breakpoints)
+    cadence = company_fiscal_cadence(anchors, legacy_only_2018)
+    bridge_rows = [row for row in row_classifications if row["diagnostic_disposition"] == "READY_BRIDGED_CHAIN"]
+    fiscal_label = fiscal_year_label_analysis(breakpoints)
+    true_transitions = [row for row in breakpoints if row["breakpoint_reason"] == "TRUE_FISCAL_CALENDAR_TRANSITION"]
+    yearly = yearly_reliability_2018_2026(row_classifications)
+    depth = company_depth_rows_2018plus(company_summaries)
+    special = special_case_validation(company_summaries, row_classifications)
+    contribution = expected_contribution(dry_plan)
+    contribution["core_field_values"] = sum(len([field for field in CORE_FIELDS if row.get("available_fields") and field in str(row["available_fields"]).split(";")]) for row in dry_plan)
+    contribution["non_core_values"] = contribution["total_accepted_field_values"] - contribution["core_field_values"]
+    after_counts = db_counts(v3_db, legacy_db, v2_db)
+    readonly = read_only_proof(before_counts, after_counts, v3_db)
+
+    anchor_account = anchor_accounting_rows(company_summaries, baseline["companies"])
+    status_account = company_status_accounting_rows(company_summaries, baseline["companies"])
+    classification = final_classification_3c1c(recent_anchor_quality, ready_rows, sequence_violations)
+    summary = {
+        "classification": classification,
+        "historical_floor": {"previous": OLD_HISTORICAL_PERIOD_END_FLOOR, "current": policy.historical_floor},
+        "baseline_reconciliation": baseline_reconciliation,
+        "population": population,
+        "anchor_accounting": anchor_account,
+        "company_status_accounting": status_account,
+        "recent_anchor_quality": recent_anchor_quality,
+        "overlap_reclassification": dict(Counter(row["corrected_typology"] for row in typology_rows)),
+        "mapping_risk": mapping_risk_summary_3c1c(typology_rows),
+        "adjacent_summary": adjacent_summary(adjacent),
+        "breakpoint_summary": dict(Counter(row["breakpoint_reason"] for row in breakpoints)),
+        "breakpoint_bridgeability": dict(Counter(row.get("bridgeability", "") for row in breakpoints)),
+        "q4_representation": dict(Counter(row["q4_representation"] for row in q4_diagnostic)),
+        "period_break_spacing": dict(Counter(row["spacing_bucket"] for row in period_breaks)),
+        "legacy_2018plus_classification": dict(Counter(row["diagnostic_disposition"] for row in row_classifications)),
+        "phase3c2_ready_rows": len(ready_rows),
+        "phase3c2_hold_rows": len(hold_rows),
+        "phase3c2_expected_contribution": contribution,
+        "phase3c2_sequence_violations": len(sequence_violations),
+        "special_cases": special,
+        "read_only_proof": readonly,
+        "phase3c2b_likely_needed": len(hold_rows) > len(ready_rows),
+        "recommended_next_step": "MASTER PLAN PHASE 3C-2 - LEGACY DEEP-HISTORY EXTENSION" if classification.endswith("READY_FOR_3C2") else "MASTER PLAN PHASE 3C-1D - LEGACY VALIDATOR REPAIR",
+    }
+    write_3c1c_artifacts(
+        artifact_root,
+        baseline_reconciliation=baseline_reconciliation,
+        population=population,
+        anchor_accounting=anchor_account,
+        company_status_accounting=status_account,
+        fiscal_transition_breakpoints=[row for row in breakpoints if row["prior_3c1b_reason"] == "FISCAL_YEAR_TRANSITION_ANOMALY"],
+        q4_diagnostic=q4_diagnostic,
+        bridge_rows=bridge_rows,
+        fiscal_label=fiscal_label,
+        true_transitions=true_transitions,
+        period_breaks=period_breaks,
+        spacing=spacing,
+        cadence=cadence,
+        typology_rows=typology_rows,
+        recent_anchor_quality=recent_anchor_quality,
+        company_summaries=company_summaries,
+        breakpoints=breakpoints,
+        row_classifications=row_classifications,
+        yearly=yearly,
+        depth=depth,
+        special=special,
+        ready_rows=ready_rows,
+        hold_rows=hold_rows,
+        sequence_violations=sequence_violations,
+        dry_plan=dry_plan,
+        contribution=contribution,
+        summary=summary,
+    )
+    return summary
+
+
 def summarize_baseline(v3_db: Path) -> dict[str, Any]:
     with sqlite3.connect(v3_db) as conn:
         conn.row_factory = sqlite3.Row
@@ -148,6 +275,10 @@ def summarize_baseline(v3_db: Path) -> dict[str, Any]:
             "publish_date_null": coverage["publish_date_null"],
             "integrity": production_integrity(conn),
         }
+
+
+def load_v3_companies(conn: sqlite3.Connection) -> set[str]:
+    return {str(row["ticker"]).upper() for row in conn.execute("SELECT ticker FROM v3_company WHERE market = 'usa'").fetchall()}
 
 
 def assert_baseline(baseline: dict[str, Any]) -> None:
@@ -182,7 +313,7 @@ def build_legacy_only(v3_rows: list[dict[str, Any]], legacy_rows: dict[tuple[str
 def reconcile_phase3c1(baseline: dict[str, Any], overlap: list[dict[str, Any]], legacy_only: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     class_counts = Counter(row["identity_classification"] for row in overlap)
     legacy_only_total = sum(len(rows) for rows in legacy_only.values())
-    pre_1999 = sum(1 for rows in legacy_only.values() for row in rows if row["period_end_date"] < "1999-01-01")
+    pre_1999 = sum(1 for rows in legacy_only.values() for row in rows if row["period_end_date"] < OLD_HISTORICAL_PERIOD_END_FLOOR)
     observed = {
         "companies": baseline["companies"],
         "canonical_q": baseline["canonical_q"],
@@ -210,27 +341,33 @@ def reconcile_phase3c1(baseline: dict[str, Any], overlap: list[dict[str, Any]], 
     return {"observed": observed, "expected": expected, "passed": observed == expected}
 
 
-def select_anchors(v3_rows: list[dict[str, Any]], overlap: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def select_anchors(v3_rows: list[dict[str, Any]], overlap: list[dict[str, Any]], legacy_only: dict[str, list[dict[str, Any]]] | None = None, *, historical_floor: str = OLD_HISTORICAL_PERIOD_END_FLOOR, company_tickers: set[str] | None = None) -> dict[str, dict[str, Any]]:
     confirmed_periods = {(row["ticker"], row["v3_period_end_date"]) for row in overlap if row["identity_classification"] == "SAME_QUARTER_CONFIRMED"}
     by_ticker: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in v3_rows:
         by_ticker[row["ticker"]].append(row)
+    legacy_only = legacy_only or {}
     anchors = {}
-    for ticker, rows in by_ticker.items():
+    all_tickers = sorted(company_tickers or set(by_ticker))
+    for ticker in all_tickers:
+        rows = by_ticker.get(ticker, [])
         rows.sort(key=lambda item: (item["fiscal_year"], item["fiscal_quarter"], item["period_end_date"]), reverse=True)
-        anchor = next((row for row in rows if row["fiscal_year"] in {2026, 2025} and (row["ticker"], row["period_end_date"]) in confirmed_periods), None)
+        has_legacy_history = bool(legacy_only.get(ticker))
+        anchor = next((row for row in rows if row["period_end_date"] >= historical_floor and row["fiscal_year"] in {2026, 2025} and (row["ticker"], row["period_end_date"]) in confirmed_periods), None)
         if anchor is not None:
             source = "RECENT_LEGACY_SAME_QUARTER_CONFIRMED"
         else:
             source = None
         if anchor is None:
-            anchor = next((row for row in rows if (row["ticker"], row["period_end_date"]) in confirmed_periods), None)
+            anchor = next((row for row in rows if row["period_end_date"] >= historical_floor and (row["ticker"], row["period_end_date"]) in confirmed_periods), None)
             source = "OLDER_LEGACY_SAME_QUARTER_CONFIRMED" if anchor is not None else None
         if anchor is None:
-            anchor = rows[0] if rows else None
-            source = "FALLBACK_UNCONFIRMED" if anchor is not None else None
+            anchor = next((row for row in rows if row["period_end_date"] >= historical_floor), None)
+            source = "FALLBACK_UNCONFIRMED" if anchor is not None else "NO_V3_2018_PLUS_ANCHOR"
         if anchor is not None:
-            anchors[ticker] = {**anchor, "anchor_source": source, "reliable_anchor": int(source != "FALLBACK_UNCONFIRMED")}
+            anchors[ticker] = {**anchor, "anchor_source": source, "reliable_anchor": int(source not in {"FALLBACK_UNCONFIRMED", "NO_V3_2018_PLUS_ANCHOR"}), "has_legacy_2018plus_history": int(has_legacy_history)}
+        else:
+            anchors[ticker] = {"ticker": ticker, "anchor_source": "NO_V3_2018_PLUS_ANCHOR", "reliable_anchor": 0, "has_legacy_2018plus_history": int(has_legacy_history)}
     return anchors
 
 
@@ -258,27 +395,63 @@ def period_continuity(newer: str, older: str) -> str:
     return "MATERIAL_GAP"
 
 
-def validate_all_backward_chains(anchors: dict[str, dict[str, Any]], legacy_only: dict[str, list[dict[str, Any]]], v2_rows: dict[tuple[str, int, str], dict[str, Any]]) -> list[CompanyChainResult]:
+def missing_quarter_gap(newer: str, older: str) -> int:
+    days = (date.fromisoformat(newer) - date.fromisoformat(older)).days
+    if days <= 130:
+        return 0
+    if 131 <= days <= 220:
+        return 1
+    if 221 <= days <= 310:
+        return 2
+    return 3
+
+
+def no_competing_gap_candidate(current_period: str, candidate: dict[str, Any], rows: list[dict[str, Any]]) -> bool:
+    current = date.fromisoformat(current_period)
+    older = date.fromisoformat(candidate["period_end_date"])
+    between = [row for row in rows if older < date.fromisoformat(row["period_end_date"]) < current]
+    return not between
+
+
+def corrected_breakpoint_reason(continuity: str, gap: int, expected_fq: str) -> str:
+    if continuity == "DUPLICATE_PERIOD":
+        return "DUPLICATE_PERIOD"
+    if continuity == "OUT_OF_ORDER":
+        return "PERIOD_END_TRUE_BREAK"
+    if continuity == "TRANSITION_PERIOD" and gap == 1 and expected_fq == "Q4":
+        return "MISSING_EXPLICIT_Q4"
+    if continuity == "TRANSITION_PERIOD" and gap == 1:
+        return "ONE_QUARTER_DATA_GAP"
+    if continuity == "TRANSITION_PERIOD" and gap == 2:
+        return "MULTI_QUARTER_DATA_GAP"
+    if continuity == "MATERIAL_GAP":
+        return "MULTI_QUARTER_DATA_GAP"
+    return "PERIOD_END_TRUE_BREAK"
+
+
+def validate_all_backward_chains(anchors: dict[str, dict[str, Any]], legacy_only: dict[str, list[dict[str, Any]]], v2_rows: dict[tuple[str, int, str], dict[str, Any]], policy: BackwardValidationPolicy | None = None) -> list[CompanyChainResult]:
+    policy = policy or BackwardValidationPolicy(historical_floor=OLD_HISTORICAL_PERIOD_END_FLOOR, allow_one_quarter_bridge=False, phase_label="PHASE3C_1B")
     results = []
     for ticker in sorted(set(anchors) | set(legacy_only)):
         anchor = anchors.get(ticker)
-        if anchor is None:
-            results.append(validate_without_anchor(ticker=ticker, legacy_rows=legacy_only.get(ticker, [])))
+        if anchor is None or "fiscal_year" not in anchor:
+            results.append(validate_without_anchor(ticker=ticker, legacy_rows=legacy_only.get(ticker, []), policy=policy, anchor=anchor))
         else:
-            results.append(validate_legacy_backward_chain(ticker=ticker, anchor=anchor, legacy_rows=legacy_only.get(ticker, []), v2_rows=v2_rows))
+            results.append(validate_legacy_backward_chain(ticker=ticker, anchor=anchor, legacy_rows=legacy_only.get(ticker, []), v2_rows=v2_rows, policy=policy))
     return results
 
 
-def validate_without_anchor(*, ticker: str, legacy_rows: list[dict[str, Any]]) -> CompanyChainResult:
+def validate_without_anchor(*, ticker: str, legacy_rows: list[dict[str, Any]], policy: BackwardValidationPolicy | None = None, anchor: dict[str, Any] | None = None) -> CompanyChainResult:
+    policy = policy or BackwardValidationPolicy(historical_floor=OLD_HISTORICAL_PERIOD_END_FLOOR, allow_one_quarter_bridge=False, phase_label="PHASE3C_1B")
     rows = []
-    for row in [item for item in legacy_rows if item["period_end_date"] >= "1999-01-01"]:
+    for row in [item for item in legacy_rows if item["period_end_date"] >= policy.historical_floor]:
         rows.append({
             "ticker": ticker,
             "fiscal_year": "",
             "fiscal_quarter": "",
             "period_end_date": row["period_end_date"],
             "publish_date": row.get("publish_date"),
-            "diagnostic_disposition": "INSUFFICIENT_EVIDENCE",
+            "diagnostic_disposition": "HOLD_INSUFFICIENT_EVIDENCE" if policy.phase_label == "PHASE3C_1C" else "INSUFFICIENT_EVIDENCE",
             "phase3c2_recommendation": "HOLD_FOR_PHASE3C2B_REVIEW",
             "period_continuity": "NO_RELIABLE_ANCHOR",
             "v2_corroboration": "NO_V2_COUNTERPART",
@@ -289,9 +462,12 @@ def validate_without_anchor(*, ticker: str, legacy_rows: list[dict[str, Any]]) -
         "newest_anchor_fiscal_year": "",
         "newest_anchor_fiscal_quarter": "",
         "newest_anchor_period_end": "",
-        "anchor_source": "NO_V3_ANCHOR",
+        "anchor_source": (anchor or {}).get("anchor_source", "NO_V3_ANCHOR"),
         "reliable_anchor": 0,
         "anchor_bucket": "NONE",
+        "anchor_category": "NO_RELIABLE_ANCHOR" if rows else "NO_LEGACY_2018_PLUS_HISTORY",
+        "company_status": "NO_RELIABLE_ANCHOR" if rows else "NO_LEGACY_2018_PLUS_HISTORY",
+        "has_legacy_2018plus_history": int(bool(rows)),
         "backward_chain_length_qs": 0,
         "oldest_validated_fiscal_year": "",
         "oldest_validated_fiscal_quarter": "",
@@ -304,7 +480,8 @@ def validate_without_anchor(*, ticker: str, legacy_rows: list[dict[str, Any]]) -
     return CompanyChainResult(summary, rows, [], rows, [], [], [])
 
 
-def validate_legacy_backward_chain(*, ticker: str, anchor: dict[str, Any], legacy_rows: list[dict[str, Any]], v2_rows: dict[tuple[str, int, str], dict[str, Any]]) -> CompanyChainResult:
+def validate_legacy_backward_chain(*, ticker: str, anchor: dict[str, Any], legacy_rows: list[dict[str, Any]], v2_rows: dict[tuple[str, int, str], dict[str, Any]], policy: BackwardValidationPolicy | None = None) -> CompanyChainResult:
+    policy = policy or BackwardValidationPolicy(historical_floor=OLD_HISTORICAL_PERIOD_END_FLOOR, allow_one_quarter_bridge=False, phase_label="PHASE3C_1B")
     confirmed = []
     ready = []
     hold = []
@@ -316,7 +493,9 @@ def validate_legacy_backward_chain(*, ticker: str, anchor: dict[str, Any], legac
     current_period = str(anchor["period_end_date"])
     breakpoint_seen = False
     older_behind = 0
-    for row in [item for item in legacy_rows if item["period_end_date"] >= "1999-01-01"]:
+    floor_complete = False
+    filtered_rows = [item for item in legacy_rows if item["period_end_date"] >= policy.historical_floor]
+    for row in filtered_rows:
         if row["period_end_date"] >= current_period:
             item = {
                 "ticker": ticker,
@@ -324,7 +503,7 @@ def validate_legacy_backward_chain(*, ticker: str, anchor: dict[str, Any], legac
                 "fiscal_quarter": "",
                 "period_end_date": row["period_end_date"],
                 "publish_date": row.get("publish_date"),
-                "diagnostic_disposition": "INSUFFICIENT_EVIDENCE",
+                "diagnostic_disposition": "HOLD_INSUFFICIENT_EVIDENCE" if policy.phase_label == "PHASE3C_1C" else "INSUFFICIENT_EVIDENCE",
                 "phase3c2_recommendation": "HOLD_FOR_PHASE3C2B_REVIEW",
                 "period_continuity": "NOT_OLDER_THAN_ANCHOR",
                 "v2_corroboration": "NO_V2_COUNTERPART",
@@ -335,22 +514,38 @@ def validate_legacy_backward_chain(*, ticker: str, anchor: dict[str, Any], legac
             continue
         expected_fy, expected_fq = predecessor(current_fy, current_fq)
         continuity = period_continuity(current_period, row["period_end_date"])
+        gap = missing_quarter_gap(current_period, row["period_end_date"])
+        bridgeable = policy.allow_one_quarter_bridge and gap == 1 and continuity == "TRANSITION_PERIOD" and no_competing_gap_candidate(current_period, row, filtered_rows)
+        if bridgeable:
+            expected_fy, expected_fq = predecessor(*predecessor(current_fy, current_fq))
         v2 = v2_rows.get((ticker, expected_fy, expected_fq))
         v2_status = "V2_EXACT_SUPPORT" if v2 and v2.get("period_end_date") == row["period_end_date"] else ("V2_FYFQ_COUNTERPART" if v2 else "NO_V2_COUNTERPART")
         if breakpoint_seen:
-            disposition = "BEHIND_BREAKPOINT_UNCONFIRMED"
+            disposition = "HOLD_BEHIND_BREAKPOINT" if policy.phase_label == "PHASE3C_1C" else "BEHIND_BREAKPOINT_UNCONFIRMED"
             older_behind += 1
         elif anchor.get("reliable_anchor") != 1:
-            disposition = "INSUFFICIENT_EVIDENCE"
+            disposition = "HOLD_INSUFFICIENT_EVIDENCE" if policy.phase_label == "PHASE3C_1C" else "INSUFFICIENT_EVIDENCE"
             breakpoint_seen = True
             older_behind += 1
         elif continuity in {"EXPECTED_QUARTER_INTERVAL", "SAFE_52_53_WEEK_VARIANT", "SMALL_PROVIDER_DATE_VARIANT"}:
-            disposition = "V2_CORROBORATED_CHAIN_CONFIRMED" if v2_status == "V2_EXACT_SUPPORT" else "BACKWARD_CHAIN_CONFIRMED"
+            if policy.phase_label == "PHASE3C_1C":
+                disposition = "READY_V2_CORROBORATED" if v2_status == "V2_EXACT_SUPPORT" else "READY_DIRECT_CHAIN"
+            else:
+                disposition = "V2_CORROBORATED_CHAIN_CONFIRMED" if v2_status == "V2_EXACT_SUPPORT" else "BACKWARD_CHAIN_CONFIRMED"
+            current_fy, current_fq, current_period = expected_fy, expected_fq, row["period_end_date"]
+        elif bridgeable:
+            disposition = "READY_BRIDGED_CHAIN" if policy.phase_label == "PHASE3C_1C" else "TRANSITION_REQUIRES_RESOLUTION"
             current_fy, current_fq, current_period = expected_fy, expected_fq, row["period_end_date"]
         else:
-            disposition = "TRANSITION_REQUIRES_RESOLUTION" if continuity == "TRANSITION_PERIOD" else "BEHIND_BREAKPOINT_UNCONFIRMED"
-            reason = "PERIOD_END_CONTINUITY_BREAK" if continuity != "TRANSITION_PERIOD" else "FISCAL_YEAR_TRANSITION_ANOMALY"
-            breakpoints.append({"ticker": ticker, "breakpoint_fiscal_year": expected_fy, "breakpoint_fiscal_quarter": expected_fq, "breakpoint_period_end": row["period_end_date"], "breakpoint_reason": reason, "continuity": continuity})
+            if policy.phase_label == "PHASE3C_1C":
+                disposition = "HOLD_TRUE_FISCAL_TRANSITION" if continuity == "TRANSITION_PERIOD" else "HOLD_BEHIND_BREAKPOINT"
+                reason = corrected_breakpoint_reason(continuity, gap, expected_fq)
+                bridgeability = "BRIDGEABLE" if reason in {"MISSING_EXPLICIT_Q4", "ONE_QUARTER_DATA_GAP"} and policy.allow_one_quarter_bridge else "REQUIRES_3C2B_REVIEW"
+            else:
+                disposition = "TRANSITION_REQUIRES_RESOLUTION" if continuity == "TRANSITION_PERIOD" else "BEHIND_BREAKPOINT_UNCONFIRMED"
+                reason = "PERIOD_END_CONTINUITY_BREAK" if continuity != "TRANSITION_PERIOD" else "FISCAL_YEAR_TRANSITION_ANOMALY"
+                bridgeability = ""
+            breakpoints.append({"ticker": ticker, "breakpoint_fiscal_year": expected_fy, "breakpoint_fiscal_quarter": expected_fq, "breakpoint_period_end": row["period_end_date"], "breakpoint_reason": reason, "prior_3c1b_reason": "FISCAL_YEAR_TRANSITION_ANOMALY" if continuity == "TRANSITION_PERIOD" else "PERIOD_END_CONTINUITY_BREAK", "continuity": continuity, "gap_quarters": gap, "bridgeability": bridgeability, "current_fiscal_year": current_fy, "current_fiscal_quarter": current_fq, "current_period_end": current_period})
             breakpoint_seen = True
             older_behind += 1
         item = {
@@ -360,18 +555,24 @@ def validate_legacy_backward_chain(*, ticker: str, anchor: dict[str, Any], legac
             "period_end_date": row["period_end_date"],
             "publish_date": row.get("publish_date"),
             "diagnostic_disposition": disposition,
-            "phase3c2_recommendation": "READY_FOR_PHASE3C2_IMPORT" if disposition in {"BACKWARD_CHAIN_CONFIRMED", "V2_CORROBORATED_CHAIN_CONFIRMED"} else "HOLD_FOR_PHASE3C2B_REVIEW",
+            "phase3c2_recommendation": "READY_FOR_PHASE3C2_IMPORT" if disposition in {"BACKWARD_CHAIN_CONFIRMED", "V2_CORROBORATED_CHAIN_CONFIRMED", "READY_DIRECT_CHAIN", "READY_BRIDGED_CHAIN", "READY_V2_CORROBORATED"} else "HOLD_FOR_PHASE3C2B_REVIEW",
             "period_continuity": continuity,
+            "gap_quarters": gap,
+            "bridge_type": "ONE_QUARTER_GAP_CHAIN_CONTINUES" if bridgeable else "",
             "v2_corroboration": v2_status,
             "available_fields": ";".join(field for field in ALL_FIELDS if row.get(field) is not None),
         }
         confirmed.append(item)
         if item["phase3c2_recommendation"] == "READY_FOR_PHASE3C2_IMPORT":
             ready.append(item)
-            dry_plan.append({**item, "market": "usa", "identity_evidence": disposition, "anchor_lineage": f"{anchor['fiscal_year']} {anchor['fiscal_quarter']} {anchor['period_end_date']}", "source_record_id": f"LEGACY:{ticker}:{row['period_end_date']}"})
+            dry_plan.append({**item, "market": "usa", "identity_evidence": disposition, "identity_confidence": "DETERMINISTIC_BACKWARD_CHAIN", "anchor_lineage": f"{anchor['fiscal_year']} {anchor['fiscal_quarter']} {anchor['period_end_date']}", "source_record_id": f"LEGACY:{ticker}:{row['period_end_date']}"})
         else:
             hold.append(item)
+    if not breakpoint_seen:
+        floor_complete = True
     anchor_year = "2026" if anchor["fiscal_year"] == 2026 else ("2025" if anchor["fiscal_year"] == 2025 else "OLDER")
+    anchor_category = "ANCHOR_2026" if anchor_year == "2026" else ("ANCHOR_2025" if anchor_year == "2025" else "ANCHOR_2024_OR_OLDER_BUT_2018_PLUS")
+    company_status = "BREAKPOINT_WITH_VALID_PREFIX" if breakpoints and ready else ("FULL_OR_PARTIAL_VALID_CHAIN" if ready else ("NO_RELIABLE_ANCHOR" if anchor.get("reliable_anchor") != 1 else "NO_LEGACY_2018_PLUS_HISTORY"))
     years = depth_years(anchor, ready)
     summary = {
         "ticker": ticker,
@@ -381,6 +582,9 @@ def validate_legacy_backward_chain(*, ticker: str, anchor: dict[str, Any], legac
         "anchor_source": anchor.get("anchor_source", ""),
         "reliable_anchor": anchor.get("reliable_anchor", 0),
         "anchor_bucket": anchor_year,
+        "anchor_category": anchor_category if anchor.get("reliable_anchor") == 1 else ("NO_RELIABLE_ANCHOR" if filtered_rows else "NO_LEGACY_2018_PLUS_HISTORY"),
+        "company_status": company_status,
+        "has_legacy_2018plus_history": int(bool(filtered_rows)),
         "backward_chain_length_qs": len(ready),
         "oldest_validated_fiscal_year": ready[-1]["fiscal_year"] if ready else "",
         "oldest_validated_fiscal_quarter": ready[-1]["fiscal_quarter"] if ready else "",
@@ -388,6 +592,7 @@ def validate_legacy_backward_chain(*, ticker: str, anchor: dict[str, Any], legac
         "breakpoint": int(bool(breakpoints)),
         "breakpoint_reason": breakpoints[0]["breakpoint_reason"] if breakpoints else "",
         "older_rows_behind_breakpoint": older_behind,
+        "validated_to_historical_floor": int(floor_complete and bool(ready)),
         "validated_years": years,
     }
     return CompanyChainResult(summary, confirmed, ready, hold, breakpoints, dry_plan, violations)
@@ -523,12 +728,196 @@ def yearly_reliability(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def legacy_2018plus_population(v3_companies: set[str], legacy_rows: dict[tuple[str, str], dict[str, Any]], overlap: list[dict[str, Any]], legacy_only: dict[str, list[dict[str, Any]]], historical_floor: str) -> dict[str, Any]:
+    total_legacy = len(legacy_rows)
+    pre_floor = sum(1 for (_, period) in legacy_rows if period < historical_floor)
+    legacy_2018 = total_legacy - pre_floor
+    overlap_2018 = sum(1 for row in overlap if row["v3_period_end_date"] >= historical_floor)
+    legacy_only_2018 = sum(1 for rows in legacy_only.values() for row in rows if row["period_end_date"] >= historical_floor)
+    companies_2018 = len({ticker for (ticker, period) in legacy_rows if period >= historical_floor})
+    pre_companies = len({ticker for (ticker, period) in legacy_rows if period < historical_floor})
+    return {
+        "total_legacy_rows": total_legacy,
+        "legacy_rows_before_2018": pre_floor,
+        "legacy_rows_2018plus": legacy_2018,
+        "existing_canonical_overlap_2018plus": overlap_2018,
+        "legacy_only_rows_2018plus": legacy_only_2018,
+        "companies_represented_2018plus": companies_2018,
+        "companies_affected_by_pre2018_exclusion": pre_companies,
+        "v3_companies": len(v3_companies),
+        "deep_history_candidate_reduction_from_1999plus": 122148 - legacy_only_2018,
+    }
+
+
+def anchor_accounting_rows(company_summaries: list[dict[str, Any]], company_total: int) -> list[dict[str, Any]]:
+    counts = Counter(row.get("anchor_category", "NO_RELIABLE_ANCHOR") for row in company_summaries)
+    rows = [{"anchor_category": key, "companies": counts[key]} for key in ("ANCHOR_2026", "ANCHOR_2025", "ANCHOR_2024_OR_OLDER_BUT_2018_PLUS", "NO_RELIABLE_ANCHOR", "NO_LEGACY_2018_PLUS_HISTORY")]
+    rows.append({"anchor_category": "TOTAL", "companies": sum(row["companies"] for row in rows)})
+    rows.append({"anchor_category": "EXPECTED_V3_COMPANIES", "companies": company_total})
+    return rows
+
+
+def company_status_accounting_rows(company_summaries: list[dict[str, Any]], company_total: int) -> list[dict[str, Any]]:
+    counts = Counter(row.get("company_status", "NO_RELIABLE_ANCHOR") for row in company_summaries)
+    rows = [{"company_status": key, "companies": counts[key]} for key in ("FULL_OR_PARTIAL_VALID_CHAIN", "BREAKPOINT_WITH_VALID_PREFIX", "NO_RELIABLE_ANCHOR", "NO_LEGACY_2018_PLUS_HISTORY")]
+    rows.append({"company_status": "TOTAL", "companies": sum(row["companies"] for row in rows)})
+    rows.append({"company_status": "EXPECTED_V3_COMPANIES", "companies": company_total})
+    return rows
+
+
+def q4_representation_diagnostic(breakpoints: list[dict[str, Any]], legacy_only: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    rows = []
+    for bp in breakpoints:
+        available = legacy_only.get(bp["ticker"], [])
+        around = [row["period_end_date"] for row in available if abs((date.fromisoformat(row["period_end_date"]) - date.fromisoformat(bp["breakpoint_period_end"])).days) <= 220]
+        if bp["breakpoint_reason"] == "MISSING_EXPLICIT_Q4":
+            rep = "Q4_GENUINELY_ABSENT_OR_ANNUAL_ONLY"
+        elif bp["breakpoint_fiscal_quarter"] == "Q4":
+            rep = "EXPECTED_Q4_BLOCKED_BY_PERIOD_PATTERN"
+        else:
+            rep = "NOT_Q4_BOUNDARY"
+        rows.append({**bp, "q4_representation": rep, "available_rows_around_boundary": ";".join(sorted(around, reverse=True))})
+    return rows
+
+
+def period_end_breakpoint_rows(breakpoints: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for bp in breakpoints:
+        current = bp.get("current_period_end")
+        failed = bp.get("breakpoint_period_end")
+        days = (date.fromisoformat(current) - date.fromisoformat(failed)).days if current and failed else None
+        rows.append({**bp, "spacing_days": days, "spacing_bucket": spacing_bucket(days)})
+    return rows
+
+
+def spacing_bucket(days: int | None) -> str:
+    if days is None:
+        return "missing"
+    if days == 0:
+        return "duplicate/same date"
+    if days < 0:
+        return "out-of-order"
+    if days < 70:
+        return "<70 days"
+    if days <= 80:
+        return "70-80"
+    if days <= 100:
+        return "81-100"
+    if days <= 110:
+        return "101-110"
+    if days <= 150:
+        return "111-150"
+    return ">150"
+
+
+def period_spacing_distribution(overlap: list[dict[str, Any]], breakpoints: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    confirmed = [row for row in overlap if row["identity_classification"] == "SAME_QUARTER_CONFIRMED"]
+    by_ticker: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in confirmed:
+        by_ticker[row["ticker"]].append(row)
+    days = []
+    for ticker_rows in by_ticker.values():
+        ticker_rows.sort(key=lambda row: row["v3_period_end_date"], reverse=True)
+        for newer, older in zip(ticker_rows, ticker_rows[1:]):
+            days.append((date.fromisoformat(newer["v3_period_end_date"]) - date.fromisoformat(older["v3_period_end_date"])).days)
+    if days:
+        sorted_days = sorted(days)
+        rows.append({"population": "confirmed_overlap_adjacent", "count": len(days), "median_days": percentile(sorted_days, 0.50), "p5_days": percentile(sorted_days, 0.05), "p25_days": percentile(sorted_days, 0.25), "p75_days": percentile(sorted_days, 0.75), "p95_days": percentile(sorted_days, 0.95)})
+    for bucket, count in Counter(row["spacing_bucket"] for row in period_end_breakpoint_rows(breakpoints)).items():
+        rows.append({"population": "breakpoints", "spacing_bucket": bucket, "count": count})
+    return rows
+
+
+def percentile(values: list[int], p: float) -> int:
+    if not values:
+        return 0
+    index = min(len(values) - 1, max(0, round((len(values) - 1) * p)))
+    return values[index]
+
+
+def company_fiscal_cadence(anchors: dict[str, dict[str, Any]], legacy_only: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    rows = []
+    for ticker, anchor in sorted(anchors.items()):
+        periods = [row["period_end_date"] for row in legacy_only.get(ticker, [])[:8]]
+        if "period_end_date" in anchor:
+            periods = [anchor["period_end_date"], *periods]
+        parsed = [date.fromisoformat(period) for period in periods]
+        diffs = [(parsed[i] - parsed[i + 1]).days for i in range(len(parsed) - 1) if parsed[i] > parsed[i + 1]]
+        if diffs and all(84 <= value <= 98 for value in diffs):
+            cadence = "13_WEEK_OR_QUARTERLY"
+        elif diffs and all(70 <= value <= 112 for value in diffs):
+            cadence = "52_53_WEEK_COMPATIBLE"
+        elif diffs:
+            cadence = "IRREGULAR_OR_SPARSE"
+        else:
+            cadence = "INSUFFICIENT"
+        rows.append({"ticker": ticker, "cadence": cadence, "sample_periods": ";".join(periods[:8]), "sample_diffs": ";".join(str(value) for value in diffs[:7])})
+    return rows
+
+
+def conflict_typology_3c1c(overlap: list[dict[str, Any]], adjacent: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    old = conflict_typology(overlap, adjacent)
+    mapping = {
+        "SAME_QUARTER_LIKELY_GATE_TOO_STRICT": "SAME_QUARTER_CONFIRMED_AFTER_GATE_FIX",
+        "SAME_QUARTER_LIKELY_FIELD_SEMANTICS": "SAME_QUARTER_FIELD_SEMANTICS_DIFFER",
+        "SAME_QUARTER_LIKELY_REVISION": "SAME_QUARTER_CONFIRMED_AFTER_GATE_FIX",
+        "POSSIBLE_WRONG_FISCAL_MAPPING": "POSSIBLE_WRONG_FISCAL_MAPPING",
+        "CLEAR_WRONG_FISCAL_MAPPING": "CLEAR_WRONG_FISCAL_MAPPING",
+        "SCALE_OR_NORMALIZATION": "SAME_QUARTER_PERIOD_VARIANT",
+        "INSUFFICIENT": "INSUFFICIENT",
+    }
+    return [{**row, "corrected_typology": mapping.get(row["typology"], "INSUFFICIENT")} for row in old]
+
+
+def mapping_risk_summary_3c1c(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    counts = Counter(row["corrected_typology"] for row in rows)
+    likely = counts["SAME_QUARTER_CONFIRMED_AFTER_GATE_FIX"] + counts["SAME_QUARTER_FIELD_SEMANTICS_DIFFER"] + counts["SAME_QUARTER_PERIOD_VARIANT"]
+    risk = counts["POSSIBLE_WRONG_FISCAL_MAPPING"] + counts["CLEAR_WRONG_FISCAL_MAPPING"]
+    total = sum(counts.values())
+    return {"overlap_conflict_rows": total, "same_q_confirmed_after_corrected_logic": likely, "likely_same_q_pct": pct(likely, total), "possible_wrong_mapping": counts["POSSIBLE_WRONG_FISCAL_MAPPING"], "clear_wrong_mapping": counts["CLEAR_WRONG_FISCAL_MAPPING"], "true_mapping_risk_pct": pct(risk, total)}
+
+
+def fiscal_year_label_analysis(breakpoints: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{**row, "label_analysis": "NO_FY_LABEL_AVAILABLE_IN_LEGACY_SOURCE"} for row in breakpoints if row["breakpoint_reason"] == "FISCAL_YEAR_LABEL_CONVENTION_MISMATCH"]
+
+
+def yearly_reliability_2018_2026(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for year in range(2026, 2017, -1):
+        items = [row for row in rows if row["period_end_date"].startswith(str(year))]
+        ready_direct = sum(1 for row in items if row["diagnostic_disposition"] == "READY_DIRECT_CHAIN")
+        ready_bridge = sum(1 for row in items if row["diagnostic_disposition"] == "READY_BRIDGED_CHAIN")
+        ready_v2 = sum(1 for row in items if row["diagnostic_disposition"] == "READY_V2_CORROBORATED")
+        ready = ready_direct + ready_bridge + ready_v2
+        hold = len(items) - ready
+        out.append({"period_end_year": year, "candidate_rows": len(items), "ready_direct": ready_direct, "ready_bridged": ready_bridge, "ready_v2_corroborated": ready_v2, "hold": hold, "true_transitions": sum(1 for row in items if row["diagnostic_disposition"] == "HOLD_TRUE_FISCAL_TRANSITION"), "mapping_conflicts": sum(1 for row in items if row["diagnostic_disposition"] == "HOLD_MAPPING_CONFLICT"), "readiness_pct": pct(ready, len(items))})
+    return out
+
+
+def company_depth_rows_2018plus(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for year in range(2025, 2017, -1):
+        rows.append({"validated_to_year": year, "companies": sum(1 for row in summaries if str(row.get("oldest_validated_period_end", ""))[:4] and int(str(row.get("oldest_validated_period_end"))[:4]) <= year)})
+    rows.append({"validated_to_year": "full_available_history_to_floor", "companies": sum(1 for row in summaries if row.get("validated_to_historical_floor"))})
+    lengths = [row["backward_chain_length_qs"] for row in summaries if row["backward_chain_length_qs"]]
+    rows.append({"validated_to_year": "median_validated_q_count", "companies": median(lengths) if lengths else 0})
+    return rows
+
+
+def final_classification_3c1c(recent: list[dict[str, Any]], ready: list[dict[str, Any]], violations: list[dict[str, Any]]) -> str:
+    recent_ok = all(row["same_quarter_confirmed"] > 0 and row["period_end_exact_or_compatible"] == row["overlap_rows"] for row in recent if row["overlap_rows"])
+    if recent_ok and ready and not violations:
+        return "FUNDAMENTALS_V3_PHASE3C_1C_LEGACY_BREAKPOINT_DIAGNOSTIC_COMPLETE_READY_FOR_3C2"
+    return "FUNDAMENTALS_V3_PHASE3C_1C_LEGACY_VALIDATOR_REPAIR_REQUIRED"
+
+
 def company_depth_rows(summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     thresholds = (1, 2, 3, 5, 8, 10, 15, 20)
     rows = []
     for threshold in thresholds:
         rows.append({"depth_threshold_years": threshold, "companies": sum(1 for row in summaries if row["validated_years"] >= threshold)})
-    rows.append({"depth_threshold_years": "through_1999", "companies": sum(1 for row in summaries if str(row.get("oldest_validated_period_end", ""))[:4] == "1999")})
+    rows.append({"depth_threshold_years": "through_old_1999_floor", "companies": sum(1 for row in summaries if str(row.get("oldest_validated_period_end", ""))[:4] == "1999")})
     return rows
 
 
@@ -606,12 +995,14 @@ def chain_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {"companies_with_valid_backward_chain": sum(1 for value in lengths if value > 0), "companies_with_breakpoint": sum(row["breakpoint"] for row in rows), "companies_without_usable_anchor": sum(1 for row in rows if row.get("reliable_anchor") != 1), "median_validated_chain_length_qs": median(lengths) if lengths else 0, "maximum_validated_chain_length_qs": max(lengths) if lengths else 0}
 
 
-def sequence_validation(ready_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def sequence_validation(ready_rows: list[dict[str, Any]], *, historical_floor: str = OLD_HISTORICAL_PERIOD_END_FLOOR) -> list[dict[str, Any]]:
     violations = []
     seen_fyfqs: set[tuple[str, int, str]] = set()
     seen_periods: set[tuple[str, str]] = set()
     by_ticker: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in ready_rows:
+        if row["period_end_date"] < historical_floor:
+            violations.append({**row, "violation": "PERIOD_BEFORE_HISTORICAL_FLOOR"})
         key = (row["ticker"], int(row["fiscal_year"]), row["fiscal_quarter"])
         period_key = (row["ticker"], row["period_end_date"])
         if key in seen_fyfqs:
@@ -671,6 +1062,56 @@ def write_artifacts(root: Path, **items: Any) -> None:
         "duplicate_legacy_diagnostic.csv": [],
         "known_special_case_validation.csv": items["special"],
         "manual_review_samples.csv": items["samples"],
+        "phase3c2_dry_import_plan.csv": items["dry_plan"],
+        "phase3c2_expected_contribution.json": items["contribution"],
+        "summary.json": items["summary"],
+    }
+    for filename, payload in mapping.items():
+        path = root / filename
+        if filename.endswith(".json"):
+            path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        else:
+            write_csv(path, payload)
+    (root / "recommended_next_step.md").write_text(items["summary"]["recommended_next_step"] + "\n")
+
+
+def write_3c1c_artifacts(root: Path, **items: Any) -> None:
+    (root / "historical_floor_change.md").write_text(
+        "V3 canonical historical scope starts at 2018-01-01. Rows before 2018-01-01 are PRE_2018_EXCLUDED for V3 deep-history import.\n"
+    )
+    pre_summary = [{
+        "previous_floor": OLD_HISTORICAL_PERIOD_END_FLOOR,
+        "new_floor": V3_HISTORICAL_PERIOD_END_FLOOR,
+        "pre2018_rows_excluded": items["population"]["legacy_rows_before_2018"],
+        "companies_affected": items["population"]["companies_affected_by_pre2018_exclusion"],
+        "legacy_only_candidate_reduction": items["population"]["deep_history_candidate_reduction_from_1999plus"],
+    }]
+    mapping = {
+        "baseline_reconciliation.json": items["baseline_reconciliation"],
+        "legacy_2018plus_population.csv": [items["population"]],
+        "pre2018_excluded_summary.csv": pre_summary,
+        "anchor_accounting.csv": items["anchor_accounting"],
+        "company_status_accounting.csv": items["company_status_accounting"],
+        "fiscal_transition_breakpoints.csv": items["fiscal_transition_breakpoints"],
+        "q4_representation_diagnostic.csv": items["q4_diagnostic"],
+        "missing_q4_bridge_candidates.csv": [row for row in items["bridge_rows"] if row.get("bridge_type")],
+        "fiscal_year_label_analysis.csv": items["fiscal_label"],
+        "true_fiscal_transition_cases.csv": items["true_transitions"],
+        "period_end_breakpoints.csv": items["period_breaks"],
+        "period_spacing_distribution.csv": items["spacing"],
+        "company_fiscal_cadence.csv": items["cadence"],
+        "one_quarter_bridge_analysis.csv": items["bridge_rows"],
+        "legacy_overlap_reclassification.csv": items["typology_rows"],
+        "legacy_recent_anchor_quality.csv": items["recent_anchor_quality"],
+        "company_backward_chain_revised.csv": items["company_summaries"],
+        "company_breakpoints_revised.csv": items["breakpoints"],
+        "legacy_2018plus_row_classification.csv": items["row_classifications"],
+        "legacy_yearly_reliability_2018_2026.csv": items["yearly"],
+        "company_history_depth_2018plus.csv": items["depth"],
+        "special_case_validation.csv": items["special"],
+        "phase3c2_ready_rows.csv": items["ready_rows"],
+        "phase3c2_hold_rows.csv": items["hold_rows"],
+        "phase3c2_sequence_validation.csv": items["sequence_violations"],
         "phase3c2_dry_import_plan.csv": items["dry_plan"],
         "phase3c2_expected_contribution.json": items["contribution"],
         "summary.json": items["summary"],

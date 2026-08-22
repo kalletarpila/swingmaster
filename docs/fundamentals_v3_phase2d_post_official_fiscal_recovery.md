@@ -39,10 +39,10 @@ press releases, Avalon investor filing pages, and Envirotech investor resources.
 | Metric | Rows |
 | --- | ---: |
 | Unresolved rows entering A3 | 1,348 |
-| Rows recovered from official fiscal-year end evidence | 1,311 |
+| Rows recovered from official fiscal-year end evidence | 1,313 |
 | Rows recovered from official 52/53-week patterns | 31 |
-| Total newly recovered rows | 1,342 |
-| Final still unresolved rows | 6 |
+| Total newly recovered rows | 1,344 |
+| Final still unresolved rows | 4 |
 
 Coverage against the full Yahoo normalized bootstrap:
 
@@ -50,25 +50,39 @@ Coverage against the full Yahoo normalized bootstrap:
 | --- | ---: |
 | Yahoo normalized rows | 14,373 |
 | Identity ready before A3 | 13,025 |
-| Final identity-ready rows | 14,367 |
-| Final identity-ready percentage | 99.96% |
-| Final unresolved percentage | 0.04% |
+| Final identity-ready rows | 14,369 |
+| Final identity-ready percentage | 99.97% |
+| Final unresolved percentage | 0.03% |
 
 Within the original 3,651 `METADATA_NOT_RESOLVED` rows:
 
 | Metric | Rows |
 | --- | ---: |
-| Identity ready after A3 | 3,645 |
-| Still identity unresolved after A3 | 6 |
+| Identity ready after A3 | 3,647 |
+| Still identity unresolved after A3 | 4 |
+
+## BNC Transition Fiscal Year
+
+User-supplied official reporting evidence resolves both previously unresolved BNC rows. FY2025 was
+an exceptional transition fiscal year, so the normal Q1 to Q4 sequence must not be inferred across
+the transition. The issuer's explicit labels are used directly:
+
+| Period end | Fiscal identity | Publish date | Evidence |
+| --- | --- | --- | --- |
+| 2024-12-31 | FY2024 Q4 | 2025-03-27 | Official reported FY24 Q4 / full year |
+| 2025-03-31 | FY2025 Q1 | 2025-05-15 | Official reported FY25 Q1 |
+| 2025-07-31 | FY2026 Q1 | 2025-09-22 | Official reported FY26 Q1 |
+| 2025-10-31 | FY2026 Q2 | 2025-12-15 | Official reported FY26 Q2 |
+
+The new fiscal-calendar regime begins from FY2026. These entries are recorded as migration
+evidence, not as hard-coded runtime rules.
 
 ## Remaining Manual Review
 
-Six rows remain unresolved:
+Four rows remain unresolved:
 
 | Ticker | Period end | Reason |
 | --- | --- | --- |
-| BNC | 2024-12-31 | Yahoo period does not deterministically match the official April fiscal calendar. |
-| BNC | 2025-03-31 | Yahoo period does not deterministically match the official April fiscal calendar. |
 | CAVA | 2026-03-31 | Recovery would create a duplicate fiscal identity already represented by another period row. |
 | DPZ | 2026-05-31 | Yahoo period does not deterministically match Domino's official 52/53-week period. |
 | LFCR | 2025-09-30 | Lifecore fiscal-year transition period needs explicit Phase 3 policy. |
@@ -86,7 +100,7 @@ publication date remains unresolved.
 | --- | ---: |
 | Publication-unresolved rows entering A3 | 1,603 |
 | Publication dates recovered through official research | 509 |
-| Publication dates recovered where fiscal identity was also newly resolved | 505 |
+| Publication dates recovered where fiscal identity was also newly resolved | 507 |
 | Final publication-ready row count | 13,279 |
 | Final publication-ready percentage | 92.39% |
 | Remaining publication-unresolved rows | 1,094 |

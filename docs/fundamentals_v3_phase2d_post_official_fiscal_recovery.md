@@ -40,9 +40,9 @@ press releases, Avalon investor filing pages, and Envirotech investor resources.
 | --- | ---: |
 | Unresolved rows entering A3 | 1,348 |
 | Rows recovered from official fiscal-year end evidence | 1,313 |
-| Rows recovered from official 52/53-week patterns | 31 |
-| Total newly recovered rows | 1,344 |
-| Final still unresolved rows | 4 |
+| Rows recovered from official 52/53-week patterns | 32 |
+| Total newly recovered rows | 1,345 |
+| Final still unresolved rows | 3 |
 
 Coverage against the full Yahoo normalized bootstrap:
 
@@ -50,16 +50,16 @@ Coverage against the full Yahoo normalized bootstrap:
 | --- | ---: |
 | Yahoo normalized rows | 14,373 |
 | Identity ready before A3 | 13,025 |
-| Final identity-ready rows | 14,369 |
-| Final identity-ready percentage | 99.97% |
-| Final unresolved percentage | 0.03% |
+| Final identity-ready rows | 14,370 |
+| Final identity-ready percentage | 99.98% |
+| Final unresolved percentage | 0.02% |
 
 Within the original 3,651 `METADATA_NOT_RESOLVED` rows:
 
 | Metric | Rows |
 | --- | ---: |
-| Identity ready after A3 | 3,647 |
-| Still identity unresolved after A3 | 4 |
+| Identity ready after A3 | 3,648 |
+| Still identity unresolved after A3 | 3 |
 
 ## BNC Transition Fiscal Year
 
@@ -77,15 +77,69 @@ the transition. The issuer's explicit labels are used directly:
 The new fiscal-calendar regime begins from FY2026. These entries are recorded as migration
 evidence, not as hard-coded runtime rules.
 
+## CAVA And DPZ 52/53-Week Calendars
+
+CAVA uses a 52-53-week fiscal year ending in December. Domino's Pizza uses a 4-5-4 week cycle.
+Official result calendars from 2024 onward were recorded as migration evidence.
+
+For CAVA, the important unresolved row is:
+
+```text
+CAVA 2026-03-31 -> official FY2026 Q1 evidence exists
+official period end -> 2026-04-19
+publish_date -> 2026-05-19
+```
+
+It remains out of `phase3_fiscal_identity_input.csv` because it would create a duplicate fiscal
+work unit; another Yahoo period already maps to FY2026 Q1. Phase 3 must resolve this as a duplicate
+provider-period/work-unit case, not as an unknown fiscal-calendar case.
+
+For DPZ, the official 4-5-4 evidence resolves the previously unresolved row:
+
+```text
+DPZ 2026-05-31 -> FY2026 Q2
+official period end -> 2026-06-14
+publish_date -> 2026-07-20
+```
+
+The Yahoo date is a provider period surrogate and is accepted only because it maps deterministically
+to the official FY2026 Q2 result.
+
+## LFCR Fiscal-Year Transition
+
+LFCR's remaining row is no longer an unknown fiscal-calendar case. Official transition evidence
+shows that `LFCR 2025-09-30` is not an independent official fiscal quarter-end.
+
+The relevant official structure is:
+
+| Fiscal identity | Official period end | Publish date |
+| --- | --- | --- |
+| FY2024 Q4 | 2024-05-26 |  |
+| FY2025 Q1 | 2024-08-25 |  |
+| FY2025 Q2 | 2024-11-24 |  |
+| FY2025 Q3 | 2025-03-31 |  |
+| FY2025 Q4 transition period | 2025-12-31 | 2026-03-16 |
+| FY2026 Q1 | 2026-03-31 | 2026-05-06 |
+| FY2026 Q2 | 2026-06-30 | 2026-08-05 |
+
+Therefore A3 does not write:
+
+```text
+LFCR 2025-09-30 -> FY2025 Q4
+```
+
+The row is recorded as `TRANSITION_PERIOD_DATE_VARIANT`. Phase 3 may merge it into FY2025 Q4 only
+if the Yahoo values can be identified as the same transition-result values. It must not create a
+new canonical quarter from this row.
+
 ## Remaining Manual Review
 
-Four rows remain unresolved:
+Three rows remain unresolved:
 
 | Ticker | Period end | Reason |
 | --- | --- | --- |
 | CAVA | 2026-03-31 | Recovery would create a duplicate fiscal identity already represented by another period row. |
-| DPZ | 2026-05-31 | Yahoo period does not deterministically match Domino's official 52/53-week period. |
-| LFCR | 2025-09-30 | Lifecore fiscal-year transition period needs explicit Phase 3 policy. |
+| LFCR | 2025-09-30 | Known transition-period date variant; do not create a new canonical quarter. |
 | NEUP | 2025-09-30 | Recovery would create a duplicate fiscal identity already represented by another period row. |
 
 These rows are not discarded. They are held for Phase 3 manual policy or duplicate work-unit
@@ -99,11 +153,11 @@ publication date remains unresolved.
 | Metric | Rows |
 | --- | ---: |
 | Publication-unresolved rows entering A3 | 1,603 |
-| Publication dates recovered through official research | 509 |
-| Publication dates recovered where fiscal identity was also newly resolved | 507 |
-| Final publication-ready row count | 13,279 |
-| Final publication-ready percentage | 92.39% |
-| Remaining publication-unresolved rows | 1,094 |
+| Publication dates recovered through official research | 511 |
+| Publication dates recovered where fiscal identity was also newly resolved | 508 |
+| Final publication-ready row count | 13,281 |
+| Final publication-ready percentage | 92.40% |
+| Remaining publication-unresolved rows | 1,092 |
 
 Publication evidence was accepted only when the source could be tied to a fiscal quarter or period
 end. Accepted evidence classes are official earnings releases, annual results releases, official IR

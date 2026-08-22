@@ -204,7 +204,7 @@ Final Phase 3 exception table:
 | Ticker | Yahoo period end | Fiscal context | Exception | Field comparison | Recommended Phase 3 action |
 | --- | --- | --- | --- | --- | --- |
 | CAVA | 2026-03-31 | FY2026 Q1, official period ended 2026-04-19 | Duplicate fiscal work unit | `PARTIAL_OVERLAP_SAME_RESULT_INCOME_VALUES_SUPPLIED_BALANCE_FIELDS_STILL_SPLIT` | Merge only with field provenance, otherwise manual review; do not create a second canonical Q. |
-| LFCR | 2025-09-30 | FY2025 Q4 transition context, official period ended 2025-12-31 | Transition-period date variant | `INSUFFICIENT_COMPARISON` | Merge only if field-equivalent, otherwise exclude provider variant from canonical import. |
+| LFCR | 2025-09-30 | FY2025 Q4 transition context, official period ended 2025-12-31 | Transition-period date variant | `DIFFERENT_PERIOD_PROVIDER_VARIANT_VALUES_NOT_FY2025_Q4` | Exclude provider variant unless later official FY2025 Q4 values prove equivalence. |
 | NEUP | 2025-09-30 | FY2026 Q1, official period ended 2025-09-30 | Fiscal-quarter mapping collision | `CONFLICTING_VALUES_DIFFERENT_OFFICIAL_QUARTERS` | Correct existing 2026-03-31 work unit to FY2026 Q3 and import 2025-09-30 as FY2026 Q1. |
 
 CAVA field comparison was refined with user-supplied Yahoo screenshot values for `2026-03-31`:
@@ -212,6 +212,13 @@ revenue 438.27M, gross profit 111.19M, operating income/EBIT 34.14M, EBITDA 59.6
 23.57M, and basic average shares 116.34M. The competing local `2026-04-30` FY2026 Q1 work unit
 contains balance/share fields only. This indicates a split provider-period/work-unit reconciliation
 case rather than a second canonical quarter.
+
+LFCR field comparison was refined with user-supplied Yahoo screenshot values for the visible
+provider periods. `2025-09-30` has revenue 31.11M, gross profit 7.79M, operating income -3.07M,
+EBIT -3.27M, EBITDA -1.29M, net income -10.91M, and average shares 37.40M. The screenshot also
+shows later `2026-03-31` and `2026-06-30` calendar-period values, while the official FY2025 Q4
+transition period ends on 2025-12-31 and is not represented by the visible Yahoo period list. Phase
+3 should treat `2025-09-30` as a distinct provider-period variant, not as FY2025 Q4 by proximity.
 
 Publication coverage after A4:
 

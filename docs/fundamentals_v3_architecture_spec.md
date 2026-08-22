@@ -355,8 +355,9 @@ Legacy-only historical rows are deep-history candidates for the separate history
 
 Current Legacy implementation order is explicit: Phase 3C-1 performs Legacy existing-Q enrichment,
 Phase 3C-1B validates Legacy-only history backward from recent anchors without writes, Phase 3C-1C
-applies the 2018-01-01 historical floor and breakpoint diagnostic, and Phase 3C-2 may create only
-the deep-history rows that the latest validation dry plan classifies as
+applies the 2018-01-01 historical floor and breakpoint diagnostic, Phase 3C-1D models SEC Q4/FY
+structure and independent segment recovery without writes, and Phase 3C-2 may create only
+the deep-history rows that the latest recovery dry plan classifies as
 `READY_FOR_PHASE3C2_IMPORT`.
 
 This order must not mean Yahoo always wins. Migration reconciliation classifies competing non-null

@@ -344,6 +344,15 @@ must not automatically replace an existing non-null canonical financial value or
 `publish_date`; materially different V2 values are comparison or reconciliation evidence for a
 later explicit correction workflow.
 
+Legacy automatic enrichment follows the same no-overwrite rule:
+
+`LEGACY_CAN_OVERWRITE_EXISTING_CANONICAL_VALUE = FALSE`
+
+Legacy may fill existing canonical Q `NULL` values only after source-specific same-quarter
+validation. It must not create new canonical Qs during existing-Q enrichment and must not
+automatically replace values previously accepted from Yahoo, V2, Legacy, or another source.
+Legacy-only historical rows are deep-history candidates for the separate history-extension phase.
+
 This order must not mean Yahoo always wins. Migration reconciliation classifies competing non-null
 values as:
 

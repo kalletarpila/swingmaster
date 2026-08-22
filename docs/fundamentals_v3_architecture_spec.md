@@ -334,6 +334,16 @@ Default seed/fill order is:
 2. Legacy safe NULL-fill for remaining gaps.
 3. V2 safe NULL-fill for remaining gaps.
 
+V2 automatic enrichment is permanently no-overwrite:
+
+`V2_CAN_OVERWRITE_EXISTING_CANONICAL_VALUE = FALSE`
+
+V2 same-quarter confirmation grants identity confidence only. It may fill canonical V3 `NULL`
+financial values and `NULL` publication dates after the source-specific identity gate passes. It
+must not automatically replace an existing non-null canonical financial value or non-null
+`publish_date`; materially different V2 values are comparison or reconciliation evidence for a
+later explicit correction workflow.
+
 This order must not mean Yahoo always wins. Migration reconciliation classifies competing non-null
 values as:
 

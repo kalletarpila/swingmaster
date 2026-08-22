@@ -285,15 +285,6 @@ class V3CanonicalMigrationEngine:
             company_id = int(company["company_id"])
             result["row_outcomes"].append("COMPANY_MATCHED")
         result["company_id"] = company_id
-        if not candidate.candidate_can_create_quarter:
-            return self._reject_before_quarter(
-                candidate,
-                result,
-                issue_type=candidate.candidate_issue_type or "OTHER_MIGRATION_REVIEW",
-                decision="CANDIDATE_NOT_CREATABLE",
-                now_utc=now_utc,
-                company_id=company_id,
-            )
         if candidate.period_end_date is None:
             return self._reject_before_quarter(
                 candidate,
@@ -318,6 +309,15 @@ class V3CanonicalMigrationEngine:
             fiscal_quarter=candidate.fiscal_quarter,
         )
         if quarter is None:
+            if not candidate.candidate_can_create_quarter:
+                return self._reject_before_quarter(
+                    candidate,
+                    result,
+                    issue_type=candidate.candidate_issue_type or "OTHER_MIGRATION_REVIEW",
+                    decision="CANDIDATE_NOT_CREATABLE",
+                    now_utc=now_utc,
+                    company_id=company_id,
+                )
             quarter_id = self.quarters.upsert_quarter(
                 company_id=company_id,
                 fiscal_year=candidate.fiscal_year,

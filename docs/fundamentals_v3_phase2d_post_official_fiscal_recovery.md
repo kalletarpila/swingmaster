@@ -132,6 +132,39 @@ The row is recorded as `TRANSITION_PERIOD_DATE_VARIANT`. Phase 3 may merge it in
 if the Yahoo values can be identified as the same transition-result values. It must not create a
 new canonical quarter from this row.
 
+## NEUP June Fiscal Year
+
+NEUP uses a June 30 fiscal year:
+
+```text
+Q1 -> Jul 1-Sep 30
+Q2 -> Oct 1-Dec 31
+Q3 -> Jan 1-Mar 31
+Q4 -> Apr 1-Jun 30
+```
+
+Official result calendar evidence for 2024-2026 was recorded:
+
+| Fiscal identity | Official period end | Publish date |
+| --- | --- | --- |
+| FY2024 Q1 | 2023-09-30 | 2023-11-14 |
+| FY2024 Q2 | 2023-12-31 | 2024-11-21 |
+| FY2024 Q3 | 2024-03-31 | 2024-05-15 |
+| FY2024 Q4 | 2024-06-30 | 2024-10-31 |
+| FY2025 Q1 | 2024-09-30 | 2024-11-14 |
+| FY2025 Q2 | 2024-12-31 | 2025-02-14 |
+| FY2025 Q3 | 2025-03-31 | 2025-05-20 |
+| FY2025 Q4 | 2025-06-30 | 2025-09-29 |
+| FY2026 Q1 | 2025-09-30 | 2025-11-14 |
+| FY2026 Q2 | 2025-12-31 | 2026-02-17 |
+| FY2026 Q3 | 2026-03-31 | 2026-05-15 |
+| FY2026 Q4 | 2026-06-30 | 2026-09-28 estimated/future |
+
+`NEUP 2025-09-30` is therefore not an unknown calendar case. It is official FY2026 Q1 with
+publish date 2025-11-14, but it remains outside `phase3_fiscal_identity_input.csv` because the same
+FY2026 Q1 work unit is already represented by another Yahoo period. Phase 3 must resolve this as a
+duplicate provider-period/work-unit issue.
+
 ## Remaining Manual Review
 
 Three rows remain unresolved:
@@ -140,7 +173,7 @@ Three rows remain unresolved:
 | --- | --- | --- |
 | CAVA | 2026-03-31 | Recovery would create a duplicate fiscal identity already represented by another period row. |
 | LFCR | 2025-09-30 | Known transition-period date variant; do not create a new canonical quarter. |
-| NEUP | 2025-09-30 | Recovery would create a duplicate fiscal identity already represented by another period row. |
+| NEUP | 2025-09-30 | Official FY2026 Q1 label exists, but recovery would create a duplicate fiscal identity. |
 
 These rows are not discarded. They are held for Phase 3 manual policy or duplicate work-unit
 resolution.

@@ -193,9 +193,15 @@ Final Phase 3 exception table:
 
 | Ticker | Yahoo period end | Fiscal context | Exception | Field comparison | Recommended Phase 3 action |
 | --- | --- | --- | --- | --- | --- |
-| CAVA | 2026-03-31 | FY2026 Q1, official period ended 2026-04-19 | Duplicate fiscal work unit | `INSUFFICIENT_COMPARISON` | Select official period row or manual review; do not create a second canonical Q. |
+| CAVA | 2026-03-31 | FY2026 Q1, official period ended 2026-04-19 | Duplicate fiscal work unit | `PARTIAL_OVERLAP_SAME_RESULT_INCOME_VALUES_SUPPLIED_BALANCE_FIELDS_STILL_SPLIT` | Merge only with field provenance, otherwise manual review; do not create a second canonical Q. |
 | LFCR | 2025-09-30 | FY2025 Q4 transition context, official period ended 2025-12-31 | Transition-period date variant | `INSUFFICIENT_COMPARISON` | Merge only if field-equivalent, otherwise exclude provider variant from canonical import. |
 | NEUP | 2025-09-30 | FY2026 Q1, official period ended 2025-09-30 | Duplicate fiscal work unit | `CONFLICTING_VALUES` | Retain as resolution issue; do not silently merge or overwrite existing FY2026 Q1. |
+
+CAVA field comparison was refined with user-supplied Yahoo screenshot values for `2026-03-31`:
+revenue 438.27M, gross profit 111.19M, operating income/EBIT 34.14M, EBITDA 59.60M, net income
+23.57M, and basic average shares 116.34M. The competing local `2026-04-30` FY2026 Q1 work unit
+contains balance/share fields only. This indicates a split provider-period/work-unit reconciliation
+case rather than a second canonical quarter.
 
 Publication coverage after A4:
 

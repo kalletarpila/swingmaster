@@ -324,8 +324,9 @@ def run_yahoo_seed(
         production = build_production_summary(conn, prepared=prepared, apply_summary=apply_summary, company_summary=company_summary)
         idempotency = run_idempotency_validation(conn, prepared.candidates, migration_run_id=migration_run_id, before=production["row_counts"], now_utc=now)
         production["idempotency"] = idempotency
-        backup_path = create_source_boundary_backup(target_db, artifact_root)
+        conn.commit()
     production["preflight"] = preflight
+    backup_path = create_source_boundary_backup(target_db, artifact_root)
     production["backup_path"] = str(backup_path)
     write_phase3b_artifacts(artifact_root, production)
     return production

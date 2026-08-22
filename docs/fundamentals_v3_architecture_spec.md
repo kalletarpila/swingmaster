@@ -353,6 +353,11 @@ validation. It must not create new canonical Qs during existing-Q enrichment and
 automatically replace values previously accepted from Yahoo, V2, Legacy, or another source.
 Legacy-only historical rows are deep-history candidates for the separate history-extension phase.
 
+Current Legacy implementation order is explicit: Phase 3C-1 performs Legacy existing-Q enrichment,
+Phase 3C-1B validates Legacy-only history backward from recent anchors without writes, and Phase
+3C-2 may create only the deep-history rows that Phase 3C-1B classified as
+`READY_FOR_PHASE3C2_IMPORT`.
+
 This order must not mean Yahoo always wins. Migration reconciliation classifies competing non-null
 values as:
 

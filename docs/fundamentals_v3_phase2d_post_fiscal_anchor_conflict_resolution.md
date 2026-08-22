@@ -61,20 +61,29 @@ Disagreeing local anchors are recorded as `SUSPECT_FISCAL_ANCHOR`. Source rows a
 | `RESOLVED_BY_TRUSTED_Q4_FISCAL_YEAR_END_PATTERN` | 50 |
 | `RESOLVED_BY_MULTI_YEAR_FISCAL_PATTERN` | 2 |
 | `RESOLVED_BY_SOURCE_PRIORITY_PLUS_SEQUENCE` | 1 |
-| `UNRESOLVED_TRUE_ANCHOR_CONFLICT` | 3 |
+| `RESOLVED_BY_MANUAL_FISCAL_CALENDAR_EVIDENCE` | 3 |
+| `UNRESOLVED_TRUE_ANCHOR_CONFLICT` | 0 |
 | `RESOLVED_BIDIRECTIONALLY` | 0 |
 
 Total: 56 rows across 27 companies.
 
-The 3 unresolved true conflicts remain unresolved because company-wide evidence did not meet the
-deterministic threshold.
+After the initial company-wide evidence pass, 3 rows remained unresolved. User-supplied fiscal
+calendar evidence for SJM and LYTS resolved those rows as manual migration evidence:
+
+| Ticker | Period end | Final identity | Evidence |
+| --- | --- | --- | --- |
+| LYTS | 2025-03-31 | FY2025 Q3 | Fiscal year ends June 30; Q3 is Jan 1-Mar 31. |
+| SJM | 2025-10-31 | FY2026 Q2 | Fiscal year ends April 30; Q2 is Aug 1-Oct 31. |
+| SJM | 2026-01-31 | FY2026 Q3 | Fiscal year ends April 30; Q3 is Nov 1-Jan 31. |
+
+These manual entries do not mutate V2, Legacy, raw-cache, or canonical V3 source rows.
 
 ## Root Causes
 
 | Root cause | Rows |
 | --- | ---: |
-| `FISCAL_QUARTER_OFFSET_CONFLICT` | 53 |
-| `OTHER` | 3 |
+| `FISCAL_QUARTER_OFFSET_CONFLICT` | 56 |
+| `OTHER` | 0 |
 | `FISCAL_YEAR_OFFSET_CONFLICT` | 0 |
 | `PERIOD_DATE_VARIANT_COLLISION` | 0 |
 | `DUPLICATE_SOURCE_MAPPING` | 0 |
@@ -151,18 +160,18 @@ Breakdown:
 | Current normalized Yahoo rows | 14,373 |
 | Original strict migration candidate records | 10,722 |
 | Prior Post-A identity-ready projection | 12,703 |
-| A2 additional identity recovery | 319 |
-| New identity-ready total | 13,022 |
-| Final identity-ready percentage | 90.60% |
-| Still fiscal-identity unresolved after A2 | 1,351 |
-| Still unresolved percentage of normalized rows | 9.40% |
+| A2 additional identity recovery | 322 |
+| New identity-ready total | 13,025 |
+| Final identity-ready percentage | 90.62% |
+| Still fiscal-identity unresolved after A2 | 1,348 |
+| Still unresolved percentage of normalized rows | 9.38% |
 
 Within the original 3,651 metadata-rejected rows:
 
 | Metric | Rows |
 | --- | ---: |
-| Identity ready after A2 | 2,300 |
-| Still identity unresolved after A2 | 1,351 |
+| Identity ready after A2 | 2,303 |
+| Still identity unresolved after A2 | 1,348 |
 | Publish date unresolved | 1,603 |
 
 Publication date remains a separate dimension and is not required for this fiscal-identity

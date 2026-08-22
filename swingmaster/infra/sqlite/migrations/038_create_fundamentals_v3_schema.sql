@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS v3_quarter_fundamentals (
     total_debt REAL,
     shares_outstanding REAL,
     ebit REAL,
+    operating_income REAL,
     operating_cashflow REAL,
     capex REAL,
     gross_profit REAL,

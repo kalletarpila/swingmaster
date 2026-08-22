@@ -45,6 +45,7 @@ FUNDAMENTAL_FIELDS = (
     "total_debt",
     "shares_outstanding",
     "ebit",
+    "operating_income",
     "operating_cashflow",
     "capex",
     "gross_profit",

@@ -280,6 +280,7 @@ def test_v3_fundamentals_storage_accepts_yahoo_bootstrap_value_contract() -> Non
     values = {
         "revenue": 109417000000.0,
         "gross_profit": 54770000000.0,
+        "operating_income": 35695000000.0,
         "ebit": 35695000000.0,
         "ebitda": 39015000000.0,
         "net_income": 29789000000.0,

@@ -501,7 +501,8 @@ Population denominators must remain explicit:
 | --- | ---: | --- |
 | Approved initial V3 company universe | 2,812 | Legacy tickers minus positive BANK, INSURANCE, ETF/fund, non-company, and genuine review exclusions. This is the V3 company denominator. |
 | Legacy fundamentals universe before exclusions | 2,936 | Distinct Legacy tickers in `fundamentals_usa.db.rc_fundamental_quarterly`. |
-| Active V3 operational universe | 2,812 | Approved V3 companies present in current Legacy operational state. Lack of V2 `active` metadata is not inactivity evidence. |
+| Approved V3 company universe | 2,812 | Historical company membership denominator. Post-B price-activity triage does not remove companies from this universe. |
+| Active V3 operational universe | 2,735 | Post-B evidence-based maintenance denominator: approved V3 companies with a valid `osakedata` USA price observation within T0..T-4, where T0 is the latest broad USA equity trading session observed in RawCandle `osakedata`. |
 | Active V3 with sufficient fiscal identity for current projection | 2,451 | Active approved companies with V2 `ORDINARY` fiscal-identity evidence available today. |
 | Active V3 not yet projectable | 361 | Admitted Legacy-only companies whose latest/current fiscal-Q readiness is not yet reliably projectable from local evidence. |
 | V2 source/profile population | 4,613 | V2 companies with ticker; useful as source/profile evidence, not V3 universe authority. |

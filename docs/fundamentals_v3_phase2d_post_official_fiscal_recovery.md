@@ -165,6 +165,45 @@ publish date 2025-11-14, but it remains outside `phase3_fiscal_identity_input.cs
 FY2026 Q1 work unit is already represented by another Yahoo period. Phase 3 must resolve this as a
 duplicate provider-period/work-unit issue.
 
+The supplied FY2026 Q4 publication date, 2026-09-28, is estimated/future metadata only. It is not
+stored or counted as an actual `publish_date`.
+
+## A4 Final Closure
+
+Classification: `FUNDAMENTALS_V3_FISCAL_IDENTITY_RECOVERY_CLOSED`
+
+Fiscal-calendar research is closed. The final distinction is:
+
+| Metric | Rows |
+| --- | ---: |
+| Normalized Yahoo rows | 14,373 |
+| Rows with known fiscal identity or known reconciliation context | 14,373 |
+| True fiscal-identity unknown rows | 0 |
+| Fiscal identity knowledge coverage | 100.00% |
+| Ready for direct canonical import | 14,370 |
+| Canonical reconciliation exceptions | 3 |
+| Duplicate work-unit reconciliation exceptions | 2 |
+| Transition-period reconciliation exceptions | 1 |
+
+This is not 100% canonical migration readiness. The three exception rows have known fiscal evidence
+or known transition context, but Phase 3 must resolve the canonical work-unit treatment before any
+canonical V3 write.
+
+Final Phase 3 exception table:
+
+| Ticker | Yahoo period end | Fiscal context | Exception | Field comparison | Recommended Phase 3 action |
+| --- | --- | --- | --- | --- | --- |
+| CAVA | 2026-03-31 | FY2026 Q1, official period ended 2026-04-19 | Duplicate fiscal work unit | `INSUFFICIENT_COMPARISON` | Select official period row or manual review; do not create a second canonical Q. |
+| LFCR | 2025-09-30 | FY2025 Q4 transition context, official period ended 2025-12-31 | Transition-period date variant | `INSUFFICIENT_COMPARISON` | Merge only if field-equivalent, otherwise exclude provider variant from canonical import. |
+| NEUP | 2025-09-30 | FY2026 Q1, official period ended 2025-09-30 | Duplicate fiscal work unit | `CONFLICTING_VALUES` | Retain as resolution issue; do not silently merge or overwrite existing FY2026 Q1. |
+
+Publication coverage after A4:
+
+| Metric | Rows |
+| --- | ---: |
+| Publication-ready rows | 13,281 |
+| Publication-unresolved rows | 1,092 |
+
 ## Remaining Manual Review
 
 Three rows remain unresolved:

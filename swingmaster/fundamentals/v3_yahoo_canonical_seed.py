@@ -282,6 +282,7 @@ def run_yahoo_seed(
     bootstrap_run_id: str,
     migration_run_id: str,
     now_utc: str | None = None,
+    expected_normalized_rows: int | None = 14373,
 ) -> dict[str, Any]:
     now = now_utc or utc_now_text()
     artifact_root.mkdir(parents=True, exist_ok=True)
@@ -305,7 +306,7 @@ def run_yahoo_seed(
         dry_apply=False,
         now_utc=now,
     ).to_dict()
-    dry_gate = validate_dry_gate(dry_conn, prepared.accounting, dry_summary)
+    dry_gate = validate_dry_gate(dry_conn, prepared.accounting, dry_summary, expected_normalized_rows=expected_normalized_rows)
     _write_json(artifact_root / "candidate_accounting.json", prepared.accounting)
     _write_json(artifact_root / "dry_apply_summary.json", {"company_summary": dry_company_summary, "apply_summary": dry_summary, "dry_gate": dry_gate})
     if not dry_gate["passed"]:
@@ -332,7 +333,13 @@ def run_yahoo_seed(
     return production
 
 
-def validate_dry_gate(conn: sqlite3.Connection, accounting: dict[str, Any], dry_summary: dict[str, Any]) -> dict[str, Any]:
+def validate_dry_gate(
+    conn: sqlite3.Connection,
+    accounting: dict[str, Any],
+    dry_summary: dict[str, Any],
+    *,
+    expected_normalized_rows: int | None = 14373,
+) -> dict[str, Any]:
     cava_q1 = conn.execute(
         """
         SELECT COUNT(*)
@@ -364,7 +371,7 @@ def validate_dry_gate(conn: sqlite3.Connection, accounting: dict[str, Any], dry_
     integrity = V3CanonicalMigrationEngine(conn).validate_integrity()
     passed = (
         accounting["reconciles_to_normalized_rows"]
-        and accounting["normalized_rows"] == 14373
+        and (expected_normalized_rows is None or accounting["normalized_rows"] == expected_normalized_rows)
         and accounting["missing_metadata_rows"] == 0
         and cava_q1 == 1
         and ("2025-09-30", 2026, "Q1") in neup_qs
@@ -378,6 +385,7 @@ def validate_dry_gate(conn: sqlite3.Connection, accounting: dict[str, Any], dry_
         "passed": bool(passed),
         "candidate_accounting_reconciles": accounting["reconciles_to_normalized_rows"],
         "normalized_rows": accounting["normalized_rows"],
+        "expected_normalized_rows": expected_normalized_rows,
         "missing_metadata_rows": accounting["missing_metadata_rows"],
         "cava_fy2026_q1_count": int(cava_q1),
         "neup_quarters": neup_qs,

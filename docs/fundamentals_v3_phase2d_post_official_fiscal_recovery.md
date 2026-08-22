@@ -161,12 +161,22 @@ Official result calendar evidence for 2024-2026 was recorded:
 | FY2026 Q4 | 2026-06-30 | 2026-09-28 estimated/future |
 
 `NEUP 2025-09-30` is therefore not an unknown calendar case. It is official FY2026 Q1 with
-publish date 2025-11-14, but it remains outside `phase3_fiscal_identity_input.csv` because the same
-FY2026 Q1 work unit is already represented by another Yahoo period. Phase 3 must resolve this as a
-duplicate provider-period/work-unit issue.
+publish date 2025-11-14.
 
 The supplied FY2026 Q4 publication date, 2026-09-28, is estimated/future metadata only. It is not
 stored or counted as an actual `publish_date`.
+
+User-supplied Yahoo screenshot values further show that the competing `NEUP 2026-03-31` row is
+FY2026 Q3, not FY2026 Q1:
+
+| Period end | Correct fiscal identity | Publish date | Key screenshot values |
+| --- | --- | --- | --- |
+| 2025-09-30 | FY2026 Q1 | 2025-11-14 | revenue 0, operating income/EBIT -5.65M, EBITDA -5.49M, net income -9.91M |
+| 2025-12-31 | FY2026 Q2 | 2026-02-17 | revenue 0, operating income/EBIT -2.35M, EBITDA -2.18M, net income 1.86M |
+| 2026-03-31 | FY2026 Q3 | 2026-05-15 | revenue 0, operating income/EBIT -0.827M, EBITDA -0.662M, net income -0.505M |
+
+Phase 3 should correct the existing `2026-03-31` work-unit mapping to FY2026 Q3 and import
+`2025-09-30` as FY2026 Q1. It must not silently overwrite the existing row.
 
 ## A4 Final Closure
 
@@ -195,7 +205,7 @@ Final Phase 3 exception table:
 | --- | --- | --- | --- | --- | --- |
 | CAVA | 2026-03-31 | FY2026 Q1, official period ended 2026-04-19 | Duplicate fiscal work unit | `PARTIAL_OVERLAP_SAME_RESULT_INCOME_VALUES_SUPPLIED_BALANCE_FIELDS_STILL_SPLIT` | Merge only with field provenance, otherwise manual review; do not create a second canonical Q. |
 | LFCR | 2025-09-30 | FY2025 Q4 transition context, official period ended 2025-12-31 | Transition-period date variant | `INSUFFICIENT_COMPARISON` | Merge only if field-equivalent, otherwise exclude provider variant from canonical import. |
-| NEUP | 2025-09-30 | FY2026 Q1, official period ended 2025-09-30 | Duplicate fiscal work unit | `CONFLICTING_VALUES` | Retain as resolution issue; do not silently merge or overwrite existing FY2026 Q1. |
+| NEUP | 2025-09-30 | FY2026 Q1, official period ended 2025-09-30 | Fiscal-quarter mapping collision | `CONFLICTING_VALUES_DIFFERENT_OFFICIAL_QUARTERS` | Correct existing 2026-03-31 work unit to FY2026 Q3 and import 2025-09-30 as FY2026 Q1. |
 
 CAVA field comparison was refined with user-supplied Yahoo screenshot values for `2026-03-31`:
 revenue 438.27M, gross profit 111.19M, operating income/EBIT 34.14M, EBITDA 59.60M, net income

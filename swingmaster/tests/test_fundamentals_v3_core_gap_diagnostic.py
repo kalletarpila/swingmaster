@@ -5,10 +5,18 @@ import sqlite3
 import pytest
 
 from swingmaster.fundamentals.v3_core_gap_diagnostic import (
+    adjacent_summary,
+    adjacent_quarter_q_level_results,
+    build_conflict_field_matrix,
+    build_primary_conflict_rows,
     classify_period_relation,
     classify_v2_identity,
     compare_values,
     connect_readonly,
+    cumulative_ytd_diagnostic,
+    fingerprint_result,
+    scale_normalization_diagnostic,
+    trusted_score,
 )
 
 
@@ -138,3 +146,126 @@ def test_readonly_connection_blocks_v2_and_v3_style_writes(tmp_path) -> None:
     assert conn.execute("SELECT COUNT(*) FROM v3_quarter").fetchone()[0] == 1
     with pytest.raises(sqlite3.OperationalError):
         conn.execute("INSERT INTO v3_quarter(id) VALUES (2)")
+
+
+def test_conflict_field_attribution_identifies_primary_revenue_conflict() -> None:
+    conflict = {
+        "ticker": "AAA",
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q1",
+        "classification": "CONFLICT",
+    }
+    v3 = {
+        ("AAA", 2026, "Q1"): {
+            "ticker": "AAA",
+            "fiscal_year": 2026,
+            "fiscal_quarter": "Q1",
+            "period_end_date": "2026-03-31",
+            "revenue": 100_000_000.0,
+            "gross_profit": 50_000_000.0,
+            "operating_income": 10_000_000.0,
+            "ebit": None,
+            "ebitda": None,
+            "net_income": 8_000_000.0,
+            "operating_cashflow": None,
+            "capex": None,
+            "free_cashflow": None,
+            "cash": None,
+            "total_debt": None,
+            "shares_outstanding": 1_000_000.0,
+        }
+    }
+    v2 = {
+        ("AAA", 2026, "Q1"): {
+            "period_end_date": "2026-03-31",
+            "revenue": 200_000_000.0,
+            "gross_profit": 50_000_000.0,
+            "operating_income": 10_000_000.0,
+            "ebit": None,
+            "ebitda": None,
+            "net_income": 8_000_000.0,
+            "operating_cashflow": None,
+            "capex": None,
+            "free_cashflow": None,
+            "cash": None,
+            "total_debt": None,
+            "shares_outstanding": 1_000_000.0,
+        }
+    }
+
+    matrix = build_conflict_field_matrix([conflict], v3, v2)
+    primary = build_primary_conflict_rows([conflict], matrix)
+
+    assert primary[0]["primary_conflict_field"] == "revenue"
+    assert "revenue" in primary[0]["conflicting_fields"]
+
+
+def test_trusted_score_ignores_semantic_risk_fields_by_default() -> None:
+    v3 = {"revenue": 100.0, "net_income": 10.0, "ebitda": 1000.0}
+    v2 = {"revenue": 101.0, "net_income": 10.1, "ebitda": -1000.0}
+
+    result = trusted_score(v3, v2)
+
+    assert result["matches"] == 2
+    assert result["conflicts"] == 0
+
+
+def test_adjacent_q_level_best_match_previous_and_next() -> None:
+    v3_rows = [
+        {"ticker": "AAA", "fiscal_year": 2026, "fiscal_quarter": "Q1", "period_end_date": "2026-03-31", "revenue": 100_000_000.0, "gross_profit": 50_000_000.0, "operating_income": 10_000_000.0, "net_income": 8_000_000.0, "operating_cashflow": 9_000_000.0, "cash": 20_000_000.0, "total_debt": 5_000_000.0},
+        {"ticker": "AAA", "fiscal_year": 2026, "fiscal_quarter": "Q2", "period_end_date": "2026-06-30", "revenue": 200_000_000.0, "gross_profit": 80_000_000.0, "operating_income": 20_000_000.0, "net_income": 18_000_000.0, "operating_cashflow": 19_000_000.0, "cash": 25_000_000.0, "total_debt": 6_000_000.0},
+        {"ticker": "AAA", "fiscal_year": 2026, "fiscal_quarter": "Q3", "period_end_date": "2026-09-30", "revenue": 300_000_000.0, "gross_profit": 90_000_000.0, "operating_income": 30_000_000.0, "net_income": 28_000_000.0, "operating_cashflow": 29_000_000.0, "cash": 35_000_000.0, "total_debt": 7_000_000.0},
+    ]
+    v2_rows = {
+        ("AAA", 2026, "Q2"): {"revenue": 300_000_000.0, "gross_profit": 90_000_000.0, "operating_income": 30_000_000.0, "net_income": 28_000_000.0, "operating_cashflow": 29_000_000.0, "cash": 35_000_000.0, "total_debt": 7_000_000.0},
+    }
+    class_map = {("AAA", 2026, "Q2"): {"classification": "CONFLICT"}}
+
+    rows = adjacent_quarter_q_level_results(v3_rows, v2_rows, class_map=class_map, conflict_only=True)
+
+    assert rows[0]["best_match"] == "NEXT_Q_BEST"
+    assert adjacent_summary(rows)["NEXT_Q_BEST"] == 1
+
+
+def test_revenue_anchored_fingerprint_conflicts_when_revenue_disagrees() -> None:
+    v3_rows = [{"ticker": "AAA", "fiscal_year": 2026, "fiscal_quarter": "Q1", "period_end_date": "2026-03-31", "revenue": 100_000_000.0, "net_income": 10_000_000.0, "cash": 5_000_000.0}]
+    v2_rows = {("AAA", 2026, "Q1"): {"revenue": 150_000_000.0, "net_income": 10_000_000.0, "cash": 5_000_000.0}}
+
+    result = fingerprint_result(v3_rows, v2_rows, "REVENUE_ANCHORED", ("revenue", "net_income", "cash"), 0.05)
+
+    assert result["CONFLICT"] == 1
+
+
+def test_scale_mismatch_detection_finds_thousand_multiplier() -> None:
+    matrix = [
+        {
+            "ticker": "AAA",
+            "fiscal_year": 2026,
+            "fiscal_quarter": "Q1",
+            "field": "revenue",
+            "comparable": 1,
+            "v3_value": 1_000.0,
+            "v2_value": 1_000_000.0,
+        }
+    ]
+
+    rows = scale_normalization_diagnostic(matrix)
+
+    assert rows
+    assert "1000" in rows[0]["scale_or_sign_pattern"]
+
+
+def test_cumulative_ytd_diagnostic_detects_ytd_like_q2_value() -> None:
+    v3_rows = [
+        {"ticker": "AAA", "fiscal_year": 2026, "fiscal_quarter": "Q1", "period_end_date": "2026-03-31", "operating_cashflow": 100_000_000.0, "capex": -10_000_000.0, "free_cashflow": 90_000_000.0, "revenue": 1_000_000_000.0, "net_income": 50_000_000.0},
+        {"ticker": "AAA", "fiscal_year": 2026, "fiscal_quarter": "Q2", "period_end_date": "2026-06-30", "operating_cashflow": 110_000_000.0, "capex": -20_000_000.0, "free_cashflow": 90_000_000.0, "revenue": 1_200_000_000.0, "net_income": 55_000_000.0},
+    ]
+    v2_rows = {
+        ("AAA", 2026, "Q1"): {"operating_cashflow": 100_000_000.0, "capex": -10_000_000.0, "free_cashflow": 90_000_000.0, "revenue": 1_000_000_000.0, "net_income": 50_000_000.0},
+        ("AAA", 2026, "Q2"): {"operating_cashflow": 210_000_000.0, "capex": -30_000_000.0, "free_cashflow": 180_000_000.0, "revenue": 2_200_000_000.0, "net_income": 105_000_000.0},
+    }
+
+    rows = cumulative_ytd_diagnostic(v3_rows, v2_rows)
+    ocf_q2 = next(row for row in rows if row["field"] == "operating_cashflow" and row["fiscal_quarter"] == "Q2")
+
+    assert ocf_q2["v2_closer_to_v3_ytd_than_quarter"] == 1

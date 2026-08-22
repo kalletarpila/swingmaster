@@ -52,3 +52,53 @@ The executed Phase 3B source-contribution snapshot is stored in:
 `temp/fundamentals_v3_phase3b_yahoo_seed/20260822T_PHASE3B_YAHOO_SEED/phase3c_baseline.json`
 
 This snapshot is the exact pre-V2 baseline for Phase 3C.
+
+## Executed Counts
+
+- Migration run ID: `V3_PHASE3B_YAHOO_SEED_20260822T000000Z`
+- Approved companies: `2812`
+- Active companies: `2735`
+- Inactive companies: `77`
+- Normalized Yahoo rows examined: `14373`
+- Direct canonical candidates: `14278`
+- Complementary same-Q candidates: `17`
+- Fiscal mapping corrections: `77`
+- Provider-period variants excluded: `1`
+- Canonical Q rows: `14345`
+- Companies with zero Yahoo Q: `58`
+- Core-ready Q rows: `12344`
+- Core-not-ready Q rows: `2001`
+- Publish date known: `12990`
+- Publish date NULL: `1355`
+- Resolution issues: `274`
+
+Issue counts:
+
+- `NON_NULL_FIELD_CONFLICT`: `248`
+- `PERIOD_DATE_CONFLICT`: `19`
+- `PUBLICATION_DATE_CONFLICT`: `6`
+- `TRANSITION_PERIOD_VARIANT`: `1`
+
+Integrity:
+
+- `PRAGMA quick_check`: `ok`
+- `PRAGMA foreign_key_check`: `0 rows`
+- duplicate company key: `0`
+- duplicate company/FY/FQ key: `0`
+
+Idempotency:
+
+- second-run Q creations: `0`
+- inappropriate second-run field fills: `0`
+- duplicate issue count: `0`
+
+Source contribution exclusions:
+
+- V2 canonical value contribution: `0`
+- Legacy canonical value contribution: `0`
+- provider/network calls: `0`
+- RawCandle changes: `0`
+
+Source-boundary backup:
+
+`temp/fundamentals_v3_phase3b_yahoo_seed/20260822T_PHASE3B_YAHOO_SEED/backups/rc_fundamentals_v3.post_yahoo_seed.db`

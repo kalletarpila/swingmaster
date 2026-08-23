@@ -131,10 +131,14 @@ def test_fk_check(tmp_path: Path) -> None:
 
 def test_final_closure_gate_passes_for_clean_inputs() -> None:
     baseline = {"company_total": 2552, "active": 2484, "inactive": 68, "coverage": {"canonical_q_total": 72536}}
-    universe = [{"status": "APPROVED_UNIVERSE_RECONCILES", "count": 2552}]
+    universe = [
+        {"status": "APPROVED_UNIVERSE_RECONCILES", "count": 2552},
+        {"status": "ARBITRARY_YAHOO_V2_ONLY_ADMITTED", "count": 0},
+    ]
     identity = [{"check": "PRE_2018_Q", "violations": 0}]
+    issue_status = [{"status": "ACTIVE_BLOCKING", "count": 0}]
     integrity = {"quick_check": "ok", "foreign_key_check_rows": 0}
-    assert final_closure_gate(baseline, universe, identity, [], [], [], integrity)["passed"]
+    assert final_closure_gate(baseline, universe, identity, [], [], [], issue_status, integrity)["passed"]
 
 
 def _check(rows: list[dict], name: str) -> int:

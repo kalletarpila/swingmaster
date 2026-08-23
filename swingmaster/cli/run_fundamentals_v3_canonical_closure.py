@@ -7,7 +7,7 @@ from pathlib import Path
 from swingmaster.fundamentals.v3_canonical_closure import run_canonical_migration_closure
 
 
-DEFAULT_ARTIFACT_ROOT = Path("temp/fundamentals_v3_phase3c_6_canonical_migration_closure/20260823T_PHASE3C_6_CANONICAL_MIGRATION_CLOSURE")
+DEFAULT_ARTIFACT_ROOT = Path("temp/fundamentals_v3_phase3c_6_canonical_migration_closure_rerun/20260823T_PHASE3C_6_RERUN")
 
 
 def main() -> None:

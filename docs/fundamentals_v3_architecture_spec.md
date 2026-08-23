@@ -842,6 +842,32 @@ future-extension work, not architecture blockers for schema/repository/workflow 
 11. Config-based cutover to V3.
 12. Legacy/V2 archive freeze and cleanup of obsolete dual-store orchestration.
 
+## Phase 3C-1E SEC Q4 Field Policy
+
+Phase 3C-1E locks the field-population contract for SEC annual rows that represent the accepted
+Q4 slot in the Legacy deep-history extension. Q4 identity and field completeness are separate:
+an accepted SEC Q4 can be created even when selected fields remain NULL.
+
+Authoritative policy:
+
+`docs/fundamentals_v3_phase3c_1e_sec_q4_field_semantics_validation.md`
+
+Machine-readable Phase 3C-2 policy artifact:
+
+`phase3c2_q4_policy.json`
+
+Durable rules:
+
+- Flow fields may be reconstructed only from compatible SEC duration facts and aligned vintage.
+- Instant fields (`cash`, `total_debt`, `shares_outstanding`) use direct FY-end instant values or
+  approved debt components; instant subtraction is forbidden.
+- `free_cashflow` is derived only from approved reconstructed OCF plus approved reconstructed
+  capex.
+- `EBIT` and `EBITDA` are left NULL for SEC-reconstructed Q4 rows unless a later locked direct or
+  approved derivation contract exists.
+- Legacy SEC Q4 policy applies only to new historical Q rows and never authorizes overwriting an
+  existing canonical value.
+
 ## Validation
 
 - One eventual production DB: yes, `rc_fundamentals_v3.db`.

@@ -16,3 +16,9 @@ Preserved Phase 4 order:
 2. Phase 4B - Missing-Field Recovery
 3. Phase 4C - EBIT & EBITDA Derivation Research and Validation
 4. Phase 4D - Historical Completeness Closure
+
+## Phase 3C-6B-2
+
+Classification: `FUNDAMENTALS_V3_PHASE3C_6B2_RESIDUAL_SEQUENCE_REVIEW_COMPLETE_READY_FOR_CLOSURE`
+
+Next: `MASTER PLAN PHASE 3C-6 - CANONICAL MIGRATION CLOSURE RE-RUN`

@@ -29,3 +29,11 @@ Preserved Phase 4 order:
 2. Phase 4B - Missing-Field Recovery
 3. Phase 4C - EBIT & EBITDA Derivation Research and Validation
 4. Phase 4D - Historical Completeness Closure
+
+## Phase 4A
+
+Classification: `FUNDAMENTALS_V3_PHASE4A_HISTORICAL_COMPLETENESS_AUDIT_COMPLETE_READY_FOR_PHASE4B`
+
+Status: `DONE`
+
+Next: `MASTER PLAN PHASE 4B - MISSING-FIELD RECOVERY`

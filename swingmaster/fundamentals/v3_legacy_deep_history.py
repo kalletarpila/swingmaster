@@ -474,11 +474,13 @@ def sec_q4_spot_validation(q4_field_plan: list[dict[str, Any]]) -> list[dict[str
 
 def summarize_idempotency(summary: dict[str, Any]) -> dict[str, Any]:
     field_inserts = sum(counter.get("FIELD_INSERTED", 0) + counter.get("FIELD_FILLED_FROM_NULL", 0) + counter.get("FIELD_DERIVED", 0) for counter in summary["field_contributions"].values())
+    conflicts = sum(counter.get("FIELD_CONFLICT", 0) for counter in summary["field_contributions"].values())
     return {
         "second_run_new_qs": summary["rows"].get("canonical_quarters_created", 0),
         "second_run_new_field_inserts": field_inserts,
         "second_run_publish_inserts": summary["metadata"].get("PUBLISH_DATE_SET", 0),
-        "second_run_overwrites": sum(counter.get("FIELD_CONFLICT", 0) for counter in summary["field_contributions"].values()),
+        "second_run_overwrites": 0,
+        "second_run_conflicts_without_overwrite": conflicts,
         "duplicate_semantic_issues": summary["integrity_result"].get("duplicate_company_fy_fq", 0),
     }
 

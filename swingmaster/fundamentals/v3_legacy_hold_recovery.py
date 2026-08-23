@@ -385,16 +385,26 @@ def classify_final_rows(ready_1c: list[dict[str, str]], hold_1c: list[dict[str, 
         v2 = v2_by_period.get(key)
         if sec and sec.fiscal_period == "FY":
             disposition = "READY_SEC_Q4_STRUCTURE"
-            fy, fq, evidence = sec.fiscal_year, "Q4", "SEC_FY_ROW_REPRESENTS_Q4_SLOT"
+            fy, fq, evidence = canonical_q4_fiscal_year_from_period_end(row["period_end_date"]), "Q4", "SEC_FY_ROW_REPRESENTS_Q4_SLOT_PERIOD_END_ANCHORED"
         elif v2 and sec:
-            disposition = "READY_REANCHORED_WITH_V2"
-            fy, fq, evidence = int(v2["fiscal_year"]), str(v2["fiscal_quarter"]), "LEGACY_SEC_ROW_PLUS_V2_EXACT_PERIOD"
+            v2_fiscal_year = plausible_fiscal_year(v2["fiscal_year"])
+            if v2_fiscal_year is None:
+                disposition = "HOLD_INSUFFICIENT_EVIDENCE"
+                fy, fq, evidence = "", str(v2["fiscal_quarter"]), "V2_EXACT_PERIOD_INVALID_FISCAL_YEAR"
+            else:
+                disposition = "READY_REANCHORED_WITH_V2"
+                fy, fq, evidence = v2_fiscal_year, str(v2["fiscal_quarter"]), "LEGACY_SEC_ROW_PLUS_V2_EXACT_PERIOD"
         elif sec and sec.fiscal_period in {"Q1", "Q2", "Q3", "Q4"} and sec.fiscal_year:
-            disposition = "READY_REANCHORED_LEGACY_ONLY"
-            fy, fq, evidence = sec.fiscal_year, sec.fiscal_period, "LEGACY_SEC_FY_FP_METADATA"
+            sec_fiscal_year = plausible_fiscal_year(sec.fiscal_year)
+            if sec_fiscal_year is None:
+                disposition = "HOLD_INSUFFICIENT_EVIDENCE"
+                fy, fq, evidence = "", sec.fiscal_period, "LEGACY_SEC_INVALID_FISCAL_YEAR"
+            else:
+                disposition = "READY_REANCHORED_LEGACY_ONLY"
+                fy, fq, evidence = sec_fiscal_year, sec.fiscal_period, "LEGACY_SEC_FY_FP_METADATA"
         elif v2:
             disposition = "HOLD_INSUFFICIENT_EVIDENCE"
-            fy, fq, evidence = int(v2["fiscal_year"]), str(v2["fiscal_quarter"]), "V2_ONLY_NOT_ENOUGH"
+            fy, fq, evidence = plausible_fiscal_year(v2["fiscal_year"]) or "", str(v2["fiscal_quarter"]), "V2_ONLY_NOT_ENOUGH"
         else:
             disposition = "HOLD_ISOLATED_ROW"
             fy, fq, evidence = row.get("fiscal_year") or "", row.get("fiscal_quarter") or "", "NO_SEC_OR_V2_SEGMENT_EVIDENCE"
@@ -411,7 +421,7 @@ def finalize_row(row: dict[str, Any], disposition: str, fiscal_year: Any, fiscal
     return {
         "market": "usa",
         "ticker": row["ticker"],
-        "fiscal_year": int(fiscal_year) if str(fiscal_year).isdigit() else fiscal_year,
+        "fiscal_year": plausible_fiscal_year(fiscal_year) or fiscal_year,
         "fiscal_quarter": fiscal_quarter,
         "period_end_date": row["period_end_date"],
         "publish_date": row.get("publish_date") or ((sec.filed_date or "") if sec and sec.fiscal_period == "FY" else ""),
@@ -425,6 +435,21 @@ def finalize_row(row: dict[str, Any], disposition: str, fiscal_year: Any, fiscal
         "available_fields": available,
         "source_record_id": f"LEGACY:{row['ticker']}:{row['period_end_date']}",
     }
+
+
+def plausible_fiscal_year(value: Any) -> int | None:
+    if not str(value).strip().isdigit():
+        return None
+    fiscal_year = int(value)
+    if 1900 <= fiscal_year <= 2100:
+        return fiscal_year
+    return None
+
+
+def canonical_q4_fiscal_year_from_period_end(period_end_date: str) -> int:
+    year = int(period_end_date[:4])
+    month = int(period_end_date[5:7])
+    return year - 1 if month <= 3 else year
 
 
 def resolve_duplicate_ready_fyfqs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

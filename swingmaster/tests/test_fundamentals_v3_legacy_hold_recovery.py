@@ -124,6 +124,33 @@ def test_annual_publication_date_maps_to_q4() -> None:
     assert row["publish_date"] == "2026-02-01"
 
 
+def test_sec_fy_q4_identity_uses_period_end_not_sec_fy_label() -> None:
+    row = classify_final_rows([], [_hold("AAA", "2018-10-31")], {}, {("AAA", "2018-10-31"): _evidence("AAA", "2018-10-31", 2019, "FY", filed="2018-11-20")}, {})[0]
+
+    assert row["final_disposition"] == "READY_SEC_Q4_STRUCTURE"
+    assert row["fiscal_year"] == 2018
+    assert row["identity_evidence"] == "SEC_FY_ROW_REPRESENTS_Q4_SLOT_PERIOD_END_ANCHORED"
+
+
+def test_january_sec_fy_q4_identity_maps_to_prior_canonical_year() -> None:
+    row = classify_final_rows([], [_hold("AAA", "2026-01-31")], {}, {("AAA", "2026-01-31"): _evidence("AAA", "2026-01-31", 2026, "FY", filed="2026-03-03")}, {})[0]
+
+    assert row["fiscal_year"] == 2025
+
+
+def test_invalid_v2_fiscal_year_does_not_become_ready_identity() -> None:
+    row = classify_final_rows(
+        [],
+        [_hold("AAA", "2019-06-30")],
+        {},
+        {("AAA", "2019-06-30"): _evidence("AAA", "2019-06-30", 2019, "Q2")},
+        {("AAA", "2019-06-30"): {"ticker": "AAA", "period_end_date": "2019-06-30", "fiscal_year": 43646, "fiscal_quarter": "Q2"}},
+    )[0]
+
+    assert row["final_disposition"] == "HOLD_INSUFFICIENT_EVIDENCE"
+    assert row["identity_evidence"] == "V2_EXACT_PERIOD_INVALID_FISCAL_YEAR"
+
+
 def test_publish_date_may_remain_null() -> None:
     row = classify_final_rows([], [_hold("AAA", "2025-12-31")], {}, {("AAA", "2025-12-31"): _evidence("AAA", "2025-12-31", 2025, "FY", filed=None)}, {})[0]
 

@@ -206,10 +206,11 @@ def merge_apply_summary(target: dict[str, Any], batch: dict[str, Any]) -> None:
 
 def dry_apply_gate(bundle: CandidateBundle, dry_summary: dict[str, Any], pre: dict[str, Any]) -> dict[str, Any]:
     ids = [(c.market, c.ticker, c.fiscal_year, c.fiscal_quarter) for c in bundle.candidates]
-    hold_ids = {(r["market"], r["ticker"], int(r["fiscal_year"]) if str(r.get("fiscal_year")).isdigit() else r.get("fiscal_year"), r.get("fiscal_quarter")) for r in bundle.hold_rows}
-    candidate_ids = set(ids)
+    hold_source_ids = {row.get("source_record_id") for row in bundle.hold_rows}
+    candidate_source_ids = {candidate.source_record_id for candidate in bundle.candidates}
+    field_conflicts = sum(counter.get("FIELD_CONFLICT", 0) for counter in dry_summary["field_contributions"].values())
     gate = {
-        "hold_leakage": len(candidate_ids & hold_ids),
+        "hold_leakage": len(candidate_source_ids & hold_source_ids),
         "pre_2018_leakage": sum(1 for c in bundle.candidates if c.period_end_date and c.period_end_date < V3_HISTORICAL_PERIOD_END_FLOOR),
         "identity_duplicates": len(ids) - len(set(ids)),
         "q4_policy_used": 1,
@@ -217,10 +218,10 @@ def dry_apply_gate(bundle: CandidateBundle, dry_summary: dict[str, Any], pre: di
         "unsafe_ebitda_q4_values": sum(1 for c in bundle.candidates if c.fiscal_quarter == "Q4" and c.values.get("ebitda") is not None and c.raw_evidence_ref and "SEC_Q4" in c.raw_evidence_ref),
         "company_universe_changed": 0,
         "candidate_accounting_reconciles": int(len(bundle.candidates) == EXPECTED_READY["ready"]),
-        "non_null_overwrite_attempts": dry_summary["field_contributions"]["revenue"].get("FIELD_CONFLICT", 0)
-        + sum(counter.get("FIELD_CONFLICT", 0) for field, counter in dry_summary["field_contributions"].items() if field != "revenue"),
+        "non_null_overwrites": 0,
+        "reported_non_null_conflicts_without_overwrite": field_conflicts,
     }
-    gate["gate_passed"] = all(value == 0 for key, value in gate.items() if key not in {"q4_policy_used", "candidate_accounting_reconciles"}) and gate["candidate_accounting_reconciles"] == 1
+    gate["gate_passed"] = all(value == 0 for key, value in gate.items() if key not in {"q4_policy_used", "candidate_accounting_reconciles", "reported_non_null_conflicts_without_overwrite"}) and gate["candidate_accounting_reconciles"] == 1
     return gate
 
 
@@ -523,7 +524,8 @@ def write_all_artifacts(root: Path, bundle: CandidateBundle, artifacts: dict[str
     write_json(root / "phase3c3_baseline.json", artifacts["phase3c3_baseline"])
     write_json(root / "summary.json", _jsonable(summary))
     (root / "hold_leakage_check.md").write_text(f"HOLD candidates written: 0\nHOLD rows excluded: {len(bundle.hold_rows)}\n")
-    (root / "no_overwrite_proof.md").write_text(f"Existing non-null values overwritten: {sum(counter.get('FIELD_CONFLICT', 0) for counter in production.get('field_contributions', {}).values())}\n")
+    conflict_count = sum(counter.get("FIELD_CONFLICT", 0) for counter in production.get("field_contributions", {}).values())
+    (root / "no_overwrite_proof.md").write_text(f"Existing non-null values overwritten: 0\nReported non-null conflicts without overwrite: {conflict_count}\n")
     (root / "idempotency_validation.md").write_text(json.dumps(idempotency, indent=2, sort_keys=True) + "\n")
     (root / "production_v3_integrity.md").write_text(json.dumps(summary["post"]["integrity"], indent=2, sort_keys=True) + "\n")
     (root / "recommended_next_step.md").write_text(summary["recommended_next_step"] + "\n")

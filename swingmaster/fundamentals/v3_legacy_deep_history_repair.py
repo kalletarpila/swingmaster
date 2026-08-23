@@ -344,7 +344,18 @@ def load_legacy_values(legacy_db: Path) -> dict[tuple[str, str], dict[str, Any]]
 def load_v2_period_keys(v2_db: Path) -> set[tuple[str, str]]:
     with sqlite3.connect(f"file:{v2_db}?mode=ro", uri=True) as conn:
         conn.row_factory = sqlite3.Row
-        return {(row["ticker"].upper(), row["period_end_date"]) for row in conn.execute("SELECT ticker, period_end_date FROM rc_v2_quarter WHERE period_end_date >= ?", (V3_HISTORICAL_PERIOD_END_FLOOR,))}
+        return {
+            (row["ticker"].upper(), row["report_date"])
+            for row in conn.execute(
+                """
+                SELECT c.ticker, q.report_date
+                FROM rc_v2_quarter q
+                JOIN rc_v2_company c ON c.company_id = q.company_id
+                WHERE q.report_date >= ? AND c.ticker IS NOT NULL
+                """,
+                (V3_HISTORICAL_PERIOD_END_FLOOR,),
+            )
+        }
 
 
 def create_backup(v3_db: Path, artifact_root: Path) -> dict[str, Any]:

@@ -868,6 +868,23 @@ Durable rules:
 - Legacy SEC Q4 policy applies only to new historical Q rows and never authorizes overwriting an
   existing canonical value.
 
+## Phase 4 Historical Completeness
+
+Phase 4 is reserved for post-migration historical completeness work after the Phase 3 canonical
+migration path has created the validated quarters without forcing unsafe derivations.
+
+Locked subphases:
+
+- Phase 4A - Historical completeness audit.
+- Phase 4B - Missing-field recovery.
+- Phase 4C - EBIT & EBITDA derivation research and validation.
+- Phase 4D - Historical completeness closure.
+
+Phase 4C must explicitly investigate whether EBIT and EBITDA can be safely derived from available
+SEC, Yahoo, Legacy, and V2 source fields. Phase 3C-2 must not solve EBIT/EBITDA derivation; it may
+store direct accepted EBIT/EBITDA where available, and SEC-derived Q4 EBIT/EBITDA remain NULL when
+the Phase 3C-1E policy marks them unsafe.
+
 ## Validation
 
 - One eventual production DB: yes, `rc_fundamentals_v3.db`.

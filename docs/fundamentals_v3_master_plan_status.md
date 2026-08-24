@@ -254,8 +254,8 @@ Authoritative structure:
 - Phase 6A - Downstream Inventory & Policy Lock: DONE
 - Phase 6B - Score & Lifecycle Calibration Design: DONE
 - Phase 6C - Score Distributions & Point Calibration: DONE
-- Phase 6D - Lifecycle Recalibration: NEXT
-- Phase 6E - Out-of-Sample & Stress Validation
+- Phase 6D - Lifecycle Recalibration: DONE
+- Phase 6E - Out-of-Sample & Stress Validation: NEXT
 - Phase 6F - Valuation Engine Implementation
 - Phase 6G - Score Engine Implementation
 - Phase 6H - Lifecycle Engine Implementation
@@ -311,3 +311,33 @@ TTM writes: `0`
 Canonical writes: `0`
 
 Next: `MASTER PLAN PHASE 6D - LIFECYCLE RECALIBRATION`
+
+## Phase 6D
+
+Classification: `FUNDAMENTALS_V3_PHASE6D_LIFECYCLE_RECALIBRATED_READY_FOR_PHASE6E`
+
+Status: `DONE`
+
+Calibration observations: `35928`
+
+Calibration companies: `2532`
+
+Lifecycle-ready observations: `25894`
+
+NOT_READY observations: `10034`
+
+Lifecycle model version: `V3_LIFECYCLE_EBIT_FIRST_V1`
+
+Lifecycle fingerprint: `18c01984ee5ca69acaca64ab6ff2d5b1faa27d8400137f6d08200926e5658f9e`
+
+Lifecycle writes: `0`
+
+Score writes: `0`
+
+Valuation writes: `0`
+
+TTM writes: `0`
+
+Canonical writes: `0`
+
+Next: `MASTER PLAN PHASE 6E - OUT-OF-SAMPLE & STRESS VALIDATION`

@@ -249,11 +249,34 @@ Next: `MASTER PLAN PHASE 6 - SCORE & VALUATION ENGINE`
 
 ## Phase 6
 
+Authoritative structure:
+
+- Phase 6A - Downstream Inventory & Policy Lock: DONE
+- Phase 6B - Score & Lifecycle Calibration Design: THIS PHASE
+- Phase 6C - Score Distributions & Point Calibration
+- Phase 6D - Lifecycle Recalibration
+- Phase 6E - Out-of-Sample & Stress Validation
+- Phase 6F - Valuation Engine Implementation
+- Phase 6G - Score Engine Implementation
+- Phase 6H - Lifecycle Engine Implementation
+- Phase 6I - Production Rebuild & Proving
+- Phase 6J - Phase 6 Closure
+
+## Phase 6A
+
+Status: `DONE`
+
 Classification: `FUNDAMENTALS_V3_PHASE6_SCORE_VALUATION_DESIGN_COMPLETE_READY_FOR_PRODUCTION_IMPLEMENTATION`
 
-Status: `DESIGN_COMPLETE_READY_FOR_PRODUCTION_IMPLEMENTATION`
+## Phase 6B
+
+Classification: `FUNDAMENTALS_V3_PHASE6B_SCORE_LIFECYCLE_CALIBRATION_DESIGN_COMPLETE_READY_FOR_PHASE6C`
+
+Status: `DESIGN_COMPLETE_READY_FOR_PHASE6C`
 
 Production score writes: `0`
+
+Lifecycle writes: `0`
 
 Production valuation writes: `0`
 
@@ -261,6 +284,4 @@ TTM writes: `0`
 
 Canonical writes: `0`
 
-Primary score-ready endpoints dry estimate: `34883`
-
-Next: `MASTER PLAN PHASE 6B - SCORE & VALUATION PRODUCTION IMPLEMENTATION`
+Next: `MASTER PLAN PHASE 6C - SCORE DISTRIBUTIONS & POINT CALIBRATION`

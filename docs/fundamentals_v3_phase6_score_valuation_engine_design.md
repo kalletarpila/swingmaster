@@ -37,4 +37,4 @@ Market cap is `price * shares_outstanding`; net debt is `total_debt - cash`; EV 
 
 Production writes: `{'score': 0, 'valuation': 0, 'ttm': 0, 'canonical': 0}`.
 
-Next: `MASTER PLAN PHASE 6B - SCORE & VALUATION PRODUCTION IMPLEMENTATION`
+Next: `MASTER PLAN PHASE 6B - SCORE & LIFECYCLE CALIBRATION DESIGN`

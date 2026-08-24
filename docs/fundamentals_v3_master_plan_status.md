@@ -174,3 +174,17 @@ Applied EBITDA: `484`
 Core-ready uplift: `193`
 
 Next: `MASTER PLAN PHASE 4C-3B - REJECTED EBIT/EBITDA CASE REVIEW`
+
+## Phase 4C-3B
+
+Outcome: `REJECTED_CASE_REVIEW_BOUNDED_REFINEMENT_JUSTIFIED`
+
+Status: `REJECTED_CASE_REVIEW_COMPLETE`
+
+Canonical financial writes: `0`
+
+Metadata writes: `0`
+
+Selected cases: `15`
+
+Next: `MASTER PLAN PHASE 4C-3C - BOUNDED REJECTION-LOGIC REFINEMENT`

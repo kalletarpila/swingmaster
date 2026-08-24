@@ -176,19 +176,58 @@ ON v3_event(quarter_id, occurred_at_utc);
 CREATE TABLE IF NOT EXISTS v3_ttm (
     ttm_id INTEGER PRIMARY KEY,
     company_id INTEGER NOT NULL REFERENCES v3_company(company_id) ON DELETE CASCADE,
-    as_of_quarter_id INTEGER NOT NULL REFERENCES v3_quarter(quarter_id) ON DELETE CASCADE,
+    endpoint_quarter_id INTEGER NOT NULL REFERENCES v3_quarter(quarter_id) ON DELETE CASCADE,
+    endpoint_fiscal_year INTEGER NOT NULL,
+    endpoint_fiscal_quarter TEXT NOT NULL CHECK (endpoint_fiscal_quarter IN ('Q1','Q2','Q3','Q4')),
+    period_end TEXT,
     model_version TEXT NOT NULL,
-    ttm_ready INTEGER NOT NULL CHECK (ttm_ready IN (0, 1)),
-    revenue_ttm REAL,
-    ebitda_ttm REAL,
-    fcf_ttm REAL,
-    net_debt REAL,
+    ttm_revenue REAL,
+    ttm_gross_profit REAL,
+    ttm_operating_income REAL,
+    ttm_ebit REAL,
+    ttm_ebitda REAL,
+    ttm_net_income REAL,
+    ttm_ocf REAL,
+    ttm_capex REAL,
+    ttm_fcf REAL,
+    cash REAL,
+    total_debt REAL,
+    shares_outstanding REAL,
+    revenue_4q_ready INTEGER NOT NULL CHECK (revenue_4q_ready IN (0,1)),
+    gross_profit_4q_ready INTEGER NOT NULL CHECK (gross_profit_4q_ready IN (0,1)),
+    operating_income_4q_ready INTEGER NOT NULL CHECK (operating_income_4q_ready IN (0,1)),
+    ebit_4q_ready INTEGER NOT NULL CHECK (ebit_4q_ready IN (0,1)),
+    ebitda_4q_ready INTEGER NOT NULL CHECK (ebitda_4q_ready IN (0,1)),
+    net_income_4q_ready INTEGER NOT NULL CHECK (net_income_4q_ready IN (0,1)),
+    ocf_4q_ready INTEGER NOT NULL CHECK (ocf_4q_ready IN (0,1)),
+    capex_4q_ready INTEGER NOT NULL CHECK (capex_4q_ready IN (0,1)),
+    fcf_4q_ready INTEGER NOT NULL CHECK (fcf_4q_ready IN (0,1)),
+    ttm_ebit_primary_ready INTEGER NOT NULL CHECK (ttm_ebit_primary_ready IN (0,1)),
+    ttm_ebitda_secondary_ready INTEGER NOT NULL CHECK (ttm_ebitda_secondary_ready IN (0,1)),
+    core_ttm_ebit_ready INTEGER NOT NULL CHECK (core_ttm_ebit_ready IN (0,1)),
+    core_ttm_ebitda_ready INTEGER NOT NULL CHECK (core_ttm_ebitda_ready IN (0,1)),
+    ttm_available_date TEXT,
+    ttm_pit_ready INTEGER NOT NULL CHECK (ttm_pit_ready IN (0,1)),
+    underlying_publish_dates_complete INTEGER NOT NULL CHECK (underlying_publish_dates_complete IN (0,1)),
+    q1_quarter_id INTEGER NOT NULL REFERENCES v3_quarter(quarter_id),
+    q2_quarter_id INTEGER NOT NULL REFERENCES v3_quarter(quarter_id),
+    q3_quarter_id INTEGER NOT NULL REFERENCES v3_quarter(quarter_id),
+    q4_quarter_id INTEGER NOT NULL REFERENCES v3_quarter(quarter_id),
+    calculation_version TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
     output_json TEXT,
-    run_id TEXT,
+    run_id TEXT NOT NULL,
+    calculated_at_utc TEXT NOT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
-    UNIQUE (company_id, as_of_quarter_id, model_version)
+    UNIQUE (company_id, endpoint_quarter_id, model_version)
 );
+
+CREATE INDEX IF NOT EXISTS idx_v3_ttm_company_endpoint
+ON v3_ttm(company_id, endpoint_fiscal_year, endpoint_fiscal_quarter);
+
+CREATE INDEX IF NOT EXISTS idx_v3_ttm_ready
+ON v3_ttm(core_ttm_ebit_ready, ttm_pit_ready);
 
 CREATE TABLE IF NOT EXISTS v3_score (
     score_id INTEGER PRIMARY KEY,

@@ -230,3 +230,19 @@ Canonical Q: `73075`
 Core-ready: `44888`
 
 Next: `MASTER PLAN PHASE 5 - TTM ENGINE`
+
+## Phase 5
+
+Classification: `FUNDAMENTALS_V3_PHASE5_TTM_ENGINE_COMPLETE_READY_FOR_PHASE6`
+
+Status: `DONE`
+
+TTM rows: `54038`
+
+Primary core EBIT TTM ready: `34883`
+
+Secondary core EBITDA TTM ready: `32438`
+
+Canonical writes outside TTM/derived cleanup: `0`
+
+Next: `MASTER PLAN PHASE 6 - SCORE & VALUATION ENGINE`

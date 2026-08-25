@@ -172,6 +172,7 @@ def score_metric_row(row: dict[str, Any], prev4: dict[str, Any] | None, prev8: d
         "company_name": row["company_name"],
         "profile": row["profile"],
         "active": row["active"],
+        "ttm_id": row.get("ttm_id"),
         "endpoint_quarter_id": row["endpoint_quarter_id"],
         "period_end": row["period_end"],
         "year": int(str(row["period_end"])[:4]),

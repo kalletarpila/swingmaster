@@ -259,8 +259,8 @@ Authoritative structure:
 - Phase 6D - Lifecycle Recalibration: DONE
 - Phase 6E - Locked Score + Lifecycle Out-of-Sample & Stress Validation: DONE
 - Phase 6F - Valuation Engine Implementation: DONE
-- Phase 6G - LEGACY 2.0 FUNDAMENTAL SCORE ENGINE IMPLEMENTATION: NEXT
-- Phase 6H - Lifecycle Engine Implementation
+- Phase 6G - LEGACY 2.0 FUNDAMENTAL SCORE ENGINE IMPLEMENTATION: DONE
+- Phase 6H - Lifecycle Engine Implementation: NEXT
 - Phase 6I - Production Rebuild & Proving
 - Phase 6J - Phase 6 Closure
 
@@ -440,3 +440,35 @@ Score writes: `0`
 Lifecycle writes: `0`
 
 Next: `MASTER PLAN PHASE 6G - LEGACY 2.0 FUNDAMENTAL SCORE ENGINE IMPLEMENTATION`
+
+## Phase 6G
+
+Classification: `FUNDAMENTALS_V3_PHASE6G_LEGACY2_SCORE_ENGINE_IMPLEMENTED_READY_FOR_PHASE6H`
+
+Status: `DONE`
+
+Score model version: `V3_LEGACY2_FUNDAMENTAL_SCORE_V1`
+
+Score fingerprint: `8c2d8400afa77f1437afef94cff5016d52a1525c18b80fa787db1bbe1e1a36d0`
+
+Score remains valuation-independent: `True`
+
+Historical endpoints dry-run: `54038`
+
+Score-ready dry-run: `34898`
+
+Phase 6I owns full production score population/proving: `True`
+
+Incremental score updates occur only when fundamental inputs change: `True`
+
+Production score writes: `0`
+
+Canonical writes: `0`
+
+TTM writes: `0`
+
+Lifecycle writes: `0`
+
+Valuation writes: `0`
+
+Next: `MASTER PLAN PHASE 6H - LIFECYCLE ENGINE IMPLEMENTATION`

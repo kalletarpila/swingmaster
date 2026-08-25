@@ -691,3 +691,49 @@ Period End remains metadata, not canonical quarter identity. Differences above 7
 Artifact root: `temp/fundamentals_v3_phase8a5_verified_publish_ingest/20260825T_PHASE8A5_VERIFIED_PUBLISH_INGEST`
 
 Next action: `USER MANUAL REVIEW - ONLY REMAINING UNRESOLVED PUBLISH/PERIOD-END ROWS`
+
+## Phase 8A6
+
+Classification: `FUNDAMENTALS_V3_PHASE8A6_SAFE_REPAIRS_APPLIED_RESIDUAL_REVIEW_REMAINS`
+
+Status: `DONE_SAFE_CANONICAL_APPLY_DOWNSTREAM_DEFERRED`
+
+Phase 8 remains: `IN PROGRESS - RESIDUAL CANONICAL EVIDENCE / DOWNSTREAM REBUILD PENDING`
+
+Verified semantic CSV: `temp/phase8_semantic_manual_check_verified.csv`
+
+Safe production repairs applied:
+
+| Repair type | Rows |
+| --- | ---: |
+| publish_date | 78 |
+| period_end metadata | 7 |
+| semantic canonical value | 87 |
+| total changed canonical cells | 172 |
+| unique canonical quarters affected | 165 |
+
+Semantic repair field mix: `revenue=82`, `shares_outstanding=3`, `cash=1`, `total_debt=1`.
+
+Write-guard failures: `0`
+
+Transaction result: `COMMITTED`
+
+Production row counts stayed unchanged: `v3_company=2550`, `v3_quarter=73075`, `v3_quarter_fundamentals=73075`, `v3_ttm=54038`, `v3_score=54038`, `v3_lifecycle=54038`, `v3_valuation=54038`.
+
+Downstream writes: `v3_ttm=0`, `v3_score=0`, `v3_lifecycle=0`, `v3_valuation=0`.
+
+Derived-data status: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Residual queues: `R1=32`, `R2=40`, `R3=127`.
+
+Residual publish/period-end: `publish_semantics=17`, `period_end_outside_tolerance=32`, total `49`.
+
+Residual semantic evidence rows: `150`.
+
+Backup: `temp/fundamentals_v3_phase8a6_safe_apply/20260825T181951Z/backup/rc_fundamentals_v3_phase8a6_backup.db`
+
+Backup sha256: `9c896c98c7b2ec4b4e19d59b47160893093d696bbb740f9d7056488b9d469081`
+
+Artifact root: `temp/fundamentals_v3_phase8a6_safe_apply/20260825T181951Z`
+
+Next action: resolve R1/R2 residual evidence or explicitly accept documented residuals, then run a separate downstream rebuild phase. Do not allow normal scheduler downstream recomputation during this controlled stale window.

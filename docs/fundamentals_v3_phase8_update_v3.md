@@ -422,3 +422,99 @@ Unresolved rows:
 Next action:
 
 `USER MANUAL REVIEW - ONLY REMAINING UNRESOLVED PUBLISH/PERIOD-END ROWS`
+
+## Phase 8A6 - Safe Verified Repair Apply + Residual Evidence Resolution
+
+Classification: `FUNDAMENTALS_V3_PHASE8A6_SAFE_REPAIRS_APPLIED_RESIDUAL_REVIEW_REMAINS`
+
+Status: `DONE_SAFE_CANONICAL_APPLY_DOWNSTREAM_DEFERRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a6_safe_apply/20260825T181951Z`
+
+Verified semantic CSV used: `temp/phase8_semantic_manual_check_verified.csv`
+
+Publish input: `temp/fundamentals_v3_phase8a5_verified_publish_ingest/20260825T_PHASE8A5_VERIFIED_PUBLISH_INGEST/publish_date_frozen_repair_set.csv`
+
+Period-end input: `temp/fundamentals_v3_phase8a5_verified_publish_ingest/20260825T_PHASE8A5_VERIFIED_PUBLISH_INGEST/period_end_frozen_repair_set.csv`
+
+Semantic input reconciliation:
+
+| Metric | Count |
+| --- | ---: |
+| rows | 237 |
+| `MATCH` | 65 |
+| `DIFFERENT` | 105 |
+| `DIFFERENT + HIGH` | 87 |
+| `DIFFERENT + MEDIUM` | 18 |
+| `UNCERTAIN` | 29 |
+| `NOT_FOUND` | 33 |
+| `VALID_BUT_DIFFERENT_SEMANTICS` | 5 |
+
+Safe semantic acceptance rule: automatic repair required `DIFFERENT`, `HIGH`, verified value, primary source, exact FY/FQ identity, current production value parity, period-end mapping under policy, and field-specific semantic proof for revenue, shares, debt, or cash. `MEDIUM`, `UNCERTAIN`, `NOT_FOUND`, `VALID_BUT_DIFFERENT_SEMANTICS`, source-semantics conflicts, and local evidence contradictions were excluded.
+
+Safe repairs applied:
+
+| Repair type | Rows |
+| --- | ---: |
+| publish_date | 78 |
+| period_end metadata | 7 |
+| semantic canonical value | 87 |
+| total changed canonical cells | 172 |
+| unique canonical quarters affected | 165 |
+| write-guard failures | 0 |
+
+Semantic repairs by field:
+
+| Field | Rows |
+| --- | ---: |
+| revenue | 82 |
+| shares_outstanding | 3 |
+| cash | 1 |
+| total_debt | 1 |
+
+Production apply:
+
+| Metric | Value |
+| --- | --- |
+| DB | `rc_fundamentals_v3.db` |
+| preflight quick_check | `ok` |
+| post-apply quick_check | `ok` |
+| backup | `temp/fundamentals_v3_phase8a6_safe_apply/20260825T181951Z/backup/rc_fundamentals_v3_phase8a6_backup.db` |
+| backup sha256 | `9c896c98c7b2ec4b4e19d59b47160893093d696bbb740f9d7056488b9d469081` |
+| transaction result | `COMMITTED` |
+
+Production row counts stayed unchanged: `v3_company=2550`, `v3_quarter=73075`, `v3_quarter_fundamentals=73075`, `v3_ttm=54038`, `v3_score=54038`, `v3_lifecycle=54038`, `v3_valuation=54038`.
+
+Downstream rebuild was intentionally not run. Derived data is temporarily marked:
+
+`DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Downstream writes in Phase 8A6: `v3_ttm=0`, `v3_score=0`, `v3_lifecycle=0`, `v3_valuation=0`.
+
+Score model fingerprint remained `8c2d8400afa77f1437afef94cff5016d52a1525c18b80fa787db1bbe1e1a36d0`.
+
+Lifecycle model fingerprint remained `18c01984ee5ca69acaca64ab6ff2d5b1faa27d8400137f6d08200926e5658f9e`.
+
+Residual evidence queues after safe apply:
+
+| Queue | Rows |
+| --- | ---: |
+| R1 - must resolve before final canonical freeze | 32 |
+| R2 - second source helpful | 40 |
+| R3 - accept / document / wait | 127 |
+
+Residual publish/period-end:
+
+| Type | Rows |
+| --- | ---: |
+| unresolved publish semantics | 17 |
+| outside-tolerance period-end | 32 |
+| total publish/period-end residual rows | 49 |
+
+Residual semantic evidence rows: `150`.
+
+Post-apply Phase 7 read-only audit artifact: `temp/fundamentals_v3_phase8a6_safe_apply/20260825T181951Z/post_phase7_readonly_audit`
+
+Post-apply Phase 7 residual CSV row counts: publish-date anomalies `50`, semantic outliers `156`.
+
+Phase 8 remains `IN PROGRESS`. Exact next action: resolve R1/R2 residual evidence or explicitly accept documented R3 cases, then run a separate downstream rebuild phase.

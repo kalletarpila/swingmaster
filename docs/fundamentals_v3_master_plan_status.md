@@ -249,11 +249,15 @@ Next: `MASTER PLAN PHASE 6 - SCORE & VALUATION ENGINE`
 
 ## Phase 6
 
+Status: `DONE`
+
+Classification: `FUNDAMENTALS_V3_PHASE6_COMPLETE_READY_FOR_PHASE7_CHECK_V3`
+
 Authoritative structure:
 
 - Phase 6A - Downstream Inventory & Policy Lock: DONE
 - Phase 6B - Score & Lifecycle Calibration Design: DONE
-- Phase 6C - Score Distributions & Point Calibration: DONE, SCORE ARCHITECTURE NOT PRODUCTION-ACCEPTED, SCORE ARCHITECTURE NOT PRODUCTION-ACCEPTED
+- Phase 6C - Score Distributions & Point Calibration: DONE / SUPERSEDED BY 6C-R FOR PRODUCTION SCORE
 - Phase 6C-R - Fundamental Score Architecture Reconciliation: DONE
 - Phase 6C-R - Fundamental Score Architecture Reconciliation: DONE
 - Phase 6D - Lifecycle Recalibration: DONE
@@ -262,7 +266,10 @@ Authoritative structure:
 - Phase 6G - LEGACY 2.0 FUNDAMENTAL SCORE ENGINE IMPLEMENTATION: DONE
 - Phase 6H - Lifecycle Engine Implementation: DONE
 - Phase 6I - Production Rebuild & Proving: DONE
-- Phase 6J - Phase 6 Closure: NEXT
+- Phase 6I test-gate closure / environment fix: DONE
+- Phase 6J - Phase 6 Closure: DONE
+
+Next: `MASTER PLAN PHASE 7 - CHECK V3`
 
 ## Phase 6A
 
@@ -543,4 +550,6 @@ Remaining full-suite failures: `PRE_EXISTING_UNRELATED_FAILURE` in older reporte
 
 Production derived row counts unchanged: `v3_ttm=54038`, `v3_valuation=54038`, `v3_score=54038`, `v3_lifecycle=54038`
 
-Next: `MASTER PLAN PHASE 6J - PHASE 6 CLOSURE`
+Phase 6J closure doc: `docs/fundamentals_v3_phase6_closure.md`
+
+Next: `MASTER PLAN PHASE 7 - CHECK V3`

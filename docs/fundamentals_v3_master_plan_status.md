@@ -253,9 +253,11 @@ Authoritative structure:
 
 - Phase 6A - Downstream Inventory & Policy Lock: DONE
 - Phase 6B - Score & Lifecycle Calibration Design: DONE
-- Phase 6C - Score Distributions & Point Calibration: DONE
+- Phase 6C - Score Distributions & Point Calibration: DONE, SCORE ARCHITECTURE NOT PRODUCTION-ACCEPTED, SCORE ARCHITECTURE NOT PRODUCTION-ACCEPTED
+- Phase 6C-R - Fundamental Score Architecture Reconciliation: DONE
+- Phase 6C-R - Fundamental Score Architecture Reconciliation: DONE
 - Phase 6D - Lifecycle Recalibration: DONE
-- Phase 6E - Out-of-Sample & Stress Validation: NEXT
+- Phase 6E - Locked Score + Lifecycle Out-of-Sample & Stress Validation: NEXT
 - Phase 6F - Valuation Engine Implementation
 - Phase 6G - Score Engine Implementation
 - Phase 6H - Lifecycle Engine Implementation
@@ -340,4 +342,34 @@ TTM writes: `0`
 
 Canonical writes: `0`
 
-Next: `MASTER PLAN PHASE 6E - OUT-OF-SAMPLE & STRESS VALIDATION`
+Next: `MASTER PLAN PHASE 6E - LOCKED SCORE + LIFECYCLE OUT-OF-SAMPLE & STRESS VALIDATION`
+
+## Phase 6C-R
+
+Classification: `FUNDAMENTALS_V3_PHASE6CR_LEGACY2_SCORE_RECONCILED_READY_FOR_PHASE6E`
+
+Status: `DONE`
+
+Legacy 2.0 total max: `100`
+
+Market-price-dependent score components: `0`
+
+Development observations 2021-2023: `25295`
+
+2024 validation observations: `5964`
+
+2025 locked OOS observations: `4669`
+
+Score fingerprint: `8c2d8400afa77f1437afef94cff5016d52a1525c18b80fa787db1bbe1e1a36d0`
+
+Production score writes: `0`
+
+Valuation writes: `0`
+
+Lifecycle writes: `0`
+
+TTM writes: `0`
+
+Canonical writes: `0`
+
+Next: `MASTER PLAN PHASE 6E - LOCKED SCORE + LIFECYCLE OUT-OF-SAMPLE & STRESS VALIDATION`

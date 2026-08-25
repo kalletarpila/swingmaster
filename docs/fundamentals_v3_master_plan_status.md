@@ -619,3 +619,33 @@ Phase 8 durable doc: `docs/fundamentals_v3_phase8_update_v3.md`
 Artifact root: `temp/fundamentals_v3_phase8_update_v3/20260825T_PHASE8_UPDATE_V3`
 
 Next blocked action: resolve `manual_evidence_requests.csv` before bounded production apply.
+
+## Phase 8A2
+
+Classification: `FUNDAMENTALS_V3_PHASE8A2_MANUAL_QUEUE_REDUCED_USER_EVIDENCE_REQUIRED`
+
+Status: `DONE_READ_ONLY_GATE_1_REDUCTION`
+
+Phase 8 remains: `IN PROGRESS - GATE 1`
+
+Original raw manual requests: `327`
+
+Total findings preserved: `348`
+
+Queue A must-check-now evidence units: `180`
+
+Queue B check-if-needed evidence units: `145`
+
+Queue C wait/accept/systematic evidence units: `23`
+
+Queue A latest-state evidence units: `108`
+
+Immediate user workload reduction: `44.95%`
+
+Production writes: `0`
+
+RawCandle writes: `0`
+
+Artifact root: `temp/fundamentals_v3_phase8a2_manual_queue_reduction/20260825T_PHASE8A2_QUEUE_REDUCTION`
+
+Next action: `USER MANUAL EVIDENCE REVIEW - QUEUE A`

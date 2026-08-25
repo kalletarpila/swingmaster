@@ -222,3 +222,115 @@ Phase 8 is not complete. Resolve the exact manual queue before any production wr
 
 Current handoff classification: `FUNDAMENTALS_V3_PHASE8_MANUAL_EVIDENCE_REQUIRED`
 
+## Phase 8A2 - Manual Evidence Queue Reduction / Root-Cause Clustering
+
+Date: 2026-08-25
+
+Classification: `FUNDAMENTALS_V3_PHASE8A2_MANUAL_QUEUE_REDUCED_USER_EVIDENCE_REQUIRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a2_manual_queue_reduction/20260825T_PHASE8A2_QUEUE_REDUCTION`
+
+Phase 8A2 reduced the original Gate 1 manual workload by clustering findings, preserving every `issue_id`, separating immediate user work from later/manual-if-needed review, and isolating wait/accept cases. This subphase remained read-only.
+
+Input reconciliation:
+
+| Metric | Expected | Actual |
+| --- | ---: | ---: |
+| total findings | 348 | 348 |
+| publish-date findings | 111 | 111 |
+| semantic findings | 237 | 237 |
+| raw manual requests | 327 | 327 |
+
+Final dispositions:
+
+| Disposition | Findings |
+| --- | ---: |
+| `MANUAL_A` | 180 |
+| `MANUAL_B` | 145 |
+| `WAIT_FOR_REFRESH` | 2 |
+| `LOW_MATERIALITY_ACCEPT` | 21 |
+
+Final practical queues:
+
+| Queue | Evidence units | Role |
+| --- | ---: | --- |
+| Queue A - must check now | 180 | Immediate user evidence queue required before Gate 1 can close |
+| Queue B - check if needed | 145 | Historical/material fallback queue |
+| Queue C - wait/accept/systematic | 23 | No immediate user work |
+
+The immediate user workload is reduced from `327` raw manual requests to `180` Queue A evidence units, a `44.95%` reduction.
+
+Publish-date clustering:
+
+- total publish-date findings: `111`
+- publish-before-period-end / local conflict pattern: `83`
+- recent uncertain: `28`
+- wrong-quarter local candidate matches: `20`
+- no local same-date quarter match: `91`
+- distinct source/provenance families: `3`
+- systematic source-family candidates: `2`
+
+Semantic clustering:
+
+| Field | Findings |
+| --- | ---: |
+| `revenue` | 199 |
+| `cash` | 2 |
+| `total_debt` | 3 |
+| `shares_outstanding` | 33 |
+
+Dominant semantic source-pair families:
+
+- `LEGACY:CANONICAL_APPLY:PHASE3C_1D_SEC_Q4_STRUCTURE_PLUS_PHASE3C_1E_FIELD_POLICY` / revenue: `75`
+- `V2:CANONICAL_APPLY:UNKNOWN` / revenue: `34`
+- `V2:PHASE4B_FIELD_RECOVERY:DIRECT_SAME_Q_NULL_FILL` / revenue: `21`
+- `V2:CANONICAL_APPLY:UNKNOWN` / shares_outstanding: `19`
+- `LEGACY:CANONICAL_APPLY:PHASE3C_1D_READY_EXPLICIT_LEGACY_QUARTER` / revenue: `18`
+
+Recent 2026 split:
+
+| Action | Findings |
+| --- | ---: |
+| `MANUAL_CHECK_NOW` | 38 |
+| `WAIT_FOR_REFRESH` | 2 |
+
+Historical reassessment:
+
+| Bucket | Findings | Manual retained | Downgraded/accepted |
+| --- | ---: | ---: | ---: |
+| <=2020 | 66 | 60 | 6 |
+| 2021-2022 | 94 | 85 | 9 |
+
+Latest-state prioritization:
+
+- latest-state findings: `108`
+- latest-state evidence units: `108`
+- Queue A latest-state units: `108`
+
+Production safety:
+
+| Layer | Before | After |
+| --- | ---: | ---: |
+| canonical | 73,075 | 73,075 |
+| TTM | 54,038 | 54,038 |
+| valuation | 54,038 | 54,038 |
+| score | 54,038 | 54,038 |
+| lifecycle | 54,038 | 54,038 |
+
+Production writes: `0`
+
+RawCandle writes: `0`
+
+Next action:
+
+`USER MANUAL EVIDENCE REVIEW - QUEUE A`
+
+Key Phase 8A2 artifacts:
+
+- `manual_evidence_queue_A_must_check_now.csv`
+- `manual_evidence_queue_A_human_summary.md`
+- `manual_evidence_queue_B_check_if_needed.csv`
+- `manual_evidence_queue_C_wait_accept_systematic.csv`
+- `manual_request_dedup_map.csv`
+- `phase8a2_summary.json`
+- `phase8_gate1_next_action.md`

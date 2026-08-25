@@ -261,8 +261,8 @@ Authoritative structure:
 - Phase 6F - Valuation Engine Implementation: DONE
 - Phase 6G - LEGACY 2.0 FUNDAMENTAL SCORE ENGINE IMPLEMENTATION: DONE
 - Phase 6H - Lifecycle Engine Implementation: DONE
-- Phase 6I - Production Rebuild & Proving: NEXT
-- Phase 6J - Phase 6 Closure
+- Phase 6I - Production Rebuild & Proving: DONE
+- Phase 6J - Phase 6 Closure: NEXT
 
 ## Phase 6A
 
@@ -508,3 +508,25 @@ Score writes: `0`
 Valuation writes: `0`
 
 Next: `MASTER PLAN PHASE 6I - PRODUCTION REBUILD & PROVING`
+
+## Phase 6I
+
+Classification: `FUNDAMENTALS_V3_PHASE6I_PRODUCTION_REBUILD_PROVEN_READY_FOR_PHASE6J`
+
+Status: `DONE`
+
+Valuation rows populated: `54038`
+
+Score rows populated: `54038`
+
+Lifecycle rows populated: `54038`
+
+Canonical/TTM/company source drift: `False`
+
+Production rerun idempotent: `True`
+
+Backup path: `temp/fundamentals_v3_phase6i_production_rebuild/20260825T_PHASE6I_PRODUCTION_REBUILD/backup/rc_fundamentals_v3.db.20260825T120045Z.sqlite.backup`
+
+Validation: focused/targeted Phase 5/6 regression gate `331 passed`; full pytest attempted but collection stopped on missing optional ML dependencies `sklearn` and `joblib`.
+
+Next: `MASTER PLAN PHASE 6J - PHASE 6 CLOSURE`

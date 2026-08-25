@@ -257,6 +257,43 @@ CREATE TABLE IF NOT EXISTS v3_score (
     UNIQUE (company_id, as_of_quarter_id, score_model_version)
 );
 
+CREATE INDEX IF NOT EXISTS idx_v3_score_ttm_endpoint
+ON v3_score(company_id, endpoint_ttm_id, score_model_version);
+
+CREATE TABLE IF NOT EXISTS v3_lifecycle (
+    lifecycle_id INTEGER PRIMARY KEY,
+    company_id INTEGER NOT NULL REFERENCES v3_company(company_id) ON DELETE CASCADE,
+    endpoint_ttm_id INTEGER NOT NULL REFERENCES v3_ttm(ttm_id) ON DELETE CASCADE,
+    endpoint_quarter_id INTEGER NOT NULL REFERENCES v3_quarter(quarter_id) ON DELETE CASCADE,
+    endpoint_fiscal_year INTEGER NOT NULL,
+    endpoint_fiscal_quarter TEXT NOT NULL,
+    endpoint_period_end TEXT NOT NULL,
+    publish_date TEXT,
+    lifecycle_model_version TEXT NOT NULL,
+    lifecycle_ready INTEGER NOT NULL CHECK (lifecycle_ready IN (0, 1)),
+    confidence TEXT NOT NULL,
+    raw_state TEXT NOT NULL,
+    final_state TEXT NOT NULL,
+    previous_final_state TEXT,
+    transitioned INTEGER NOT NULL CHECK (transitioned IN (0, 1)),
+    transition_reason TEXT NOT NULL,
+    state_age INTEGER NOT NULL,
+    candidate_state TEXT,
+    candidate_confirmation_count INTEGER NOT NULL DEFAULT 0,
+    hard_inflection_applied INTEGER NOT NULL CHECK (hard_inflection_applied IN (0, 1)),
+    lifecycle_fingerprint TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    feature_json TEXT,
+    output_json TEXT,
+    run_id TEXT,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    UNIQUE (company_id, endpoint_ttm_id, lifecycle_model_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_v3_lifecycle_endpoint
+ON v3_lifecycle(company_id, endpoint_period_end, lifecycle_model_version);
+
 CREATE TABLE IF NOT EXISTS v3_valuation (
     valuation_id INTEGER PRIMARY KEY,
     company_id INTEGER NOT NULL REFERENCES v3_company(company_id) ON DELETE CASCADE,

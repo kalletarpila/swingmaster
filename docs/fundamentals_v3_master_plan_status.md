@@ -585,3 +585,37 @@ Phase 7 closure doc: `docs/fundamentals_v3_phase7_check_v3.md`
 Artifact root: `temp/fundamentals_v3_phase7_check_v3/20260825T_PHASE7_CHECK_V3`
 
 Next: `MASTER PLAN PHASE 8 - UPDATE V3`
+
+## Phase 8
+
+Classification: `FUNDAMENTALS_V3_PHASE8_MANUAL_EVIDENCE_REQUIRED`
+
+Status: `GATE_1_COMPLETE_MANUAL_EVIDENCE_REQUIRED`
+
+Phase 7 publish-date anomalies ingested: `111`
+
+Phase 7 semantic field outliers ingested: `237`
+
+Exact ticker/FY/FQ identity: `348`
+
+Ambiguous-quarter findings: `0`
+
+Unresolved identity findings: `0`
+
+Manual evidence requests: `327`
+
+Manual priority split: `P1_CURRENT_MATERIAL=142`, `P2_HISTORICAL_MATERIAL=145`, `P3_RECENT_UNCERTAIN=40`
+
+Confirmed repair rows frozen: `0`
+
+Production apply performed: `False`
+
+Production writes: `0`
+
+RawCandle writes: `0`
+
+Phase 8 durable doc: `docs/fundamentals_v3_phase8_update_v3.md`
+
+Artifact root: `temp/fundamentals_v3_phase8_update_v3/20260825T_PHASE8_UPDATE_V3`
+
+Next blocked action: resolve `manual_evidence_requests.csv` before bounded production apply.

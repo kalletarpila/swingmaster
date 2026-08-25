@@ -737,3 +737,43 @@ Backup sha256: `9c896c98c7b2ec4b4e19d59b47160893093d696bbb740f9d7056488b9d469081
 Artifact root: `temp/fundamentals_v3_phase8a6_safe_apply/20260825T181951Z`
 
 Next action: resolve R1/R2 residual evidence or explicitly accept documented residuals, then run a separate downstream rebuild phase. Do not allow normal scheduler downstream recomputation during this controlled stale window.
+
+## Phase 8A7
+
+Classification: `FUNDAMENTALS_V3_PHASE8A7_CANONICAL_CLOSURE_RESIDUAL_R1_REVIEW_REQUIRED`
+
+Status: `DONE_BOUNDED_CANONICAL_REPAIR_AND_FINANCIAL_REMOVAL_DOWNSTREAM_DEFERRED`
+
+Phase 8 remains: `IN PROGRESS - RESIDUAL R1 REVIEW REQUIRED`
+
+Safe A7 production actions:
+
+- five confirmed wrong-semantics Revenue rows repaired
+- 10 financial / mortgage-REIT / credit-investment companies removed from V3
+- retained-company downstream rebuild not run
+
+Five Revenue repairs applied: `5`; write-guard failures: `0`.
+
+Removed tickers: `AOMR`, `ARR`, `DX`, `IVR`, `KREF`, `NLY`, `ORC`, `RC`, `RWT`, `TWO`.
+
+Financial removal impact: companies `10`, canonical quarters `310`, fundamentals `310`, TTM `223`, score `223`, lifecycle `223`, valuation `223`.
+
+Universe counts: companies `2550 -> 2540`, active `2482 -> 2472`, inactive `68 -> 68`.
+
+Post-A7 canonical rows: `72765`.
+
+Post-A7 derived rows: `v3_ttm=53815`, `v3_score=53815`, `v3_lifecycle=53815`, `v3_valuation=53815`.
+
+Residual queues: `R1=36`, `R2=37`, `R3=126`.
+
+Post-A7 read-only audit counts: publish anomalies `50`, semantic outliers `127`.
+
+Derived-data status remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Backup: `temp/fundamentals_v3_phase8a7_canonical_closure/20260825T183549Z/backup/rc_fundamentals_v3_phase8a7_backup.db`
+
+Backup sha256: `f69931073ed4865a3862168e0582863d124757dd28a7e2b647b5da7014c986c9`
+
+Artifact root: `temp/fundamentals_v3_phase8a7_canonical_closure/20260825T183549Z`
+
+Next action: `RESOLVE PHASE 8A7 RESIDUAL R1 BEFORE DOWNSTREAM REBUILD`

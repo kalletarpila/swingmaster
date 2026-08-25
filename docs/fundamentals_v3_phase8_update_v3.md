@@ -518,3 +518,101 @@ Post-apply Phase 7 read-only audit artifact: `temp/fundamentals_v3_phase8a6_safe
 Post-apply Phase 7 residual CSV row counts: publish-date anomalies `50`, semantic outliers `156`.
 
 Phase 8 remains `IN PROGRESS`. Exact next action: resolve R1/R2 residual evidence or explicitly accept documented R3 cases, then run a separate downstream rebuild phase.
+
+## Phase 8A7 - Canonical Repair Closure Before Downstream Rebuild
+
+Classification: `FUNDAMENTALS_V3_PHASE8A7_CANONICAL_CLOSURE_RESIDUAL_R1_REVIEW_REQUIRED`
+
+Status: `DONE_BOUNDED_CANONICAL_REPAIR_AND_FINANCIAL_REMOVAL_DOWNSTREAM_DEFERRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a7_canonical_closure/20260825T183549Z`
+
+A6 baseline: publish repairs `78`, period-end metadata repairs `7`, semantic value repairs `87`, changed canonical cells `172`, unique quarters affected `165`.
+
+Re-audit reconciliation:
+
+| Area | A6 residual | Phase 7 re-audit | Explanation |
+| --- | ---: | ---: | --- |
+| publish/period-end | 49 | 50 | Phase 7-only rows: `BBW FY2025 Q3`, `GEF FY2026 Q2`, `GEF FY2026 Q3`; A6-only rows no longer flagged: `KALV FY2025 Q3`, `MNR FY2025 Q4`; net `+1`. |
+| semantic | 150 | 156 | Phase 7-only rows: `ABVC FY2025 Q4`, `CAPS FY2018 Q4`, `FTFT FY2024 Q4`, `SLDP FY2026 Q2`, `VIR FY2026 Q1`, `WKHS FY2021 Q4`. These are expected audit flags after previously accepted/confirmed negative revenue semantics, not A6 residual rows. |
+
+Five confirmed wrong-semantics Revenue repairs were applied with old-value guards:
+
+| Ticker | FY/Q | Old | New | Root cause |
+| --- | --- | ---: | ---: | --- |
+| GDC | FY2020 Q3 | -45759 | 2465765 | Revenue subcomponent selected instead of consolidated Revenue |
+| LIXT | FY2022 Q3 | -643957 | 0 | expense-related concept selected as Revenue |
+| MBOT | FY2021 Q2 | -35000 | 0 | non-operating interest selected as Revenue |
+| MBOT | FY2021 Q3 | -3000 | 0 | non-operating interest selected as Revenue |
+| VAL | FY2019 Q3 | -2000000 | 551300000 | contract-asset / receivable movement selected as Revenue |
+
+Revenue repair rows changed: `5`; write-guard failures: `0`.
+
+Confirmed Revenue mapper failure modes:
+
+- Revenue subcomponent selected instead of consolidated Revenue.
+- Non-operating interest or expense selected as Revenue for a pre-revenue company.
+- Contract asset / receivable movement selected as Revenue.
+- Cumulative/YTD context cannot silently satisfy discrete-quarter Revenue.
+
+Systemic scan candidates found: `5`. No additional rows beyond the five explicitly approved repairs were automatically changed.
+
+Financial UNCERTAIN Revenue set:
+
+| Metric | Count |
+| --- | ---: |
+| UNCERTAIN financial rows | 24 |
+| unique companies | 10 |
+| `REMOVE_FROM_V3` | 10 |
+| `KEEP_IN_V3` | 0 |
+| `MANUAL_REMOVAL_REVIEW` | 0 |
+
+Removed tickers: `AOMR`, `ARR`, `DX`, `IVR`, `KREF`, `NLY`, `ORC`, `RC`, `RWT`, `TWO`.
+
+Removal rationale: all frozen removal companies are mortgage-REIT / real-estate credit / lender style entities where the standard operating-company Revenue/EBIT/FCF model is semantically inappropriate. Ordinary operating REITs were not removed by this rule.
+
+Financial removal deleted: companies `10`, canonical quarters `310`, fundamentals `310`, TTM `223`, score `223`, lifecycle `223`, valuation `223`, migration audit `1021`, resolution issues `67`. Unrelated-company changes: `0`.
+
+Special-case results:
+
+| Case | Result | Repair |
+| --- | --- | --- |
+| POWW FY2025 Q1 / 2025-03-31 | fiscal identity conflict; official structure points to FY2025 Q4 semantics | no, left R1 |
+| RH FY2021 Q4 / 2021-05-01 | fiscal identity conflict; official structure points to FY2021 Q1 semantics | no, left R1 |
+| VTGN FY2025 Q1 / 2025-03-31 | fiscal identity conflict; official structure points to FY2025 Q4 semantics | no, left R1 |
+| VTGN FY2022 Q3 | same retained-company fiscal identity conflict family surfaced in residual R1 | no, left R1 |
+| PRSU FY2024 Q4 | annual/9M evidence remains incompatible; no unsafe FY-minus-9M | no, R2 |
+| TBLA FY2022 Q3 cash | only cash plus restricted cash found; cash-only value not accepted | no, R2 |
+
+Residual queues after A7:
+
+| Queue | Rows |
+| --- | ---: |
+| R1 | 36 |
+| R2 | 37 |
+| R3 | 126 |
+
+R1 consists of retained-company period-end outside-tolerance rows `32` plus fiscal identity conflicts `4` (`POWW`, `RH`, `VTGN`, plus retained identity-conflict revenue row count from the residual set). R2 contains publish semantics second-source rows `17`, medium-confidence semantic rows `18`, plus PRSU/TBLA special cases `2`.
+
+Post-A7 proving:
+
+| Metric | Value |
+| --- | --- |
+| quick_check | `ok` |
+| canonical rows | `72765` |
+| duplicate identities | `0` |
+| orphan issues | `0` |
+| post-A7 publish audit count | `50` |
+| post-A7 semantic audit count | `127` |
+
+Production row counts changed only by the approved financial-company removals: `v3_company 2550 -> 2540`, active companies `2482 -> 2472`, inactive companies `68 -> 68`, `v3_quarter 73075 -> 72765`, `v3_ttm/v3_score/v3_lifecycle/v3_valuation 54038 -> 53815`.
+
+Backup: `temp/fundamentals_v3_phase8a7_canonical_closure/20260825T183549Z/backup/rc_fundamentals_v3_phase8a7_backup.db`
+
+Backup sha256: `f69931073ed4865a3862168e0582863d124757dd28a7e2b647b5da7014c986c9`
+
+Downstream rebuild was not run. Derived data remains:
+
+`DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Phase 8 remains `IN PROGRESS`. Exact next action: `RESOLVE PHASE 8A7 RESIDUAL R1 BEFORE DOWNSTREAM REBUILD`.

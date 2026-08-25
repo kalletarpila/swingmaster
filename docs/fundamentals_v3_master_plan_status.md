@@ -649,3 +649,45 @@ RawCandle writes: `0`
 Artifact root: `temp/fundamentals_v3_phase8a2_manual_queue_reduction/20260825T_PHASE8A2_QUEUE_REDUCTION`
 
 Next action: `USER MANUAL EVIDENCE REVIEW - QUEUE A`
+
+## Phase 8A5
+
+Classification: `FUNDAMENTALS_V3_PHASE8A5_PUBLISH_MANUAL_REVIEW_REMAINS`
+
+Status: `DONE_READ_ONLY_PUBLISH_EVIDENCE_INGEST`
+
+Phase 8 remains: `IN PROGRESS - GATE 1`
+
+Verified publish CSV: `temp/fundamentals_v3_phase8_publish_date_manual_check_verified.csv`
+
+Rows ingested: `111`
+
+MATCH: `16`
+
+DIFFERENT: `95`
+
+FY/FQ mismatches: `0`
+
+Current production identity/state mismatches: `0`
+
+Frozen publish-date repair candidates: `78`
+
+Frozen period-end metadata repair candidates: `7`
+
+Publish semantics unresolved: `17`
+
+Period-end outside tolerance unresolved: `32`
+
+Unique unresolved publish/period-end rows: `49`
+
+Production writes: `0`
+
+RawCandle writes: `0`
+
+Permanent period-end policy: For the same confirmed canonical fiscal quarter, period_end differences within ±7 actual trading days are considered equivalent for V3 tracking. Within that tolerance, the later date is used as canonical period_end.
+
+Period End remains metadata, not canonical quarter identity. Differences above 7 trading days require review. Small fiscal-close vs month-end differences are not material errors under this policy.
+
+Artifact root: `temp/fundamentals_v3_phase8a5_verified_publish_ingest/20260825T_PHASE8A5_VERIFIED_PUBLISH_INGEST`
+
+Next action: `USER MANUAL REVIEW - ONLY REMAINING UNRESOLVED PUBLISH/PERIOD-END ROWS`

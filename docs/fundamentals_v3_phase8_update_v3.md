@@ -334,3 +334,91 @@ Key Phase 8A2 artifacts:
 - `manual_request_dedup_map.csv`
 - `phase8a2_summary.json`
 - `phase8_gate1_next_action.md`
+
+## Phase 8A5 - Verified Publish-Date Evidence Ingest & Period-End Tolerance
+
+Date: 2026-08-25
+
+Classification: `FUNDAMENTALS_V3_PHASE8A5_PUBLISH_MANUAL_REVIEW_REMAINS`
+
+Verified CSV source: `temp/fundamentals_v3_phase8_publish_date_manual_check_verified.csv`
+
+Artifact root: `temp/fundamentals_v3_phase8a5_verified_publish_ingest/20260825T_PHASE8A5_VERIFIED_PUBLISH_INGEST`
+
+Phase 8A5 ingested the externally verified publish-date file and froze only evidence-sufficient publish-date candidates. No production writes were performed.
+
+Input reconciliation:
+
+| Metric | Count |
+| --- | ---: |
+| rows | 111 |
+| unique quarters | 111 |
+| `MATCH` | 16 |
+| `DIFFERENT` | 95 |
+| `UNCERTAIN` / `NOT_FOUND` | 0 |
+| Source 1 complete | 111 |
+| Source 2 complete | 111 |
+
+Fiscal identity reconciliation:
+
+| Metric | Count |
+| --- | ---: |
+| FY matches | 111 |
+| FY mismatches | 0 |
+| FQ matches | 111 |
+| FQ mismatches | 0 |
+| current production identity/state mismatches | 0 |
+
+Publish evidence classification:
+
+| Classification | Count |
+| --- | ---: |
+| `MATCH_CONFIRMED` | 16 |
+| `PUBLISH_DATE_REPAIR_CONFIRMED` | 78 |
+| `PUBLISH_DATE_SEMANTICS_UNCERTAIN` | 17 |
+
+The 17 semantics-uncertain rows are based on filing-date evidence without sufficiently clear earnings/result publication semantics. They are excluded from the frozen publish-date repair set.
+
+Permanent period-end policy:
+
+For the same confirmed canonical fiscal quarter, period_end differences within ±7 actual trading days are considered equivalent for V3 tracking. Within that tolerance, the later date is used as canonical period_end. Period End remains metadata, not canonical quarter identity. Differences above 7 trading days require review. Small fiscal-close vs month-end differences are not material errors under this policy.
+
+Period-end tolerance analysis:
+
+| Disposition | Count |
+| --- | ---: |
+| exact period-end match | 54 |
+| differing period ends | 57 |
+| within ±7 trading days | 25 |
+| outside tolerance | 32 |
+| current V3 already later | 18 |
+| verified date later | 7 |
+
+Frozen repair candidate files:
+
+| Candidate set | Rows |
+| --- | ---: |
+| publish-date repairs | 78 |
+| period-end metadata repairs | 7 |
+
+Downstream planning for confirmed publish-date repairs:
+
+| Layer | Potentially affected rows |
+| --- | ---: |
+| TTM PIT/availability metadata | 181 |
+| score metadata/lineage | 181 |
+| lifecycle metadata/lineage | 181 |
+| valuation rows | 62 |
+| valuation dates that would change | 62 |
+
+Period-end-only downstream recompute required: `False`
+
+Unresolved rows:
+
+- publish semantics manual review rows: `17`
+- period_end outside tolerance manual review rows: `32`
+- unique unresolved rows: `49`
+
+Next action:
+
+`USER MANUAL REVIEW - ONLY REMAINING UNRESOLVED PUBLISH/PERIOD-END ROWS`

@@ -114,6 +114,7 @@ def test_dry_run_writes_zero_rows(tmp_path: Path) -> None:
         "input_quarterly_rows": 5,
         "ttm_rows_built": 2,
         "rows_written": 0,
+        "written_as_of_dates": [],
         "dry_run": "true",
         "run_id": "TTMRUN1",
     }

@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("joblib", reason="optional ML model tests require joblib")
+pytest.importorskip("sklearn", reason="optional ML model tests require scikit-learn")
+pytest.importorskip("catboost", reason="optional ML model tests require catboost")
+
 import sqlite3
 from pathlib import Path
 

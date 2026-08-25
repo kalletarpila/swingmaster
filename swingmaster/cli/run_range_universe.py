@@ -45,7 +45,6 @@ from swingmaster.infra.sqlite.db import get_connection
 from swingmaster.infra.sqlite.db_readonly import get_readonly_connection
 from swingmaster.infra.sqlite.migrator import apply_migrations
 from swingmaster.infra.sqlite.repos.ticker_universe_reader import TickerUniverseReader
-from swingmaster.dual_score.production import compute_and_store_dual_scores_production
 from swingmaster.ew_score.compute import compute_and_store_ew_scores
 from swingmaster.ew_score.repo import RcEwScoreDailyRepo
 
@@ -1833,6 +1832,8 @@ def maybe_run_dual_score_production(
 ) -> tuple[int, int, int]:
     if not enabled:
         return (0, 0, 0)
+    from swingmaster.dual_score.production import compute_and_store_dual_scores_production
+
     summary = compute_and_store_dual_scores_production(
         rc_conn,
         osakedata_db_path=osakedata_db_path,

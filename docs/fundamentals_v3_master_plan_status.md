@@ -527,6 +527,20 @@ Production rerun idempotent: `True`
 
 Backup path: `temp/fundamentals_v3_phase6i_production_rebuild/20260825T_PHASE6I_PRODUCTION_REBUILD/backup/rc_fundamentals_v3.db.20260825T120045Z.sqlite.backup`
 
-Validation: focused/targeted Phase 5/6 regression gate `331 passed`; full pytest attempted but collection stopped on missing optional ML dependencies `sklearn` and `joblib`.
+Validation: focused/targeted Phase 5/6 regression gate `686 passed`; full pytest optional-ML collection gate closed.
+
+Phase 6I test-gate closure / environment fix: `DONE`
+
+Test-gate closure classification: `FUNDAMENTALS_V3_PHASE6I_FULL_PYTEST_GATE_CLOSED_READY_FOR_PHASE6J`
+
+Dependency classification: `GENUINELY_OPTIONAL_ML_DEPENDENCY`
+
+Full pytest collection after fix: `3457 collected`, `22 skipped`, `0 errors`
+
+Full pytest execution after fix: `3237 passed`, `181 failed`, `61 skipped`, `0 errors`
+
+Remaining full-suite failures: `PRE_EXISTING_UNRELATED_FAILURE` in older reported-vintage/PIT write policy tests; not Phase 6 V3 TTM/valuation/score/lifecycle regressions.
+
+Production derived row counts unchanged: `v3_ttm=54038`, `v3_valuation=54038`, `v3_score=54038`, `v3_lifecycle=54038`
 
 Next: `MASTER PLAN PHASE 6J - PHASE 6 CLOSURE`

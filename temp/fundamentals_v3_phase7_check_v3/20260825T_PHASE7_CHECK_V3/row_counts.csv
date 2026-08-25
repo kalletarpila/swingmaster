@@ -1,0 +1,10 @@
+row_count,table_name
+2550,v3_company
+73075,v3_quarter
+73075,v3_quarter_fundamentals
+54038,v3_ttm
+54038,v3_valuation
+54038,v3_score
+54038,v3_lifecycle
+2482,active_companies
+68,inactive_companies

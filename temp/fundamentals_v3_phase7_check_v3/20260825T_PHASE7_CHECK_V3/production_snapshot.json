@@ -1,0 +1,39 @@
+{
+  "counts": {
+    "active_companies": 2482,
+    "inactive_companies": 68,
+    "v3_company": 2550,
+    "v3_lifecycle": 54038,
+    "v3_quarter": 73075,
+    "v3_quarter_fundamentals": 73075,
+    "v3_score": 54038,
+    "v3_ttm": 54038,
+    "v3_valuation": 54038
+  },
+  "files": {
+    "disk_free_bytes": 637593645056,
+    "files": {
+      "/home/kalle/projects/rawcandle/data/osakedata.db": {
+        "exists": true,
+        "mtime_ns": 1787635759699496762,
+        "size": 1960472576
+      },
+      "rc_fundamentals_v3.db": {
+        "exists": true,
+        "mtime_ns": 1787659412913078962,
+        "size": 534671360
+      },
+      "rc_fundamentals_v3.db-shm": {
+        "exists": false,
+        "mtime_ns": null,
+        "size": null
+      },
+      "rc_fundamentals_v3.db-wal": {
+        "exists": false,
+        "mtime_ns": null,
+        "size": null
+      }
+    }
+  },
+  "quick_check": "ok"
+}

@@ -1,0 +1,9 @@
+actual,expected,match,metric
+2550,2550,True,v3_company
+2482,2482,True,active_companies
+68,68,True,inactive_companies
+73075,73075,True,v3_quarter
+54038,54038,True,v3_ttm
+54038,54038,True,v3_valuation
+54038,54038,True,v3_score
+54038,54038,True,v3_lifecycle

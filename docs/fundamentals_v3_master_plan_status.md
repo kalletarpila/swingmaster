@@ -553,3 +553,35 @@ Production derived row counts unchanged: `v3_ttm=54038`, `v3_valuation=54038`, `
 Phase 6J closure doc: `docs/fundamentals_v3_phase6_closure.md`
 
 Next: `MASTER PLAN PHASE 7 - CHECK V3`
+
+## Phase 7
+
+Classification: `FUNDAMENTALS_V3_PHASE7_CHECK_COMPLETE_PHASE8_REPAIR_REQUIRED`
+
+Status: `DONE`
+
+Read-only production audit: `PASS`
+
+Production baseline counts matched: `True`
+
+Production row counts: `v3_company=2550`, `active=2482`, `inactive=68`, `v3_quarter=73075`, `v3_ttm=54038`, `v3_valuation=54038`, `v3_score=54038`, `v3_lifecycle=54038`
+
+Score model/fingerprint verified: `V3_LEGACY2_FUNDAMENTAL_SCORE_V1` / `8c2d8400afa77f1437afef94cff5016d52a1525c18b80fa787db1bbe1e1a36d0`
+
+Lifecycle model/fingerprint verified: `V3_LIFECYCLE_EBIT_FIRST_V1` / `18c01984ee5ca69acaca64ab6ff2d5b1faa27d8400137f6d08200926e5658f9e`
+
+TTM parity failures: `0`
+
+Score lineage/bounds failures: `0`
+
+Lifecycle lineage/state failures: `0`
+
+Valuation formula/price parity failures: `0`
+
+Material Phase 8 handoff issues: `PUBLISH_DATE_ANOMALY=111`, `SEMANTIC_FIELD_OUTLIER=237`
+
+Phase 7 closure doc: `docs/fundamentals_v3_phase7_check_v3.md`
+
+Artifact root: `temp/fundamentals_v3_phase7_check_v3/20260825T_PHASE7_CHECK_V3`
+
+Next: `MASTER PLAN PHASE 8 - UPDATE V3`

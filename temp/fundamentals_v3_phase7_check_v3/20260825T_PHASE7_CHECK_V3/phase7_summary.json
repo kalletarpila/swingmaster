@@ -1,0 +1,23 @@
+{
+  "classification": "FUNDAMENTALS_V3_PHASE7_CHECK_COMPLETE_PHASE8_REPAIR_REQUIRED",
+  "completed_at_utc": "2026-08-25T13:46:12Z",
+  "issue_count": 2,
+  "next_phase": "MASTER PLAN PHASE 8 - UPDATE V3",
+  "read_only_ok": true,
+  "row_counts": {
+    "active_companies": 2482,
+    "inactive_companies": 68,
+    "v3_company": 2550,
+    "v3_lifecycle": 54038,
+    "v3_quarter": 73075,
+    "v3_quarter_fundamentals": 73075,
+    "v3_score": 54038,
+    "v3_ttm": 54038,
+    "v3_valuation": 54038
+  },
+  "severity_counts": {
+    "HIGH": 1,
+    "MEDIUM": 1
+  },
+  "started_at_utc": "2026-08-25T13:46:09Z"
+}

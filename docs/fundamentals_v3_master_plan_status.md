@@ -258,8 +258,8 @@ Authoritative structure:
 - Phase 6C-R - Fundamental Score Architecture Reconciliation: DONE
 - Phase 6D - Lifecycle Recalibration: DONE
 - Phase 6E - Locked Score + Lifecycle Out-of-Sample & Stress Validation: DONE
-- Phase 6F - Valuation Engine Implementation: NEXT
-- Phase 6G - Score Engine Implementation
+- Phase 6F - Valuation Engine Implementation: DONE
+- Phase 6G - LEGACY 2.0 FUNDAMENTAL SCORE ENGINE IMPLEMENTATION: NEXT
 - Phase 6H - Lifecycle Engine Implementation
 - Phase 6I - Production Rebuild & Proving
 - Phase 6J - Phase 6 Closure
@@ -403,3 +403,40 @@ TTM writes: `0`
 Canonical writes: `0`
 
 Next: `MASTER PLAN PHASE 6F - VALUATION ENGINE IMPLEMENTATION`
+
+
+## Permanent Valuation Snapshot Policy
+
+V3 valuation snapshots are stored persistently using the first trading day strictly after publish_date and that day's close price.
+
+Valuation snapshots are historical immutable derived facts for a given endpoint/model version. They are not recalculated using current price. Fundamental score remains valuation-independent. Phase 6I performs authoritative production valuation population/proving.
+
+## Phase 6F
+
+Classification: `FUNDAMENTALS_V3_PHASE6F_VALUATION_ENGINE_IMPLEMENTED_READY_FOR_PHASE6G`
+
+Status: `DONE`
+
+Valuation model version: `V3_VALUATION_POST_PUBLICATION_SNAPSHOT_V1`
+
+Existing valuation rows: `0`
+
+TTM endpoints dry-run: `54038`
+
+Calculable valuation snapshots: `43754`
+
+Missing publish_date: `3304`
+
+Missing target price: `120`
+
+Production valuation writes: `0`
+
+Canonical writes: `0`
+
+TTM writes: `0`
+
+Score writes: `0`
+
+Lifecycle writes: `0`
+
+Next: `MASTER PLAN PHASE 6G - LEGACY 2.0 FUNDAMENTAL SCORE ENGINE IMPLEMENTATION`

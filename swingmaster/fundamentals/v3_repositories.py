@@ -760,7 +760,84 @@ class V3OutputRepository:
             {"company_id": company_id, "as_of_quarter_id": as_of_quarter_id, "score_model_version": score_model_version},
         )
 
-    def upsert_valuation(self, *, company_id: int, valuation_date: str, model_version: str, valuation_ready: bool, output: Mapping[str, Any] | None = None, run_id: str | None = None, now_utc: str | None = None) -> int:
+    def upsert_valuation(
+        self,
+        *,
+        company_id: int,
+        valuation_date: str,
+        model_version: str,
+        valuation_ready: bool,
+        output: Mapping[str, Any] | None = None,
+        run_id: str | None = None,
+        now_utc: str | None = None,
+        endpoint_ttm_id: int | None = None,
+        endpoint_quarter_id: int | None = None,
+        endpoint_fiscal_year: int | None = None,
+        endpoint_fiscal_quarter: str | None = None,
+        endpoint_period_end: str | None = None,
+        publish_date: str | None = None,
+        valuation_close_price: float | None = None,
+        price_source: str = "UNSPECIFIED",
+        source_fingerprint: str = "UNSPECIFIED",
+    ) -> int:
+        columns = {str(row[1]) for row in self.conn.execute("PRAGMA table_info(v3_valuation)").fetchall()}
+        if "endpoint_ttm_id" in columns:
+            required = {
+                "endpoint_ttm_id": endpoint_ttm_id,
+                "endpoint_quarter_id": endpoint_quarter_id,
+                "endpoint_fiscal_year": endpoint_fiscal_year,
+                "endpoint_fiscal_quarter": endpoint_fiscal_quarter,
+                "endpoint_period_end": endpoint_period_end,
+            }
+            missing = [name for name, value in required.items() if value is None]
+            if missing:
+                raise ValueError("FUNDAMENTALS_V3_VALUATION_SNAPSHOT_LINEAGE_REQUIRED:" + ",".join(missing))
+            now = now_utc or utc_now_text()
+            self.conn.execute(
+                """
+                INSERT INTO v3_valuation (
+                    company_id, endpoint_ttm_id, endpoint_quarter_id, endpoint_fiscal_year,
+                    endpoint_fiscal_quarter, endpoint_period_end, publish_date, valuation_date,
+                    valuation_close_price, price_source, model_version, valuation_ready,
+                    valuation_status, source_fingerprint, output_json, run_id,
+                    created_at_utc, updated_at_utc
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(company_id, endpoint_ttm_id, model_version) DO UPDATE SET
+                    valuation_ready = excluded.valuation_ready,
+                    valuation_status = excluded.valuation_status,
+                    source_fingerprint = excluded.source_fingerprint,
+                    output_json = excluded.output_json,
+                    run_id = excluded.run_id,
+                    updated_at_utc = excluded.updated_at_utc
+                """,
+                (
+                    int(company_id),
+                    int(endpoint_ttm_id),
+                    int(endpoint_quarter_id),
+                    int(endpoint_fiscal_year),
+                    endpoint_fiscal_quarter,
+                    endpoint_period_end,
+                    publish_date,
+                    valuation_date,
+                    valuation_close_price,
+                    price_source,
+                    model_version,
+                    1 if valuation_ready else 0,
+                    "VALID" if valuation_ready else "MISSING_INPUT",
+                    source_fingerprint,
+                    _json_dumps(output) if output is not None else None,
+                    run_id,
+                    now,
+                    now,
+                ),
+            )
+            return _last_or_existing_id(
+                self.conn,
+                "v3_valuation",
+                "valuation_id",
+                {"company_id": company_id, "endpoint_ttm_id": endpoint_ttm_id, "model_version": model_version},
+            )
         return self._upsert_output(
             table="v3_valuation",
             id_column="valuation_id",

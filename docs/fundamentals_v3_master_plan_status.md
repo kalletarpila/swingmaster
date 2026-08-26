@@ -986,3 +986,25 @@ Phase 8 remains: `IN PROGRESS - IMMR/RCAT SPECIAL RESEARCH BEFORE GLOBAL AUDIT`
 Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Next action: `USER EXTERNAL RESEARCH - IMMR / RCAT`, then `PHASE 8A10A-SPECIAL-FINAL-APPLY`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
+## Phase 8A10A-PUBLISH-APPLY
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_PUBLISH_VERIFIED_REPAIRS_COMPLETE`
+
+Status: `DONE_PRODUCTION_PUBLISH_DATE_REPAIR_APPLIED_DOWNSTREAM_DEFERRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_publish_apply/20260826T133006Z`
+
+Applied exactly `17` externally verified publish_date repairs from `temp/phase8_publish_date_residual_17_verified.csv`. Input validation passed: `17` rows, `17` DIFFERENT, `17` HIGH confidence, `0` identity conflicts, `0` uncertain/not-found rows, source coverage `6` multi-source and `11` single-source rows.
+
+Only `v3_quarter.publish_date` changed. Changed cells: `17`; period_end/FY/FQ/fundamentals/lineage changes: `0`; unrelated canonical drift: `0`; write failures: `0`.
+
+Production integrity stayed stable: companies `2540`, canonical quarters `72765`, fundamentals rows `72765`, and TTM/Score/Lifecycle/Valuation rows `53815`. RawCandle writes: `0`.
+
+Publish residual status: raw heuristic flags `35 -> 19`; original verified 17 retained publish R1 `0`; original verified 17 retained R2 `1` (`BCTX` market_availability_date stale after publish_date repair, intentionally out of this phase's write scope).
+
+Phase 8 remains: `IN PROGRESS - IMMR/RCAT SPECIAL RESEARCH BEFORE GLOBAL AUDIT`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `USER EXTERNAL RESEARCH - IMMR / RCAT`, then `PHASE 8A10A-SPECIAL-FINAL-APPLY`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.

@@ -1135,3 +1135,41 @@ Downstream remains deferred:
 `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `USER EXTERNAL RESEARCH - IMMR / RCAT`, then `PHASE 8A10A-SPECIAL-FINAL-APPLY`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
+## Phase 8A10A-PUBLISH-APPLY Verified Publish-Date Residual Closure
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_PUBLISH_VERIFIED_REPAIRS_COMPLETE`
+
+Status: `DONE_PRODUCTION_PUBLISH_DATE_REPAIR_APPLIED_DOWNSTREAM_DEFERRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_publish_apply/20260826T133006Z`
+
+Authoritative input: `temp/phase8_publish_date_residual_17_verified.csv`.
+
+Verified input contract passed: rows `17`, `DIFFERENT` `17`, `HIGH` confidence `17`, identity conflicts `0`, uncertain/not-found rows `0`, verified publish dates complete `17`, ISO dates `17`, unique ticker/FY/FQ identities `17`. Source coverage was `6` rows with 2+ sources and `11` rows with one source.
+
+Applied scope was exactly the verified 17-row publish_date repair set for `ABVC`, `BCTX`, `BJDX`, `BOC`, `BRTX` (2 rows), `KLRS`, `LWLG`, `NWTG`, `OLB`, `OMEX`, `ORBS`, `PROP`, `RIME`, `RNAZ`, `SLXN`, and `TELO`.
+
+Canonical publish_date policy remains first public disclosure of the relevant financial results. This phase preserved these regression cases:
+
+- `BRTX` FY2020 Q2 and FY2020 Q3 both use `2021-04-12`; same-day multi-quarter publication is accepted for delayed reporting.
+- `RIME` uses `2025-04-15` because the 10-K was public before the later earnings release.
+- `KLRS`, `ORBS`, and `NWTG` ticker/name history was accepted as same-registrant evidence, not identity conflict.
+- `LWLG` and `NWTG` use the earlier earnings release where it preceded the SEC filing.
+- `BCTX` FY2026 Q1 keeps period_end `2025-10-31`; fiscal identity was not inferred from calendar year.
+
+Production apply committed one transaction. Rows updated: `17`; changed canonical cells: `17`; write failures: `0`. Only `v3_quarter.publish_date` changed. Period_end changes `0`; FY/FQ changes `0`; fundamentals changes `0`; lineage changes `0`; unrelated canonical drift `0`.
+
+Publish residual audit moved raw heuristic flags from `35` to `19`. For the original verified 17 cases, retained publish R1 is `0`; one case (`BCTX`) remains as R2 because `market_availability_date` is stale relative to the corrected publish_date. This phase intentionally did not change `market_availability_date`.
+
+Production integrity stayed stable: quick_check `ok -> ok`, companies `2540 -> 2540`, canonical quarters `72765 -> 72765`, fundamentals rows `72765 -> 72765`, and TTM/Score/Lifecycle/Valuation rows `53815 -> 53815`. Duplicate FY/FQ identities stayed `0`, orphan rows stayed `0`, RawCandle writes `0`.
+
+Backup: `temp/fundamentals_v3_phase8a10a_publish_apply/20260826T133006Z/backup/rc_fundamentals_v3_phase8a10a_publish_apply_backup.db`
+
+Backup sha256: `812c6e4c75ec23b63cf91760b245f4487e558a5d7b06665ba9b1d0ff20346ef6`
+
+Phase 8 remains: `IN PROGRESS - IMMR/RCAT SPECIAL RESEARCH BEFORE GLOBAL AUDIT`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `USER EXTERNAL RESEARCH - IMMR / RCAT`, then `PHASE 8A10A-SPECIAL-FINAL-APPLY`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.

@@ -892,3 +892,116 @@ Downstream remains deferred:
 `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `PHASE 8A10A-APPLY - APPLY FROZEN STRUCTURAL QUARTER-SEQUENCE REPAIRS`, plus `SPECIAL CASE RESEARCH - FNGR / IMMR / RCAT AS APPLICABLE`.
+
+## Phase 8A10A-APPLY Frozen Structural Quarter-Sequence Repair Apply
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_APPLY_FROZEN_STRUCTURAL_REPAIRS_APPLIED_SPECIAL_CASES_REMAIN`
+
+Status: `DONE_PRODUCTION_STRUCTURAL_REPAIR_APPLIED_DOWNSTREAM_DEFERRED_SPECIAL_CASES_REMAIN`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_apply/20260826T091635Z`
+
+Frozen authoritative input: `temp/fundamentals_v3_phase8a10a_r_remap_reconciliation/20260826T071127Z/phase8a10a_r_v3_frozen_structural_apply_set.csv`.
+
+Frozen scope:
+
+| Metric | Count |
+| --- | ---: |
+| transformation groups | 10 |
+| canonical rows | 67 |
+| atomic operations | 134 |
+
+Applied groups: `CRUS`, `DOMO`, `EEFT`, `INBS`, `MNR`, `MNRO`, `NCNO`, `RBC`, `SKY`, `VIVS`.
+
+Excluded special cases remained untouched: `FNGR`, `IMMR`, `RCAT`.
+
+Write guards and simulation:
+
+| Check | Result |
+| --- | ---: |
+| groups passing write guards | 10 |
+| groups failing write guards | 0 |
+| rows passing old-state guards | 67 |
+| drifted rows | 0 |
+| simulation groups PASS | 10 |
+| simulation groups FAIL | 0 |
+| duplicate final FY/FQ in simulation | 0 |
+| content-loss issues | 0 |
+| lineage simulation issues | 0 |
+
+Production apply:
+
+| Metric | Count |
+| --- | ---: |
+| groups attempted | 10 |
+| groups committed | 10 |
+| groups rolled back | 0 |
+| canonical rows transformed | 67 |
+| atomic operations executed | 134 |
+| write failures | 0 |
+
+Per-group apply summary:
+
+| Ticker | Rows | Atomic ops | Status |
+| --- | ---: | ---: | --- |
+| CRUS | 6 | 12 | COMMITTED |
+| DOMO | 9 | 18 | COMMITTED |
+| EEFT | 9 | 18 | COMMITTED |
+| INBS | 5 | 10 | COMMITTED |
+| MNR | 5 | 10 | COMMITTED |
+| MNRO | 6 | 12 | COMMITTED |
+| NCNO | 9 | 18 | COMMITTED |
+| RBC | 6 | 12 | COMMITTED |
+| SKY | 6 | 12 | COMMITTED |
+| VIVS | 6 | 12 | COMMITTED |
+
+Content and lineage integrity:
+
+| Check | Result |
+| --- | ---: |
+| economic-quarter signatures preserved | 67 / 67 |
+| non-null canonical cells before | 794 |
+| non-null canonical cells after | 794 |
+| publish_date ownership issues | 0 |
+| lineage/provenance issues | 0 |
+| unrelated canonical drift | 0 |
+
+The 52/53-week tickers `CRUS`, `MNRO`, `RBC`, and `SKY` kept official weekend period ends; the repair did not normalize these to month-end. `VIVS` was applied as one coherent 6-row segment.
+
+Production integrity:
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| quick_check | ok | ok |
+| companies | 2540 | 2540 |
+| canonical quarters | 72765 | 72765 |
+| fundamentals rows | 72765 | 72765 |
+| TTM rows | 53815 | 53815 |
+| score rows | 53815 | 53815 |
+| lifecycle rows | 53815 | 53815 |
+| valuation rows | 53815 | 53815 |
+| duplicate FY/FQ identities | 0 | 0 |
+| orphan rows | 0 | 0 |
+
+RawCandle writes: `0`.
+
+Residual structural R1:
+
+| Metric | Count |
+| --- | ---: |
+| before | 15 |
+| after | 3 |
+| repaired tickers still R1 | 0 |
+| new R1 cases | 0 |
+
+Remaining structural R1 tickers: `FNGR`, `IMMR`, `RCAT`.
+
+Backup: `temp/fundamentals_v3_phase8a10a_apply/20260826T091635Z/backup/rc_fundamentals_v3_phase8a10a_apply_backup.db`
+
+Backup sha256: `8902fe0c9902995b0e92e7962e8a41e984463ed1f8632663a5bc0011a8f25491`
+
+Downstream remains deferred:
+
+`DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `SPECIAL CASE RESEARCH - FNGR / IMMR / RCAT`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.

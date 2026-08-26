@@ -904,3 +904,31 @@ Safety proof: production writes `0`, RawCandle writes `0`, derived writes `0`; c
 Phase 8 remains: `IN PROGRESS - APPLY FROZEN STRUCTURAL REPAIR SET BEFORE DOWNSTREAM REBUILD`
 
 Next action: `PHASE 8A10A-APPLY - APPLY FROZEN STRUCTURAL QUARTER-SEQUENCE REPAIRS`, plus `SPECIAL CASE RESEARCH - FNGR / IMMR / RCAT AS APPLICABLE`.
+
+## Phase 8A10A-APPLY
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_APPLY_FROZEN_STRUCTURAL_REPAIRS_APPLIED_SPECIAL_CASES_REMAIN`
+
+Status: `DONE_PRODUCTION_STRUCTURAL_REPAIR_APPLIED_DOWNSTREAM_DEFERRED_SPECIAL_CASES_REMAIN`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_apply/20260826T091635Z`
+
+The frozen A10A-R structural apply set was applied to production V3. Scope was exactly `10` transformation groups, `67` canonical rows, and `134` atomic operations for `CRUS`, `DOMO`, `EEFT`, `INBS`, `MNR`, `MNRO`, `NCNO`, `RBC`, `SKY`, and `VIVS`.
+
+Write guards passed for all `67` rows, drifted rows were `0`, simulation passed for all `10` groups, and production apply committed all `10` groups with `0` rollbacks and `0` write failures.
+
+Content and ownership proof passed: economic-quarter signatures preserved `67 / 67`, non-null canonical cells `794 -> 794`, publish-date ownership issues `0`, lineage/provenance issues `0`, and unrelated canonical drift `0`.
+
+Production integrity stayed stable: quick_check `ok -> ok`, companies `2540 -> 2540`, canonical quarters `72765 -> 72765`, fundamentals rows `72765 -> 72765`, and TTM/Score/Lifecycle/Valuation rows `53815 -> 53815`. Duplicate FY/FQ identities stayed `0`, orphan rows stayed `0`, RawCandle writes were `0`.
+
+Residual structural R1 moved from `15` to `3`. Remaining structural R1 tickers are `FNGR`, `IMMR`, and `RCAT`. Repaired tickers still R1: `0`; new R1 cases: `0`.
+
+Backup: `temp/fundamentals_v3_phase8a10a_apply/20260826T091635Z/backup/rc_fundamentals_v3_phase8a10a_apply_backup.db`
+
+Backup sha256: `8902fe0c9902995b0e92e7962e8a41e984463ed1f8632663a5bc0011a8f25491`
+
+Phase 8 remains: `IN PROGRESS - SPECIAL STRUCTURAL CASES BEFORE GLOBAL AUDIT`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Next action: `SPECIAL CASE RESEARCH - FNGR / IMMR / RCAT`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.

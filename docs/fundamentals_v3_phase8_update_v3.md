@@ -759,3 +759,81 @@ Backup sha256: `d4b114d35b4ae731096d05844f8613b7c7c1873d2ab67bc31feda950986b5c7f
 Artifact root: `temp/fundamentals_v3_phase8a9_period_end_apply/20260826T052001Z`
 
 Exact next action: `RESOLVE_SEQUENCE_COLLISION_R1_BEFORE_COMBINED_DOWNSTREAM_REBUILD`.
+
+## Phase 8A10A Sequence-Collision Root Cause Analysis
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_SEQUENCE_COLLISIONS_EXTERNAL_EVIDENCE_REQUIRED`
+
+Status: `DONE_READ_ONLY_STRUCTURAL_ANALYSIS_REPAIR_PLAN_NOT_PRODUCTION_READY`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_sequence_collision_analysis/20260826T054812Z`
+
+Phase 8 remains in progress. No production writes were performed.
+
+Frozen R1 set:
+
+| Metric | Count |
+| --- | ---: |
+| R1 rows | 15 |
+| unique tickers | 13 |
+| collision rows | 10 |
+| sequence-conflict rows | 5 |
+
+Root causes:
+
+| Primary root cause | Count |
+| --- | ---: |
+| `SHIFTED_MULTI_QUARTER_SEQUENCE` | 11 |
+| `52_53_WEEK_CALENDAR_HANDLING` | 4 |
+
+Case summary:
+
+| Ticker | FY/Q | Current | Verified | Root cause | Disposition | Prod-ready |
+| --- | --- | --- | --- | --- | --- | --- |
+| CRUS | FY2025 Q4 | 2026-03-31 | 2025-03-29 | `52_53_WEEK_CALENDAR_HANDLING` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| DOMO | FY2025 Q4 | 2026-01-31 | 2025-01-31 | `SHIFTED_MULTI_QUARTER_SEQUENCE` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| EEFT | FY2025 Q3 | 2025-12-31 | 2025-09-30 | `SHIFTED_MULTI_QUARTER_SEQUENCE` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| FNGR | FY2024 Q2 | 2024-05-31 | 2023-08-31 | `SHIFTED_MULTI_QUARTER_SEQUENCE` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| IMMR | FY2025 Q4 | 2026-01-31 | 2025-04-30 | `SHIFTED_MULTI_QUARTER_SEQUENCE` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| INBS | FY2025 Q4 | 2025-12-31 | 2025-06-30 | `SHIFTED_MULTI_QUARTER_SEQUENCE` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| MNR | FY2025 Q4 | 2025-09-30 | 2025-12-31 | `SHIFTED_MULTI_QUARTER_SEQUENCE` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| MNRO | FY2025 Q4 | 2026-03-31 | 2025-03-29 | `52_53_WEEK_CALENDAR_HANDLING` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| NCNO | FY2025 Q4 | 2026-01-31 | 2025-01-31 | `SHIFTED_MULTI_QUARTER_SEQUENCE` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| RBC | FY2025 Q4 | 2026-03-31 | 2025-03-29 | `52_53_WEEK_CALENDAR_HANDLING` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| RCAT | FY2024 Q3 | 2024-10-31 | 2024-01-31 | `SHIFTED_MULTI_QUARTER_SEQUENCE` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| SKY | FY2025 Q4 | 2026-03-31 | 2025-03-29 | `52_53_WEEK_CALENDAR_HANDLING` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| VIVS | FY2025 Q1 | 2025-03-31 | 2024-06-30 | `SHIFTED_MULTI_QUARTER_SEQUENCE` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| VIVS | FY2025 Q2 | 2025-06-30 | 2024-09-30 | `SHIFTED_MULTI_QUARTER_SEQUENCE` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+| VIVS | FY2025 Q4 | 2025-12-31 | 2025-03-31 | `SHIFTED_MULTI_QUARTER_SEQUENCE` | `SHIFT_MULTI_QUARTER_SEGMENT` | NO |
+
+The key finding is that the 15 retained cases are not safe single-cell period_end repairs. Each requires a segment-level structural decision because changing only the target period_end would collide with another canonical row or invert the FY/FQ chronology.
+
+Publish-date context corroborates the structural problem: most affected rows have negative publish lags or publish chronology reversals under the current canonical period_end, which is consistent with source-period mapping drift. Publish date remains evidence only and was not repaired.
+
+Initial Phase 8A10B audit rules were defined for fiscal continuity, period_end continuity, publish-date chronology, reporting lag bands, duplicate period_end detection, and 52/53-week exceptions. Initial threshold bands:
+
+- period gap normal: `75-105` days; review: `50-74` or `106-130`; severe: `<=0`, `<50`, `>160`, or annual-like adjacent jumps
+- publish gap normal: `60-130` days; review: `30-59` or `131-210`; severe: chronology reversal or `>210`
+- reporting lag: negative `<0`, very short `0-6`, normal `7-120`, long `121-240`, extreme `>240`
+
+These are A10A seed thresholds only; Phase 8A10B must recalibrate against the full retained V3 population.
+
+Safety proof:
+
+| Metric | Result |
+| --- | --- |
+| production writes | 0 |
+| RawCandle writes | 0 |
+| company rows | 2540 -> 2540 |
+| canonical rows | 72765 -> 72765 |
+| fundamentals rows | 72765 -> 72765 |
+| TTM rows | 53815 -> 53815 |
+| score rows | 53815 -> 53815 |
+| lifecycle rows | 53815 -> 53815 |
+| valuation rows | 53815 -> 53815 |
+
+Downstream remains deferred:
+
+`DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `USER EXTERNAL RESEARCH - ONLY UNRESOLVED STRUCTURAL CASES`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.

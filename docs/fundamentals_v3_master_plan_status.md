@@ -854,3 +854,31 @@ Backup sha256: `d4b114d35b4ae731096d05844f8613b7c7c1873d2ab67bc31feda950986b5c7f
 Artifact root: `temp/fundamentals_v3_phase8a9_period_end_apply/20260826T052001Z`
 
 Next action: `RESOLVE_SEQUENCE_COLLISION_R1_BEFORE_COMBINED_DOWNSTREAM_REBUILD`
+
+## Phase 8A10A
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_SEQUENCE_COLLISIONS_EXTERNAL_EVIDENCE_REQUIRED`
+
+Status: `DONE_READ_ONLY_STRUCTURAL_ANALYSIS_REPAIR_PLAN_NOT_PRODUCTION_READY`
+
+Phase 8 remains: `IN PROGRESS - STRUCTURAL R1 EVIDENCE REQUIRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_sequence_collision_analysis/20260826T054812Z`
+
+Frozen R1: `15` rows across `13` tickers.
+
+Guard split: `COLLISION=10`, `SEQUENCE_CONFLICT=5`.
+
+Root causes: `SHIFTED_MULTI_QUARTER_SEQUENCE=11`, `52_53_WEEK_CALENDAR_HANDLING=4`.
+
+Production-ready transformations: `0`.
+
+All 15 remaining cases require segment-level structural planning. A10A did not approve a single-row period_end-only apply because each target correction either collides with another populated canonical row or breaks fiscal chronology under the hard-locked FY/FQ identity.
+
+Safety proof: production writes `0`, RawCandle writes `0`, companies `2540 -> 2540`, canonical quarters `72765 -> 72765`, fundamentals rows `72765 -> 72765`, derived rows unchanged at `53815` for TTM, score, lifecycle, and valuation.
+
+Downstream remains deferred:
+
+`DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Next action: `USER EXTERNAL RESEARCH - ONLY UNRESOLVED STRUCTURAL CASES`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.

@@ -1101,3 +1101,25 @@ Safety: production writes `0`, RawCandle writes `0`, derived writes `0`, baselin
 Phase 8 remains: `IN PROGRESS - GLOBAL P1 AND CURRENT-CRITICAL P2/P3 REVIEW REQUIRED`
 
 Exact next action: `RESOLVE CURRENT-CRITICAL 2024+ / LAST-8Q P2A/P3_ESCALATED`.
+
+## Phase 8A10C - Local Review & Current-Downstream Queue
+
+Status: `DONE_READ_ONLY_LOCAL_REVIEW_CURRENT_DOWNSTREAM_QUEUE_READY`
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10C_LOCAL_REVIEW_COMPLETE_CURRENT_DOWNSTREAM_EXTERNAL_RESEARCH_REQUIRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10c_local_review/20260826T165000Z`
+
+The `30` Phase 8A10B-P2P3 `LOCAL_EVIDENCE_REVIEW` rows were frozen and reviewed against current V3 plus local migration/source evidence. Results: locally confirmed valid `23`, valid special cases `6`, external research still required `1`, local repair-ready `0`, P1 escalations `0`. Six rows showed snapshot drift due to blank A10B queue publish_date vs current V3 publish_date, with identity and period_end still matching.
+
+The current-downstream P2/P3 research set was rebuilt and deduplicated after local review. Final queue: `35` rows / `30` tickers, with Priority 1 `3`, Priority 2 `32`, Priority 3 `0`. It includes TTM impact `35`, Score/Lifecycle/Valuation impact `3` each, latest-4Q rows `26`, and latest-8Q rows `35`.
+
+Non-blocking latest-8Q backlog: `7` rows / `6` tickers. This backlog does not block Phase 8 closure.
+
+Global P1 remains separate: P1 rows excluded `15`, final queue overlap `0`.
+
+Safety: production writes `0`, RawCandle writes `0`, derived writes `0`, baseline unchanged `1`.
+
+Phase 8 remains: `IN PROGRESS - GLOBAL P1 AND CURRENT-DOWNSTREAM P2/P3 EXTERNAL RESEARCH REQUIRED`
+
+Exact next action: `USER EXTERNAL RESEARCH - CURRENT TTM / SCORE / LIFECYCLE / VALUATION QUEUE`.

@@ -1322,6 +1322,36 @@ Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `RESOLVE CURRENT-CRITICAL 2024+ / LAST-8Q P2A/P3_ESCALATED`.
 
+## Phase 8A10C - Local Review & Current-Downstream External Queue
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10C_LOCAL_REVIEW_COMPLETE_CURRENT_DOWNSTREAM_EXTERNAL_RESEARCH_REQUIRED`
+
+Status: `DONE_READ_ONLY_LOCAL_REVIEW_CURRENT_DOWNSTREAM_QUEUE_READY`
+
+Artifact root: `temp/fundamentals_v3_phase8a10c_local_review/20260826T165000Z`
+
+This phase reviewed the `30` current-critical `LOCAL_EVIDENCE_REVIEW` rows from Phase 8A10B-P2P3 using only local V3, migration, provider acquisition, and resolution evidence. No web/network research was performed. The global P1 queue remains separate and was not mixed into this P2/P3 queue.
+
+Local review results: exact current matches `24`, current snapshot drift `6`, locally confirmed valid false positives `23`, valid special cases `6`, external research still required `1`, local repair-ready cases `0`, P1 escalations `0`. The six drift rows were all snapshot publish-date enrichments where the A10B queue row had blank publish_date but current V3 contains a publish_date while period_end and identity still match: `BNC`, `WS`, `LFCR`, `ACI`, `BSLK`, and `FERG`.
+
+Current-impact narrowing: before local review, the combined current-critical queue had current TTM impact `57`, Score `10`, Lifecycle `10`, and Valuation `10`. After local review and P1 exclusion, unresolved current-impact P2/P3 cases were TTM `35`, Score `3`, Lifecycle `3`, and Valuation `3`; unique current-impact issues before and after dedupe were both `35`.
+
+Final external queue: `35` rows / `30` tickers. Priority split: Priority 1 `3`, Priority 2 `32`, Priority 3 `0`. The queue contains latest-quarter rows `3`, latest-4Q rows `26`, latest-8Q rows `35`, multi-signal rows `35`, and single-signal rows `0`.
+
+Latest-8Q non-blocking backlog: `7` rows / `6` tickers, latest-quarter backlog `2`, latest-4Q backlog `3`. `BLOCKS_PHASE8_CLOSURE=NO`.
+
+Global P1 exclusion was verified: P1 rows excluded `15`; final queue overlap with global P1 `0`.
+
+Safety proof: production writes `0`, RawCandle writes `0`, TTM writes `0`, Score writes `0`, Lifecycle writes `0`, Valuation writes `0`, and baseline unchanged `1`.
+
+Closure policy: current downstream correctness blocks; wider historical/recent backlog does not block Phase 8 closure.
+
+Phase 8 remains: `IN PROGRESS - GLOBAL P1 AND CURRENT-DOWNSTREAM P2/P3 EXTERNAL RESEARCH REQUIRED`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `USER EXTERNAL RESEARCH - CURRENT TTM / SCORE / LIFECYCLE / VALUATION QUEUE`.
+
 ## Phase 8A10A-PUBLISH-APPLY Verified Publish-Date Residual Closure
 
 Classification: `FUNDAMENTALS_V3_PHASE8A10A_PUBLISH_VERIFIED_REPAIRS_COMPLETE`

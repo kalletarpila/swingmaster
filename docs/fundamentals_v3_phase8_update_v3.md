@@ -721,3 +721,41 @@ Backup: `temp/fundamentals_v3_phase8a8_r1_resolution/20260826T045013Z/backup/rc_
 Backup sha256: `641b4c3cb6df1ac6ecf3d983f6aa5ce99f67efe77e0266cdca0310444f770c2d`
 
 Exact next action: `USER EXTERNAL RESEARCH — R1 QUEUE`.
+
+## Phase 8A9 Period-End Apply
+
+Classification: `FUNDAMENTALS_V3_PHASE8A9_SEQUENCE_COLLISION_R1_RETAINED`
+
+Status: `DONE_PARTIAL_GUARDED_APPLY_SEQUENCE_COLLISION_R1_RETAINED`
+
+Input reconciliation passed for `temp/phase8_period_end_R1_verified.csv`: `18` verified rows, `18` unique quarters, `18` DIFFERENT, `18` HIGH confidence, `18` Candidate Value equals Verified Period End, `0` identity conflicts.
+
+Applied exact period_end repairs:
+
+| Ticker | FY/Q | Old | New |
+| --- | --- | --- | --- |
+| AMST | FY2024 Q4 | 2024-12-31 | 2024-06-30 |
+| KALV | FY2025 Q3 | 2024-12-31 | 2025-01-31 |
+| LYTS | FY2025 Q1 | 2025-03-31 | 2024-09-30 |
+
+Rows applied: `3`; write guard failures: `0`.
+
+Retained R1: `15`, split as `COLLISION=10` and `SEQUENCE_CONFLICT=5`.
+
+The retained rows require a separate sequence/identity repair decision. A9 intentionally did not relabel FY/FQ, merge quarters, remove rows, or create same-company period_end duplicates.
+
+Production proof: quick_check `ok`, companies `2540 -> 2540`, canonical quarters `72765 -> 72765`, fundamentals rows `72765 -> 72765`, derived rows unchanged at `53815` for TTM, score, lifecycle, and valuation. Same-company period_end duplicate groups remained `3 -> 3`, so A9 introduced no new period_end duplicate group.
+
+Downstream rebuild was not run.
+
+Derived-data status remains:
+
+`DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Backup: `temp/fundamentals_v3_phase8a9_period_end_apply/20260826T052001Z/backup/rc_fundamentals_v3_phase8a9_backup.db`
+
+Backup sha256: `d4b114d35b4ae731096d05844f8613b7c7c1873d2ab67bc31feda950986b5c7f`
+
+Artifact root: `temp/fundamentals_v3_phase8a9_period_end_apply/20260826T052001Z`
+
+Exact next action: `RESOLVE_SEQUENCE_COLLISION_R1_BEFORE_COMBINED_DOWNSTREAM_REBUILD`.

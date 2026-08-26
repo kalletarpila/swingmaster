@@ -1057,3 +1057,25 @@ Phase 8 remains: `IN PROGRESS - FULL V3 AUDIT NEXT`
 Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
+## Phase 8A10B
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10B_FULL_AUDIT_EXTERNAL_RESEARCH_REQUIRED`
+
+Status: `DONE_READ_ONLY_FULL_V3_AUDIT_P1_EXTERNAL_RESEARCH_REQUIRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10b_full_sequence_audit/20260826T152346Z`
+
+Full retained V3 canonical audit completed read-only after structural R1 closure and IMMR/RCAT removal. Baseline stayed unchanged: companies `2538`, active `2470`, inactive `68`, canonical/fundamentals rows `72713`, TTM/Score/Lifecycle/Valuation rows `53788`, quick_check `ok`, duplicate FY/FQ `0`, orphan rows `0`.
+
+Publish residual discrepancy was reconciled: current `R1=12 / R2=5` is the current post-removal heuristic population, not a failure of the prior verified 17-row publish apply. The original verified 17 set remains R1-closed; only `BCTX` remains as an R2 market_availability stale case. Current true publish R1 is `12`, current true publish R2 is `5`.
+
+Global audit findings: fiscal sequence companies audited `2538`, companies with quarters `2533`, quarters audited `72713`, missing-quarter observations `7434`, one-year shift candidates `165`, likely duplicate economic quarter rows `6`, negative reporting lags `12`.
+
+Severity result: P1 `15` rows / `13` companies, P2 `5937` rows / `2368` companies, P3 `4640` rows / `2320` companies. P1 disposition is `EXTERNAL_RESEARCH_REQUIRED=15`.
+
+Phase 8 remains: `IN PROGRESS - GLOBAL P1 EXTERNAL RESEARCH REQUIRED`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `USER EXTERNAL RESEARCH - GLOBAL P1 QUEUE`.

@@ -1226,6 +1226,61 @@ Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
 
+## Phase 8A10B Full V3 Fiscal Sequence / Period-End / Publish-Date Audit
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10B_FULL_AUDIT_EXTERNAL_RESEARCH_REQUIRED`
+
+Status: `DONE_READ_ONLY_FULL_V3_AUDIT_P1_EXTERNAL_RESEARCH_REQUIRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10b_full_sequence_audit/20260826T152346Z`
+
+Baseline after IMMR/RCAT removal: companies `2538`, active `2470`, inactive `68`, canonical quarters `72713`, fundamentals rows `72713`, and TTM/Score/Lifecycle/Valuation rows `53788` each. `quick_check=ok`, duplicate FY/FQ `0`, orphan fundamentals `0`, and foreign_key_check rows `0`.
+
+The audit covered all `2538` retained V3 companies. Fiscal/date sequence calculations covered `2533` companies with canonical quarter rows and `72713` quarters; `5` retained companies currently have zero canonical quarters.
+
+Publish residual reconciliation resolved the apparent discrepancy from the removal phase. The current `17` publish residual rows are the post-removal heuristic population: `12` current true R1 publish-date anomalies plus `5` R2 market_availability-only flags. The earlier externally verified 17-row publish_date apply set remains R1-closed; only `1` of that original set is still residual, the known `BCTX` R2 market_availability stale case. Therefore the current `R1=12 / R2=5` does not mean the verified 17 repairs failed.
+
+Empirical distributions:
+
+| Distribution | Count | P50 | P90 | P95 | P99 | Max |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| period_end gap days | 70176 | 91 | 92 | 182 | 275 | 2011 |
+| publish gap days | 65009 | 91 | 121 | 181 | 273 | 1210 |
+| reporting lag days | 69248 | 37 | 58 | 73 | 455 | 1566 |
+
+Hard rules used: duplicate FY/Q, non-positive period_end progression, duplicate period_end with corroborating context, and publish_date before period_end. Soft empirical rules used: unusually short/long period gaps, unusually long publish intervals, and long/extreme reporting lags. Missing expected FY/Q rows were classified as `MISSING_HISTORY` unless another signal supported wrong canonical mapping.
+
+Audit results:
+
+| Area | Count |
+| --- | ---: |
+| duplicate FY/Q | 0 |
+| missing-quarter observations | 7434 |
+| reverse fiscal-label sequences | 0 |
+| one-year shift candidates | 165 |
+| multi-quarter missing/shift observations | 1262 |
+| likely duplicate economic quarter rows | 6 |
+| negative reporting lags | 12 |
+| valid 52/53-week sentinels | 4 |
+
+Severity classification:
+
+| Severity | Rows | Companies |
+| --- | ---: | ---: |
+| P1 | 15 | 13 |
+| P2 | 5937 | 2368 |
+| P3 | 4640 | 2320 |
+
+All P1 rows are classified `EXTERNAL_RESEARCH_REQUIRED`. P1 tickers are `BBY`, `DELL`, `FNGR`, `GCO`, `HAE`, `MRVL`, `POWW`, `RH`, `RL`, `SAIC`, `TJX`, `TRNS`, and `VTGN`. Latest/current-state impact candidates: cross-signal latest/current impact `16`, current-TTM impact `16`. The bounded external research queue contains `15` rows / `13` tickers.
+
+Safety proof: production writes `0`, RawCandle writes `0`, TTM writes `0`, Score writes `0`, Lifecycle writes `0`, Valuation writes `0`, and baseline unchanged `1`.
+
+Phase 8 remains: `IN PROGRESS - GLOBAL P1 EXTERNAL RESEARCH REQUIRED`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `USER EXTERNAL RESEARCH - GLOBAL P1 QUEUE`.
+
 ## Phase 8A10A-PUBLISH-APPLY Verified Publish-Date Residual Closure
 
 Classification: `FUNDAMENTALS_V3_PHASE8A10A_PUBLISH_VERIFIED_REPAIRS_COMPLETE`

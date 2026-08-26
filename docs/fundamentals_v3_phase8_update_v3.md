@@ -1281,6 +1281,47 @@ Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `USER EXTERNAL RESEARCH - GLOBAL P1 QUEUE`.
 
+## Phase 8A10B-P2P3 - 2024+ / Last-8Q Reprioritization
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10B_P2P3_REPRIORITIZED_CURRENT_CRITICAL_REVIEW_REQUIRED`
+
+Status: `DONE_READ_ONLY_P2P3_REPRIORITIZATION_CURRENT_CRITICAL_QUEUE_READY`
+
+Artifact root: `temp/fundamentals_v3_phase8a10b_p2p3_reprioritization/20260826T162000Z`
+
+This phase intentionally did not try to manually perfect all historical P2/P3 findings. Full historical perfection is not required for Phase 8 closure because most broad P2/P3 findings are old history gaps, long but plausible issuer/reporting intervals, or non-blocking informational sequence observations. The practical priority is current data quality: 2024+ rows, each company latest eight canonical quarters, the latest quarter, the current four-quarter TTM input window, and rows capable of distorting current Score/Lifecycle/Valuation.
+
+Priority rules: `latest-8Q` is the primary user window, and companies with fewer than eight canonical quarters use all available quarters. `2024+` is a recency cut based on period_end or publish chronology, not fiscal-year inference. `P2A_CURRENT_CRITICAL_REVIEW` requires recent/latest-8Q scope plus current downstream impact or a material structural signal such as reverse chronology, negative reporting lag, one-year shift, duplicate economic quarter, or severe short period gap. `P2B_RECENT_NONBLOCKING` captures 2024+/latest-8Q P2 rows where evidence points more toward unusual reporting behavior, sparse/deep-history availability, or isolated metadata oddity than wrong canonical mapping. `P2C_HISTORICAL_DEFERRED` captures non-current P2 rows that should remain documented but not block Phase 8. `P3A_RECENT_INFORMATIONAL` captures recent/latest-8Q accepted or harmless P3 observations. `P3B_HISTORICAL_INFORMATIONAL` captures old accepted P3 observations. `P3_ESCALATED` is limited to recent/latest-8Q P3 rows with multiple independent material structural signals and current impact.
+
+Starting population: P2 `5937` rows / `2368` companies, P3 `4640` rows / `2320` companies, with P1 `15` rows explicitly excluded because P1 is already in a separate external research queue.
+
+Recent window mapping: retained companies `2538`, companies with quarters `2533`, companies with at least eight quarters `2514`, companies with fewer than eight quarters `19`, latest-8Q window quarters `20232`, latest-4Q window quarters `10132`, and 2024+ canonical quarters `24211`.
+
+Reprioritization result:
+
+| Bucket | Rows | Companies |
+| --- | ---: | ---: |
+| P2A current critical | 154 | 122 |
+| P2B recent non-blocking | 2665 | 2290 |
+| P2C historical deferred | 3118 | 1407 |
+| P3A recent informational | 2495 | 2282 |
+| P3B historical informational | 2132 | 1228 |
+| P3 escalated | 12 | 12 |
+
+Current-critical queue: `166` rows / `122` tickers. It contains latest-quarter rows `42`, latest-4Q rows `80`, latest-8Q rows `144`, and 2024+ rows `157`. Current downstream impact rows: TTM `57`, Score `10`, Lifecycle `10`, Valuation `10`.
+
+Signal structure in the current-critical queue: single-signal rows `17`, multi-signal rows `149`, one-year shift candidates `49`, duplicate-economic-quarter candidates `2`, publish/period contradictions `85`, systemic recent pattern types `7`.
+
+Recommended action counts in the queue: `EXTERNAL_RESEARCH=136`, `LOCAL_EVIDENCE_REVIEW=30`. No rows were classified as `MARKET_AVAILABILITY_ONLY`, `MISSING_HISTORY_NON_BLOCKING`, or `VALID_52_53_WEEK` inside the current-critical queue.
+
+Safety proof: production writes `0`, RawCandle writes `0`, TTM writes `0`, Score writes `0`, Lifecycle writes `0`, Valuation writes `0`, and baseline unchanged `1`.
+
+Phase 8 remains: `IN PROGRESS - GLOBAL P1 AND CURRENT-CRITICAL P2/P3 REVIEW REQUIRED`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `RESOLVE CURRENT-CRITICAL 2024+ / LAST-8Q P2A/P3_ESCALATED`.
+
 ## Phase 8A10A-PUBLISH-APPLY Verified Publish-Date Residual Closure
 
 Classification: `FUNDAMENTALS_V3_PHASE8A10A_PUBLISH_VERIFIED_REPAIRS_COMPLETE`

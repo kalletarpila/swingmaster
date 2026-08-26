@@ -1079,3 +1079,25 @@ Phase 8 remains: `IN PROGRESS - GLOBAL P1 EXTERNAL RESEARCH REQUIRED`
 Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `USER EXTERNAL RESEARCH - GLOBAL P1 QUEUE`.
+
+## Phase 8A10B-P2P3 - P2/P3 Current-Priority Reprioritization
+
+Status: `DONE_READ_ONLY_P2P3_REPRIORITIZATION_CURRENT_CRITICAL_QUEUE_READY`
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10B_P2P3_REPRIORITIZED_CURRENT_CRITICAL_REVIEW_REQUIRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10b_p2p3_reprioritization/20260826T162000Z`
+
+The broad A10B P2/P3 populations were reprioritized around current quality rather than historical perfection. P1 rows remain excluded and are still handled by the separate global P1 external research queue.
+
+Result: P2A current-critical `154` rows / `122` companies; P2B recent non-blocking `2665` rows / `2290` companies; P2C historical deferred `3118` rows / `1407` companies; P3 escalated `12` rows / `12` companies. The combined current-critical P2A/P3_ESCALATED queue is `166` rows / `122` tickers.
+
+Current windows: retained companies `2538`, companies with quarters `2533`, companies with at least eight quarters `2514`, latest-8Q quarters `20232`, latest-4Q quarters `10132`, 2024+ quarters `24211`.
+
+Current-critical impact: latest-quarter rows `42`, latest-4Q rows `80`, latest-8Q rows `144`, current TTM rows `57`, Score/Lifecycle/Valuation endpoint rows `10` each.
+
+Safety: production writes `0`, RawCandle writes `0`, derived writes `0`, baseline unchanged `1`.
+
+Phase 8 remains: `IN PROGRESS - GLOBAL P1 AND CURRENT-CRITICAL P2/P3 REVIEW REQUIRED`
+
+Exact next action: `RESOLVE CURRENT-CRITICAL 2024+ / LAST-8Q P2A/P3_ESCALATED`.

@@ -616,3 +616,108 @@ Downstream rebuild was not run. Derived data remains:
 `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Phase 8 remains `IN PROGRESS`. Exact next action: `RESOLVE PHASE 8A7 RESIDUAL R1 BEFORE DOWNSTREAM REBUILD`.
+
+## Phase 8A8 - Residual R1 Resolution Before Downstream Rebuild
+
+Classification: `FUNDAMENTALS_V3_PHASE8A8_EXTERNAL_RESEARCH_REQUIRED`
+
+Status: `DONE_VERIFIED_R1_REPAIRS_APPLIED_EXTERNAL_PERIOD_END_RESEARCH_REQUIRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a8_r1_resolution/20260826T045013Z`
+
+Starting state after A7:
+
+| Metric | Count |
+| --- | ---: |
+| R1 | 36 |
+| R2 | 37 |
+| R3 | 126 |
+| companies | 2540 |
+| canonical quarters | 72765 |
+| TTM rows | 53815 |
+| score rows | 53815 |
+| lifecycle rows | 53815 |
+| valuation rows | 53815 |
+
+Four externally verified repairs were applied with identity and old-value guards:
+
+| Ticker | FY/Q | Field | Old | New | Period End |
+| --- | --- | --- | ---: | ---: | --- |
+| POWW | FY2025 Q1 | revenue | -42159090 | 12281991 | `2025-03-31 -> 2024-06-30` |
+| RH | FY2021 Q4 | revenue | -7453000 | 902741000 | `2021-05-01 -> 2022-01-29` |
+| VTGN | FY2025 Q1 | revenue | -15000 | 84000 | `2025-03-31 -> 2024-06-30` |
+| TBLA | FY2022 Q3 | cash | -445000 | 188477000 | unchanged `2022-09-30` |
+
+Four-case rows applied: `4`; write failures: `0`.
+
+POWW/RH/VTGN identity guards passed with period-collision observations: each corrected period_end already appeared on another existing canonical row for the same ticker, but canonical identity `company_id + fiscal_year + fiscal_quarter` remained unique. No fiscal label rewrite was performed in this phase.
+
+Restated / continuing-operations policy recorded: when a later official filing presents historical quarterly values on a documented restated / continuing-operations basis after discontinued operations or a material business disposal, V3 may prefer the latest official comparable historical value for a consistent canonical series, provided identity is unchanged and lineage records the evidence. This is not a general automatic restatement rule.
+
+R1 after four repairs and local review:
+
+| Area | R1 |
+| --- | ---: |
+| publish | 0 |
+| period_end | 18 |
+| revenue | 0 |
+| cash | 0 |
+| debt | 0 |
+| other | 0 |
+| total | 18 |
+
+Deep review outcomes:
+
+| Review area | Outcome |
+| --- | ---: |
+| publish locally resolved / downgraded | 0 |
+| period-end downgraded to R2 | 12 |
+| period-end downgraded to R3 | 2 |
+| period-end external research required | 18 |
+| revenue repaired | 3 |
+| revenue resolved valid-as-is | 1 |
+| cash repaired | 1 |
+| debt locally resolved | 0 |
+
+No additional safe repair set beyond the four verified cases was found from local evidence. `phase8a8_additional_safe_repair_set.csv` is intentionally empty.
+
+Final residual queues:
+
+| Queue | Rows |
+| --- | ---: |
+| R1 | 18 |
+| R2 | 49 |
+| R3 | 132 |
+
+Final R1 tickers/cases:
+
+`AMST FY2024 Q4`, `CRUS FY2025 Q4`, `DOMO FY2025 Q4`, `EEFT FY2025 Q3`, `FNGR FY2024 Q2`, `IMMR FY2025 Q4`, `INBS FY2025 Q4`, `KALV FY2025 Q3`, `LYTS FY2025 Q1`, `MNR FY2025 Q4`, `MNRO FY2025 Q4`, `NCNO FY2025 Q4`, `RBC FY2025 Q4`, `RCAT FY2024 Q3`, `SKY FY2025 Q4`, `VIVS FY2025 Q1`, `VIVS FY2025 Q2`, `VIVS FY2025 Q4`.
+
+External research queue: `temp/fundamentals_v3_phase8a8_r1_resolution/20260826T045013Z/external_research_queue_R1.csv`
+
+Human summary: `temp/fundamentals_v3_phase8a8_r1_resolution/20260826T045013Z/external_research_queue_R1_human_summary.md`
+
+Canonical proving:
+
+| Metric | Value |
+| --- | --- |
+| quick_check | `ok` |
+| companies before/after | `2540 -> 2540` |
+| canonical rows before/after | `72765 -> 72765` |
+| duplicate identities | `0` |
+| orphan fundamentals | `0` |
+| unrelated canonical drift | `0` |
+| post-A8 publish audit count | `51` |
+| post-A8 semantic audit count | `123` |
+
+Post-A8 Phase 7 read-only limitation: Phase 7's file-metadata sentinel reported a RawCandle `osakedata.db` mtime change during the audit window while the V3 DB mtime stayed unchanged. RawCandle quick_check returned `ok`; row count check was blocked by an external SQLite lock. A8 performed no RawCandle writes.
+
+Downstream rebuild was not run. Derived data remains:
+
+`DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Backup: `temp/fundamentals_v3_phase8a8_r1_resolution/20260826T045013Z/backup/rc_fundamentals_v3_phase8a7_backup.db`
+
+Backup sha256: `641b4c3cb6df1ac6ecf3d983f6aa5ce99f67efe77e0266cdca0310444f770c2d`
+
+Exact next action: `USER EXTERNAL RESEARCH — R1 QUEUE`.

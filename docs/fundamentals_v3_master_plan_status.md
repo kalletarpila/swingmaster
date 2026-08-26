@@ -777,3 +777,42 @@ Backup sha256: `f69931073ed4865a3862168e0582863d124757dd28a7e2b647b5da7014c986c9
 Artifact root: `temp/fundamentals_v3_phase8a7_canonical_closure/20260825T183549Z`
 
 Next action: `RESOLVE PHASE 8A7 RESIDUAL R1 BEFORE DOWNSTREAM REBUILD`
+
+## Phase 8A8
+
+Classification: `FUNDAMENTALS_V3_PHASE8A8_EXTERNAL_RESEARCH_REQUIRED`
+
+Status: `DONE_VERIFIED_R1_REPAIRS_APPLIED_EXTERNAL_PERIOD_END_RESEARCH_REQUIRED`
+
+Phase 8 remains: `IN PROGRESS - R1 EXTERNAL PERIOD-END EVIDENCE REQUIRED`
+
+Applied verified repairs:
+
+- `POWW FY2025 Q1`: period_end `2025-03-31 -> 2024-06-30`, revenue `-42159090 -> 12281991`
+- `RH FY2021 Q4`: period_end `2021-05-01 -> 2022-01-29`, revenue `-7453000 -> 902741000`
+- `VTGN FY2025 Q1`: period_end `2025-03-31 -> 2024-06-30`, revenue `-15000 -> 84000`
+- `TBLA FY2022 Q3`: cash `-445000 -> 188477000`
+
+Four-case rows applied: `4`; write failures: `0`.
+
+Final residual queues: `R1=18`, `R2=49`, `R3=132`.
+
+Final R1 consists only of retained-company period_end research cases. Revenue/Cash/Debt/Shares R1 are `0`.
+
+External research queue: `temp/fundamentals_v3_phase8a8_r1_resolution/20260826T045013Z/external_research_queue_R1.csv`
+
+External human summary: `temp/fundamentals_v3_phase8a8_r1_resolution/20260826T045013Z/external_research_queue_R1_human_summary.md`
+
+Canonical proof: quick_check `ok`, companies `2540 -> 2540`, canonical quarters `72765 -> 72765`, duplicate identities `0`, orphan fundamentals `0`, unrelated canonical drift `0`.
+
+Downstream writes: `v3_ttm=0`, `v3_score=0`, `v3_lifecycle=0`, `v3_valuation=0`.
+
+Derived-data status remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Backup: `temp/fundamentals_v3_phase8a8_r1_resolution/20260826T045013Z/backup/rc_fundamentals_v3_phase8a7_backup.db`
+
+Backup sha256: `641b4c3cb6df1ac6ecf3d983f6aa5ce99f67efe77e0266cdca0310444f770c2d`
+
+Artifact root: `temp/fundamentals_v3_phase8a8_r1_resolution/20260826T045013Z`
+
+Next action: `USER EXTERNAL RESEARCH — R1 QUEUE`

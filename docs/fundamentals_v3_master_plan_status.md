@@ -1145,3 +1145,25 @@ Independent current-state A10B validation confirmed P1 `15` rows / `13` companie
 Phase 8 remains: `IN PROGRESS - GLOBAL P1 SEGMENT BLOCKERS AND CURRENT-DOWNSTREAM P2/P3 EXTERNAL RESEARCH REQUIRED`
 
 Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE ONLY THE REMAINING BLOCKER SEGMENTS`.
+
+## Phase 8A10E - One-Year Period-End Shift Root Cause
+
+Status: `DONE_READ_ONLY_ONE_YEAR_SHIFT_ANALYSIS_PERIOD_END_ONLY_REPAIR_REJECTED`
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10E_BLOCKERS_REMAIN`
+
+Artifact root: `temp/fundamentals_v3_phase8a10e_one_year_period_shift/20260826T174000Z`
+
+The nine `ONE_YEAR_PERIOD_SHIFT` tickers from A10D-R were analyzed read-only: `BBY`, `DELL`, `GCO`, `HAE`, `MRVL`, `RL`, `SAIC`, `TJX`, and `TRNS`.
+
+The period_end-only repair hypothesis was rejected. The shared surface symptom is Yahoo/52-53-week period_end year offset plus month-end normalization, but local content evidence shows mixed fiscal identity/content shift: `FYQ_CORRECT_CONTENT_WRONG=18`, `FYQ_WRONG_CONTENT_CORRECT_FOR_ANOTHER_QUARTER=19`, and `UNRESOLVED=48`. Therefore no generic production-safe period_end-only rule exists for this nine-ticker group.
+
+Frozen repair rows `0`; identity changes `0`; publish changes `0`; fundamental changes `0`; blocked rows `9`. Rehearsal on a disposable DB copy applied `0` rows and exact A10B re-audit stayed nine-ticker P1 `9 -> 9`, global P1 `15 -> 15`, with no new P1 introduced.
+
+Likely source path is the historical Phase 3B Yahoo seed path: `v3_yahoo_canonical_seed.py::prepare_yahoo_seed` passes normalized Yahoo period_end into canonical candidates while official period_end remains metadata-only. Classified as historical migration artifact, not proven active Update V3 ingestion bug. Future prevention is still required before reusing that seed path.
+
+Safety: production writes `0`, RawCandle writes `0`, derived writes `0`, quick_check `ok`, duplicate FY/FQ `0`, orphan rows `0`.
+
+Phase 8 remains: `IN PROGRESS - NINE-TICKER FISCAL IDENTITY/CONTENT SEGMENTS AND OTHER P1 FOLLOW-UPS REQUIRED`
+
+Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE NINE-TICKER FISCAL IDENTITY/CONTENT SEGMENTS BEFORE PERIOD_END APPLY`.

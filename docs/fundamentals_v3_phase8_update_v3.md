@@ -1428,3 +1428,47 @@ Phase 8 remains: `IN PROGRESS - GLOBAL P1 SEGMENT BLOCKERS AND CURRENT-DOWNSTREA
 Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE ONLY THE REMAINING BLOCKER SEGMENTS`.
+
+## Phase 8A10E - One-Year Period-End Shift Root Cause
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10E_BLOCKERS_REMAIN`
+
+Status: `DONE_READ_ONLY_ONE_YEAR_SHIFT_ANALYSIS_PERIOD_END_ONLY_REPAIR_REJECTED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10e_one_year_period_shift/20260826T174000Z`
+
+Scope was exactly the nine A10D-R `ONE_YEAR_PERIOD_SHIFT` tickers: `BBY`, `DELL`, `GCO`, `HAE`, `MRVL`, `RL`, `SAIC`, `TJX`, and `TRNS`. `FNGR`, `POWW`, `RH`, and `VTGN` remained out of scope.
+
+Starting state: nine-ticker P1 rows `9`, global P1 rows `15`, production baseline unchanged at companies `2538`, canonical/fundamentals rows `72713`, and TTM/Score/Lifecycle/Valuation rows `53788`.
+
+The simple hypothesis was rejected. The common surface symptom is a 52/53-week Yahoo month-end period metadata row offset by one year or nearby month-end normalization, but the affected rows are not proven FY/FQ/content-correct. Content alignment found `FYQ_CORRECT_CONTENT_WRONG=18`, `FYQ_WRONG_CONTENT_CORRECT_FOR_ANOTHER_QUARTER=19`, and `UNRESOLVED=48`. Period-offset alignment found `PLUS_ONE_YEAR_MONTH_END_NORMALIZED=16`, `PLUS_ONE_YEAR_SAME_MONTH_DAY=2`, and `NO_OFFICIAL_MATCH=67`.
+
+Per-ticker segment result:
+
+| Ticker | FY/FQ correct | Content correct | Publish correct | First bad | Last bad | Bad rows | Offset pattern | Repair rows | Production-ready |
+| --- | --- | --- | --- | --- | --- | ---: | --- | ---: | --- |
+| `BBY` | NO | NO | NO/UNVERIFIED | FY2024 Q4 | FY2026 Q1 | 5 | `PLUS_ONE_YEAR_MONTH_END_NORMALIZED` | 0 | NO |
+| `DELL` | NO | NO | NO/UNVERIFIED | FY2024 Q4 | FY2026 Q1 | 5 | `PLUS_ONE_YEAR_MONTH_END_NORMALIZED`, `PLUS_ONE_YEAR_SAME_MONTH_DAY` | 0 | NO |
+| `GCO` | NO | NO | NO/UNVERIFIED | FY2024 Q4 | FY2026 Q1 | 4 | `PLUS_ONE_YEAR_MONTH_END_NORMALIZED` | 0 | NO |
+| `HAE` | UNPROVEN | NO | NO/UNVERIFIED | FY2025 Q4 | FY2026 Q1 | 2 | `PLUS_ONE_YEAR_MONTH_END_NORMALIZED` | 0 | NO |
+| `MRVL` | NO | NO | NO/UNVERIFIED | FY2024 Q4 | FY2026 Q1 | 5 | `PLUS_ONE_YEAR_MONTH_END_NORMALIZED` | 0 | NO |
+| `RL` | NO | NO | NO/UNVERIFIED | FY2025 Q1 | FY2026 Q1 | 3 | `PLUS_ONE_YEAR_MONTH_END_NORMALIZED` | 0 | NO |
+| `SAIC` | NO | NO | NO/UNVERIFIED | FY2024 Q1 | FY2026 Q1 | 6 | `PLUS_ONE_YEAR_MONTH_END_NORMALIZED`, `PLUS_ONE_YEAR_SAME_MONTH_DAY` | 0 | NO |
+| `TJX` | NO | NO | NO/UNVERIFIED | FY2025 Q1 | FY2026 Q1 | 4 | `PLUS_ONE_YEAR_MONTH_END_NORMALIZED` | 0 | NO |
+| `TRNS` | NO | NO | NO/UNVERIFIED | FY2025 Q1 | FY2026 Q1 | 3 | `PLUS_ONE_YEAR_MONTH_END_NORMALIZED` | 0 | NO |
+
+Frozen repair result: repair rows `0`, period_end-only rows `0`, identity changes `0`, publish changes `0`, fundamental changes `0`, blocked rows `9`. No production apply set was frozen because period_end-only correctness was not proven for any of the nine ticker groups.
+
+Source-code trace: likely responsible historical path is `swingmaster/fundamentals/v3_yahoo_canonical_seed.py::prepare_yahoo_seed`, which builds canonical candidates with `period_end_date=row["period_end_date"]` from normalized Yahoo rows while storing `official_period_end_date` only in metadata. `swingmaster/fundamentals/v3_canonical_migration.py::_apply_dates` then treats conflicting period dates through conflict/safe-variant policy rather than substituting the official period_end. This is classified as `HISTORICAL_MIGRATION_ARTIFACT=YES`, `ACTIVE_SYSTEMIC_INGESTION_BUG=NO`, with `future_prevention_required=YES` if the same Yahoo seed path is reused.
+
+Rehearsal applied `0` repair rows on a disposable DB copy. Integrity stayed clean: quick_check `ok`, duplicate FY/FQ `0`, orphan rows `0`, unrelated drift `0`.
+
+Exact A10B re-audit on the rehearsal DB: nine-ticker P1 `9 -> 9`, global P1 `15 -> 15`, new P1 `0`. Remaining P1 tickers are `BBY`, `DELL`, `FNGR`, `GCO`, `HAE`, `MRVL`, `POWW`, `RH`, `RL`, `SAIC`, `TJX`, `TRNS`, and `VTGN`.
+
+Safety proof: production writes `0`, RawCandle writes `0`, TTM writes `0`, Score writes `0`, Lifecycle writes `0`, Valuation writes `0`.
+
+Phase 8 remains: `IN PROGRESS - NINE-TICKER FISCAL IDENTITY/CONTENT SEGMENTS AND OTHER P1 FOLLOW-UPS REQUIRED`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE NINE-TICKER FISCAL IDENTITY/CONTENT SEGMENTS BEFORE PERIOD_END APPLY`.

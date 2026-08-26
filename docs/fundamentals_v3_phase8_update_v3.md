@@ -381,7 +381,7 @@ The 17 semantics-uncertain rows are based on filing-date evidence without suffic
 
 Permanent period-end policy:
 
-For the same confirmed canonical fiscal quarter, period_end differences within ±7 actual trading days are considered equivalent for V3 tracking. Within that tolerance, the later date is used as canonical period_end. Period End remains metadata, not canonical quarter identity. Differences above 7 trading days require review. Small fiscal-close vs month-end differences are not material errors under this policy.
+For the same confirmed canonical fiscal quarter, period_end differences within ±7 actual trading days are considered equivalent for V3 tracking only when no stronger official issuer/SEC period-end evidence resolves the exact date. Within that tolerance, the later date may be used as canonical period_end as a fallback; official period-end evidence still outranks normalized provider dates. Period End remains metadata, not canonical quarter identity. Differences above 7 trading days require review. Small fiscal-close vs month-end differences are not material errors under this policy.
 
 Period-end tolerance analysis:
 
@@ -1504,3 +1504,36 @@ Phase 8 remains: `IN PROGRESS - CURRENT-DOWNSTREAM SAFE APPLY AND P1/STRUCTURAL/
 Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `PHASE 8A10F-APPLY - APPLY REHEARSED CURRENT-DOWNSTREAM REPAIRS`, after checking interaction with the still-running global-P1 workflow.
+
+## Phase 8 Prevention Hardening - Canonical Ingestion / Update Regression Protection
+
+Classification: `FUNDAMENTALS_V3_PHASE8_PREVENTION_HARDENING_POLICY_DOCUMENTED`
+
+Status: `DOCUMENTATION_ONLY_IMPLEMENTATION_PENDING`
+
+Authoritative prevention policy: `docs/fundamentals_v3_canonical_prevention_policy.md`
+
+Phase 8 identified permanent prevention requirements for canonical ingestion, migration, backfill,
+repair, and Update write paths. The policy locks the rule that issuer FY/FQ is canonical identity,
+official period_end evidence outranks normalized provider period dates, publish_date is the first
+authoritative public result date, economic-quarter content must move together, and write paths must
+block target collisions, fiscal sequence errors, transition/STUB misencoding, restatement hybrids,
+and silent month-end normalization.
+
+The historical Yahoo seed failure mode is recorded as likely originating in
+`swingmaster/fundamentals/v3_yahoo_canonical_seed.py::prepare_yahoo_seed`, where normalized Yahoo
+`period_end_date` was used for canonical candidates while `official_period_end_date` remained
+metadata. This remains classified as `HISTORICAL_MIGRATION_ARTIFACT`, not a proven active Update V3
+bug, but future reuse of the seed/bootstrap/migration/backfill/recovery path must prove the failure
+cannot recur.
+
+Future implementation phase:
+
+```text
+PHASE 8 PREVENTION HARDENING - IMPLEMENT CANONICAL WRITE-PATH GUARDS & REGRESSION TESTS
+```
+
+Completion target: `FUNDAMENTALS_V3_PHASE8_PREVENTION_HARDENING_COMPLETE`
+
+Safety: production writes `0`, RawCandle writes `0`, TTM writes `0`, Score writes `0`, Lifecycle
+writes `0`, Valuation writes `0`.

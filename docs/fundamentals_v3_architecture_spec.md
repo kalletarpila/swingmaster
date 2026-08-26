@@ -50,6 +50,18 @@ schema/repository/workflow coding decisions.
 - Detailed field provenance from V2 is not carried forward unless a concrete reconciliation need
   exists.
 
+## Canonical Prevention Policy
+
+The permanent write-path prevention policy is authoritative in
+`docs/fundamentals_v3_canonical_prevention_policy.md`.
+
+All canonical ingestion, migration, backfill, repair, and Update paths must preserve issuer-reported
+`company_id + fiscal_year + fiscal_quarter` identity, treat `period_end_date` as metadata rather than
+identity, preserve official issuer/SEC period ends over normalized provider dates, and use
+`publish_date` as the first authoritative public result date. Future implementations must include
+pre-write structural guards, post-write structural audits, and regression sentinels before Phase 8
+closure, V3 cutover, or Legacy retirement.
+
 ## Database Ownership
 
 V3 becomes the only writable production fundamentals store after cutover. Legacy

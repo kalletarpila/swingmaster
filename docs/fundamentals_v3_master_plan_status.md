@@ -684,7 +684,7 @@ Production writes: `0`
 
 RawCandle writes: `0`
 
-Permanent period-end policy: For the same confirmed canonical fiscal quarter, period_end differences within ±7 actual trading days are considered equivalent for V3 tracking. Within that tolerance, the later date is used as canonical period_end.
+Permanent period-end policy: For the same confirmed canonical fiscal quarter, period_end differences within ±7 actual trading days are considered equivalent for V3 tracking only when no stronger official issuer/SEC period-end evidence resolves the exact date. Within that tolerance, the later date may be used as canonical period_end as a fallback; official period-end evidence still outranks normalized provider dates.
 
 Period End remains metadata, not canonical quarter identity. Differences above 7 trading days require review. Small fiscal-close vs month-end differences are not material errors under this policy.
 
@@ -1191,3 +1191,32 @@ Safety: production writes `0`, RawCandle writes `0`, derived writes `0`.
 Phase 8 remains: `IN PROGRESS - CURRENT-DOWNSTREAM SAFE APPLY AND P1/STRUCTURAL/VALUE BLOCKERS REMAIN`
 
 Exact next action: `PHASE 8A10F-APPLY - APPLY REHEARSED CURRENT-DOWNSTREAM REPAIRS`, after checking interaction with the still-running global-P1 workflow.
+
+## Phase 8 Prevention Hardening - Canonical Ingestion / Update Regression Protection
+
+Status: `MANDATORY_GATE_DOCUMENTED_IMPLEMENTATION_PENDING`
+
+Target classification after implementation: `FUNDAMENTALS_V3_PHASE8_PREVENTION_HARDENING_COMPLETE`
+
+Authoritative policy: `docs/fundamentals_v3_canonical_prevention_policy.md`
+
+This gate is mandatory before final Phase 8 closure, V3 cutover, and Legacy retirement. Phase 8
+cleanup is not sufficient while active or reusable canonical write paths can recreate known canonical
+mapping, period_end, publish_date, restatement, transition/STUB, or target-collision failure modes.
+
+Future implementation phase:
+
+```text
+PHASE 8 PREVENTION HARDENING - IMPLEMENT CANONICAL WRITE-PATH GUARDS & REGRESSION TESTS
+```
+
+Current remaining order:
+
+1. Finish current P1 and current-downstream canonical repair work.
+2. Run final canonical audit and closure proving.
+3. Complete `PHASE 8 PREVENTION HARDENING`.
+4. Run one combined downstream rebuild: `TTM -> Score -> Lifecycle -> Valuation`.
+5. Complete final Phase 8 proving and closure.
+6. Run Phase 9 Production Proving.
+7. Perform Phase 10 V3 Cutover.
+8. Perform Phase 11 Legacy Retirement.

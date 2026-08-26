@@ -1389,3 +1389,42 @@ Phase 8 remains: `IN PROGRESS - IMMR/RCAT SPECIAL RESEARCH BEFORE GLOBAL AUDIT`
 Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `USER EXTERNAL RESEARCH - IMMR / RCAT`, then `PHASE 8A10A-SPECIAL-FINAL-APPLY`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
+## Phase 8A10D-R - Global P1 Segment Reconciliation
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10D_R_SEGMENT_RECONCILIATION_BLOCKERS_REMAIN`
+
+Status: `DONE_READ_ONLY_SEGMENT_RECONCILIATION_PRODUCTION_APPLY_BLOCKED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10d_r_segment_reconciliation/20260826T171500Z`
+
+This phase reconciled the full surrounding fiscal-quarter segments for the `13` global P1 tickers from the Phase 8A10B audit: `BBY`, `DELL`, `FNGR`, `GCO`, `HAE`, `MRVL`, `POWW`, `RH`, `RL`, `SAIC`, `TJX`, `TRNS`, and `VTGN`. Scope stayed read-only against production; the proposed external P1 transformation package was applied only to a disposable copy of `rc_fundamentals_v3.db`, then the exact A10B global P1 audit was re-run on that copy.
+
+Input contract: current A10B P1 rows `15`, verified case rows `15`, transformation rows `19`, fundamental repair rows `2`, unique tickers `13`, confidence `HIGH=14 / MEDIUM=1`, production-ready flags from external package `YES=14 / NO=1`.
+
+Rehearsal result: P1 before `15`, P1 after `16`, original P1 resolved `0`, new P1 introduced `0`. The rehearsal proved that applying the externally verified row-level corrections alone is not safe as a production apply set because the surrounding fiscal-year/quarter segments remain inconsistent.
+
+Root-cause classification:
+
+| Root cause | Tickers |
+| --- | --- |
+| `ONE_YEAR_PERIOD_SHIFT` | `BBY`, `DELL`, `GCO`, `HAE`, `MRVL`, `RL`, `SAIC`, `TJX`, `TRNS` |
+| `MULTI_QUARTER_SEGMENT_SHIFT` | `FNGR` |
+| `WRONG_PUBLISH_ASSIGNMENT` | `POWW`, `VTGN` |
+| `DUPLICATE_ECONOMIC_QUARTER` | `RH` |
+
+Repair-scope classification: nine FY2026 Q1 retail/fiscal-calendar cases are `MULTI_ROW_METADATA_SEGMENT`; `FNGR` is `MIXED_STRUCTURAL_AND_VALUE_REPAIR`; `POWW` and `VTGN` remain `SINGLE_ROW_METADATA` but did not pass the exact post-rehearsal A10B closure gate; `RH` remains `NO_SAFE_REPAIR_YET`.
+
+RH collision finding: current `RH` FY2022 Q1 has period_end `2021-07-31` and publish_date `2021-09-08`, which maps to official RH FY2021 Q2, but the current canonical FY2021 Q2 target already exists and represents a different economic quarter. RH therefore remains blocked pending a field-level collision/merge policy.
+
+Frozen production apply set: empty. Blocked ticker groups: `13`. Production-ready ticker groups: `0`. Rehearsal integrity stayed clean: quick_check `ok`, duplicate FY/FQ `0`, orphan rows `0`.
+
+Safety proof: production writes `0`, RawCandle writes `0`, TTM writes `0`, Score writes `0`, Lifecycle writes `0`, Valuation writes `0`. Production baseline stayed unchanged at companies `2538`, canonical/fundamentals rows `72713`, and TTM/Score/Lifecycle/Valuation rows `53788`.
+
+Independent current-state A10B validation under `temp/fundamentals_v3_phase8a10d_r_segment_reconciliation/20260826T171500Z/validation_a10b_current` confirmed the same production baseline: P1 `15` rows / `13` companies, production writes `0`, RawCandle writes `0`.
+
+Phase 8 remains: `IN PROGRESS - GLOBAL P1 SEGMENT BLOCKERS AND CURRENT-DOWNSTREAM P2/P3 EXTERNAL RESEARCH REQUIRED`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE ONLY THE REMAINING BLOCKER SEGMENTS`.

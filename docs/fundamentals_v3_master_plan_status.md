@@ -1123,3 +1123,25 @@ Safety: production writes `0`, RawCandle writes `0`, derived writes `0`, baselin
 Phase 8 remains: `IN PROGRESS - GLOBAL P1 AND CURRENT-DOWNSTREAM P2/P3 EXTERNAL RESEARCH REQUIRED`
 
 Exact next action: `USER EXTERNAL RESEARCH - CURRENT TTM / SCORE / LIFECYCLE / VALUATION QUEUE`.
+
+## Phase 8A10D-R - Global P1 Segment Reconciliation
+
+Status: `DONE_READ_ONLY_SEGMENT_RECONCILIATION_PRODUCTION_APPLY_BLOCKED`
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10D_R_SEGMENT_RECONCILIATION_BLOCKERS_REMAIN`
+
+Artifact root: `temp/fundamentals_v3_phase8a10d_r_segment_reconciliation/20260826T171500Z`
+
+Global P1 segment reconciliation was completed for the locked 13-ticker scope: `BBY`, `DELL`, `FNGR`, `GCO`, `HAE`, `MRVL`, `POWW`, `RH`, `RL`, `SAIC`, `TJX`, `TRNS`, and `VTGN`.
+
+The external row-level P1 package was validated and rehearsed only on a disposable database copy. Exact post-rehearsal A10B result was P1 `15 -> 16`, with original P1 resolved `0` and new P1 introduced `0`. This blocks production apply because the proposed row-level corrections do not repair the full surrounding fiscal segments.
+
+Frozen production apply set is empty. Remaining blockers are all `13` ticker groups: nine `ONE_YEAR_PERIOD_SHIFT` / `MULTI_ROW_METADATA_SEGMENT` cases (`BBY`, `DELL`, `GCO`, `HAE`, `MRVL`, `RL`, `SAIC`, `TJX`, `TRNS`), `FNGR` multi-quarter segment/value repair, `RH` duplicate economic quarter collision, and `POWW`/`VTGN` publish-assignment rows that still fail the exact post-rehearsal A10B gate.
+
+Safety: production writes `0`, RawCandle writes `0`, derived writes `0`, quick_check `ok`, duplicate FY/FQ `0`, orphan rows `0`.
+
+Independent current-state A10B validation confirmed P1 `15` rows / `13` companies with production writes `0` and RawCandle writes `0`.
+
+Phase 8 remains: `IN PROGRESS - GLOBAL P1 SEGMENT BLOCKERS AND CURRENT-DOWNSTREAM P2/P3 EXTERNAL RESEARCH REQUIRED`
+
+Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE ONLY THE REMAINING BLOCKER SEGMENTS`.

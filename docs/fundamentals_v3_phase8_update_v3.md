@@ -837,3 +837,58 @@ Downstream remains deferred:
 `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `USER EXTERNAL RESEARCH - ONLY UNRESOLVED STRUCTURAL CASES`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
+## Phase 8A10A-R External Structural Remap Reconciliation
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_R_PARTIAL_APPLY_SET_READY_SPECIAL_CASES_REMAIN`
+
+Status: `DONE_READ_ONLY_FROZEN_STRUCTURAL_APPLY_SET_READY_WITH_SPECIAL_CASES`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_r_remap_reconciliation/20260826T071127Z`
+
+External inputs from `temp/` were validated:
+
+| File | Rows |
+| --- | ---: |
+| `phase8_structural_R1_official_fiscal_timelines.csv` | 116 |
+| `phase8_structural_R1_case_resolution.csv` | 15 |
+| `phase8_structural_R1_segment_remap.csv` | 75 |
+
+External case-resolution split: `YES=12`, `NO=3`; external NO tickers are exactly `FNGR`, `IMMR`, and `RCAT`.
+
+Current V3 reconciliation:
+
+| Check | Count |
+| --- | ---: |
+| exact current row matches | 75 |
+| economic match HIGH | 69 |
+| economic match MEDIUM | 4 |
+| economic match LOW | 2 |
+| target empty | 36 |
+| target exists, different economic quarter in same rotation | 33 |
+| target exists, same economic quarter | 6 |
+| unresolved non-null conflicts | 0 |
+
+Frozen structural apply set:
+
+| Metric | Count |
+| --- | ---: |
+| production-ready ticker groups | 10 |
+| canonical rows in frozen apply set | 67 |
+| atomic operations | 134 |
+
+Production-ready groups: `CRUS`, `DOMO`, `EEFT`, `INBS`, `MNR`, `MNRO`, `NCNO`, `RBC`, `SKY`, `VIVS`.
+
+Remaining special cases: `FNGR`, `IMMR`, `RCAT`.
+
+- `FNGR`: bounded single-row repair appears possible only with separate approval; external classification remains NO because broader history is sparse.
+- `IMMR`: identity and restated value repair are coupled; label-only repair remains blocked.
+- `RCAT`: transition-year / 10-KT case; do not move the current 1534727 revenue row to 2024-01-31.
+
+Safety proof: production writes `0`, RawCandle writes `0`, derived writes `0`; companies `2540 -> 2540`, canonical quarters `72765 -> 72765`, fundamentals rows `72765 -> 72765`, and derived rows stayed `53815` for TTM, score, lifecycle, and valuation.
+
+Downstream remains deferred:
+
+`DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `PHASE 8A10A-APPLY - APPLY FROZEN STRUCTURAL QUARTER-SEQUENCE REPAIRS`, plus `SPECIAL CASE RESEARCH - FNGR / IMMR / RCAT AS APPLICABLE`.

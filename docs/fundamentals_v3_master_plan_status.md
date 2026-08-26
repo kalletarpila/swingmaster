@@ -882,3 +882,25 @@ Downstream remains deferred:
 `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Next action: `USER EXTERNAL RESEARCH - ONLY UNRESOLVED STRUCTURAL CASES`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
+## Phase 8A10A-R
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_R_PARTIAL_APPLY_SET_READY_SPECIAL_CASES_REMAIN`
+
+Status: `DONE_READ_ONLY_FROZEN_STRUCTURAL_APPLY_SET_READY_WITH_SPECIAL_CASES`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_r_remap_reconciliation/20260826T071127Z`
+
+External structural remap files were reconciled against current V3 without production writes. Inputs validated at `116` official fiscal timeline rows, `15` case-resolution rows, and `75` segment-remap rows. External case split was `YES=12`, `NO=3`, with NO tickers exactly `FNGR`, `IMMR`, and `RCAT`.
+
+Current V3 matched all `75` external remap source rows exactly. Economic-content matching was `HIGH=69`, `MEDIUM=4`, `LOW=2`. Target identity analysis found `36` empty targets, `33` same-segment rotation targets, and `6` same-economic-quarter targets. Unresolved non-null field conflicts: `0`.
+
+Frozen apply set is ready for `10` ticker groups and `67` canonical rows: `CRUS`, `DOMO`, `EEFT`, `INBS`, `MNR`, `MNRO`, `NCNO`, `RBC`, `SKY`, `VIVS`. Planned atomic operations: `134`.
+
+Special cases remain outside the apply set: `FNGR`, `IMMR`, `RCAT`.
+
+Safety proof: production writes `0`, RawCandle writes `0`, derived writes `0`; company, quarter, fundamentals, TTM, score, lifecycle, and valuation counts were unchanged.
+
+Phase 8 remains: `IN PROGRESS - APPLY FROZEN STRUCTURAL REPAIR SET BEFORE DOWNSTREAM REBUILD`
+
+Next action: `PHASE 8A10A-APPLY - APPLY FROZEN STRUCTURAL QUARTER-SEQUENCE REPAIRS`, plus `SPECIAL CASE RESEARCH - FNGR / IMMR / RCAT AS APPLICABLE`.

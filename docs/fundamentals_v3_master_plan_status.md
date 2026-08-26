@@ -960,3 +960,29 @@ Phase 8 remains: `IN PROGRESS - APPLY FNGR SPECIAL REPAIR THEN RESOLVE IMMR/RCAT
 Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Next action: `PHASE 8A10A-SPECIAL-APPLY - APPLY FNGR BOUNDED SPECIAL REPAIR`, then resolve `IMMR` / `RCAT` evidence before `PHASE 8A10B`.
+
+## Phase 8A10A-SPECIAL-APPLY
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_SPECIAL_APPLY_FNGR_COMPLETE_IMMR_RCAT_REMAIN`
+
+Status: `DONE_PRODUCTION_FNGR_SPECIAL_REPAIR_APPLIED_DOWNSTREAM_DEFERRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_special_apply/20260826T095727Z`
+
+Applied the single frozen FNGR special repair to quarter_id `37082` only. Fiscal identity stayed FY2024 Q2. Period_end changed `2024-05-31 -> 2023-08-31`; publish_date changed `2023-10-16 -> 2023-10-13`; Revenue stayed `8373983`.
+
+Changed canonical metadata cells: `2`; write failures `0`; all fundamentals unchanged; lineage refs `2 -> 2`; content signature parity passed; unrelated canonical drift `0`.
+
+Structural R1 moved from `3` to `2`. Remaining tickers are exactly `IMMR` and `RCAT`. FNGR no longer remains structural R1 and is not publish-date R1 for the old date.
+
+Production proof: quick_check `ok -> ok`, companies `2540 -> 2540`, canonical quarters `72765 -> 72765`, fundamentals rows `72765 -> 72765`, and TTM/Score/Lifecycle/Valuation rows `53815 -> 53815`. Duplicate FY/FQ identities stayed `0`; orphan rows stayed `0`; RawCandle writes `0`.
+
+Backup: `temp/fundamentals_v3_phase8a10a_special_apply/20260826T095727Z/backup/rc_fundamentals_v3_phase8a10a_special_fngr_backup.db`
+
+Backup sha256: `f3fc19be53fc5802cf3abe1182065018cb1a6bd0c50994df73b2bb39bc172e70`
+
+Phase 8 remains: `IN PROGRESS - IMMR/RCAT SPECIAL RESEARCH BEFORE GLOBAL AUDIT`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Next action: `USER EXTERNAL RESEARCH - IMMR / RCAT`, then `PHASE 8A10A-SPECIAL-FINAL-APPLY`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.

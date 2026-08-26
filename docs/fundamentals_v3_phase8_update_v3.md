@@ -1073,3 +1073,65 @@ Downstream remains deferred:
 `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `PHASE 8A10A-SPECIAL-APPLY - APPLY FNGR BOUNDED SPECIAL REPAIR`, then resolve `IMMR` / `RCAT` evidence before `PHASE 8A10B`.
+
+## Phase 8A10A-SPECIAL-APPLY FNGR Bounded Special Repair
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_SPECIAL_APPLY_FNGR_COMPLETE_IMMR_RCAT_REMAIN`
+
+Status: `DONE_PRODUCTION_FNGR_SPECIAL_REPAIR_APPLIED_DOWNSTREAM_DEFERRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_special_apply/20260826T095727Z`
+
+Authoritative input: `temp/fundamentals_v3_phase8a10a_special_resolution/20260826T093155Z/phase8a10a_special_frozen_apply_set.csv`.
+
+Frozen scope:
+
+| Metric | Count |
+| --- | ---: |
+| transformation groups | 1 |
+| canonical rows | 1 |
+| operations | 2 |
+
+Target: `FNGR` quarter_id `37082`, FY2024 Q2. Fiscal identity stayed unchanged.
+
+Applied bounded metadata repair:
+
+| Field | Before | After |
+| --- | --- | --- |
+| period_end | 2024-05-31 | 2023-08-31 |
+| publish_date | 2023-10-16 | 2023-10-13 |
+
+Revenue stayed unchanged at `8373983`. All canonical fundamental fields stayed unchanged. Lineage refs stayed `2 -> 2`. Content signature excluding the two intended metadata fields matched before/after.
+
+Sparse FNGR history remains non-blocking: this was not treated as a shifted segment, relabel, merge, or missing-quarter reconstruction.
+
+Reporting lag corrected from a negative impossible lag to `43` calendar days.
+
+Production proof:
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| quick_check | ok | ok |
+| companies | 2540 | 2540 |
+| canonical quarters | 72765 | 72765 |
+| fundamentals rows | 72765 | 72765 |
+| TTM rows | 53815 | 53815 |
+| score rows | 53815 | 53815 |
+| lifecycle rows | 53815 | 53815 |
+| valuation rows | 53815 | 53815 |
+| duplicate FY/FQ identities | 0 | 0 |
+| orphan rows | 0 | 0 |
+
+Changed canonical metadata cells: `2`. Write failures: `0`. Unrelated canonical drift: `0`. RawCandle writes: `0`.
+
+Structural R1 after apply: `2`, remaining tickers exactly `IMMR` and `RCAT`. FNGR is no longer structural R1 and is not publish-date R1 for the old `2023-10-16` date. New R1 cases: `0`.
+
+Backup: `temp/fundamentals_v3_phase8a10a_special_apply/20260826T095727Z/backup/rc_fundamentals_v3_phase8a10a_special_fngr_backup.db`
+
+Backup sha256: `f3fc19be53fc5802cf3abe1182065018cb1a6bd0c50994df73b2bb39bc172e70`
+
+Downstream remains deferred:
+
+`DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `USER EXTERNAL RESEARCH - IMMR / RCAT`, then `PHASE 8A10A-SPECIAL-FINAL-APPLY`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.

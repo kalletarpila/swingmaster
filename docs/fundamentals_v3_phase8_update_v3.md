@@ -1005,3 +1005,71 @@ Downstream remains deferred:
 `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `SPECIAL CASE RESEARCH - FNGR / IMMR / RCAT`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
+## Phase 8A10A-SPECIAL FNGR / IMMR / RCAT Structural Resolution
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_SPECIAL_PARTIAL_APPLY_SET_READY_EVIDENCE_REMAINS`
+
+Status: `DONE_READ_ONLY_SPECIAL_RESOLUTION_PARTIAL_APPLY_SET_READY`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_special_resolution/20260826T093155Z`
+
+Starting structural R1: `3` tickers: `FNGR`, `IMMR`, `RCAT`.
+
+FNGR result:
+
+- current row: FY2024 Q2, quarter_id `37082`, period_end `2024-05-31`, publish_date `2023-10-16`, Revenue `8373983`
+- official identity: FY2024 Q2, period_end `2023-08-31`, Revenue `8373983`
+- sparse-history conclusion: surrounding missing history is non-blocking because the individual economic quarter is independently proven
+- production-ready: YES
+- frozen operations: `UPDATE_PERIOD_END` to `2023-08-31` and `UPDATE_PUBLISH_DATE` to `2023-10-13`
+
+IMMR result:
+
+- affected current rows: `5`
+- current FY2025 Q1-Q4 / FY2026 Q1 segment maps toward FY2025 Q4 / FY2026 Q1-Q4
+- at least one restated Revenue repair is required: current `281376000` vs official `284876000` for FY2025 Q4
+- other non-null fields still require restated official comparison before apply
+- production-ready: NO
+
+RCAT result:
+
+- fiscal transition case: old April 30 fiscal-year regime changed to a December 31 regime through FY2024T transition reporting
+- current quarter_id `59126`: FY2024 Q2, period_end `2024-07-31`, Revenue `886440`; official FY2024T Q1 Revenue is `2776535`, so value repair is required
+- current quarter_id `59125`: FY2024 Q3, period_end `2024-10-31`, Revenue `1534727`; official transition label is FY2024T Q2 and the `1534727` Revenue stays with `2024-10-31`
+- V3 needs explicit deterministic policy for encoding FY2024T transition labels before apply
+- production-ready: NO
+
+Frozen special apply set:
+
+| Metric | Count |
+| --- | ---: |
+| production-ready tickers | 1 |
+| transformation groups | 1 |
+| canonical rows affected | 1 |
+| operations | 2 |
+| field-value repairs | 0 |
+| identity repairs | 0 |
+| period_end repairs | 1 |
+| publish_date repairs | 1 |
+| merges/deletes/recreates | 0 |
+
+Production-ready ticker: `FNGR`.
+
+Remaining evidence/policy queue: `IMMR`, `RCAT`.
+
+External research queue size: `2`.
+
+Full-V3 audit handoff rules added:
+
+- sparse history is not automatically shifted sequence when the individual economic quarter is independently proven
+- restatements may couple identity movement with financial-value replacement
+- transition-year / 10-KT periods must be modeled separately from ordinary Q1-Q4 continuity
+
+Safety proof: production writes `0`, RawCandle writes `0`, quick_check `ok -> ok`, companies `2540 -> 2540`, canonical quarters `72765 -> 72765`, fundamentals rows `72765 -> 72765`, TTM/Score/Lifecycle/Valuation `53815 -> 53815`.
+
+Downstream remains deferred:
+
+`DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `PHASE 8A10A-SPECIAL-APPLY - APPLY FNGR BOUNDED SPECIAL REPAIR`, then resolve `IMMR` / `RCAT` evidence before `PHASE 8A10B`.

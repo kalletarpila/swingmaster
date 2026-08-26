@@ -932,3 +932,31 @@ Phase 8 remains: `IN PROGRESS - SPECIAL STRUCTURAL CASES BEFORE GLOBAL AUDIT`
 Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Next action: `SPECIAL CASE RESEARCH - FNGR / IMMR / RCAT`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
+## Phase 8A10A-SPECIAL
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_SPECIAL_PARTIAL_APPLY_SET_READY_EVIDENCE_REMAINS`
+
+Status: `DONE_READ_ONLY_SPECIAL_RESOLUTION_PARTIAL_APPLY_SET_READY`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_special_resolution/20260826T093155Z`
+
+The three remaining structural R1 special cases were reviewed against current V3 and stored A10A-R official evidence without production writes.
+
+FNGR is production-ready for a bounded single-row special repair: quarter_id `37082`, FY2024 Q2, period_end `2024-05-31 -> 2023-08-31`; publish_date `2023-10-16 -> 2023-10-13`; Revenue `8373983` already matches official evidence. Sparse surrounding history is non-blocking.
+
+IMMR remains unresolved because the current segment has identity/value coupling. Five rows are affected; at least FY2025 Q4 Revenue must change from `281376000` to `284876000`, and all other non-null canonical fields still need restated official comparison before apply.
+
+RCAT remains unresolved because the FY2024T transition period needs explicit V3 encoding policy. The `1534727` Revenue row remains tied to `2024-10-31` as FY2024T Q2 and must not move to `2024-01-31`; the transition Q1 row at `2024-07-31` also needs value repair.
+
+Frozen special apply set: production-ready tickers `1`, transformation groups `1`, canonical rows affected `1`, operations `2`, period_end repairs `1`, publish_date repairs `1`, value repairs `0`, merges/deletes/recreates `0`.
+
+External evidence/policy queue: `2` tickers, `IMMR` and `RCAT`.
+
+Safety proof: production writes `0`, RawCandle writes `0`, quick_check `ok -> ok`, companies `2540 -> 2540`, canonical quarters `72765 -> 72765`, fundamentals rows `72765 -> 72765`, and derived rows `53815 -> 53815`.
+
+Phase 8 remains: `IN PROGRESS - APPLY FNGR SPECIAL REPAIR THEN RESOLVE IMMR/RCAT BEFORE GLOBAL AUDIT`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Next action: `PHASE 8A10A-SPECIAL-APPLY - APPLY FNGR BOUNDED SPECIAL REPAIR`, then resolve `IMMR` / `RCAT` evidence before `PHASE 8A10B`.

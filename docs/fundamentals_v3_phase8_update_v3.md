@@ -1170,6 +1170,62 @@ Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: resolve exact IMMR evidence/preservation decision and RCAT transition/STUB architecture policy before any IMMR/RCAT production apply, then proceed to `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
 
+## Phase 8A10A-SPECIAL-REMOVE IMMR / RCAT V3 Removal
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_SPECIAL_REMOVE_COMPLETE_STRUCTURAL_R1_CLOSED`
+
+Status: `DONE_PRODUCTION_IMMR_RCAT_REMOVED_DOWNSTREAM_DEFERRED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_special_remove/20260826T145046Z`
+
+User-approved universe decision: `IMMR` and `RCAT` were removed completely from V3 because their remaining structural repairs required disproportionate issuer-specific handling. This preserves the standard V3 architecture and avoids IMMR restatement remapping, RCAT FY2024T encoding, RCAT STUB encoding, and transition-period schema changes.
+
+Frozen company identities:
+
+| Ticker | company_id | active | market | admission |
+| --- | ---: | ---: | --- | --- |
+| `IMMR` | 1159 | 1 | usa | `PHASE3B_APPROVED_BASELINE` / `ACTIVE` |
+| `RCAT` | 1919 | 1 | usa | `PHASE3B_APPROVED_BASELINE` / `ACTIVE` |
+
+Inventory before removal:
+
+| Ticker | canonical | fundamentals | lineage/source/status | TTM | Score | Lifecycle | Valuation | core-ready quarters |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `IMMR` | 31 | 31 | 89 | 22 | 22 | 22 | 22 | 5 |
+| `RCAT` | 21 | 21 | 94 | 5 | 5 | 5 | 5 | 6 |
+
+Delete plan affected `9` tables with `397` manually guarded rows. Company rows were deleted last after valuation, lifecycle, score, TTM, V3 provenance/status rows, fundamentals, and canonical quarters. All delete-count parity checks passed.
+
+Production deltas:
+
+| Table/count | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| companies | 2540 | 2538 | -2 |
+| active companies | 2472 | 2470 | -2 |
+| inactive companies | 68 | 68 | 0 |
+| canonical quarters | 72765 | 72713 | -52 |
+| fundamentals rows | 72765 | 72713 | -52 |
+| TTM rows | 53815 | 53788 | -27 |
+| Score rows | 53815 | 53788 | -27 |
+| Lifecycle rows | 53815 | 53788 | -27 |
+| Valuation rows | 53815 | 53788 | -27 |
+
+Integrity proof: quick_check `ok -> ok`, duplicate FY/FQ `0`, orphan rows `0`, foreign_key_check rows `0`, retained unrelated drift `0`, RawCandle writes `0`.
+
+Structural R1 closed: `2 -> 0`; remaining structural R1 tickers `[]`; new structural R1 `0`.
+
+Residual high-level status after removal: publish R1 `12`, publish R2 `5`, publish R3 `0`; semantic R1/R2/R3 `0/0/0`; structural R1/R2/R3 `0/0/0`.
+
+Backup: `temp/fundamentals_v3_phase8a10a_special_remove/20260826T145046Z/backup/rc_fundamentals_v3_phase8a10a_special_remove_backup.db`
+
+Backup sha256: `5db135fe5f7661715ffc2989207cfd3801a2d1bb01e75c12a9b694aab451690c`
+
+Phase 8 remains: `IN PROGRESS - FULL V3 AUDIT NEXT`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
 ## Phase 8A10A-PUBLISH-APPLY Verified Publish-Date Residual Closure
 
 Classification: `FUNDAMENTALS_V3_PHASE8A10A_PUBLISH_VERIFIED_REPAIRS_COMPLETE`

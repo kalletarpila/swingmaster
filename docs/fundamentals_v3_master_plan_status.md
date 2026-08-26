@@ -1033,3 +1033,27 @@ Frozen apply set: `0` tickers, `0` groups, `0` canonical rows, `0` atomic operat
 Phase 8 remains: `IN PROGRESS - IMMR EVIDENCE BLOCKER AND RCAT TRANSITION/STUB POLICY BEFORE GLOBAL AUDIT`
 
 Exact next action: resolve IMMR field preservation/evidence and RCAT transition/STUB representation before any IMMR/RCAT apply; then run `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
+## Phase 8A10A-SPECIAL-REMOVE
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_SPECIAL_REMOVE_COMPLETE_STRUCTURAL_R1_CLOSED`
+
+Status: `CANONICAL STRUCTURAL SPECIAL-CASE CLOSURE COMPLETE - FULL V3 AUDIT NEXT`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_special_remove/20260826T145046Z`
+
+User-approved V3 universe removal completed for `IMMR` company_id `1159` and `RCAT` company_id `1919`. Both were active USA `ORDINARY` V3 companies before removal. Rationale: disproportionate issuer-specific structural exception complexity relative to retaining them in the standard V3 universe.
+
+Production removal was one guarded transaction. Deleted rows: companies `2`, canonical quarters `52`, fundamentals `52`, V3 lineage/source/status rows `183`, TTM `27`, Score `27`, Lifecycle `27`, Valuation `27`. Delete plan affected `9` tables and `397` rows; guard parity passed for every table/ticker pair.
+
+Universe and canonical state after removal: companies `2540 -> 2538`, active `2472 -> 2470`, inactive `68 -> 68`, canonical quarters `72765 -> 72713`, fundamentals `72765 -> 72713`, TTM/Score/Lifecycle/Valuation `53815 -> 53788`.
+
+Integrity stayed clean: quick_check `ok -> ok`, duplicate FY/FQ `0`, orphan rows `0`, retained unrelated drift `0`, RawCandle writes `0`.
+
+Structural R1 is closed: `2 -> 0`, remaining structural R1 tickers `[]`, new structural R1 `0`.
+
+Phase 8 remains: `IN PROGRESS - FULL V3 AUDIT NEXT`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.

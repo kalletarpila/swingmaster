@@ -1136,6 +1136,40 @@ Downstream remains deferred:
 
 Exact next action: `USER EXTERNAL RESEARCH - IMMR / RCAT`, then `PHASE 8A10A-SPECIAL-FINAL-APPLY`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
 
+## Phase 8A10A-SPECIAL-FINAL-RECONCILE IMMR / RCAT External Evidence Reconciliation
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_SPECIAL_FINAL_RECONCILE_BLOCKERS_REMAIN`
+
+Status: `DONE_READ_ONLY_SPECIAL_FINAL_RECONCILE_BLOCKERS_REMAIN`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_special_final_reconcile/20260826T143248Z`
+
+The five external special-case files were located and validated:
+
+| File | Rows |
+| --- | ---: |
+| `phase8_immr_rcat_official_quarter_matrix.csv` | 19 |
+| `phase8_immr_rcat_v3_row_mapping.csv` | 15 |
+| `phase8_immr_restatement_field_matrix.csv` | 48 |
+| `phase8_immr_rcat_final_transformation_plan.csv` | 13 |
+| `phase8_rcat_transition_policy.csv` | 11 |
+
+Current V3 reconciliation matched `15 / 15` mapping rows with current-state drift `0`. Current reviewed segments were `IMMR=31` rows and `RCAT=21` rows.
+
+IMMR is not production-ready. Official mapping covers `8` quarters and identifies `8` identity repairs, `5` publish_date repairs, `3` revenue restatement repairs, `30` other verified field repairs, `7` fields marked `NOT_VERIFIABLE_FROM_RESTATEMENT_SOURCE`, `1` obsolete row, and `5` target collisions. The blocker is qid `42578` / target FY2025 Q1: `DELETE_AND_RECREATE` would replace a non-matching current row while non-null `gross_profit` and `shares_outstanding` values remain unverified. Exact missing decision: whether those July-only fields may be discarded or must be separately preserved.
+
+RCAT is not production-ready. The official evidence requires the FY2024T transition namespace and a STUB period; current canonical schema cannot encode either truthfully because `v3_quarter.fiscal_year` is `INTEGER` and `v3_quarter.fiscal_quarter` is constrained to `Q1`-`Q4`. Synthetic Q3 is explicitly rejected as semantically false, while excluding the STUB would lose an economic reporting period. RCAT has `4` identity repairs, `2` value repairs, `2` publish_date repairs, and `3` create/delete/merge-shaped row operations pending a schema or policy decision.
+
+Frozen apply set is intentionally empty: production-ready tickers `0`, transformation groups `0`, canonical rows affected `0`, atomic operations `0`, canonical value writes `0`, identity writes `0`, metadata writes `0`, lineage actions `0`.
+
+Safety proof: production writes `0`, RawCandle writes `0`, derived writes `0`; quick_check stayed `ok`, companies `2540`, canonical quarters `72765`, fundamentals rows `72765`, and TTM/Score/Lifecycle/Valuation rows `53815`.
+
+Phase 8 remains: `IN PROGRESS - IMMR EVIDENCE BLOCKER AND RCAT TRANSITION/STUB POLICY BEFORE GLOBAL AUDIT`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: resolve exact IMMR evidence/preservation decision and RCAT transition/STUB architecture policy before any IMMR/RCAT production apply, then proceed to `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
 ## Phase 8A10A-PUBLISH-APPLY Verified Publish-Date Residual Closure
 
 Classification: `FUNDAMENTALS_V3_PHASE8A10A_PUBLISH_VERIFIED_REPAIRS_COMPLETE`

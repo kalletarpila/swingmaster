@@ -1008,3 +1008,28 @@ Phase 8 remains: `IN PROGRESS - IMMR/RCAT SPECIAL RESEARCH BEFORE GLOBAL AUDIT`
 Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `USER EXTERNAL RESEARCH - IMMR / RCAT`, then `PHASE 8A10A-SPECIAL-FINAL-APPLY`, then `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.
+
+## Phase 8A10A-SPECIAL-FINAL-RECONCILE
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10A_SPECIAL_FINAL_RECONCILE_BLOCKERS_REMAIN`
+
+Status: `DONE_READ_ONLY_SPECIAL_FINAL_RECONCILE_BLOCKERS_REMAIN`
+
+Artifact root: `temp/fundamentals_v3_phase8a10a_special_final_reconcile/20260826T143248Z`
+
+The IMMR / RCAT external research package was reconciled against current V3 without production writes. Input files found: `5 / 5`; rows: official quarter matrix `19`, V3 mapping `15`, IMMR restatement matrix `48`, final transformation plan `13`, RCAT transition policy `11`.
+
+Current V3 matched `15 / 15` mapping rows with current-state drift `0`. Production integrity stayed unchanged: companies `2540`, canonical quarters `72765`, fundamentals rows `72765`, and TTM/Score/Lifecycle/Valuation rows `53815`.
+
+Final readiness:
+
+| Ticker | Production-ready | Reason |
+| --- | --- | --- |
+| `IMMR` | `NO` | qid `42578` / target FY2025 Q1 has non-null `gross_profit` and `shares_outstanding` values that are not verifiable from the restatement source before delete/recreate. |
+| `RCAT` | `NO` | FY2024T and STUB periods require a transition-period namespace or auxiliary period policy; current schema only supports integer FY and Q1-Q4. |
+
+Frozen apply set: `0` tickers, `0` groups, `0` canonical rows, `0` atomic operations. No canonical values, fiscal identities, period_end values, publish_date values, lineage rows, TTM rows, Score rows, Lifecycle rows, Valuation rows, or RawCandle rows were changed.
+
+Phase 8 remains: `IN PROGRESS - IMMR EVIDENCE BLOCKER AND RCAT TRANSITION/STUB POLICY BEFORE GLOBAL AUDIT`
+
+Exact next action: resolve IMMR field preservation/evidence and RCAT transition/STUB representation before any IMMR/RCAT apply; then run `PHASE 8A10B - FULL V3 FISCAL QUARTER SEQUENCE / PERIOD_END / PUBLISH_DATE AUDIT`.

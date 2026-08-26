@@ -1167,3 +1167,27 @@ Safety: production writes `0`, RawCandle writes `0`, derived writes `0`, quick_c
 Phase 8 remains: `IN PROGRESS - NINE-TICKER FISCAL IDENTITY/CONTENT SEGMENTS AND OTHER P1 FOLLOW-UPS REQUIRED`
 
 Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE NINE-TICKER FISCAL IDENTITY/CONTENT SEGMENTS BEFORE PERIOD_END APPLY`.
+
+## Phase 8A10F - Current-Downstream P2/P3 External Evidence Reconciliation
+
+Status: `DONE_READ_ONLY_CURRENT_DOWNSTREAM_RECONCILIATION_PARTIAL_APPLY_SET_FROZEN`
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10F_CURRENT_DOWNSTREAM_PARTIAL_APPLY_SET_READY_BLOCKERS_REMAIN`
+
+Artifact root: `temp/fundamentals_v3_phase8a10f_current_downstream_reconcile/20260826T181000Z`
+
+The external 35-case current-downstream package validated cleanly: 35 rows / 30 tickers, externally ready `21`, externally blocked `14`, confidence `HIGH=34 / MEDIUM=1`, official timeline rows `96`, transformation operations `52`.
+
+Current V3 reconciliation produced exact matches `26`, already-resolved harmless drift `2`, material drift `7`, row-not-found `0`. Global-P1 overlap is limited to `POWW` and `VTGN`; both are P1-dependent and excluded from the apply set.
+
+Frozen current-downstream apply set: `19` metadata operations across `18` groups, consisting of publish_date writes `17` and period_end writes `2`. Identity writes, canonical value writes, creates, merges, deletes, lineage writes, and downstream writes are all `0`.
+
+Blockers remain: `15` cases total, including the original 14 externally blocked cases plus `LYTS` current-state guard drift. Breakdown: restatement/value `5`, FY/Q structural/collision `7`, missing target quarter `1`, global-P1 dependent `2`.
+
+Rehearsal on a disposable DB copy passed: groups attempted `18`, passed `18`, failed `0`, quick_check `ok`, duplicate FY/FQ `0`, orphan rows `0`, unrelated drift `0`. Original 35-case post-rehearsal accounting: resolved `18`, still blocked `15`, already-correct/no-write `2`, new current-critical cases `0`.
+
+Safety: production writes `0`, RawCandle writes `0`, derived writes `0`.
+
+Phase 8 remains: `IN PROGRESS - CURRENT-DOWNSTREAM SAFE APPLY AND P1/STRUCTURAL/VALUE BLOCKERS REMAIN`
+
+Exact next action: `PHASE 8A10F-APPLY - APPLY REHEARSED CURRENT-DOWNSTREAM REPAIRS`, after checking interaction with the still-running global-P1 workflow.

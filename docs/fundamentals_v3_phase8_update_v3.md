@@ -1472,3 +1472,35 @@ Phase 8 remains: `IN PROGRESS - NINE-TICKER FISCAL IDENTITY/CONTENT SEGMENTS AND
 Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE NINE-TICKER FISCAL IDENTITY/CONTENT SEGMENTS BEFORE PERIOD_END APPLY`.
+
+## Phase 8A10F - Current-Downstream P2/P3 External Evidence Reconciliation
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10F_CURRENT_DOWNSTREAM_PARTIAL_APPLY_SET_READY_BLOCKERS_REMAIN`
+
+Status: `DONE_READ_ONLY_CURRENT_DOWNSTREAM_RECONCILIATION_PARTIAL_APPLY_SET_FROZEN`
+
+Artifact root: `temp/fundamentals_v3_phase8a10f_current_downstream_reconcile/20260826T181000Z`
+
+External current-downstream package validated cleanly: case rows `35`, unique request IDs `35`, unique tickers `30`, externally ready `21`, externally blocked `14`, confidence `HIGH=34 / MEDIUM=1`, official timeline rows `96`, transformation operations `52`.
+
+Current V3 reconciliation found exact current matches `26`, harmless/already-resolved drift `2`, material drift `7`, and row-not-found `0`. The key ready-case blocker was `LYTS` FY2025 Q4: the external file expected blank current publish_date, but current V3 already has `2025-09-11`, so its old-value guard does not pass.
+
+Global-P1 overlap was isolated: same-ticker overlap `2` (`POWW`, `VTGN`), same canonical FY/FQ overlap `0`, duplicate repair operations `0`, P1-dependent cases `2`, P1 conflicts `0`. Those overlapping cases were excluded from the current-downstream apply set.
+
+External-ready validation: locally ready operations `19`, already-correct operations `2`, blocked-by-current-state operations `1`, blocked-by-global-P1 operations `0`. The frozen write set contains only locally guarded metadata operations: publish_date writes `17`, period_end writes `2`, identity writes `0`, canonical value writes `0`, creates `0`, merges `0`, deletes `0`. Frozen production-ready groups `18`, repair operations `19`.
+
+Blocked set after local reconciliation contains `15` cases: the original `14` externally blocked cases plus the `LYTS` current-state guard drift. Blocker classes: restatement/value reconciliation `5`, FY/Q structural collision/remap `7`, missing target quarter `1`, global-P1 dependent `2`, remaining external evidence required `0`.
+
+Restatement/value matrix covered `5` tickers (`AIHS`, `ARAY`, `BNC`, `ILLR`, `RR`), `7` quarters, and `84` canonical field checks. Exact verified value repairs `0`; fields still not verifiable `84`. No fundamental value write was frozen.
+
+Rehearsal applied the `19` locally ready metadata operations on a disposable DB copy. Groups attempted `18`, groups passed `18`, groups failed `0`. Integrity stayed clean: quick_check `ok`, duplicate FY/FQ `0`, orphan rows `0`, unrelated drift `0`.
+
+Current-downstream post-rehearsal accounting for the original 35 cases: resolved by rehearsed safe repair `18`, still blocked `15`, already-correct/no-write `2`, new current-critical cases introduced `0`. Remaining current-impact blockers: TTM `15`, Score `2`, Lifecycle `2`, Valuation `2`.
+
+Safety proof: production writes `0`, RawCandle writes `0`, TTM writes `0`, Score writes `0`, Lifecycle writes `0`, Valuation writes `0`. Production baseline stayed unchanged at companies `2538`, canonical/fundamentals rows `72713`, and TTM/Score/Lifecycle/Valuation rows `53788`.
+
+Phase 8 remains: `IN PROGRESS - CURRENT-DOWNSTREAM SAFE APPLY AND P1/STRUCTURAL/VALUE BLOCKERS REMAIN`
+
+Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
+
+Exact next action: `PHASE 8A10F-APPLY - APPLY REHEARSED CURRENT-DOWNSTREAM REPAIRS`, after checking interaction with the still-running global-P1 workflow.

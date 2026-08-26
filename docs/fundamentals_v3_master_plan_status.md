@@ -1168,6 +1168,26 @@ Phase 8 remains: `IN PROGRESS - NINE-TICKER FISCAL IDENTITY/CONTENT SEGMENTS AND
 
 Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE NINE-TICKER FISCAL IDENTITY/CONTENT SEGMENTS BEFORE PERIOD_END APPLY`.
 
+## Phase 8A10E-R - Nine-Ticker Latest-8Q Official Mapping
+
+Status: `DONE_READ_ONLY_LATEST8Q_MAPPING_REHEARSAL_BLOCKED`
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10E_R_MAPPING_BLOCKED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10e_r_latest8q_mapping/20260826T_PHASE8A10E_R`
+
+The authoritative latest-8Q timeline validated at rows `72`, tickers `9`, rows per ticker `8`, confidence `HIGH=72`. `TJX` latest included quarter is `FY2027 Q2`; all other eight tickers latest included quarter is `FY2027 Q1`.
+
+Current V3 candidate rows: `79`. Every ticker remains blocked by latest-8Q mapping/content/collision incompleteness. Rehearsal on a disposable DB copy attempted `6` metadata groups and passed integrity (`quick_check=ok`, duplicate FY/FQ `0`, orphans `0`), but timeline parity failed and exact A10B stayed nine-ticker P1 `9 -> 9`, global P1 `15 -> 15`, new P1 `0`.
+
+Frozen production apply set: `0` rows. Production-ready ticker groups `0`; blocked ticker groups `9`; period_end writes `0`; publish writes `0`; identity/value/create/merge/delete writes `0`.
+
+Safety: production writes `0`, RawCandle writes `0`, derived writes `0`.
+
+Phase 8 remains: `IN PROGRESS - NINE-TICKER MAPPING BLOCKERS AND CURRENT-DOWNSTREAM SAFE APPLY REMAIN`
+
+Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE ONLY BLOCKED TICKERS`
+
 ## Phase 8A10F - Current-Downstream P2/P3 External Evidence Reconciliation
 
 Status: `DONE_READ_ONLY_CURRENT_DOWNSTREAM_RECONCILIATION_PARTIAL_APPLY_SET_FROZEN`

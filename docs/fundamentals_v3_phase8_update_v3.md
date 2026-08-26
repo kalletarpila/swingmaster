@@ -1473,6 +1473,48 @@ Downstream remains: `DERIVED_DATA_PENDING_REBUILD_AFTER_CANONICAL_REPAIR`
 
 Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE NINE-TICKER FISCAL IDENTITY/CONTENT SEGMENTS BEFORE PERIOD_END APPLY`.
 
+## Phase 8A10E-R - Nine-Ticker Latest-8Q Official Mapping
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10E_R_MAPPING_BLOCKED`
+
+Status: `DONE_READ_ONLY_LATEST8Q_MAPPING_REHEARSAL_BLOCKED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10e_r_latest8q_mapping/20260826T_PHASE8A10E_R`
+
+Authoritative latest-8Q input: `temp/swingmaster_v3_official_fiscal_quarter_timeline_2026-08-26.csv`
+
+The external latest-8Q timeline validated cleanly: rows `72`, tickers `9`, rows per ticker `8`, confidence `HIGH=72`. Latest included quarter is `TJX FY2027 Q2`; all other eight tickers end at `FY2027 Q1`. The primary 72-row timeline does not contain Revenue/OI/NI fingerprint columns, so `temp/phase8_global_P1_official_fiscal_timelines.csv` was used only as supplemental fingerprint evidence where available.
+
+Current V3 candidate extraction covered `79` rows across the nine tickers. Current candidate rows by ticker: `BBY=10`, `DELL=8`, `GCO=10`, `HAE=7`, `MRVL=10`, `RL=7`, `SAIC=10`, `TJX=10`, `TRNS=7`.
+
+Ticker-level result:
+
+| Ticker | Exact mapped | Unmatched current | Missing official | Root cause | Proposed shape | Affected rows | Ready |
+| --- | ---: | ---: | ---: | --- | --- | ---: | --- |
+| `BBY` | 1 | 3 | 3 | `CONTENT_MAPPING_ERROR` | `UPDATE_PERIOD_END|UPDATE_PUBLISH_DATE` | 1 | NO |
+| `DELL` | 1 | 1 | 3 | `CONTENT_MAPPING_ERROR` | `UPDATE_PERIOD_END|UPDATE_PUBLISH_DATE` | 1 | NO |
+| `GCO` | 1 | 4 | 3 | `CONTENT_MAPPING_ERROR` | `UPDATE_PERIOD_END|UPDATE_PUBLISH_DATE` | 2 | NO |
+| `HAE` | 0 | 2 | 4 | `CONTENT_MAPPING_ERROR` | `NO_WRITE` | 0 | NO |
+| `MRVL` | 1 | 3 | 3 | `CONTENT_MAPPING_ERROR` | `UPDATE_PERIOD_END|UPDATE_PUBLISH_DATE` | 1 | NO |
+| `RL` | 0 | 1 | 4 | `CONTENT_MAPPING_ERROR` | `NO_WRITE` | 0 | NO |
+| `SAIC` | 1 | 2 | 3 | `CONTENT_MAPPING_ERROR` | `UPDATE_PERIOD_END` | 1 | NO |
+| `TJX` | 1 | 3 | 3 | `CONTENT_MAPPING_ERROR` | `UPDATE_PERIOD_END|UPDATE_PUBLISH_DATE` | 1 | NO |
+| `TRNS` | 0 | 1 | 4 | `CONTENT_MAPPING_ERROR` | `NO_WRITE` | 0 | NO |
+
+All nine tickers still have missing latest-8Q official quarters, duplicate/target-collision risk, and content-verification conflicts. No ticker-level group passed the production-ready gate.
+
+Rehearsal applied only the locally derivable metadata operations to a disposable DB copy. Groups attempted `6`, groups passed `6`, groups failed `0`, quick_check `ok`, duplicate FY/FQ `0`, orphan rows `0`, unrelated drift `0`, but official latest-8Q timeline parity failed and exact A10B did not improve: nine-ticker P1 `9 -> 9`, global P1 `15 -> 15`, new P1 `0`.
+
+Frozen production apply set is empty: production-ready ticker groups `0`, blocked groups `9`, canonical rows affected `0`, atomic operations `0`, period_end writes `0`, publish writes `0`, identity writes `0`, value writes `0`, creates `0`, merges `0`, deletes `0`.
+
+Prevention implication: the historical Yahoo seed failure is now refined as multiple failure modes, not a simple period_end-only defect. Official period_end must outrank normalized provider dates, but future write guards must also detect missing latest-8Q targets, economic-content shifts, target collisions, and content-verification gaps before allowing canonical writes.
+
+Safety proof: production writes `0`, RawCandle writes `0`, TTM writes `0`, Score writes `0`, Lifecycle writes `0`, Valuation writes `0`.
+
+Phase 8 remains: `IN PROGRESS - NINE-TICKER MAPPING BLOCKERS AND CURRENT-DOWNSTREAM SAFE APPLY REMAIN`
+
+Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE ONLY BLOCKED TICKERS`
+
 ## Phase 8A10F - Current-Downstream P2/P3 External Evidence Reconciliation
 
 Classification: `FUNDAMENTALS_V3_PHASE8A10F_CURRENT_DOWNSTREAM_PARTIAL_APPLY_SET_READY_BLOCKERS_REMAIN`

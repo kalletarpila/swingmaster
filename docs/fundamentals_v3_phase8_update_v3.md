@@ -1515,6 +1515,56 @@ Phase 8 remains: `IN PROGRESS - NINE-TICKER MAPPING BLOCKERS AND CURRENT-DOWNSTR
 
 Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE ONLY BLOCKED TICKERS`
 
+## Phase 8A10E-R2 - Nine-Ticker Financial-Fingerprint Mapping
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10E_R2_MAPPING_BLOCKED`
+
+Status: `DONE_READ_ONLY_FINANCIAL_FINGERPRINT_MAPPING_REHEARSAL_BLOCKED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10e_r2_financial_mapping/20260827T_PHASE8A10E_R2_FINAL`
+
+Authoritative enriched latest-8Q input: `temp/swingmaster_v3_official_fiscal_quarter_timeline_with_financials_2026-08-26.csv`
+
+The enriched official timeline validated cleanly: rows `72`, tickers `9`, rows per ticker `8`, confidence `HIGH=72`, Revenue populated `72/72`, Operating Income populated `72/72`, and Net Income populated `72/72`. `TJX` latest included quarter is `FY2027 Q2`; all other eight tickers latest included quarter is `FY2027 Q1`.
+
+Financial-fingerprint matching now dominates date/FY/FQ evidence. Current FY/FQ and period_end may be wrong, so the mapper compares Revenue, Operating Income, and Net Income using scale/rounding tolerance and blocks date-only matches when the financial fingerprint contradicts the official row.
+
+Mapping improvement:
+
+| Metric | Count |
+| --- | ---: |
+| Previous exact date mappings | 6 |
+| New financial-high mappings | 33 |
+| Ambiguous mappings | 0 |
+| Missing official/current economic quarters | 39 |
+| No-financial-match current rows | 22 |
+
+Ticker-level result:
+
+| Ticker | Financial-high mappings | Missing official/current economic quarters | Target collisions | Production ready |
+| --- | ---: | ---: | ---: | --- |
+| `BBY` | 2 | 6 | 1 | NO |
+| `DELL` | 3 | 5 | 1 | NO |
+| `GCO` | 4 | 4 | 2 | NO |
+| `HAE` | 3 | 5 | 2 | NO |
+| `MRVL` | 2 | 6 | 1 | NO |
+| `RL` | 1 | 7 | 1 | NO |
+| `SAIC` | 6 | 2 | 3 | NO |
+| `TJX` | 6 | 2 | 3 | NO |
+| `TRNS` | 6 | 2 | 2 | NO |
+
+Financial evidence: Revenue exact/rounding matches `61`, Operating Income exact/rounding matches `41`, Net Income exact/rounding matches `64`, contradictory fingerprint matrix rows `43`. This proves the nine-ticker problem is economic-content displacement plus missing/colliding target segments, not a generic period_end-only offset.
+
+Frozen production apply set is empty: production-ready ticker groups `0`, blocked groups `9`, operations `0`, period_end writes `0`, publish writes `0`, identity writes `0`, value writes `0`, creates `0`, merges `0`, deletes `0`.
+
+Rehearsal applied `0` transformations on a disposable DB copy. Integrity stayed clean: quick_check `ok`, duplicate FY/FQ `0`, orphan rows `0`. Exact post-rehearsal A10B did not improve: nine-ticker P1 `9 -> 9`, global P1 `15 -> 15`, new P1 `0`.
+
+Safety proof: production writes `0`, RawCandle writes `0`, TTM writes `0`, Score writes `0`, Lifecycle writes `0`, Valuation writes `0`. RawCandle external drift was observed during the read-only run, but R2 does not read or write RawCandle; the exact A10B rehearsal used the same V3 audit logic with an unused RawCandle sentinel guard.
+
+Phase 8 remains: `IN PROGRESS - NINE-TICKER FINANCIAL CONTENT SEGMENTS AND CURRENT-DOWNSTREAM SAFE APPLY REMAIN`
+
+Exact next action: `DO NOT WRITE PRODUCTION - USE THE FINANCIAL MATCH MATRIX TO RESOLVE REMAINING BLOCKED ROWS`
+
 ## Phase 8A10F - Current-Downstream P2/P3 External Evidence Reconciliation
 
 Classification: `FUNDAMENTALS_V3_PHASE8A10F_CURRENT_DOWNSTREAM_PARTIAL_APPLY_SET_READY_BLOCKERS_REMAIN`

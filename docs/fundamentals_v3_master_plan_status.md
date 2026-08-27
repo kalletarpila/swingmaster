@@ -1188,6 +1188,30 @@ Phase 8 remains: `IN PROGRESS - NINE-TICKER MAPPING BLOCKERS AND CURRENT-DOWNSTR
 
 Exact next action: `DO NOT WRITE PRODUCTION - RESOLVE ONLY BLOCKED TICKERS`
 
+## Phase 8A10E-R2 - Nine-Ticker Financial-Fingerprint Mapping
+
+Status: `DONE_READ_ONLY_FINANCIAL_FINGERPRINT_MAPPING_REHEARSAL_BLOCKED`
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10E_R2_MAPPING_BLOCKED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10e_r2_financial_mapping/20260827T_PHASE8A10E_R2_FINAL`
+
+The enriched official latest-8Q financial timeline validated cleanly: rows `72`, tickers `9`, rows per ticker `8`, confidence `HIGH=72`, and Revenue/OI/NI populated `72/72/72`. `TJX` latest included quarter is `FY2027 Q2`; all other eight tickers latest included quarter is `FY2027 Q1`.
+
+Financial fingerprint matching improved deterministic evidence from prior exact date mapping `6` to financial-high mappings `33`, with no ambiguous mappings. It also proved that the issue is not a safe period_end-only repair: missing official/current economic quarters remain `39`, no-financial-match current rows `22`, and contradictory fingerprint evidence appears in `43` matrix rows.
+
+Ticker-level financial-high mappings: `BBY=2`, `DELL=3`, `GCO=4`, `HAE=3`, `MRVL=2`, `RL=1`, `SAIC=6`, `TJX=6`, `TRNS=6`. All nine ticker groups remain production-blocked by missing economic-quarter coverage and target-collision/content displacement risk.
+
+Frozen production apply set is empty: ready ticker groups `0`, blocked ticker groups `9`, operations `0`, period_end writes `0`, publish writes `0`, identity writes `0`, value writes `0`, creates `0`, merges `0`, deletes `0`.
+
+Rehearsal on a disposable V3 copy applied `0` transformations. Integrity stayed clean (`quick_check=ok`, duplicate FY/FQ `0`, orphans `0`), and exact A10B stayed unchanged: nine-ticker P1 `9 -> 9`, global P1 `15 -> 15`, new P1 `0`.
+
+Safety: production writes `0`, RawCandle writes `0`, derived writes `0`. RawCandle external drift was observed during the read-only run, but R2 does not read or write RawCandle; the exact A10B rehearsal used the same V3 audit logic with an unused RawCandle sentinel guard.
+
+Phase 8 remains: `IN PROGRESS - NINE-TICKER FINANCIAL CONTENT SEGMENTS AND CURRENT-DOWNSTREAM SAFE APPLY REMAIN`
+
+Exact next action: `DO NOT WRITE PRODUCTION - USE THE FINANCIAL MATCH MATRIX TO RESOLVE REMAINING BLOCKED ROWS`
+
 ## Phase 8A10F - Current-Downstream P2/P3 External Evidence Reconciliation
 
 Status: `DONE_READ_ONLY_CURRENT_DOWNSTREAM_RECONCILIATION_PARTIAL_APPLY_SET_FROZEN`

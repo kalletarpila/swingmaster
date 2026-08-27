@@ -1749,3 +1749,25 @@ Status: `FUNDAMENTALS_V3_PHASE8D_FISCAL_WRITE_GUARDS_ACTIVE`
 Fiscal-calendar guard is active in `V3QuarterRepository.upsert_quarter` before canonical quarter mutation. Exact FY2026/FY2027 anchors are authoritative, backward inference assumes stable fiscal calendar unless positive transition evidence exists, and `REVIEW`/`BLOCK` candidates perform zero canonical writes.
 
 Phase 8 remains `IN PROGRESS`.
+
+## Phase 8D-1 - Full-Database Fiscal Guard Audit
+
+Status: `FUNDAMENTALS_V3_PHASE8D1_FULL_FISCAL_AUDIT_COMPLETE`
+
+Artifact root: `temp/fundamentals_v3_phase8d1_full_fiscal_audit/20260827T_PHASE8D1_FULL`
+
+The Phase 8D dry-run sample was replaced with a complete read-only replay of every current V3 canonical quarter row. Rows audited: `72713`. Outcome distribution: PASS `57762`, PASS_WITH_WARNING `2195`, REVIEW `152`, BLOCK `12604`.
+
+The BLOCK population is split by evidence strength rather than treated as one class. Exact-anchor-proven conflicts: `833`. Backward-inference blocks: `11291`. Block confidence distribution: PROVEN_HIGH `1054`, STRUCTURAL_HIGH `3644`, STRUCTURAL_MEDIUM `2602`, INFERENCE_RISK `5304`.
+
+Inference-distance behavior: exact/current-anchor interval rows `4601` with BLOCK `848` (`18.4308%`); 1-year rows `9782` with BLOCK `1304` (`13.3306%`); 2-year rows `7661` with BLOCK `2930` (`38.2457%`); 3-year rows `8924` with BLOCK `951` (`10.6567%`); 4-5-year rows `18052` with BLOCK `2256` (`12.4972%`); 6-10-year rows `22049` with BLOCK `4313` (`19.5610%`). Unknown metadata rows `1642` produced PASS_WITH_WARNING only.
+
+Calendar-type behavior: CALENDAR_YEAR `53751` rows with BLOCK `4151` (`7.7226%`); FIXED_DATE_FISCAL_YEAR `9626` rows with BLOCK `6101` (`63.3804%`); WEEK_BASED_52_53 `5173` rows with BLOCK `1150` (`22.2308%`); OTHER_VERIFIED `2521` rows with BLOCK `1202` (`47.6795%`); UNKNOWN `1642` rows with BLOCK `0`.
+
+Current/recent behavior: 2024+ rows PASS `16907`, PASS_WITH_WARNING `569`, REVIEW `24`, BLOCK `5084`; latest 8Q rows PASS `15040`, PASS_WITH_WARNING `531`, REVIEW `23`, BLOCK `4638`; latest 4Q rows PASS `8396`, PASS_WITH_WARNING `261`, REVIEW `13`, BLOCK `1462`; current TTM input rows PASS `56124`, PASS_WITH_WARNING `2154`, REVIEW `127`, BLOCK `11642`; Score/Lifecycle/Valuation source rows PASS `43015`, PASS_WITH_WARNING `1734`, REVIEW `74`, BLOCK `8958`.
+
+Known P1 replay across the existing canonical rows remained protected: PASS `46`, REVIEW `8`, BLOCK `267`. The audit recommends `KEEP_PHASE8D_GUARD_UNCHANGED`; no calibration was applied because the full-database audit did not establish a bounded false-positive category that could be weakened without reducing exact-anchor and known-defect protection. Long-distance backward-inference cases remain separately identified for future repair/review.
+
+Safety: production writes `0`, RawCandle writes `0`, canonical/fundamentals/lineage/fiscal-anchor/TTM/Score/Lifecycle/Valuation fingerprints unchanged, integrity `quick_check=ok`, FK issues `0`, duplicate canonical FY/FQ `0`, orphan rows `0`.
+
+Phase 8 remains `IN PROGRESS`.

@@ -1290,3 +1290,23 @@ Current remaining order:
 6. Run Phase 9 Production Proving.
 7. Perform Phase 10 V3 Cutover.
 8. Perform Phase 11 Legacy Retirement.
+
+## Phase 8B - Temporary downstream rebuild with known deferred canonical defects
+
+Status: `DONE_DOWNSTREAM_REBUILD_WITH_DEFERRED_CANONICAL_DEFECTS`
+
+Classification: `FUNDAMENTALS_V3_PHASE8B_DOWNSTREAM_REBUILD_COMPLETE_WITH_KNOWN_CANONICAL_DEFECTS`
+
+Artifact root: `temp/fundamentals_v3_phase8b_downstream_rebuild/20260827T_PHASE8B`
+
+The user explicitly changed the temporary operational order: canonical repairs are deferred, the current V3 canonical state is frozen as an operational baseline, and downstream TTM -> Score -> Lifecycle -> Valuation is rebuilt now from current production canonical data. This is not canonical closure and not Phase 8 completion.
+
+Known unresolved global P1 remains `15 rows / 13 tickers`: `BBY, DELL, FNGR, GCO, HAE, MRVL, POWW, RH, RL, SAIC, TJX, TRNS, VTGN`. The nine 52/53-week tickers remain in V3 and are not repaired in this phase. A10F safe repairs remain frozen but unapplied.
+
+Canonical fingerprint before and after downstream rebuild matched: `True`.
+
+Downstream rows after rebuild: TTM `53781`, Score `53781`, Lifecycle `53781`, Valuation `53781`.
+
+Safety: canonical writes `0`, RawCandle writes `0`; downstream writes were authorized and executed.
+
+Phase 8 remains: `IN PROGRESS - DEFERRED CANONICAL REPAIR AND PREVENTION HARDENING REQUIRED BEFORE FINAL CUTOVER`

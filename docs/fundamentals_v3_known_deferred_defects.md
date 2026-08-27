@@ -25,3 +25,13 @@ Machine-readable register: `temp/fundamentals_v3_phase8b_downstream_rebuild/2026
 ## Phase 8C Note
 
 Phase 8C added fiscal-calendar metadata and fiscal-slot validation evidence. Use it when deferred canonical repairs resume; no Phase 8B defects are resolved by this note.
+
+## Phase 8D-2 Current-Risk Expansion
+
+Phase 8D-2 did not resolve or modify defects. It expanded the current-risk register using the Phase 8D-1 full-audit artifacts and current downstream dependency mapping.
+
+New current-risk tickers outside the original known-13 register: `511`.
+
+Machine-readable current-risk register: `temp/fundamentals_v3_phase8d2_operational_risk/20260827T_PHASE8D2/new_current_risk_tickers.csv`
+
+Operational conclusion: `CURRENT_V3_CURRENT_DOWNSTREAM_RISK_TOO_BROAD`. Do not proceed to Phase 8 operational closure before prioritizing current-latest / TTM-affecting fiscal identity repairs.

@@ -1771,3 +1771,19 @@ Known P1 replay across the existing canonical rows remained protected: PASS `46`
 Safety: production writes `0`, RawCandle writes `0`, canonical/fundamentals/lineage/fiscal-anchor/TTM/Score/Lifecycle/Valuation fingerprints unchanged, integrity `quick_check=ok`, FK issues `0`, duplicate canonical FY/FQ `0`, orphan rows `0`.
 
 Phase 8 remains `IN PROGRESS`.
+
+## Phase 8D-2 - Current / Recent Operational Risk Assessment
+
+Status: `FUNDAMENTALS_V3_PHASE8D2_OPERATIONAL_RISK_ASSESSED`
+
+Artifact root: `temp/fundamentals_v3_phase8d2_operational_risk/20260827T_PHASE8D2`
+
+The assessment reused the Phase 8D-1 full-audit artifacts and did not rerun the fiscal guard. Historical context remains BLOCK `12604` of `72713` rows, split into exact-anchor-proven `833` and backward-inference `11291`.
+
+Current/recent exposure: 2024+ BLOCK `5084` of `22584`; 2025+ BLOCK `2154` of `14686`; latest8Q BLOCK `4638` of `20232`; latest4Q BLOCK `1462` of `10132`; latest-quarter BLOCK `301` of `2470`.
+
+Current TTM risk distribution: TTM_CLEAN `2056`, TTM_WARNING_ONLY `69`, TTM_BACKWARD_INFERENCE_RISK `17`, TTM_EXACT_ANCHOR_CONFLICT `0`, TTM_MULTIPLE_STRUCTURAL_CONFLICTS `386`.
+
+Current downstream exposure is broad: Score/Lifecycle/Valuation each have `492` current rows with known blocked TTM input risk, of which `479` are outside the original known-13 register. New current-risk tickers outside the known register: `511`; new P1 current-risk tickers: `236`.
+
+Operational recommendation: `CURRENT_V3_CURRENT_DOWNSTREAM_RISK_TOO_BROAD`. Phase 8 remains `IN PROGRESS`; do not proceed to Phase 8 operational closure before prioritizing current-latest / TTM-affecting fiscal identity repairs. Keep the Phase 8D guard active.

@@ -1326,3 +1326,15 @@ Status: `FUNDAMENTALS_V3_PHASE8D_FISCAL_WRITE_GUARDS_ACTIVE`
 Fiscal-calendar guard is active in `V3QuarterRepository.upsert_quarter` before canonical quarter mutation. Exact FY2026/FY2027 anchors are authoritative, backward inference assumes stable fiscal calendar unless positive transition evidence exists, and `REVIEW`/`BLOCK` candidates perform zero canonical writes.
 
 Phase 8 remains `IN PROGRESS`.
+
+## Phase 8D-2 - Current / Recent Operational Risk Assessment
+
+Status: `FUNDAMENTALS_V3_PHASE8D2_OPERATIONAL_RISK_ASSESSED`
+
+Artifact root: `temp/fundamentals_v3_phase8d2_operational_risk/20260827T_PHASE8D2`
+
+The assessment reused Phase 8D-1 artifacts and did not rerun the guard or modify production data. Historical fiscal BLOCK context remains `12604 / 72713`, but the operational decision is based on current/recent exposure: latest-quarter BLOCK `301 / 2470`, latest4Q BLOCK `1462 / 10132`, latest8Q BLOCK `4638 / 20232`, and current TTM multiple-structural-conflict rows `386`.
+
+Recommendation: `CURRENT_V3_CURRENT_DOWNSTREAM_RISK_TOO_BROAD`.
+
+Phase 8 remains: `IN PROGRESS - CURRENT-LATEST / TTM-AFFECTING FISCAL IDENTITY REPAIRS REQUIRED BEFORE OPERATIONAL CLOSURE`

@@ -15,12 +15,6 @@ from typing import Any
 from swingmaster.fundamentals.v3_phase7_check_v3 import rows, write_csv, write_json
 from swingmaster.fundamentals.v3_phase8a10d_r_segment_reconciliation import connect_ro, file_state, integrity
 from swingmaster.fundamentals.v3_phase8a6_safe_apply import sha_rows
-from swingmaster.fundamentals.v3_phase8b_downstream_rebuild import (
-    EXPECTED_P1_TICKERS,
-    baseline_summary,
-    canonical_fingerprint,
-    downstream_fingerprint,
-)
 
 
 CLASSIFICATION_COMPLETE = "FUNDAMENTALS_V3_PHASE8C_FISCAL_CALENDAR_METADATA_COMPLETE"
@@ -28,6 +22,7 @@ CLASSIFICATION_REVIEW = "FUNDAMENTALS_V3_PHASE8C_FISCAL_CALENDAR_METADATA_COMPLE
 CLASSIFICATION_BLOCKED = "FUNDAMENTALS_V3_PHASE8C_FISCAL_CALENDAR_METADATA_BLOCKED"
 PROFILE_TABLE = "v3_company_fiscal_calendar_profile"
 ANCHOR_TABLE = "v3_company_fiscal_year_calendar"
+EXPECTED_P1_TICKERS = ("BBY", "DELL", "FNGR", "GCO", "HAE", "MRVL", "POWW", "RH", "RL", "SAIC", "TJX", "TRNS", "VTGN")
 
 PROFILE_DDL = f"""
 CREATE TABLE IF NOT EXISTS {PROFILE_TABLE} (
@@ -121,6 +116,44 @@ class Phase8CPaths:
     phase8b_artifact_root: Path = Path("temp/fundamentals_v3_phase8b_downstream_rebuild/20260827T_PHASE8B")
 
 
+@dataclass(frozen=True)
+class FiscalCalendarTransitionEvidence:
+    status: str = "STABLE_CALENDAR"
+    evidence: str | None = None
+
+
+@dataclass(frozen=True)
+class FiscalCalendarWriteCandidate:
+    company_id: int
+    fiscal_year: int
+    fiscal_quarter: str
+    period_end_date: str | None
+    publish_date: str | None = None
+    source_context: str | None = None
+    provider_fiscal_year: int | None = None
+    provider_fiscal_quarter: str | None = None
+    financial_fingerprint_state: str | None = None
+    transition_evidence: FiscalCalendarTransitionEvidence = FiscalCalendarTransitionEvidence()
+    stub_period: bool = False
+
+
+@dataclass(frozen=True)
+class FiscalCalendarGuardDecision:
+    decision: str
+    write_permitted: bool
+    reason_codes: tuple[str, ...]
+    inferred_fiscal_year: int | None
+    inferred_fiscal_quarter: str | None
+    exact_anchor_used: str | None
+    calendar_type: str | None
+    calendar_regime: str
+    slot_confidence: str
+    target_collision_state: str
+    chronology_state: str
+    financial_corroboration_state: str
+    transition_evidence: str
+
+
 def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -141,6 +174,52 @@ def ensure_fiscal_calendar_schema(conn: sqlite3.Connection) -> None:
 
 def table_columns(conn: sqlite3.Connection, table: str) -> list[str]:
     return [str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")]
+
+
+def table_count(conn: sqlite3.Connection, table: str) -> int:
+    return int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
+
+def baseline_summary(v3_db: Path) -> dict[str, Any]:
+    with sqlite3.connect(f"file:{v3_db}?mode=ro", uri=True) as conn:
+        return {
+            "companies": table_count(conn, "v3_company"),
+            "active_companies": int(conn.execute("SELECT COUNT(*) FROM v3_company WHERE active=1").fetchone()[0]),
+            "inactive_companies": int(conn.execute("SELECT COUNT(*) FROM v3_company WHERE active=0").fetchone()[0]),
+            "canonical_quarter_rows": table_count(conn, "v3_quarter"),
+            "fundamentals_rows": table_count(conn, "v3_quarter_fundamentals"),
+            "migration_audit_rows": table_count(conn, "v3_migration_audit"),
+            "provider_acquisition_rows": table_count(conn, "v3_provider_q_acquisition"),
+            "ttm_rows": table_count(conn, "v3_ttm"),
+            "score_rows": table_count(conn, "v3_score"),
+            "lifecycle_rows": table_count(conn, "v3_lifecycle"),
+            "valuation_rows": table_count(conn, "v3_valuation"),
+        }
+
+
+def canonical_fingerprint(v3_db: Path) -> dict[str, Any]:
+    sql = """
+        SELECT c.company_id,c.market,c.ticker,q.fiscal_year,q.fiscal_quarter,q.period_end_date,q.publish_date,
+               f.revenue,f.operating_income,f.ebit,f.ebitda,f.net_income,f.operating_cashflow,f.capex,
+               f.free_cashflow,f.cash,f.total_debt,f.shares_outstanding
+        FROM v3_company c
+        JOIN v3_quarter q ON q.company_id=c.company_id
+        JOIN v3_quarter_fundamentals f ON f.quarter_id=q.quarter_id
+        ORDER BY c.company_id,q.fiscal_year,CASE q.fiscal_quarter WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2 WHEN 'Q3' THEN 3 WHEN 'Q4' THEN 4 ELSE 9 END
+    """
+    with sqlite3.connect(f"file:{v3_db}?mode=ro", uri=True) as conn:
+        conn.row_factory = sqlite3.Row
+        data = [dict(row) for row in conn.execute(sql)]
+    return {"rows": len(data), "sha256": sha_rows(data)}
+
+
+def downstream_fingerprint(v3_db: Path, table: str) -> dict[str, Any]:
+    volatile = {"run_id", "created_at_utc", "updated_at_utc", "calculated_at_utc"}
+    with sqlite3.connect(f"file:{v3_db}?mode=ro", uri=True) as conn:
+        conn.row_factory = sqlite3.Row
+        cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})") if row[1] not in volatile and not str(row[1]).endswith("_id")]
+        data = [dict(row) for row in conn.execute(f"SELECT {','.join(cols)} FROM {table} ORDER BY {','.join(cols)}")]
+    return {"table": table, "rows": len(data), "sha256": sha_rows(data)}
 
 
 def schema_summary(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -433,21 +512,38 @@ def infer_slot(calendar: dict[str, Any] | None, observed_period_end: str, propos
     fy = None
     start = None
     next_start = None
+    exact_interval = False
     for idx, (year, start_date) in enumerate(anchors):
         ns = anchors[idx + 1][1] if idx + 1 < len(anchors) else None
         if ns and start_date <= observed < ns:
             fy, start, next_start = year, start_date, ns
+            exact_interval = True
             break
     if fy is None and anchors:
         ref_year, ref_start = anchors[0] if observed < anchors[0][1] else anchors[-1]
-        delta_years = observed.year - ref_start.year
-        estimated_start = date(observed.year, ref_start.month, min(ref_start.day, 28 if ref_start.month == 2 else ref_start.day))
-        if observed < estimated_start:
-            delta_years -= 1
-            estimated_start = date(observed.year - 1, ref_start.month, min(ref_start.day, 28 if ref_start.month == 2 else ref_start.day))
-        fy = ref_year + delta_years
-        start = estimated_start
-        next_start = date(start.year + 1, start.month, start.day)
+        if calendar["profile"]["calendar_type"] == "WEEK_BASED_52_53":
+            fy = ref_year
+            start = ref_start
+            if observed < start:
+                while observed < start:
+                    fy -= 1
+                    next_start = start
+                    start = start - timedelta(days=364)
+            else:
+                next_start = start + timedelta(days=364)
+                while observed >= next_start:
+                    fy += 1
+                    start = next_start
+                    next_start = start + timedelta(days=364)
+        else:
+            delta_years = observed.year - ref_start.year
+            estimated_start = date(observed.year, ref_start.month, min(ref_start.day, 28 if ref_start.month == 2 else ref_start.day))
+            if observed < estimated_start:
+                delta_years -= 1
+                estimated_start = date(observed.year - 1, ref_start.month, min(ref_start.day, 28 if ref_start.month == 2 else ref_start.day))
+            fy = ref_year + delta_years
+            start = estimated_start
+            next_start = date(start.year + 1, start.month, start.day)
     if fy is None or start is None:
         return {"confidence": "INSUFFICIENT", "warnings": ["INSUFFICIENT_METADATA"]}
     total_days = (next_start - start).days if next_start else 365
@@ -469,7 +565,7 @@ def infer_slot(calendar: dict[str, Any] | None, observed_period_end: str, propos
     return {
         "candidate_fiscal_year": fy,
         "candidate_fiscal_quarter": f"Q{quarter}",
-        "confidence": "EXACT_ANCHOR" if next_start else "HIGH",
+        "confidence": "EXACT_ANCHOR" if exact_interval else "HIGH",
         "exact_anchor_used": start.isoformat(),
         "calendar_type": calendar["profile"]["calendar_type"],
         "expected_slot_end": expected_end.isoformat(),
@@ -513,6 +609,125 @@ def validate_canonical_row(calendar: dict[str, Any] | None, row: dict[str, Any],
     else:
         status = "PASS"
     return {"status": status, "reason_codes": unique, "slot": slot}
+
+
+def previous_next_quarters(conn: sqlite3.Connection, company_id: int, fiscal_year: int, fiscal_quarter: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    ordinal = int(fiscal_year) * 4 + QUARTER_ORDER[str(fiscal_quarter).upper()]
+    prev = rows(
+        conn,
+        """
+        SELECT fiscal_year,fiscal_quarter,period_end_date
+        FROM v3_quarter
+        WHERE company_id=? AND (fiscal_year*4 + CASE fiscal_quarter WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2 WHEN 'Q3' THEN 3 WHEN 'Q4' THEN 4 END) < ?
+        ORDER BY fiscal_year DESC, CASE fiscal_quarter WHEN 'Q4' THEN 4 WHEN 'Q3' THEN 3 WHEN 'Q2' THEN 2 WHEN 'Q1' THEN 1 END DESC
+        LIMIT 1
+        """,
+        (company_id, ordinal),
+    )
+    nxt = rows(
+        conn,
+        """
+        SELECT fiscal_year,fiscal_quarter,period_end_date
+        FROM v3_quarter
+        WHERE company_id=? AND (fiscal_year*4 + CASE fiscal_quarter WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2 WHEN 'Q3' THEN 3 WHEN 'Q4' THEN 4 END) > ?
+        ORDER BY fiscal_year, CASE fiscal_quarter WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2 WHEN 'Q3' THEN 3 WHEN 'Q4' THEN 4 END
+        LIMIT 1
+        """,
+        (company_id, ordinal),
+    )
+    return (prev[0] if prev else None, nxt[0] if nxt else None)
+
+
+def validate_canonical_write_candidate(conn: sqlite3.Connection, candidate: FiscalCalendarWriteCandidate) -> FiscalCalendarGuardDecision:
+    conn.row_factory = sqlite3.Row
+    fq = str(candidate.fiscal_quarter).upper()
+    calendar = load_company_calendar(conn, int(candidate.company_id))
+    reasons: set[str] = set()
+    transition_status = candidate.transition_evidence.status
+    if transition_status == "VERIFIED_TRANSITION":
+        reasons.add("VERIFIED_FISCAL_CALENDAR_TRANSITION")
+    elif transition_status in {"POSSIBLE_TRANSITION", "INSUFFICIENT_TRANSITION_EVIDENCE"}:
+        reasons.add("POSSIBLE_FISCAL_CALENDAR_TRANSITION")
+    if candidate.stub_period:
+        reasons.add("STUB_PERIOD_REVIEW")
+    if candidate.provider_fiscal_year and int(candidate.provider_fiscal_year) != int(candidate.fiscal_year):
+        reasons.add("PROVIDER_FISCAL_LABEL_CONFLICT")
+    if candidate.provider_fiscal_quarter and str(candidate.provider_fiscal_quarter).upper() != fq:
+        reasons.add("PROVIDER_FISCAL_LABEL_CONFLICT")
+
+    row = {
+        "fiscal_year": int(candidate.fiscal_year),
+        "fiscal_quarter": fq,
+        "period_end_date": candidate.period_end_date,
+        "publish_date": candidate.publish_date,
+    }
+    validation = validate_canonical_row(calendar, row)
+    slot = validation["slot"]
+    for reason in validation["reason_codes"]:
+        if reason == "FISCAL_ANCHOR_CONFLICT":
+            reasons.add("EXACT_FY_ANCHOR_CONFLICT")
+        elif reason == "INSUFFICIENT_METADATA":
+            reasons.add("INSUFFICIENT_FISCAL_METADATA")
+        else:
+            reasons.add(reason)
+
+    target = conn.execute(
+        "SELECT quarter_id,period_end_date,publish_date FROM v3_quarter WHERE company_id=? AND fiscal_year=? AND fiscal_quarter=?",
+        (int(candidate.company_id), int(candidate.fiscal_year), fq),
+    ).fetchone()
+    target_collision_state = "NO_TARGET_COLLISION"
+    if target and candidate.period_end_date and target["period_end_date"] and target["period_end_date"] != candidate.period_end_date:
+        target_collision_state = "TARGET_IDENTITY_COLLISION"
+        reasons.add("TARGET_IDENTITY_COLLISION")
+
+    prev, nxt = previous_next_quarters(conn, int(candidate.company_id), int(candidate.fiscal_year), fq)
+    chronology_state = "CHRONOLOGY_OK"
+    if candidate.period_end_date and prev and prev.get("period_end_date") and candidate.period_end_date < prev["period_end_date"]:
+        chronology_state = "REVERSE_SEQUENCE_PREVIOUS"
+        reasons.add("REVERSE_SEQUENCE")
+    if candidate.period_end_date and nxt and nxt.get("period_end_date") and candidate.period_end_date > nxt["period_end_date"]:
+        chronology_state = "REVERSE_SEQUENCE_NEXT"
+        reasons.add("REVERSE_SEQUENCE")
+
+    financial_state = candidate.financial_fingerprint_state or "NOT_SUPPLIED"
+    if financial_state == "CONFLICT":
+        reasons.add("FINANCIAL_FINGERPRINT_CONFLICT")
+
+    hard_reasons = {
+        "FY_SHIFT_PLUS_ONE",
+        "FY_SHIFT_MINUS_ONE",
+        "EXACT_FY_ANCHOR_CONFLICT",
+        "TARGET_IDENTITY_COLLISION",
+        "REVERSE_SEQUENCE",
+    }
+    strong_slot_conflict = "FQ_SLOT_MISMATCH" in reasons and slot.get("confidence") in {"EXACT_ANCHOR", "HIGH"} and not reasons.intersection({"POSSIBLE_FISCAL_CALENDAR_TRANSITION", "VERIFIED_FISCAL_CALENDAR_TRANSITION", "STUB_PERIOD_REVIEW"})
+    transition_or_stub = reasons.intersection({"POSSIBLE_FISCAL_CALENDAR_TRANSITION", "VERIFIED_FISCAL_CALENDAR_TRANSITION", "STUB_PERIOD_REVIEW"})
+    if transition_or_stub:
+        decision = "REVIEW"
+    elif reasons.intersection(hard_reasons) or strong_slot_conflict:
+        decision = "BLOCK"
+    elif reasons.intersection({"FINANCIAL_FINGERPRINT_CONFLICT", "PERIOD_END_OUTSIDE_SLOT"}):
+        decision = "REVIEW"
+    elif reasons:
+        decision = "PASS_WITH_WARNING"
+    else:
+        decision = "PASS"
+
+    return FiscalCalendarGuardDecision(
+        decision=decision,
+        write_permitted=decision in {"PASS", "PASS_WITH_WARNING"},
+        reason_codes=tuple(sorted(reasons)),
+        inferred_fiscal_year=slot.get("candidate_fiscal_year"),
+        inferred_fiscal_quarter=slot.get("candidate_fiscal_quarter"),
+        exact_anchor_used=slot.get("exact_anchor_used"),
+        calendar_type=slot.get("calendar_type"),
+        calendar_regime=transition_status,
+        slot_confidence=slot.get("confidence", "INSUFFICIENT"),
+        target_collision_state=target_collision_state,
+        chronology_state=chronology_state,
+        financial_corroboration_state=financial_state,
+        transition_evidence=candidate.transition_evidence.evidence or "",
+    )
 
 
 def semantic_fingerprints(v3_db: Path) -> dict[str, Any]:

@@ -1741,3 +1741,11 @@ Status: `FUNDAMENTALS_V3_PHASE8C_FISCAL_CALENDAR_METADATA_COMPLETE_WITH_REVIEW_I
 Artifact root: `temp/fundamentals_v3_phase8c_fiscal_calendar_metadata/20260827T_PHASE8C`
 
 Fiscal-calendar profiles and exact FY anchors were imported as metadata-only production data. Canonical and downstream fingerprints remained unchanged. Phase 8 remains `IN PROGRESS`.
+
+## Phase 8D - Fiscal Calendar Prevention Guards
+
+Status: `FUNDAMENTALS_V3_PHASE8D_FISCAL_WRITE_GUARDS_ACTIVE`
+
+Fiscal-calendar guard is active in `V3QuarterRepository.upsert_quarter` before canonical quarter mutation. Exact FY2026/FY2027 anchors are authoritative, backward inference assumes stable fiscal calendar unless positive transition evidence exists, and `REVIEW`/`BLOCK` candidates perform zero canonical writes.
+
+Phase 8 remains `IN PROGRESS`.

@@ -11,6 +11,7 @@ from typing import Any
 
 from swingmaster.fundamentals.v3_helpers import normalize_fiscal_quarter, normalize_market, normalize_ticker
 from swingmaster.fundamentals.v3_schema import apply_v3_schema
+from swingmaster.fundamentals.v3_fiscal_calendar import FiscalCalendarWriteCandidate, validate_canonical_write_candidate
 
 
 PROVIDERS = {"YAHOO", "LEGACY", "V2", "SEC", "SIMFIN"}
@@ -270,10 +271,25 @@ class V3QuarterRepository:
         q_lifecycle: str = "RESULT_DETECTED",
         sec_confirmation_state: str = "NOT_DERIVABLE",
         now_utc: str | None = None,
+        enforce_fiscal_calendar_guard: bool = True,
     ) -> int:
         if q_lifecycle not in Q_LIFECYCLES:
             raise ValueError(f"V3_INVALID_Q_LIFECYCLE:{q_lifecycle}")
         fq = normalize_fiscal_quarter(fiscal_quarter)
+        if enforce_fiscal_calendar_guard:
+            guard = validate_canonical_write_candidate(
+                self.conn,
+                FiscalCalendarWriteCandidate(
+                    company_id=int(company_id),
+                    fiscal_year=int(fiscal_year),
+                    fiscal_quarter=fq,
+                    period_end_date=period_end_date,
+                    publish_date=publish_date,
+                    source_context="V3QuarterRepository.upsert_quarter",
+                ),
+            )
+            if not guard.write_permitted:
+                raise RuntimeError("V3_FISCAL_CALENDAR_GUARD_REJECTED:" + guard.decision + ":" + ",".join(guard.reason_codes))
         now = now_utc or utc_now_text()
         self.conn.execute(
             """

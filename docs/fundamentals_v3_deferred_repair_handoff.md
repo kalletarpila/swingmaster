@@ -20,3 +20,11 @@ Current decision: do not repair canonical data now; rebuild downstream temporari
 ## Phase 8C Note
 
 Phase 8C added fiscal-calendar metadata and fiscal-slot validation evidence. Use it when deferred canonical repairs resume; no Phase 8B defects are resolved by this note.
+
+## Phase 8D - Fiscal Calendar Prevention Guards
+
+Status: `FUNDAMENTALS_V3_PHASE8D_FISCAL_WRITE_GUARDS_ACTIVE`
+
+Fiscal-calendar guard is active in `V3QuarterRepository.upsert_quarter` before canonical quarter mutation. Exact FY2026/FY2027 anchors are authoritative, backward inference assumes stable fiscal calendar unless positive transition evidence exists, and `REVIEW`/`BLOCK` candidates perform zero canonical writes.
+
+Phase 8 remains `IN PROGRESS`.

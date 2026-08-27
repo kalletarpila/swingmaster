@@ -23,3 +23,11 @@ Phase 8C validation is read-only diagnostic evidence. Future Update V3 preventio
 Maintenance policy: add one new anchor row per company and fiscal year when official evidence becomes available. Do not add new FY-specific columns. Historical anchors are immutable unless stronger verified evidence proves an error.
 
 Artifact root: `temp/fundamentals_v3_phase8c_fiscal_calendar_metadata/20260827T_PHASE8C`.
+
+## Phase 8D - Fiscal Calendar Prevention Guards
+
+Status: `FUNDAMENTALS_V3_PHASE8D_FISCAL_WRITE_GUARDS_ACTIVE`
+
+Fiscal-calendar guard is active in `V3QuarterRepository.upsert_quarter` before canonical quarter mutation. Exact FY2026/FY2027 anchors are authoritative, backward inference assumes stable fiscal calendar unless positive transition evidence exists, and `REVIEW`/`BLOCK` candidates perform zero canonical writes.
+
+Phase 8 remains `IN PROGRESS`.

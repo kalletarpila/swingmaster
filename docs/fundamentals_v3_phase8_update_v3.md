@@ -1565,6 +1565,90 @@ Phase 8 remains: `IN PROGRESS - NINE-TICKER FINANCIAL CONTENT SEGMENTS AND CURRE
 
 Exact next action: `DO NOT WRITE PRODUCTION - USE THE FINANCIAL MATCH MATRIX TO RESOLVE REMAINING BLOCKED ROWS`
 
+## Phase 8A10E-R3 - Clean Latest-8Q Reconstruction for Nine 52/53-Week Tickers
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10E_R3_RECONSTRUCTION_BLOCKED`
+
+Status: `DONE_READ_ONLY_CLEAN_LATEST8Q_RECONSTRUCTION_BLOCKED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10e_r3_latest8q_reconstruction/20260827T_PHASE8A10E_R3`
+
+Authoritative enriched latest-8Q input: `temp/swingmaster_v3_official_fiscal_quarter_timeline_with_financials_2026-08-26.csv`
+
+R3 abandons row-mapping as a production repair strategy for the nine 52/53-week tickers. R2 proved that the defect is not a generic period_end-only shift: current V3 labels, period_end dates, and some row content are displaced relative to the issuer economic quarter. R3 therefore builds clean official latest-8Q target segments first and then asks whether current/local source evidence can populate those targets safely.
+
+Official timeline authority:
+
+| Metric | Count |
+| --- | ---: |
+| Official rows | 72 |
+| Tickers | 9 |
+| Rows per ticker | 8 |
+| HIGH confidence rows | 72 |
+| Revenue populated | 72 |
+| Operating Income populated | 72 |
+| Net Income populated | 72 |
+
+Fiscal-calendar slot inference was used only as structural mapping evidence, never as canonical date truth. FY2027 starts were loaded for all nine tickers. January/February boundary group: `BBY`, `DELL`, `GCO`, `MRVL`, `SAIC`, `TJX`. March/April boundary group: `HAE`, `RL`, `TRNS`. Slot model valid tickers `9/9`; slot ambiguities `0`; official period_end remains authoritative.
+
+Clean reconstruction result:
+
+| Metric | Count |
+| --- | ---: |
+| Clean target quarters | 72 |
+| Reused current rows without repair | 0 |
+| Reused with metadata repair | 0 |
+| Reused with identity repair | 29 |
+| Reconstructed from local source | 0 |
+| Reconstructed from multiple sources | 0 |
+| Partial targets | 43 |
+| Source-insufficient target assignments | 43 |
+
+Field reconstruction availability:
+
+| Field | Verified targets |
+| --- | ---: |
+| Revenue | 72 |
+| Operating Income | 72 |
+| Net Income | 72 |
+| Gross Profit | 29 |
+| EBIT | 22 |
+| EBITDA | 29 |
+| OCF | 29 |
+| Capex | 29 |
+| FCF | 29 |
+| Cash | 29 |
+| Total Debt | 29 |
+| Shares Outstanding | 29 |
+
+Ticker readiness:
+
+| Ticker | Current rows reused | First target | Last target | Production ready |
+| --- | ---: | --- | --- | --- |
+| `BBY` | 1 | 2024-08-03 | 2026-05-02 | NO |
+| `DELL` | 2 | 2024-08-02 | 2026-05-01 | NO |
+| `GCO` | 3 | 2024-08-03 | 2026-05-02 | NO |
+| `HAE` | 3 | 2024-09-28 | 2026-06-27 | NO |
+| `MRVL` | 1 | 2024-08-03 | 2026-05-02 | NO |
+| `RL` | 1 | 2024-09-28 | 2026-06-27 | NO |
+| `SAIC` | 6 | 2024-08-02 | 2026-05-01 | NO |
+| `TJX` | 6 | 2024-11-02 | 2026-08-01 | NO |
+| `TRNS` | 6 | 2024-09-28 | 2026-06-27 | NO |
+
+Frozen replacement apply set is empty: ready ticker groups `0`, blocked tickers `9`, operations `0`, metadata writes `0`, identity writes `0`, canonical value writes `0`, creates `0`, deletes `0`, lineage actions `0`.
+
+Rehearsal applied `0` operations on a disposable V3 copy. Integrity stayed clean: quick_check `ok`, duplicate FY/FQ `0`, orphan rows `0`, unrelated drift `0`. Fiscal-slot parity passed because the target model is coherent. Official timeline parity, financial parity, and latest-8Q window parity remain failing because no ticker group was safe to replace.
+
+Exact A10B re-audit after rehearsal stayed unchanged: global P1 `15 -> 15`, nine-ticker P1 `9 -> 9`, new P1 `0`. Remaining P1 tickers are `BBY`, `DELL`, `FNGR`, `GCO`, `HAE`, `MRVL`, `POWW`, `RH`, `RL`, `SAIC`, `TJX`, `TRNS`, and `VTGN`.
+
+Prevention findings: metadata-only failure count `0`, FY/Q displacement count `29`, hybrid row count `0`, missing-quarter count `43`. Future prevention must build clean official targets before writes and require financial fingerprint, fiscal-slot, target-collision, latest-window, and post-A10B gates.
+
+Safety proof: production writes `0`, RawCandle writes `0`, TTM writes `0`, Score writes `0`, Lifecycle writes `0`, Valuation writes `0`. RawCandle external drift was observed during the read-only run, but R3 did not read or write RawCandle.
+
+Phase 8 remains: `IN PROGRESS - NINE-TICKER CLEAN RECONSTRUCTION BLOCKED AND CURRENT-DOWNSTREAM SAFE APPLY REMAIN`
+
+Exact next action: `DO NOT WRITE PRODUCTION - CONSIDER REMOVING ONLY THE PERSISTENTLY UNRESOLVABLE TICKERS FROM V3`
+
 ## Phase 8A10F - Current-Downstream P2/P3 External Evidence Reconciliation
 
 Classification: `FUNDAMENTALS_V3_PHASE8A10F_CURRENT_DOWNSTREAM_PARTIAL_APPLY_SET_READY_BLOCKERS_REMAIN`

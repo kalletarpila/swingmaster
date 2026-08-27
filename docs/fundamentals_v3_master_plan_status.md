@@ -1212,6 +1212,32 @@ Phase 8 remains: `IN PROGRESS - NINE-TICKER FINANCIAL CONTENT SEGMENTS AND CURRE
 
 Exact next action: `DO NOT WRITE PRODUCTION - USE THE FINANCIAL MATCH MATRIX TO RESOLVE REMAINING BLOCKED ROWS`
 
+## Phase 8A10E-R3 - Clean Latest-8Q Reconstruction for Nine 52/53-Week Tickers
+
+Status: `DONE_READ_ONLY_CLEAN_LATEST8Q_RECONSTRUCTION_BLOCKED`
+
+Classification: `FUNDAMENTALS_V3_PHASE8A10E_R3_RECONSTRUCTION_BLOCKED`
+
+Artifact root: `temp/fundamentals_v3_phase8a10e_r3_latest8q_reconstruction/20260827T_PHASE8A10E_R3`
+
+The R2 row-mapping strategy was abandoned for production apply because it proved financial-content displacement and missing/colliding target segments rather than a safe metadata-only offset. R3 therefore constructed clean official latest-8Q target segments first, then reconciled current V3 rows against that target.
+
+The authoritative enriched timeline validated cleanly: rows `72`, tickers `9`, rows per ticker `8`, confidence `HIGH=72`, Revenue/OI/NI populated `72/72/72`. FY2027 fiscal-year anchors were loaded for all nine tickers. Fiscal-slot validation passed for `9/9` tickers, with slot ambiguities `0`.
+
+Clean targets total `72`. Revenue, Operating Income, and Net Income were verified for all `72` targets from the official financial timeline. Current V3 supplied high-confidence identity-repair source rows for `29` targets, but no ticker reached atomic latest-8Q primary-core completeness. Primary-core and secondary field availability from safe reused local evidence remained incomplete: EBITDA/FCF/cash/debt/shares `29/72`, Gross Profit/OCF/Capex `29/72`, EBIT `22/72`.
+
+Ticker-level current rows reused: `BBY=1`, `DELL=2`, `GCO=3`, `HAE=3`, `MRVL=1`, `RL=1`, `SAIC=6`, `TJX=6`, `TRNS=6`. All nine ticker groups remain production-blocked; frozen replacement apply set is empty.
+
+Rehearsal applied `0` operations on a disposable V3 copy. Integrity stayed clean (`quick_check=ok`, duplicate FY/FQ `0`, orphans `0`). Official timeline parity, financial parity, and latest-8Q window parity remain failing because no replacement group was safe to apply. Exact A10B stayed unchanged: nine-ticker P1 `9 -> 9`, global P1 `15 -> 15`, new P1 `0`.
+
+Prevention implication: the historical seed artifact is not only metadata-only drift. It includes FY/Q displacement and missing recent canonical quarters. Future canonical write paths must build clean official target segments first, then enforce financial fingerprint, fiscal-slot, target-collision, latest-window, and post-A10B gates before writes.
+
+Safety: production writes `0`, RawCandle writes `0`, derived writes `0`. RawCandle external drift was observed during the run, but R3 did not read or write RawCandle.
+
+Phase 8 remains: `IN PROGRESS - NINE-TICKER CLEAN RECONSTRUCTION BLOCKED AND CURRENT-DOWNSTREAM SAFE APPLY REMAIN`
+
+Exact next action: `DO NOT WRITE PRODUCTION - CONSIDER REMOVING ONLY THE PERSISTENTLY UNRESOLVABLE TICKERS FROM V3`
+
 ## Phase 8A10F - Current-Downstream P2/P3 External Evidence Reconciliation
 
 Status: `DONE_READ_ONLY_CURRENT_DOWNSTREAM_RECONCILIATION_PARTIAL_APPLY_SET_FROZEN`

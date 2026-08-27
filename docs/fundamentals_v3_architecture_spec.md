@@ -914,3 +914,11 @@ the Phase 3C-1E policy marks them unsafe.
 - Provenance is minimized: yes.
 - Migration conflict complexity does not become permanent runtime complexity: yes.
 - Phase 1 can proceed without new material architecture decisions: yes.
+
+## Phase 8C - Fiscal Calendar Metadata Layer
+
+Status: `FUNDAMENTALS_V3_PHASE8C_FISCAL_CALENDAR_METADATA_COMPLETE_WITH_REVIEW_ITEMS`
+
+Artifact root: `temp/fundamentals_v3_phase8c_fiscal_calendar_metadata/20260827T_PHASE8C`
+
+Fiscal-calendar profiles and exact FY anchors were imported as metadata-only production data. Canonical and downstream fingerprints remained unchanged. Phase 8 remains `IN PROGRESS`.

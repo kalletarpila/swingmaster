@@ -21,3 +21,7 @@ Known categories:
 - A10F blockers: `15`.
 
 Machine-readable register: `temp/fundamentals_v3_phase8b_downstream_rebuild/20260827T_PHASE8B/fundamentals_v3_deferred_defect_register.csv`
+
+## Phase 8C Note
+
+Phase 8C added fiscal-calendar metadata and fiscal-slot validation evidence. Use it when deferred canonical repairs resume; no Phase 8B defects are resolved by this note.

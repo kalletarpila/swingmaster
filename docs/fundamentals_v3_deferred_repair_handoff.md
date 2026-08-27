@@ -16,3 +16,7 @@ Do not re-research completed evidence unnecessarily. Resume from these phases an
 - A10F: current-downstream safe subset and blockers.
 
 Current decision: do not repair canonical data now; rebuild downstream temporarily and return to canonical repair before final cutover. Prevention hardening remains mandatory before final V3 cutover.
+
+## Phase 8C Note
+
+Phase 8C added fiscal-calendar metadata and fiscal-slot validation evidence. Use it when deferred canonical repairs resume; no Phase 8B defects are resolved by this note.

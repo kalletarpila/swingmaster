@@ -102,3 +102,13 @@ The remaining order before V3 cutover is:
 
 V3 must not cut over while active canonical write paths can recreate known Phase 8 canonical mapping,
 period-end, publish-date, restatement, transition/STUB, or target-collision failure modes.
+
+## Phase 8C - Fiscal Calendar Metadata Layer
+
+Status: `FUNDAMENTALS_V3_PHASE8C_FISCAL_CALENDAR_METADATA_COMPLETE_WITH_REVIEW_ITEMS`
+
+Artifact root: `temp/fundamentals_v3_phase8c_fiscal_calendar_metadata/20260827T_PHASE8C`
+
+Fiscal-calendar profiles and exact FY anchors were imported as metadata-only production data. Canonical and downstream fingerprints remained unchanged. Phase 8 remains `IN PROGRESS`.
+
+Future Update V3 write order now includes fiscal-calendar exact anchors and slot validation before canonical write.

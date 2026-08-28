@@ -1338,3 +1338,7 @@ The assessment reused Phase 8D-1 artifacts and did not rerun the guard or modify
 Recommendation: `CURRENT_V3_CURRENT_DOWNSTREAM_RISK_TOO_BROAD`.
 
 Phase 8 remains: `IN PROGRESS - CURRENT-LATEST / TTM-AFFECTING FISCAL IDENTITY REPAIRS REQUIRED BEFORE OPERATIONAL CLOSURE`
+
+## Phase 8C-EXT - Historical Exact FY Anchor Backfill
+
+Status: `FUNDAMENTALS_V3_PHASE8C_EXT_HISTORICAL_ANCHOR_BACKFILL_COMPLETE_WITH_REVIEW_ITEMS`. Phase 8 remains `IN PROGRESS`. Artifact root: `temp/fundamentals_v3_phase8c_ext_historical_anchors/20260828T_PHASE8C_EXT`.

@@ -23,6 +23,7 @@ V3_REQUIRED_TABLES = (
     "v3_resolution_issue",
     "v3_company_fiscal_calendar_profile",
     "v3_company_fiscal_year_calendar",
+    "v3_company_fiscal_anchor_chain",
 )
 V3_RAW_CACHE_TABLES = ("v3_raw_cache_entry",)
 
@@ -51,11 +52,16 @@ def fiscal_calendar_migration_file_path() -> Path:
     return Path(__file__).resolve().parents[1] / "infra" / "sqlite" / "migrations" / "039_v3_fiscal_calendar_metadata.sql"
 
 
+def fiscal_anchor_chain_migration_file_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "infra" / "sqlite" / "migrations" / "040_v3_fiscal_anchor_chain_metadata.sql"
+
+
 def apply_v3_schema(conn: sqlite3.Connection, *, include_raw_cache: bool = False) -> None:
     conn.execute("PRAGMA foreign_keys=ON")
     sql_text = migration_file_path().read_text()
     conn.executescript(sql_text)
     conn.executescript(fiscal_calendar_migration_file_path().read_text())
+    conn.executescript(fiscal_anchor_chain_migration_file_path().read_text())
     if include_raw_cache:
         conn.executescript(V3_RAW_CACHE_DDL)
     conn.commit()

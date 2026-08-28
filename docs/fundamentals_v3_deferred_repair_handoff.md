@@ -28,3 +28,7 @@ Status: `FUNDAMENTALS_V3_PHASE8D_FISCAL_WRITE_GUARDS_ACTIVE`
 Fiscal-calendar guard is active in `V3QuarterRepository.upsert_quarter` before canonical quarter mutation. Exact FY2026/FY2027 anchors are authoritative, backward inference assumes stable fiscal calendar unless positive transition evidence exists, and `REVIEW`/`BLOCK` candidates perform zero canonical writes.
 
 Phase 8 remains `IN PROGRESS`.
+
+## Historical Exact Fiscal-Year Anchors
+
+FY1999-FY2027 verified exact fiscal-year-start anchors are now available for future fiscal-label provenance and guard reanalysis. Artifact root: `temp/fundamentals_v3_phase8c_ext_historical_anchors/20260828T_PHASE8C_EXT`.

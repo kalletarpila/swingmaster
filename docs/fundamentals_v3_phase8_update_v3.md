@@ -1863,3 +1863,15 @@ Content integrity classification: LABEL_ONLY_ERROR_HIGH_CONFIDENCE `342`, LABEL_
 Current repairability, read-only: AUTO_LABEL_REPAIR_READY rows `0`, collision review rows `3595`, content reconstruction rows `0`, unresolved rows `5565`.
 
 The active guard remains unchanged and continues to catch these candidates. Production writes `0`; active guard changes `0`; fingerprints unchanged `True`.
+
+## Phase 8C-EXT - Historical Exact FY Anchor Backfill
+
+Status: `FUNDAMENTALS_V3_PHASE8C_EXT_HISTORICAL_ANCHOR_BACKFILL_COMPLETE_WITH_REVIEW_ITEMS`
+
+Artifact root: `temp/fundamentals_v3_phase8c_ext_historical_anchors/20260828T_PHASE8C_EXT`
+
+Imported historical verified exact fiscal-year starts from FY1999-FY2027 into the V3 fiscal-calendar metadata layer. Normalized populated source cells `35399`, new exact anchor inserts `32670`, already-existing exact anchors `2729`, total anchors after `35399`.
+
+Current anchor reconciliation passed: FY2026 exact matches `2470`, FY2027 exact matches `259`, conflicts `0`. Chain/break metadata rows inserted `2470`.
+
+Safety: canonical/fundamentals/TTM/Score/Lifecycle/Valuation fingerprints unchanged; active guard changes `0`; RawCandle writes `0`. Phase 8 remains `IN PROGRESS`.

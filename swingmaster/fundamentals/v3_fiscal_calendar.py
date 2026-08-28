@@ -22,6 +22,7 @@ CLASSIFICATION_REVIEW = "FUNDAMENTALS_V3_PHASE8C_FISCAL_CALENDAR_METADATA_COMPLE
 CLASSIFICATION_BLOCKED = "FUNDAMENTALS_V3_PHASE8C_FISCAL_CALENDAR_METADATA_BLOCKED"
 PROFILE_TABLE = "v3_company_fiscal_calendar_profile"
 ANCHOR_TABLE = "v3_company_fiscal_year_calendar"
+CHAIN_TABLE = "v3_company_fiscal_anchor_chain"
 EXPECTED_P1_TICKERS = ("BBY", "DELL", "FNGR", "GCO", "HAE", "MRVL", "POWW", "RH", "RL", "SAIC", "TJX", "TRNS", "VTGN")
 
 PROFILE_DDL = f"""
@@ -68,7 +69,23 @@ CREATE INDEX IF NOT EXISTS idx_v3_company_fiscal_year_calendar_start
 ON {ANCHOR_TABLE}(fiscal_year_start_date);
 """
 
-FISCAL_CALENDAR_SCHEMA_SQL = PROFILE_DDL + "\n" + ANCHOR_DDL
+CHAIN_DDL = f"""
+CREATE TABLE IF NOT EXISTS {CHAIN_TABLE} (
+    company_id INTEGER PRIMARY KEY REFERENCES v3_company(company_id) ON DELETE CASCADE,
+    chain_status TEXT NOT NULL,
+    break_reason TEXT NOT NULL CHECK (break_reason IN ('SOURCE_HISTORY_EXHAUSTED','UNRESOLVED_BOUNDARY','CALENDAR_TRANSITION','NO_FISCAL_YEAR','COMPLETE_TO_FY1999')),
+    earliest_verified_fiscal_year INTEGER,
+    latest_verified_fiscal_year INTEGER,
+    populated_anchor_count INTEGER NOT NULL,
+    source_type TEXT NOT NULL,
+    source_reference TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+"""
+
+FISCAL_CALENDAR_SCHEMA_SQL = PROFILE_DDL + "\n" + ANCHOR_DDL + "\n" + CHAIN_DDL
 
 MONTHS_FI = {
     "tammikuuta": 1,

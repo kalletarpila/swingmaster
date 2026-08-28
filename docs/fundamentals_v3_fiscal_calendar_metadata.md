@@ -31,3 +31,13 @@ Status: `FUNDAMENTALS_V3_PHASE8D_FISCAL_WRITE_GUARDS_ACTIVE`
 Fiscal-calendar guard is active in `V3QuarterRepository.upsert_quarter` before canonical quarter mutation. Exact FY2026/FY2027 anchors are authoritative, backward inference assumes stable fiscal calendar unless positive transition evidence exists, and `REVIEW`/`BLOCK` candidates perform zero canonical writes.
 
 Phase 8 remains `IN PROGRESS`.
+
+## Historical Exact Fiscal-Year Anchor Backfill
+
+Status: `FUNDAMENTALS_V3_PHASE8C_EXT_HISTORICAL_ANCHOR_BACKFILL_COMPLETE_WITH_REVIEW_ITEMS`
+
+Artifact root: `temp/fundamentals_v3_phase8c_ext_historical_anchors/20260828T_PHASE8C_EXT`
+
+The FY1999-FY2027 dataset `temp/v3_active_tickers_99_27.csv` was imported as verified exact issuer fiscal-year-start metadata. Only populated source cells were normalized into `v3_company_fiscal_year_calendar`; blank cells remain `NO VERIFIED EXACT ANCHOR AVAILABLE` and were not inferred from profiles, 364/371-day logic, or neighboring years.
+
+Chain and break evidence is stored once per company in `v3_company_fiscal_anchor_chain`. Preserved break reasons include SOURCE_HISTORY_EXHAUSTED, UNRESOLVED_BOUNDARY, CALENDAR_TRANSITION, NO_FISCAL_YEAR, and COMPLETE_TO_FY1999. Exact annual anchors outrank profile inference for future analysis. The import was idempotent and did not change canonical or downstream state.

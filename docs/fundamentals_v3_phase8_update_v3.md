@@ -1845,3 +1845,21 @@ Publish chronology improved on the strict next-quarter upper bound: `72.6389% ->
 Known P1 replay: tickers `13`, BLOCK `69`, REVIEW `3`, PASS `6`, high-confidence structural P1 PASS `0`.
 
 Safety: production writes `0`; active guard changed `NO`; fingerprints unchanged `YES`.
+
+## Phase 8D-6 - Recent FY/FQ Label Provenance Audit
+
+Status: `RECENT_FY_FQ_LABEL_DERIVATION_BUG_CONFIRMED`
+
+Artifact root: `temp/fundamentals_v3_phase8d6_label_provenance_audit/20260828T_PHASE8D6`
+
+Phase 8D-6 audited FY/FQ label provenance for the `513` Phase 8D-5 rows where the economic quarter was high-confidence but the stored label was not structurally supported by authoritative FY intervals. Yahoo raw normalization provides period_end/value rows, not issuer FY/FQ; V3 labels enter through metadata enrichment and Phase 3B seed metadata artifacts, then canonical migration copies candidate FY/FQ.
+
+Residual split: FIXED_DATE_FISCAL_YEAR `425`, WEEK_BASED_52_53 `31`, CALENDAR_YEAR `16`, OTHER `41`. Label errors: FY_LABEL_MINUS_ONE `405`, FY_LABEL_PLUS_ONE `0`, FY_AND_FQ_WRONG `67`, structurally correct `0`, unresolved `41`.
+
+The ~365/~371-day cohort had `405` rows; systematic FY-minus-one cases `405`; stored FY equals fiscal-start calendar year `405` and period_end calendar year `308`. This confirms a start-year/period-year style label convention problem rather than bad Yahoo financial values for most rows.
+
+Content integrity classification: LABEL_ONLY_ERROR_HIGH_CONFIDENCE `342`, LABEL_PLUS_METADATA_ERROR `130`, CONTENT_MAPPING_ERROR `0`, unresolved `41`.
+
+Current repairability, read-only: AUTO_LABEL_REPAIR_READY rows `0`, collision review rows `3595`, content reconstruction rows `0`, unresolved rows `5565`.
+
+The active guard remains unchanged and continues to catch these candidates. Production writes `0`; active guard changes `0`; fingerprints unchanged `True`.

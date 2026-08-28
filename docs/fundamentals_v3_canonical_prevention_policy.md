@@ -70,6 +70,10 @@ PHASE 8 PREVENTION HARDENING - IMPLEMENT CANONICAL WRITE-PATH GUARDS & REGRESSIO
     remained metadata. This is classified as `HISTORICAL_MIGRATION_ARTIFACT`, not a proven active
     Update V3 bug. Any future reuse of that seed/bootstrap/migration/backfill/recovery path must
     prove normalized provider period_end cannot supersede available official period_end.
+    Phase 8D-6 also confirmed a recent-label provenance failure mode: provider, period-end-year,
+    fiscal-start-year, calendar-quarter, V2, or artifact-derived FY/FQ labels must not override
+    authoritative issuer fiscal-calendar metadata. Candidate FY/FQ must be reconstructed from issuer
+    FY intervals before canonical write acceptance when fiscal-calendar metadata is available.
 12. Pre-write guards are mandatory for company identity, FY/FQ uniqueness, target collision, fiscal
     sequence, period-end chronology and gaps, publish chronology, `publish_date >= period_end_date`,
     source-period compatibility, economic-content compatibility, 52/53-week handling, and prevention

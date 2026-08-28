@@ -1787,3 +1787,19 @@ Current TTM risk distribution: TTM_CLEAN `2056`, TTM_WARNING_ONLY `69`, TTM_BACK
 Current downstream exposure is broad: Score/Lifecycle/Valuation each have `492` current rows with known blocked TTM input risk, of which `479` are outside the original known-13 register. New current-risk tickers outside the known register: `511`; new P1 current-risk tickers: `236`.
 
 Operational recommendation: `CURRENT_V3_CURRENT_DOWNSTREAM_RISK_TOO_BROAD`. Phase 8 remains `IN PROGRESS`; do not proceed to Phase 8 operational closure before prioritizing current-latest / TTM-affecting fiscal identity repairs. Keep the Phase 8D guard active.
+
+## Phase 8D-3 - Empirical Fiscal Quarter-End / Publish-Date Calibration
+
+Status: `FUNDAMENTALS_V3_PHASE8D3_QUARTER_SLOT_CALIBRATION_COMPLETE`
+
+Artifact root: `temp/fundamentals_v3_phase8d3_quarter_slot_calibration/20260828T_PHASE8D3`
+
+Calibration population: active tickers `2470`, recent rows considered `14817`, KNOWN_GOOD_HIGH `11107`, KNOWN_GOOD_MEDIUM `3632`, excluded structural risk `78`.
+
+Period-end offsets for KNOWN_GOOD_HIGH: median signed `0`, median absolute `1`, abs P90 `3.0`, abs P95 `183.0`, abs P99 `366.0`. Window coverage: ±7 `94.2199%`, ±14 `94.2379%`.
+
+Publish chronology: rows with publish_date `11107`, publish after period_end `99.982%`, strict next-quarter chronology `74.3135%`, +7 tolerance `74.3225%`, +14 tolerance `74.3315%`.
+
+Current guard on KNOWN_GOOD_HIGH: PASS `9452`, PASS_WITH_WARNING `25`, REVIEW `9`, BLOCK `1621` (`14.5944%`).
+
+Recommendation: `REWORK_FISCAL_SLOT_MODEL`. Guard behavior was not changed; production writes were `0`.

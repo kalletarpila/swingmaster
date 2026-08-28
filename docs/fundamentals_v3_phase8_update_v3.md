@@ -1819,3 +1819,29 @@ Known-good guard simulation: old BLOCK `1621` (`14.5944%`), new BLOCK `562` (`5.
 Known P1 replay: tickers `13`, remain BLOCK `69`, become REVIEW `3`, incorrectly PASS `6`; high-confidence structural P1 silent PASS `0`.
 
 The candidate model is not active in production writes. Production writes `0`; production guard activation changes `0`.
+
+## Phase 8D-5 - Fiscal-Year Interval Assignment Refinement
+
+Status: `FISCAL_YEAR_INTERVAL_HYPOTHESIS_REJECTED`
+
+Artifact root: `temp/fundamentals_v3_phase8d5_fiscal_year_interval_refinement/20260828T_PHASE8D5`
+
+Phase 8D-5 decomposed the Phase 8D-4 known-good residual BLOCK population and separated fiscal-year interval assignment from fiscal-quarter slot assignment. The candidate resolver now resolves issuer FY first from exact adjacent anchors or stable backward intervals, then assigns Q1-Q4 inside that FY interval. FY2026/FY2027 anchors remain authoritative and the refined resolver is not active in production.
+
+Known-good population reuse: old `11107`, new `11107`, exact same population `True`. Phase 8D-4 residual BLOCK rows `562`.
+
+Identity agreement: FY `92.9054% -> 90.9336%`, FQ `95.9755% -> 91.2218%`, combined `91.915% -> 87.5394%`.
+
+Period-end tails: median abs `0 -> 0.0`, P90 `2.0 -> 0.0`, P95 `182.0 -> 3.0`, P99 `365.0 -> 274.0`.
+
+Known-good guard simulation: BLOCK `562` (`5.0599%`) -> `656` (`5.9062%`), REVIEW `265`, WARNING `0`.
+
+Residual decomposition: CALENDAR_YEAR `16`, FIXED_DATE_FISCAL_YEAR `426`, WEEK_BASED_52_53 `79`, OTHER_VERIFIED `41`. Root causes: KNOWN_GOOD_LABEL_NOT_STRUCTURALLY_SUPPORTED `513`, FY_INTERVAL_ASSIGNMENT_ERROR `43`, ANCHOR_PROPAGATION_ERROR `6`.
+
+Offset modes in the 562 Phase 8D-4 residuals: ~90-day `10`, ~180-day `35`, ~270-day `24`, ~365-day `427`, ~371-day `24`, other `42`. The dominant mode is not normal quarter-end drift; it is one-fiscal-year label displacement relative to authoritative FY intervals.
+
+Publish chronology improved on the strict next-quarter upper bound: `72.6389% -> 74.6286%`. Current/recent simulated BLOCK counts worsened versus Phase 8D-4 candidate baseline: 2024+ `1102 -> 1200`, latest8Q `1037 -> 1135`, latest4Q `520 -> 605`, latest-quarter `90 -> 98`, current-TTM affected `439 -> 536`.
+
+Known P1 replay: tickers `13`, BLOCK `69`, REVIEW `3`, PASS `6`, high-confidence structural P1 PASS `0`.
+
+Safety: production writes `0`; active guard changed `NO`; fingerprints unchanged `YES`.

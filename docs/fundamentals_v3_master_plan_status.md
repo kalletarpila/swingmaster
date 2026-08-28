@@ -1346,3 +1346,7 @@ Status: `FUNDAMENTALS_V3_PHASE8C_EXT_HISTORICAL_ANCHOR_BACKFILL_COMPLETE_WITH_RE
 ## Phase 8D-7 - Historical Exact Anchor Reanalysis
 
 Status: `HISTORICAL_EXACT_ANCHORS_MATERIALLY_RESOLVE_FISCAL_IDENTITY_RISK`. Phase 8 remains `IN PROGRESS`. Artifact root: `temp/fundamentals_v3_phase8d7_historical_anchor_reanalysis/20260828T_PHASE8D7`.
+
+## Phase 8E - Deterministic Fiscal Identity Repair Rehearsal
+
+Status: `FUNDAMENTALS_V3_PHASE8E_PARTIAL_APPLY_SET_READY_BLOCKERS_REMAIN`. Phase 8 remains `IN PROGRESS`. Frozen production apply set: `494` rows / `168` groups. Downstream rebuild remains deferred until production apply. Artifact root: `temp/fundamentals_v3_phase8e_rehearse_fiscal_repairs/20260828T_PHASE8E`.

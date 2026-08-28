@@ -1889,3 +1889,19 @@ D6 FY-minus-one replay: original `405`, direct-exact confirmed `351`, short-infe
 Full canonical reclassification: direct FY conflicts `3425`, direct FQ conflicts `785`, transition reviews `264`, unresolved `2703`, clean `65536`. Old backward-inference BLOCK rows now covered by direct intervals `10948` / `11291`.
 
 Current repairability: AUTO_RELABEL_READY `701` rows / `192` tickers; ATOMIC_SEGMENT_RELABEL_READY `643` rows / `152` tickers. Phase 8 remains `IN PROGRESS`; production writes `0`; guard changes `0`.
+
+## Phase 8E - Deterministic Fiscal Identity Repair Rehearsal
+
+Status: `FUNDAMENTALS_V3_PHASE8E_PARTIAL_APPLY_SET_READY_BLOCKERS_REMAIN`
+
+Artifact root: `temp/fundamentals_v3_phase8e_rehearse_fiscal_repairs/20260828T_PHASE8E`
+
+Phase 8E rehearsed only the Phase 8D-7 deterministic identity subset: AUTO_RELABEL_READY `701` rows / `192` tickers and ATOMIC_SEGMENT_RELABEL_READY `643` rows / `152` tickers. Frozen safe set rows `494`, groups `168`, tickers `148`; blocked groups `207`.
+
+Rehearsal used temporary identity rekeys on a disposable DB copy, preserved quarter_id, content signatures and lineage signatures, and left production unchanged. Rehearsal quick_check `ok`, duplicate FY/FQ `0`, content signature drift `0`, lineage failures `0`.
+
+Full fiscal risk direct FY conflicts `3425 -> 2988`, direct FQ conflicts `785 -> 728`, clean rows `65536 -> 66030`. Current TTM affected tickers `405 -> 338`.
+
+Disposable downstream rebuild was not completed in this bounded rehearsal. Downstream blocker remains `1`; the apply phase must rebuild TTM -> Score -> Lifecycle -> Valuation once after production identity repair.
+
+Production writes `0`; fiscal metadata writes `0`; RawCandle writes `0`; guard changes `0`. Phase 8 remains `IN PROGRESS`.

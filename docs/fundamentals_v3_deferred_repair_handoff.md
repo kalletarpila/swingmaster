@@ -36,3 +36,7 @@ FY1999-FY2027 verified exact fiscal-year-start anchors are now available for fut
 ## Phase 8D-7 Historical Anchor Repairability
 
 Classification: `HISTORICAL_EXACT_ANCHORS_MATERIALLY_RESOLVE_FISCAL_IDENTITY_RISK`. Deterministic direct-exact auto relabel candidates `701` rows across `192` tickers; segment candidates `643` rows across `152` tickers. Artifact root: `temp/fundamentals_v3_phase8d7_historical_anchor_reanalysis/20260828T_PHASE8D7`.
+
+## Phase 8E Frozen Deterministic Apply Set
+
+Frozen safe apply set: `494` rows across `148` tickers. Blocked deterministic groups: `207`. Downstream rebuild remains deferred until production apply. Artifact root: `temp/fundamentals_v3_phase8e_rehearse_fiscal_repairs/20260828T_PHASE8E`.

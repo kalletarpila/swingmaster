@@ -1803,3 +1803,19 @@ Publish chronology: rows with publish_date `11107`, publish after period_end `99
 Current guard on KNOWN_GOOD_HIGH: PASS `9452`, PASS_WITH_WARNING `25`, REVIEW `9`, BLOCK `1621` (`14.5944%`).
 
 Recommendation: `REWORK_FISCAL_SLOT_MODEL`. Guard behavior was not changed; production writes were `0`.
+
+## Phase 8D-4 - Calendar-Type-Specific Fiscal Slot Model Rework
+
+Status: `NEW_FISCAL_SLOT_MODEL_NEEDS_REFINEMENT`
+
+Artifact root: `temp/fundamentals_v3_phase8d4_slot_model_rework/20260828T_PHASE8D4`
+
+The generic 13/14-week slot model failed because fixed-date fiscal years were modeled as day-count slots and 53-week years assumed false precision. The candidate resolver uses calendar quarters for CALENDAR_YEAR, calendar-month addition for FIXED_DATE_FISCAL_YEAR, local-evidence week placement for WEEK_BASED_52_53, and conservative exact-anchor behavior for OTHER_VERIFIED.
+
+Known-good population reuse: old `11107`, new `11107`, exact same population `True`. Period-end abs P95 old `183.0`, new `182.0`; ±7 coverage old `94.2199`, new `94.0873`.
+
+Known-good guard simulation: old BLOCK `1621` (`14.5944%`), new BLOCK `562` (`5.0599%`), new REVIEW `204`.
+
+Known P1 replay: tickers `13`, remain BLOCK `69`, become REVIEW `3`, incorrectly PASS `6`; high-confidence structural P1 silent PASS `0`.
+
+The candidate model is not active in production writes. Production writes `0`; production guard activation changes `0`.

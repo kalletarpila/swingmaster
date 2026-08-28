@@ -1875,3 +1875,17 @@ Imported historical verified exact fiscal-year starts from FY1999-FY2027 into th
 Current anchor reconciliation passed: FY2026 exact matches `2470`, FY2027 exact matches `259`, conflicts `0`. Chain/break metadata rows inserted `2470`.
 
 Safety: canonical/fundamentals/TTM/Score/Lifecycle/Valuation fingerprints unchanged; active guard changes `0`; RawCandle writes `0`. Phase 8 remains `IN PROGRESS`.
+
+## Phase 8D-7 - Historical Exact Anchor Fiscal-Identity Reanalysis
+
+Status: `HISTORICAL_EXACT_ANCHORS_MATERIALLY_RESOLVE_FISCAL_IDENTITY_RISK`
+
+Artifact root: `temp/fundamentals_v3_phase8d7_historical_anchor_reanalysis/20260828T_PHASE8D7`
+
+Historical anchors now provide `32929` adjacent exact FY intervals and directly resolve `66127` canonical rows. Rows still using short inference `3883`, long inference `0`, transition/unresolved `2967`.
+
+D6 FY-minus-one replay: original `405`, direct-exact confirmed `351`, short-inference confirmed `0`, transition review `0`, not confirmed `54`.
+
+Full canonical reclassification: direct FY conflicts `3425`, direct FQ conflicts `785`, transition reviews `264`, unresolved `2703`, clean `65536`. Old backward-inference BLOCK rows now covered by direct intervals `10948` / `11291`.
+
+Current repairability: AUTO_RELABEL_READY `701` rows / `192` tickers; ATOMIC_SEGMENT_RELABEL_READY `643` rows / `152` tickers. Phase 8 remains `IN PROGRESS`; production writes `0`; guard changes `0`.

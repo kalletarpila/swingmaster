@@ -1342,3 +1342,7 @@ Phase 8 remains: `IN PROGRESS - CURRENT-LATEST / TTM-AFFECTING FISCAL IDENTITY R
 ## Phase 8C-EXT - Historical Exact FY Anchor Backfill
 
 Status: `FUNDAMENTALS_V3_PHASE8C_EXT_HISTORICAL_ANCHOR_BACKFILL_COMPLETE_WITH_REVIEW_ITEMS`. Phase 8 remains `IN PROGRESS`. Artifact root: `temp/fundamentals_v3_phase8c_ext_historical_anchors/20260828T_PHASE8C_EXT`.
+
+## Phase 8D-7 - Historical Exact Anchor Reanalysis
+
+Status: `HISTORICAL_EXACT_ANCHORS_MATERIALLY_RESOLVE_FISCAL_IDENTITY_RISK`. Phase 8 remains `IN PROGRESS`. Artifact root: `temp/fundamentals_v3_phase8d7_historical_anchor_reanalysis/20260828T_PHASE8D7`.

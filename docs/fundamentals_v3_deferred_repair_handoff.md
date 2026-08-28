@@ -32,3 +32,7 @@ Phase 8 remains `IN PROGRESS`.
 ## Historical Exact Fiscal-Year Anchors
 
 FY1999-FY2027 verified exact fiscal-year-start anchors are now available for future fiscal-label provenance and guard reanalysis. Artifact root: `temp/fundamentals_v3_phase8c_ext_historical_anchors/20260828T_PHASE8C_EXT`.
+
+## Phase 8D-7 Historical Anchor Repairability
+
+Classification: `HISTORICAL_EXACT_ANCHORS_MATERIALLY_RESOLVE_FISCAL_IDENTITY_RISK`. Deterministic direct-exact auto relabel candidates `701` rows across `192` tickers; segment candidates `643` rows across `152` tickers. Artifact root: `temp/fundamentals_v3_phase8d7_historical_anchor_reanalysis/20260828T_PHASE8D7`.

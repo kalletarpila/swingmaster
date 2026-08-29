@@ -35,3 +35,7 @@ New current-risk tickers outside the original known-13 register: `511`.
 Machine-readable current-risk register: `temp/fundamentals_v3_phase8d2_operational_risk/20260827T_PHASE8D2/new_current_risk_tickers.csv`
 
 Operational conclusion: `CURRENT_V3_CURRENT_DOWNSTREAM_RISK_TOO_BROAD`. Do not proceed to Phase 8 operational closure before prioritizing current-latest / TTM-affecting fiscal identity repairs.
+
+## Phase 8E-APPLY Baseline
+
+The PREAPPLY-proven 494 deterministic fiscal identity rows were applied. Remaining deferred populations: direct FY conflicts `2988`, direct FQ conflicts `728`, transition reviews `264`, unresolved fiscal history `2703`, original Phase 8E blocked rows `207`.

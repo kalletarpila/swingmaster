@@ -44,3 +44,7 @@ Frozen safe apply set: `494` rows across `148` tickers. Blocked deterministic gr
 ## Phase 8E-PREAPPLY Deferred Groups
 
 Groups excluded after preapply proving: `0`. Reasons: `NONE`. Artifact root: `temp/fundamentals_v3_phase8e_preapply_downstream_proving/20260829T_PHASE8E_PREAPPLY`.
+
+## Phase 8E-APPLY Remaining Deferred Defects
+
+Remaining direct FY conflicts `2988`, direct FQ conflicts `728`, transition reviews `264`, unresolved `2703`. Original Phase 8E blocked rows remain deferred: `207`. Artifact root: `temp/fundamentals_v3_phase8e_apply/20260829T_PHASE8E_APPLY`.

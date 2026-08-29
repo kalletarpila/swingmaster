@@ -1354,3 +1354,7 @@ Status: `FUNDAMENTALS_V3_PHASE8E_PARTIAL_APPLY_SET_READY_BLOCKERS_REMAIN`. Phase
 ## Phase 8E-PREAPPLY - Full Disposable Downstream Proving
 
 Status: `FUNDAMENTALS_V3_PHASE8E_PREAPPLY_FULLY_PROVEN`. Production gate `GO_FOR_PHASE8E_PRODUCTION_APPLY`. Phase 8 remains `IN PROGRESS`. Artifact root: `temp/fundamentals_v3_phase8e_preapply_downstream_proving/20260829T_PHASE8E_PREAPPLY`.
+
+## Phase 8E-APPLY - Production Fiscal Identity Repair & Downstream Rebuild
+
+Status: `FUNDAMENTALS_V3_PHASE8E_APPLY_COMPLETE_WITH_REMAINING_DEFERRED_DEFECTS`. Operational quality `V3_CURRENT_DATA_QUALITY_GOOD_WITH_KNOWN_GAPS`. Phase 8 remains `IN PROGRESS`. Artifact root: `temp/fundamentals_v3_phase8e_apply/20260829T_PHASE8E_APPLY`.

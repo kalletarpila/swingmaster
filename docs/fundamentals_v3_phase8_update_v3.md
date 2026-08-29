@@ -1923,3 +1923,19 @@ Fiscal risk direct FY conflicts `3425 -> 2988`, direct FQ conflicts `785 -> 728`
 Final production-ready set: `494` rows / `168` groups / `148` tickers. Production go/no-go: `GO_FOR_PHASE8E_PRODUCTION_APPLY`.
 
 Production writes `0`; fiscal metadata writes `0`; RawCandle writes `0`; production fingerprints identical `True`. Phase 8 remains `IN PROGRESS`.
+
+## Phase 8E-APPLY - Production Fiscal Identity Repair & Downstream Rebuild
+
+Status: `FUNDAMENTALS_V3_PHASE8E_APPLY_COMPLETE_WITH_REMAINING_DEFERRED_DEFECTS`
+
+Artifact root: `temp/fundamentals_v3_phase8e_apply/20260829T_PHASE8E_APPLY`
+
+Applied exactly the PREAPPLY-proven fiscal identity set: `494` rows / `168` groups / `148` tickers. Failed groups `0`; original blocked rows touched `0`.
+
+Canonical integrity passed: quick_check `ok`, FK rows `0`, duplicate FY/FQ `0`, content drift `0`, lineage failures `0`.
+
+Production downstream was rebuilt once and proved deterministic. TTM rows `53781 -> 53490`, Score rows `53490`, Lifecycle rows `53490`, Valuation rows `53490`. Unrelated downstream drift `0`; PREAPPLY equivalent `True`.
+
+Fiscal risk direct FY conflicts `3425 -> 2988`, direct FQ conflicts `785 -> 728`, clean rows `65536 -> 66030`.
+
+Operational quality conclusion: `V3_CURRENT_DATA_QUALITY_GOOD_WITH_KNOWN_GAPS`. Phase 8 remains `IN PROGRESS`.

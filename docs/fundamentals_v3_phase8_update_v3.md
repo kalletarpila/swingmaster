@@ -1951,3 +1951,17 @@ Latest8Q rows audited: `19728` across `2470` active tickers. Already fully clean
 Safety proof: production writes `0`, RawCandle writes `0`, fingerprints unchanged `True`.
 
 Next action: RESOLVE LOCAL-ONLY CASES AND EXTERNAL EVIDENCE FIRST; KEEP ONLY TRUE TRANSITION / COLLISION / STRUCTURAL CASES FOR MANUAL DECISION
+
+## Phase 8G - Local Latest8Q Downstream-Critical Repair
+
+Classification: `LATEST8Q_LOCAL_CRITICAL_REPAIRS_COMPLETE_WITH_EXTERNAL_STRUCTURAL_WORK_REMAINING`
+
+Final verification artifact root: `temp/fundamentals_v3_phase8g_local_latest8q_repairs/20260829T_PHASE8G_FINAL`
+
+Local downstream-critical canonical relabels were applied through five guarded cascading passes: `277` rows / `277` groups / `92` tickers, failed groups `0`. Final read-only verification found local candidates `0` and `NO_MISSING_REQUIREMENT` `0`.
+
+New minimal external facts `4413` vs Phase 8F `6064`. New material structural decisions `1095` vs Phase 8F `1130`.
+
+Phase 8 remains `IN PROGRESS`.
+
+Next action: USE THE NEW MINIMAL DOWNSTREAM-CRITICAL EXTERNAL RESEARCH QUEUE NEXT; DO NOT RESEARCH SECONDARY FIELDS THAT DO NOT AFFECT TTM / SCORE / LIFECYCLE / VALUATION

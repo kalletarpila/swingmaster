@@ -1939,3 +1939,15 @@ Production downstream was rebuilt once and proved deterministic. TTM rows `53781
 Fiscal risk direct FY conflicts `3425 -> 2988`, direct FQ conflicts `785 -> 728`, clean rows `65536 -> 66030`.
 
 Operational quality conclusion: `V3_CURRENT_DATA_QUALITY_GOOD_WITH_KNOWN_GAPS`. Phase 8 remains `IN PROGRESS`.
+
+## Phase 8F - Complete Latest-8Q Gap / Full-Closure Analysis
+
+Classification: `LATEST8Q_FULL_CLOSURE_MAP_COMPLETE_WITH_STRUCTURAL_DECISIONS`
+
+Artifact root: `temp/fundamentals_v3_phase8f_latest8q_full_closure/20260829T_PHASE8F`
+
+Latest8Q rows audited: `19728` across `2470` active tickers. Already fully clean tickers: `92`. Primary-core clean tickers: `92`. Structural/manual-review tickers: `496`. `NO_MISSING_REQUIREMENT_IN_PLAN`: `0`.
+
+Safety proof: production writes `0`, RawCandle writes `0`, fingerprints unchanged `True`.
+
+Next action: RESOLVE LOCAL-ONLY CASES AND EXTERNAL EVIDENCE FIRST; KEEP ONLY TRUE TRANSITION / COLLISION / STRUCTURAL CASES FOR MANUAL DECISION

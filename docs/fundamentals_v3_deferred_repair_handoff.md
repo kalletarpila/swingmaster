@@ -48,3 +48,15 @@ Groups excluded after preapply proving: `0`. Reasons: `NONE`. Artifact root: `te
 ## Phase 8E-APPLY Remaining Deferred Defects
 
 Remaining direct FY conflicts `2988`, direct FQ conflicts `728`, transition reviews `264`, unresolved `2703`. Original Phase 8E blocked rows remain deferred: `207`. Artifact root: `temp/fundamentals_v3_phase8e_apply/20260829T_PHASE8E_APPLY`.
+
+## Phase 8F - Complete Latest-8Q Gap / Full-Closure Analysis
+
+Classification: `LATEST8Q_FULL_CLOSURE_MAP_COMPLETE_WITH_STRUCTURAL_DECISIONS`
+
+Artifact root: `temp/fundamentals_v3_phase8f_latest8q_full_closure/20260829T_PHASE8F`
+
+Latest8Q rows audited: `19728` across `2470` active tickers. Already fully clean tickers: `92`. Primary-core clean tickers: `92`. Structural/manual-review tickers: `496`. `NO_MISSING_REQUIREMENT_IN_PLAN`: `0`.
+
+Safety proof: production writes `0`, RawCandle writes `0`, fingerprints unchanged `True`.
+
+Next action: RESOLVE LOCAL-ONLY CASES AND EXTERNAL EVIDENCE FIRST; KEEP ONLY TRUE TRANSITION / COLLISION / STRUCTURAL CASES FOR MANUAL DECISION

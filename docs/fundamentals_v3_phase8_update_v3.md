@@ -1965,3 +1965,20 @@ New minimal external facts `4413` vs Phase 8F `6064`. New material structural de
 Phase 8 remains `IN PROGRESS`.
 
 Next action: USE THE NEW MINIMAL DOWNSTREAM-CRITICAL EXTERNAL RESEARCH QUEUE NEXT; DO NOT RESEARCH SECONDARY FIELDS THAT DO NOT AFFECT TTM / SCORE / LIFECYCLE / VALUATION
+
+
+## Phase 8H - Latest8Q Downstream-Critical External Research Packaging
+
+Classification: `LATEST8Q_EXTERNAL_RESEARCH_PACKAGE_READY_WITH_STRUCTURAL_DEPENDENCIES`
+
+Artifact root: `temp/fundamentals_v3_phase8h_external_research_packaging/20260829T_PHASE8H`
+
+Packaged Phase 8G external queue rows `4413` into `4413` research tasks covering `9491` normalized downstream-critical facts across `1689` tickers. Secondary-only removals `0`, duplicate facts removed `329`.
+
+Wave 1 `1066` tasks / `810` tickers / `1857` facts. Wave 2 `370` tasks / `181` tickers / `548` facts. Wave 3 `2977` tasks / `1336` tickers / `7086` facts.
+
+Structural queue remains separate: `1095` decisions / `482` tickers. External+structural mixed tickers `402`.
+
+Phase 8 remains `IN PROGRESS`.
+
+Next action: RUN WAVE 1 EXTERNAL RESEARCH FIRST WHILE KEEPING STRUCTURAL DECISIONS SEPARATE; USE NEW EVIDENCE TO REDUCE THE STRUCTURAL QUEUE BEFORE MANUAL REVIEW

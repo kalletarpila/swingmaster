@@ -1905,3 +1905,21 @@ Full fiscal risk direct FY conflicts `3425 -> 2988`, direct FQ conflicts `785 ->
 Disposable downstream rebuild was not completed in this bounded rehearsal. Downstream blocker remains `1`; the apply phase must rebuild TTM -> Score -> Lifecycle -> Valuation once after production identity repair.
 
 Production writes `0`; fiscal metadata writes `0`; RawCandle writes `0`; guard changes `0`. Phase 8 remains `IN PROGRESS`.
+
+## Phase 8E-PREAPPLY - Full Disposable Downstream Proving
+
+Status: `FUNDAMENTALS_V3_PHASE8E_PREAPPLY_FULLY_PROVEN`
+
+Artifact root: `temp/fundamentals_v3_phase8e_preapply_downstream_proving/20260829T_PHASE8E_PREAPPLY`
+
+Frozen input was the Phase 8E apply set: `494` rows / `168` groups / `148` tickers. Stale-precondition groups `0`.
+
+Disposable repair passed canonical integrity with quick_check `ok`, FK rows `0`, duplicate FY/FQ `0`, content drift `0`, lineage failures `0`.
+
+Disposable downstream rebuild completed for TTM, Score, Lifecycle, and Valuation. Determinism: TTM `True`, Score `True`, Lifecycle `True`, Valuation `True`. Unrelated downstream drift `0`.
+
+Fiscal risk direct FY conflicts `3425 -> 2988`, direct FQ conflicts `785 -> 728`, clean rows `65536 -> 66030`. Current TTM affected tickers `405 -> 323`.
+
+Final production-ready set: `494` rows / `168` groups / `148` tickers. Production go/no-go: `GO_FOR_PHASE8E_PRODUCTION_APPLY`.
+
+Production writes `0`; fiscal metadata writes `0`; RawCandle writes `0`; production fingerprints identical `True`. Phase 8 remains `IN PROGRESS`.

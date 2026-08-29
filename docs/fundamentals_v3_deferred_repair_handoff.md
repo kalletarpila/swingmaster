@@ -40,3 +40,7 @@ Classification: `HISTORICAL_EXACT_ANCHORS_MATERIALLY_RESOLVE_FISCAL_IDENTITY_RIS
 ## Phase 8E Frozen Deterministic Apply Set
 
 Frozen safe apply set: `494` rows across `148` tickers. Blocked deterministic groups: `207`. Downstream rebuild remains deferred until production apply. Artifact root: `temp/fundamentals_v3_phase8e_rehearse_fiscal_repairs/20260828T_PHASE8E`.
+
+## Phase 8E-PREAPPLY Deferred Groups
+
+Groups excluded after preapply proving: `0`. Reasons: `NONE`. Artifact root: `temp/fundamentals_v3_phase8e_preapply_downstream_proving/20260829T_PHASE8E_PREAPPLY`.

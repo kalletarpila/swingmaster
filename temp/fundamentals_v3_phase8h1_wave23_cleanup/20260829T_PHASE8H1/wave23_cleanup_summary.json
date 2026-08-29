@@ -1,0 +1,156 @@
+{
+  "artifact_root": "temp/fundamentals_v3_phase8h1_wave23_cleanup/20260829T_PHASE8H1",
+  "classification": "WAVE23_EXTERNAL_QUEUE_CLEANUP_COMPLETE_WITH_STRUCTURAL_DEPENDENCIES",
+  "closure": {
+    "COMPLETE_CLOSURE_PATH": 2470,
+    "MISSING_REQUIREMENT": 0
+  },
+  "combined": {
+    "combined_reduction_pct": 13.4661,
+    "remaining_external_tickers": 1264,
+    "remaining_facts": 6606,
+    "tickers_no_longer_needing_external_research": 94,
+    "total_facts_removed": 1028
+  },
+  "known_13": [
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "EBIT_DIRECT|LINEAGE_OWNERSHIP_EVIDENCE|SOURCE_SEMANTICS_CONFIRMATION|TARGET_COLLISION_EVIDENCE",
+      "remaining_structural_decision": "YES",
+      "ticker": "BBY"
+    },
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "EBIT_DIRECT|LINEAGE_OWNERSHIP_EVIDENCE|SOURCE_SEMANTICS_CONFIRMATION|TARGET_COLLISION_EVIDENCE",
+      "remaining_structural_decision": "YES",
+      "ticker": "DELL"
+    },
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "CAPEX_FOR_FCF|EBIT_DIRECT|FCF_DIRECT|LINEAGE_OWNERSHIP_EVIDENCE|OCF_FOR_FCF|REVENUE|SOURCE_SEMANTICS_CONFIRMATION|TARGET_COLLISION_EVIDENCE|TOTAL_DEBT",
+      "remaining_structural_decision": "YES",
+      "ticker": "FNGR"
+    },
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "EBIT_DIRECT|LINEAGE_OWNERSHIP_EVIDENCE|SOURCE_SEMANTICS_CONFIRMATION|TARGET_COLLISION_EVIDENCE",
+      "remaining_structural_decision": "YES",
+      "ticker": "GCO"
+    },
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "LINEAGE_OWNERSHIP_EVIDENCE|OFFICIAL_PERIOD_END",
+      "remaining_structural_decision": "YES",
+      "ticker": "HAE"
+    },
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "EBIT_DIRECT|LINEAGE_OWNERSHIP_EVIDENCE|SOURCE_SEMANTICS_CONFIRMATION|TARGET_COLLISION_EVIDENCE",
+      "remaining_structural_decision": "YES",
+      "ticker": "MRVL"
+    },
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "EBIT_DIRECT|FIRST_PUBLIC_PUBLISH_DATE|FISCAL_TRANSITION_EVIDENCE|OFFICIAL_PERIOD_END|SOURCE_SEMANTICS_CONFIRMATION|TARGET_COLLISION_EVIDENCE|TOTAL_DEBT",
+      "remaining_structural_decision": "YES",
+      "ticker": "POWW"
+    },
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "LINEAGE_OWNERSHIP_EVIDENCE|MISSING_QUARTER_EXISTENCE|REVENUE|TARGET_COLLISION_EVIDENCE|TOTAL_DEBT",
+      "remaining_structural_decision": "YES",
+      "ticker": "RH"
+    },
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "EBIT_DIRECT|LINEAGE_OWNERSHIP_EVIDENCE|OFFICIAL_PERIOD_END|SOURCE_SEMANTICS_CONFIRMATION|TARGET_COLLISION_EVIDENCE",
+      "remaining_structural_decision": "YES",
+      "ticker": "RL"
+    },
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "EBIT_DIRECT|LINEAGE_OWNERSHIP_EVIDENCE|SOURCE_SEMANTICS_CONFIRMATION|TARGET_COLLISION_EVIDENCE",
+      "remaining_structural_decision": "YES",
+      "ticker": "SAIC"
+    },
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "EBIT_DIRECT|SOURCE_SEMANTICS_CONFIRMATION",
+      "remaining_structural_decision": "YES",
+      "ticker": "TJX"
+    },
+    {
+      "current_wave": "P3_LATEST8Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "EBIT_DIRECT|LINEAGE_OWNERSHIP_EVIDENCE|OFFICIAL_PERIOD_END|SOURCE_SEMANTICS_CONFIRMATION|TARGET_COLLISION_EVIDENCE",
+      "remaining_structural_decision": "YES",
+      "ticker": "TRNS"
+    },
+    {
+      "current_wave": "P2_LATEST4Q",
+      "fy_fq_locally_resolved": "NO",
+      "fy_fq_request_removed": "NO",
+      "remaining_external_facts": "CAPEX_FOR_FCF|FCF_DIRECT|FIRST_PUBLIC_PUBLISH_DATE|LINEAGE_OWNERSHIP_EVIDENCE|MISSING_QUARTER_EXISTENCE|SOURCE_SEMANTICS_CONFIRMATION|TARGET_COLLISION_EVIDENCE",
+      "remaining_structural_decision": "YES",
+      "ticker": "VTGN"
+    }
+  ],
+  "next_action": "USE THE CLEANED WAVE 2 / WAVE 3 FILES FOR FUTURE EXTERNAL RESEARCH; DO NOT REQUEST FY/FQ CONFIRMATION WHERE HISTORICAL EXACT ANCHORS ALREADY RESOLVE THE IDENTITY",
+  "safety": {
+    "guard_changes": 0,
+    "network_calls": 0,
+    "production_writes": 0,
+    "rawcandle_writes": 0
+  },
+  "structural": {
+    "structural_cases_simplified_by_locally_resolved_fy_fq": 0,
+    "structural_cases_unchanged": 1095
+  },
+  "wave2": {
+    "facts_removed": 15,
+    "fy_fq_requests_removed": 0,
+    "missing_quarter_requests_removed": 15,
+    "new_facts": 533,
+    "new_tasks": 369,
+    "old_facts": 548,
+    "old_tasks": 370,
+    "reduction_pct": 2.7372,
+    "source_semantics_requests_removed": 0,
+    "tickers": 180
+  },
+  "wave3": {
+    "facts_removed": 1013,
+    "fy_fq_requests_removed": 0,
+    "missing_quarter_requests_removed": 1000,
+    "new_facts": 6073,
+    "new_tasks": 2695,
+    "old_facts": 7086,
+    "old_tasks": 2977,
+    "reduction_pct": 14.2958,
+    "source_semantics_requests_removed": 13,
+    "tickers": 1242
+  }
+}

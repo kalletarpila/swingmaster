@@ -1982,3 +1982,18 @@ Structural queue remains separate: `1095` decisions / `482` tickers. External+st
 Phase 8 remains `IN PROGRESS`.
 
 Next action: RUN WAVE 1 EXTERNAL RESEARCH FIRST WHILE KEEPING STRUCTURAL DECISIONS SEPARATE; USE NEW EVIDENCE TO REDUCE THE STRUCTURAL QUEUE BEFORE MANUAL REVIEW
+
+
+## Phase 8H-1 - Wave 2 / Wave 3 External Queue Cleanup
+
+Classification: `WAVE23_EXTERNAL_QUEUE_CLEANUP_COMPLETE_WITH_STRUCTURAL_DEPENDENCIES`
+
+Artifact root: `temp/fundamentals_v3_phase8h1_wave23_cleanup/20260829T_PHASE8H1`
+
+Wave 2 facts `548 -> 533` and Wave 3 facts `7086 -> 6073` after exhausting historical exact FY anchors and local FQ resolution before external fiscal-identity requests. Total facts removed `1028`; remaining Wave 2/3 facts `6606`; remaining external tickers `1264`.
+
+Structural cases remain separate: unchanged `1095`, simplified by locally resolved FY/FQ `0`.
+
+Phase 8 remains `IN PROGRESS`.
+
+Next action: USE THE CLEANED WAVE 2 / WAVE 3 FILES FOR FUTURE EXTERNAL RESEARCH; DO NOT REQUEST FY/FQ CONFIRMATION WHERE HISTORICAL EXACT ANCHORS ALREADY RESOLVE THE IDENTITY

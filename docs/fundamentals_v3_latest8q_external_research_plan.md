@@ -65,3 +65,28 @@ Structural decisions remain separate in `latest8q_structural_decisions_remaining
 ## Next Action
 
 RUN WAVE 1 EXTERNAL RESEARCH FIRST WHILE KEEPING STRUCTURAL DECISIONS SEPARATE; USE NEW EVIDENCE TO REDUCE THE STRUCTURAL QUEUE BEFORE MANUAL REVIEW
+
+## Phase 8H-1 - Wave 2 / Wave 3 Exact-Anchor Cleanup
+
+Phase 8H-1 cleans only Wave 2 and Wave 3. Wave 1 is not modified.
+
+Historical exact FY anchors and local calendar-type FQ resolution must be exhausted before requesting external FY/FQ verification. OFFICIAL_FY_FQ_IDENTITY and identity-only SOURCE_SEMANTICS_CONFIRMATION requests are removed when exact anchors, period_end, fiscal slot logic, and sequence context resolve the quarter locally.
+
+### Results
+
+- Wave 2: `370` tasks -> `369` tasks, `548` facts -> `533` facts
+- Wave 3: `2977` tasks -> `2695` tasks, `7086` facts -> `6073` facts
+- combined facts removed: `1028`
+- remaining facts: `6606`
+- tickers no longer needing external research: `94`
+- remaining external tickers: `1264`
+
+Structural queue remains separate. Structural cases unchanged `1095`, simplified by locally resolved FY/FQ `0`.
+
+Closure test: COMPLETE_CLOSURE_PATH `2470`, MISSING_REQUIREMENT `0`.
+
+Safety: production writes `0`, network calls `0`, RawCandle writes `0`.
+
+Classification: `WAVE23_EXTERNAL_QUEUE_CLEANUP_COMPLETE_WITH_STRUCTURAL_DEPENDENCIES`
+
+Next action: USE THE CLEANED WAVE 2 / WAVE 3 FILES FOR FUTURE EXTERNAL RESEARCH; DO NOT REQUEST FY/FQ CONFIRMATION WHERE HISTORICAL EXACT ANCHORS ALREADY RESOLVE THE IDENTITY

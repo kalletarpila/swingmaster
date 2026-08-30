@@ -10,6 +10,8 @@ __pycache__/
 venv/
 .env
 .env*/
+.env.finnhub
+.env.sharadar
 .env.simfin
 
 # SQLite artifacts

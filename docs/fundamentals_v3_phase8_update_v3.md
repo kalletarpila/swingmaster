@@ -2009,3 +2009,17 @@ Root cause fixed: exact-anchor-first FY/FQ gating and strict source-semantics su
 Phase 8 remains `IN PROGRESS`.
 
 Next action: USE ONLY THE ROOT-CAUSE-CLEANED WAVE 2 / WAVE 3 FILES FOR FUTURE EXTERNAL RESEARCH; NEVER REQUEST FY/FQ OR GENERIC SOURCE-SEMANTICS CONFIRMATION WHEN HISTORICAL EXACT ANCHORS AND LOCAL QUARTER EVIDENCE ALREADY RESOLVE THE QUESTION
+
+## Phase 8H-3 - Wave 1 First-Batch Reconciliation & Repair Rehearsal
+
+Classification: `WAVE1_FIRST_BATCH_RECONCILIATION_COMPLETE_WITH_REMAINING_EXTERNAL_STRUCTURAL_CASES`
+
+Artifact root: `temp/fundamentals_v3_phase8h3_wave1_reconciliation/20260830T_PHASE8H3`
+
+Input facts `671` with VERIFIED `581`, NOT_FOUND `47`, UNCERTAIN `29`, CONFLICT `0`, NOT_APPLICABLE `14`.
+
+Final ticker states: no repair `132`, production-ready `47`, structural `11`, external `17`, local reconciliation `3`.
+
+Phase 8 remains `IN PROGRESS`.
+
+Next action: APPLY THE SAFE REHEARSED SUBSET FIRST; KEEP ONLY THE GENUINE EXTERNAL / STRUCTURAL REMAINDERS IN THE NEXT QUEUE

@@ -91,3 +91,10 @@ Structural queue remains separate: `1095` decisions / `482` tickers. External+st
 Phase 8 remains `IN PROGRESS`.
 
 Next action: RUN WAVE 1 EXTERNAL RESEARCH FIRST WHILE KEEPING STRUCTURAL DECISIONS SEPARATE; USE NEW EVIDENCE TO REDUCE THE STRUCTURAL QUEUE BEFORE MANUAL REVIEW
+
+## Phase 8H-3 Genuine Remaining Wave 1 Cases
+
+- More external evidence facts: `76`
+- External tickers: `36`
+- Structural decisions: `11`
+- Structural tickers: `11`

@@ -104,3 +104,11 @@ Wave 1 diagnostic only: FY/FQ would disappear `0`, semantics would disappear `33
 Wave 2 rootcause-cleaned: `369 -> 369` tasks, `533 -> 530` facts.
 
 Wave 3 rootcause-cleaned: `2695 -> 2695` tasks, `6073 -> 6068` facts.
+
+## Wave 1 First-Batch Reconciliation
+
+Phase 8H-3 reconciles the externally researched Wave 1 first batch against current V3 without production writes.
+
+Fact-complete tickers: `174`; fact-incomplete tickers: `36`. Redundant Wave 1 source-semantics rows are ignored unless they carry a true semantic subtype. Structural flags are closed when no non-redundant fact gap, collision, transition, lineage, or value conflict remains.
+
+Frozen rehearsal apply groups: `55`. Remaining genuine external facts: `76`. Remaining structural decisions: `11`.

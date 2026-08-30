@@ -2065,3 +2065,19 @@ Mandatory cases: WDAY `2026-04-30 -> FY2027 Q1`; ASTH `2026-03-31 -> FY2026 Q1`;
 Global rows analyzed `71071`. FY defects `1960`, FQ defects `8437`, FY+FQ defects `1171`, unresolved `0`.
 
 Repair set: `854` groups / `2088` rows / `270` tickers. Missing Q4 creation is deferred to Phase 8H-5B.
+
+## Phase 8H-5A-PREAPPLY - Fiscal Identity Repair Proof
+
+Classification: `FISCAL_IDENTITY_PREAPPLY_PROOF_COMPLETE_APPLY_READY`
+
+Artifact root: `temp/fundamentals_v3_phase8h5a_preapply_proof/20260830T_PHASE8H5A_PREAPPLY`
+
+Pre-apply proof was required because H5A audit-level FY/FQ differences include high-confidence write candidates, target collisions, slot-warning rows, historical no-write rows, and H3/provider false positives. The production apply set is therefore smaller than the raw audit headline counts.
+
+Normalized canonical rows: `71071`. Repair-ready rows: `2088`. Collision-blocked rows: `300`. FQ-confidence-insufficient rows: `9082`.
+
+The 8437 FQ-only headline defects are partitioned in `temp/fundamentals_v3_phase8h5a_preapply_proof/20260830T_PHASE8H5A_PREAPPLY/fq_defect_explanation.csv`. Only rows with HIGH fiscal identity and HIGH FQ evidence remain in `temp/fundamentals_v3_phase8h5a_preapply_proof/20260830T_PHASE8H5A_PREAPPLY/fiscal_identity_final_preapply_set.csv`.
+
+Latest8Q wrong identity before simulated apply: `4327`. Covered by final repair set: `307`. Simulated latest8Q wrong after: `4020`.
+
+Fresh rehearsal: `854` groups passed, `0` failed, unrelated canonical drift `0`. Downstream determinism: `YES`.

@@ -118,3 +118,7 @@ Structural tickers: `ASTH, CECO, CGC, CTOR, MCS, MYGN, OSK, PTIX, RCEL, VCEL, WD
 ## Phase 8H-5A Fiscal Identity Handoff
 
 H3 false-positive structural cases are closed only when exact-anchor arbitration proves current V3 identity correct. Existing-row fiscal identity repair candidates are in `temp/fundamentals_v3_phase8h5a_fiscal_identity_root_cause/20260830T_PHASE8H5A`. Missing Q4 reconstruction remains deferred.
+
+## Phase 8H-5A-PREAPPLY Fiscal Identity Residuals
+
+Only non-apply fiscal identity residuals remain deferred after preapply proof: target collisions, insufficient FQ-confidence rows, and no-write H3/provider false positives. Missing Q4 reconstruction is still a separate deferred phase and was not started here.

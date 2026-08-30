@@ -104,3 +104,13 @@ Next action: RUN WAVE 1 EXTERNAL RESEARCH FIRST WHILE KEEPING STRUCTURAL DECISIO
 - External evidence: `17` tickers / `53` fact rows
 - Structural review: `11` tickers / `11` decisions
 - Local reconciliation: `3` tickers / `3` cases
+
+## Phase 8H-5 Remaining Wave 1 Cases
+
+- Local reconciliation: `3` cases
+- Structural review: `11` decisions
+- External follow-up: `17` tickers / `53` fact rows
+
+Local tickers: `ALGM, POWW, TRNS`
+
+Structural tickers: `ASTH, CECO, CGC, CTOR, MCS, MYGN, OSK, PTIX, RCEL, VCEL, WDAY`

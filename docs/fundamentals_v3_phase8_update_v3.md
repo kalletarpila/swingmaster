@@ -2037,3 +2037,17 @@ Downstream rebuild status: TTM `REBUILT`, Score `REBUILT`, Lifecycle `REBUILT`, 
 Phase 8 remains `IN PROGRESS`.
 
 Next action: KEEP THE 132 NO-REPAIR TICKERS CLOSED, KEEP THE 47 APPLIED TICKERS RECONCILED, AND CONTINUE ONLY WITH THE POST-APPLY 31-TICKER EXTERNAL / STRUCTURAL / LOCAL REMAINDER SET
+
+## Phase 8H-5 - Wave 1 Local / Structural Remainder Resolution
+
+Classification: `WAVE1_REMAINDER_LOCAL_STRUCTURAL_RESOLUTION_COMPLETE_WITH_TRUE_EXTERNAL_REMAINDERS`
+
+Artifact root: `temp/fundamentals_v3_phase8h5_wave1_remainder_resolution/20260830T_PHASE8H5`
+
+Phase 8H-5 validated the H4 post-apply remainder inputs, classified the 3 local and 11 structural cases from existing artifacts, built the H5 frozen repair set, and rehearsed it on a disposable DB. No production canonical, downstream, RawCandle, guard, or model-logic writes were performed.
+
+Remaining local cases: `3`. Remaining structural decisions: `11`. Remaining external follow-up facts: `53`.
+
+Phase 8 remains `IN PROGRESS`.
+
+Next action: KEEP ONLY THE PRECISE UNRESOLVED STRUCTURAL / LOCAL DECISIONS OPEN; DO NOT BROADEN THE RESEARCH SCOPE

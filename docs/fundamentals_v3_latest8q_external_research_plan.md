@@ -120,3 +120,13 @@ Phase 8H-4 applied the H3 frozen Wave 1 first-batch repair set to production: `5
 Post-apply first-batch states: repair applied reconciled `47`, no-repair closed `132`, structural `11`, external `17`, local `3`.
 
 Remaining queues are frozen as external `17` tickers / `53` facts, structural `11` tickers / `11` decisions, local `3` tickers / `3` cases.
+
+## Wave 1 Remainder Resolution and Final Follow-Up Minimization
+
+Phase 8H-5 exhausted local evidence for the H4 Wave 1 remainder set without network calls or production writes.
+
+Local reconciliation remainders analyzed: `3`. Structural remainders analyzed: `11`. H5 deterministic repair groups: `0`.
+
+The final external follow-up queue is minimized to `17` tickers / `53` fact rows. Duplicate active Wave 2/3 requests remain `0`.
+
+Next action: KEEP ONLY THE PRECISE UNRESOLVED STRUCTURAL / LOCAL DECISIONS OPEN; DO NOT BROADEN THE RESEARCH SCOPE

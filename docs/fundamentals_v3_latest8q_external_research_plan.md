@@ -112,3 +112,11 @@ Phase 8H-3 reconciles the externally researched Wave 1 first batch against curre
 Fact-complete tickers: `174`; fact-incomplete tickers: `36`. Redundant Wave 1 source-semantics rows are ignored unless they carry a true semantic subtype. Structural flags are closed when no non-redundant fact gap, collision, transition, lineage, or value conflict remains.
 
 Frozen rehearsal apply groups: `55`. Remaining genuine external facts: `76`. Remaining structural decisions: `11`.
+
+## Wave 1 First-Batch Production Apply
+
+Phase 8H-4 applied the H3 frozen Wave 1 first-batch repair set to production: `55` groups / `59` rows / `47` tickers. Skipped groups `0`; failed groups `0`.
+
+Post-apply first-batch states: repair applied reconciled `47`, no-repair closed `132`, structural `11`, external `17`, local `3`.
+
+Remaining queues are frozen as external `17` tickers / `53` facts, structural `11` tickers / `11` decisions, local `3` tickers / `3` cases.

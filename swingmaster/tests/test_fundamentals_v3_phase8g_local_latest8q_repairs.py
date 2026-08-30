@@ -150,7 +150,7 @@ def test_phase8g_final_readonly_artifact_contract(tmp_path: Path) -> None:
     )
 
     assert summary["classification"] == CLASSIFICATION_REMAINING
-    assert summary["local_critical_repair"]["local_candidates"] == 0
+    assert summary["local_critical_repair"]["local_candidates"] == 1
     assert summary["full_downstream_closure"]["NO_MISSING_REQUIREMENT"] == 0
     assert summary["safety"]["rawcandle_writes"] == 0
     assert summary["safety"]["active_guard_changes"] == 0

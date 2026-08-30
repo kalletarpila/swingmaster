@@ -98,3 +98,9 @@ Next action: RUN WAVE 1 EXTERNAL RESEARCH FIRST WHILE KEEPING STRUCTURAL DECISIO
 - External tickers: `36`
 - Structural decisions: `11`
 - Structural tickers: `11`
+
+## Phase 8H-4 Post-Apply Remaining Wave 1 Cases
+
+- External evidence: `17` tickers / `53` fact rows
+- Structural review: `11` tickers / `11` decisions
+- Local reconciliation: `3` tickers / `3` cases

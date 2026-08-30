@@ -2023,3 +2023,17 @@ Final ticker states: no repair `132`, production-ready `47`, structural `11`, ex
 Phase 8 remains `IN PROGRESS`.
 
 Next action: APPLY THE SAFE REHEARSED SUBSET FIRST; KEEP ONLY THE GENUINE EXTERNAL / STRUCTURAL REMAINDERS IN THE NEXT QUEUE
+
+## Phase 8H-4 - Wave 1 First-Batch Production Apply & Re-Audit
+
+Classification: `WAVE1_FIRST_BATCH_PRODUCTION_APPLY_COMPLETE_WITH_REMAINING_EXTERNAL_STRUCTURAL_CASES`
+
+Artifact root: `temp/fundamentals_v3_phase8h4_wave1_production_apply/20260830T_PHASE8H4`
+
+Applied `55` / `55` frozen repair groups. Canonical integrity quick_check `ok`, FK rows `0`, duplicate FY/FQ `0`. H3 rehearsal parity differences `0`.
+
+Downstream rebuild status: TTM `REBUILT`, Score `REBUILT`, Lifecycle `REBUILT`, Valuation `REBUILT`. Determinism all layers `YES`.
+
+Phase 8 remains `IN PROGRESS`.
+
+Next action: KEEP THE 132 NO-REPAIR TICKERS CLOSED, KEEP THE 47 APPLIED TICKERS RECONCILED, AND CONTINUE ONLY WITH THE POST-APPLY 31-TICKER EXTERNAL / STRUCTURAL / LOCAL REMAINDER SET

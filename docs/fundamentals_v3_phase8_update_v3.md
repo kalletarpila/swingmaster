@@ -1997,3 +1997,15 @@ Structural cases remain separate: unchanged `1095`, simplified by locally resolv
 Phase 8 remains `IN PROGRESS`.
 
 Next action: USE THE CLEANED WAVE 2 / WAVE 3 FILES FOR FUTURE EXTERNAL RESEARCH; DO NOT REQUEST FY/FQ CONFIRMATION WHERE HISTORICAL EXACT ANCHORS ALREADY RESOLVE THE IDENTITY
+
+## Phase 8H-2 - FY/FQ / Source-Semantics External Dependency Root-Cause Fix
+
+Classification: `FYFQ_SEMANTICS_DEPENDENCY_ROOT_CAUSE_FIXED_WITH_TRUE_STRUCTURAL_REMAINDERS`
+
+Artifact root: `temp/fundamentals_v3_phase8h2_dependency_root_cause/20260830T_PHASE8H2`
+
+Root cause fixed: exact-anchor-first FY/FQ gating and strict source-semantics subtype enforcement. Wave 2 facts `533 -> 530`; Wave 3 facts `6073 -> 6068`; combined removed `8`. Closure MISSING_REQUIREMENT `0`.
+
+Phase 8 remains `IN PROGRESS`.
+
+Next action: USE ONLY THE ROOT-CAUSE-CLEANED WAVE 2 / WAVE 3 FILES FOR FUTURE EXTERNAL RESEARCH; NEVER REQUEST FY/FQ OR GENERIC SOURCE-SEMANTICS CONFIRMATION WHEN HISTORICAL EXACT ANCHORS AND LOCAL QUARTER EVIDENCE ALREADY RESOLVE THE QUESTION

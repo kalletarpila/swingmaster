@@ -90,3 +90,17 @@ Safety: production writes `0`, network calls `0`, RawCandle writes `0`.
 Classification: `WAVE23_EXTERNAL_QUEUE_CLEANUP_COMPLETE_WITH_STRUCTURAL_DEPENDENCIES`
 
 Next action: USE THE CLEANED WAVE 2 / WAVE 3 FILES FOR FUTURE EXTERNAL RESEARCH; DO NOT REQUEST FY/FQ CONFIRMATION WHERE HISTORICAL EXACT ANCHORS ALREADY RESOLVE THE IDENTITY
+
+## FY/FQ and Source-Semantics Dependency Root-Cause Fix
+
+Phase 8H-2 fixes the dependency-generation root cause behind redundant FY/FQ and generic source-semantics research requirements.
+
+Phase 8H-1 removed zero FY/FQ requests because the four remaining Wave 2/3 FY/FQ facts were true unresolved-boundary structural cases, not locally resolved exact-anchor rows. The broader issue was source semantics: Phase 8F emitted `NEED_SOURCE_SEMANTICS_CONFIRMATION` as a sequence fallback and Phase 8H retained it without a semantic subtype.
+
+Corrected order: resolve FY from exact anchors, resolve FQ locally, evaluate structural exceptions, identify concrete source semantic subtype, then emit external evidence. Generic sequence-only semantics are prohibited.
+
+Wave 1 diagnostic only: FY/FQ would disappear `0`, semantics would disappear `339`, tasks would shrink `339`, tasks would disappear `0`. Wave 1 file unchanged `YES`.
+
+Wave 2 rootcause-cleaned: `369 -> 369` tasks, `533 -> 530` facts.
+
+Wave 3 rootcause-cleaned: `2695 -> 2695` tasks, `6073 -> 6068` facts.

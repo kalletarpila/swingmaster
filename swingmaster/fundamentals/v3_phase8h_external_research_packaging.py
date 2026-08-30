@@ -53,6 +53,17 @@ WAVE_FILE = {
 }
 WAVE_LABEL = {"P1_CURRENT": "Wave 1", "P2_LATEST4Q": "Wave 2", "P3_LATEST8Q": "Wave 3"}
 KNOWN_13 = tuple(EXPECTED_P1_TICKERS)
+SOURCE_SEMANTIC_SUBTYPES = {
+    "YTD_VS_DISCRETE",
+    "DEBT_DEFINITION",
+    "SHARES_PERIOD_END_VS_WEIGHTED_AVERAGE",
+    "RESTATEMENT_VINTAGE",
+    "SOURCE_PERIOD_OWNERSHIP",
+    "FIELD_SCOPE_AMBIGUITY",
+    "LINEAGE_OWNERSHIP",
+    "FCF_SEMANTICS",
+    "EBIT_COMPONENT_SEMANTICS",
+}
 
 
 @dataclass(frozen=True)
@@ -87,6 +98,51 @@ def normalized_evidence_types(codes: str) -> list[str]:
 
 def mapped_dependency_types(codes: str) -> list[str]:
     return [CODE_TO_EVIDENCE_TYPE[code] for code in split_codes(codes) if code in CODE_TO_EVIDENCE_TYPE]
+
+
+def source_semantic_subtypes(row: dict[str, Any]) -> list[str]:
+    text = " ".join(
+        str(row.get(key) or "")
+        for key in (
+            "exact_information_needed",
+            "research_request",
+            "existing_local_evidence_summary",
+            "closure_dependency",
+            "original_closure_dependency",
+        )
+    ).lower()
+    out: list[str] = []
+    markers = (
+        ("ytd", "YTD_VS_DISCRETE"),
+        ("discrete", "YTD_VS_DISCRETE"),
+        ("debt definition", "DEBT_DEFINITION"),
+        ("debt scope", "DEBT_DEFINITION"),
+        ("shares period-end", "SHARES_PERIOD_END_VS_WEIGHTED_AVERAGE"),
+        ("weighted-average", "SHARES_PERIOD_END_VS_WEIGHTED_AVERAGE"),
+        ("weighted average", "SHARES_PERIOD_END_VS_WEIGHTED_AVERAGE"),
+        ("restatement", "RESTATEMENT_VINTAGE"),
+        ("vintage", "RESTATEMENT_VINTAGE"),
+        ("source ownership", "SOURCE_PERIOD_OWNERSHIP"),
+        ("period ownership", "SOURCE_PERIOD_OWNERSHIP"),
+        ("different economic quarter", "SOURCE_PERIOD_OWNERSHIP"),
+        ("target collision", "SOURCE_PERIOD_OWNERSHIP"),
+        ("lineage", "LINEAGE_OWNERSHIP"),
+        ("reconcile stored fy/fq", "LINEAGE_OWNERSHIP"),
+        ("field scope", "FIELD_SCOPE_AMBIGUITY"),
+        ("derive fcf", "FCF_SEMANTICS"),
+        ("ocf", "FCF_SEMANTICS"),
+        ("capex", "FCF_SEMANTICS"),
+        ("approved issuer/company-specific ebit rule", "EBIT_COMPONENT_SEMANTICS"),
+        ("ebit derivation", "EBIT_COMPONENT_SEMANTICS"),
+    )
+    for marker, subtype in markers:
+        if marker in text and subtype not in out:
+            out.append(subtype)
+    return out
+
+
+def has_concrete_source_semantics(row: dict[str, Any]) -> bool:
+    return bool(source_semantic_subtypes(row))
 
 
 def sanitized_exact_information(texts: Iterable[str], evidence_types: Iterable[str]) -> str:
@@ -246,11 +302,14 @@ def build_fact_rows(kept_rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any
     dedup: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for row in kept_rows:
         for evidence_type in mapped_dependency_types(row.get("closure_dependency", "")):
+            if evidence_type == "SOURCE_SEMANTICS_CONFIRMATION" and not has_concrete_source_semantics(row):
+                continue
             fact = {
                 "ticker": row["ticker"],
                 "fiscal_year": row["fiscal_year"],
                 "fiscal_quarter": row["fiscal_quarter"],
                 "evidence_type": evidence_type,
+                "semantic_subtype": "|".join(source_semantic_subtypes(row)) if evidence_type == "SOURCE_SEMANTICS_CONFIRMATION" else "",
                 "source_row_id": row["source_row_id"],
                 "priority": row["priority"],
                 "current_period_end": row.get("current_period_end", ""),

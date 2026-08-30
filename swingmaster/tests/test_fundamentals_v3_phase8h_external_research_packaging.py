@@ -276,7 +276,11 @@ def test_phase8h_readonly_artifact_contract(tmp_path: Path) -> None:
 
     assert summary["classification"] == CLASSIFICATION_STRUCTURAL
     assert summary["starting_queue"]["phase8g_external_facts"] == 4413
-    assert summary["cleanup"]["final_downstream_critical_external_facts"] == 9491
+    assert summary["cleanup"]["final_downstream_critical_external_facts"] == 9103
+    assert summary["cleanup"]["duplicate_requests_removed"] == 717
+    assert summary["waves"]["P1_CURRENT"]["facts"] == 1518
+    assert summary["waves"]["P2_LATEST4Q"]["facts"] == 545
+    assert summary["waves"]["P3_LATEST8Q"]["facts"] == 7040
     assert summary["closure_completeness"]["NO_MISSING_REQUIREMENT"] == 0
     assert summary["safety"] == {"production_writes": 0, "network_calls": 0, "rawcandle_writes": 0}
     for ticker in EXPECTED_P1_TICKERS:

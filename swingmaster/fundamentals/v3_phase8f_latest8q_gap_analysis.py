@@ -448,9 +448,9 @@ def analyze_quarter(row: dict[str, Any], sequence: dict[str, Any], downstream: d
         elif seq_status == "MISSING_QUARTER":
             evidence_codes.append("NEED_MISSING_QUARTER_SOURCE")
             evidence_desc.append(f"{fyfq(row)}: verify missing adjacent fiscal quarter source")
-        else:
-            evidence_codes.append("NEED_SOURCE_SEMANTICS_CONFIRMATION")
-            evidence_desc.append(f"{fyfq(row)}: confirm sequence semantics")
+        elif seq_status == "TRANSITION_SEQUENCE":
+            evidence_codes.append("NEED_TRANSITION_CALENDAR_EVIDENCE")
+            evidence_desc.append(f"{fyfq(row)}: need transition/stub calendar decision")
     if row.get("target_collision") in {"TARGET_DIFFERENT_ECONOMIC", "TARGET_CONFLICTING"}:
         issue_codes.append("TARGET_COLLISION")
         source_conflicts.append(str(row.get("target_collision")))

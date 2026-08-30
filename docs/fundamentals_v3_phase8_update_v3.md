@@ -2051,3 +2051,17 @@ Remaining local cases: `3`. Remaining structural decisions: `11`. Remaining exte
 Phase 8 remains `IN PROGRESS`.
 
 Next action: KEEP ONLY THE PRECISE UNRESOLVED STRUCTURAL / LOCAL DECISIONS OPEN; DO NOT BROADEN THE RESEARCH SCOPE
+
+## Phase 8H-5A - Fiscal Identity Root-Cause Audit & Repair Rehearsal
+
+Classification: `FISCAL_IDENTITY_ROOT_CAUSE_FIXED_WITH_TRUE_STRUCTURAL_REMAINDERS`
+
+Artifact root: `temp/fundamentals_v3_phase8h5a_fiscal_identity_root_cause/20260830T_PHASE8H5A`
+
+Authoritative FY-start policy is exact-anchor-first: if a period_end falls in an exact FY-start interval, that interval defines fiscal_year before provider labels, H3 candidate mappings, SEC/XBRL fiscal focus, or calendar-year heuristics. H3 `official_mapping` is now documented as `h3_candidate_mapping` unless supported by stronger issuer evidence.
+
+Mandatory cases: WDAY `2026-04-30 -> FY2027 Q1`; ASTH `2026-03-31 -> FY2026 Q1`; CECO `2026-03-31 -> FY2026 Q1`.
+
+Global rows analyzed `71071`. FY defects `1960`, FQ defects `8437`, FY+FQ defects `1171`, unresolved `0`.
+
+Repair set: `854` groups / `2088` rows / `270` tickers. Missing Q4 creation is deferred to Phase 8H-5B.

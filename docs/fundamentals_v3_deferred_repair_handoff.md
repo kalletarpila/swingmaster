@@ -114,3 +114,7 @@ Next action: RUN WAVE 1 EXTERNAL RESEARCH FIRST WHILE KEEPING STRUCTURAL DECISIO
 Local tickers: `ALGM, POWW, TRNS`
 
 Structural tickers: `ASTH, CECO, CGC, CTOR, MCS, MYGN, OSK, PTIX, RCEL, VCEL, WDAY`
+
+## Phase 8H-5A Fiscal Identity Handoff
+
+H3 false-positive structural cases are closed only when exact-anchor arbitration proves current V3 identity correct. Existing-row fiscal identity repair candidates are in `temp/fundamentals_v3_phase8h5a_fiscal_identity_root_cause/20260830T_PHASE8H5A`. Missing Q4 reconstruction remains deferred.

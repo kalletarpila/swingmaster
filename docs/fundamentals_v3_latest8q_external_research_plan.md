@@ -130,3 +130,7 @@ Local reconciliation remainders analyzed: `3`. Structural remainders analyzed: `
 The final external follow-up queue is minimized to `17` tickers / `53` fact rows. Duplicate active Wave 2/3 requests remain `0`.
 
 Next action: KEEP ONLY THE PRECISE UNRESOLVED STRUCTURAL / LOCAL DECISIONS OPEN; DO NOT BROADEN THE RESEARCH SCOPE
+
+## Exact FY-Start Metadata Overrides External FY/FQ Candidates
+
+External FY/FQ research, SEC/XBRL fiscal focus, and H3 candidate mappings must not override exact fiscal-year start metadata. Use external research only when exact FY-start intervals, issuer period_end evidence, and local sequence context cannot resolve identity.
